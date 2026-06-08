@@ -6,7 +6,11 @@ import react from "@vitejs/plugin-react";
 // fetches. If a particular county server blocks CORS, uncomment the matching proxy
 // entry below and point that county's URL in src/lib/counties.js at the local path
 // (e.g. "/gis-harris/HCAD/Parcels/MapServer/0").
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Relative asset paths so the production build works when served from a
+  // GitHub Pages subfolder (https://<user>.github.io/<repo>/), while local
+  // `npm run dev` still serves from the root.
+  base: command === "build" ? "./" : "/",
   plugins: [react()],
   server: {
     host: true,
@@ -25,4 +29,4 @@ export default defineConfig({
       // },
     },
   },
-});
+}));
