@@ -1,0 +1,14 @@
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #efeadf;
+  font-family: "Helvetica Neue", Helvetica, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+input, select, button, textarea { font-family: inherit; }
