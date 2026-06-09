@@ -775,7 +775,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
   const changeType = (id, type) => {
     pushHistory();
-    setEls((a) => a.map((el) => (el.id === id ? { ...el, type } : el)));
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, type, ...(type === "building" && !el.dock ? { dock: "single" } : {}) } : el)));
     setTypeMenu(null);
   };
 
@@ -1308,11 +1308,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               <Field label="Width (ft)"><input style={numInput} value={Math.round(selEl.w)} onChange={(e) => setSelEl({ w: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
               <Field label="Depth (ft)"><input style={numInput} value={Math.round(selEl.h)} onChange={(e) => setSelEl({ h: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
               <Field label="Rotation (°)"><input style={numInput} value={Math.round(selEl.rot)} onChange={(e) => setSelEl({ rot: ((+e.target.value || 0) % 360 + 360) % 360 })} /></Field>
+              {selEl.type === "building" && (
+                <Field label="Docks">
+                  <select style={{ ...numInput, width: 112, fontFamily: "inherit" }} value={selEl.dock || "single"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
+                    <option value="single">Single-load</option>
+                    <option value="cross">Cross-dock</option>
+                    <option value="none">None</option>
+                  </select>
+                </Field>
+              )}
               <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                 Footprint: <b style={{ color: PAL.ink }}>{f0(selEl.w * selEl.h)} sf</b><br />
                 {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(carStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}
                 {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(trailerStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.trailerW}′×{settings.trailerL}′, {settings.trailerAisle}′ drive lane</>}
-                {selEl.type === "building" && <>Est. dock doors (long side): <b style={{ color: PAL.ink }}>{Math.floor(Math.max(selEl.w, selEl.h) / 12)}</b> @ 12′ o.c.</>}
+                {selEl.type === "building" && (() => {
+                  const dock = selEl.dock || "single";
+                  const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
+                  const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
+                  return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
+                })()}
               </div>
               <button style={{ ...chip, marginTop: 8, color: PAL.accent }} onClick={deleteSel}>Delete element</button>
             </Section>
@@ -1430,10 +1444,22 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
     ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
   }
-  if (el.type === "building" && settings.showDocks) {
-    const n = Math.floor(el.w / 12);
-    for (let k = 1; k < n; k++)
-      parts.push(<line key={`dk${k}`} x1={tl.x + k * 12 * ppf} y1={tl.y + h} x2={tl.x + k * 12 * ppf} y2={tl.y + h + 6} stroke={PAL.ink} strokeWidth={1} />);
+  if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
+    const dock = el.dock || "single";
+    const wide = el.w >= el.h;            // dock faces go on the long side(s)
+    const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
+    const bands = wide
+      ? (dock === "cross" ? [[0, h - Dpx], [0, 0]] : [[0, h - Dpx]])   // bottom (+ top)
+      : (dock === "cross" ? [[w - Dpx, 0], [0, 0]] : [[w - Dpx, 0]]);  // right (+ left)
+    bands.forEach(([bx, by], bi) => {
+      const bw = wide ? w : Dpx, bh = wide ? Dpx : h;
+      parts.push(<rect key={`db${bi}`} x={tl.x + bx} y={tl.y + by} width={bw} height={bh} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+      const n = Math.floor((wide ? el.w : el.h) / 12); // door divisions every 12'
+      for (let k = 1; k < n; k++) {
+        if (wide) { const x = tl.x + bx + k * 12 * ppf; parts.push(<line key={`db${bi}d${k}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + bh} stroke="#5b6470" strokeWidth={0.5} />); }
+        else { const y = tl.y + by + k * 12 * ppf; parts.push(<line key={`db${bi}d${k}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + bw} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
+      }
+    });
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}>{parts}</g>;
