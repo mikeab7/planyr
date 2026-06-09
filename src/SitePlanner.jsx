@@ -1198,15 +1198,21 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
     const c = f2p(poly ? centroid(el.points) : { x: el.cx, y: el.cy });
-    const lines = [TYPE[el.type].label.split(" / ")[0]];
+    let lines;
     if (el.type === "sidewalk") {
-      // sidewalks just show their width (the narrow dimension) — no sf / length
-      if (!poly) lines.push(`${f0(Math.min(el.w, el.h))}′ wide`);
+      // e.g. "5′ Sidewalk" — width only, no sf / length
+      lines = [poly ? "Sidewalk" : `${f0(Math.min(el.w, el.h))}′ Sidewalk`];
     } else {
-      if (el.type === "parking") lines.push(`${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`);
-      else if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
-      else lines.push(`${f0(area)} sf`);
-      lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+      lines = [TYPE[el.type].label.split(" / ")[0]];
+      if (el.type === "parking") {
+        lines.push(`${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`);
+        // show the depth (narrow dimension), not the length
+        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(Math.min(el.w, el.h))}′ deep`);
+      } else {
+        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
+        else lines.push(`${f0(area)} sf`);
+        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+      }
     }
     return (
       <text key={`lbl${el.id}`} x={c.x} y={c.y - (lines.length - 1) * 7} textAnchor="middle" pointerEvents="none"
