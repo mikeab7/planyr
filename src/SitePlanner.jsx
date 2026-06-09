@@ -812,7 +812,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const d = drag.current;
     if (d && d.mode === "draw" && draftRect) {
       if (draftRect.w >= 4 && draftRect.h >= 4) {
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: buildingDock } : {}) };
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {}) };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -1045,9 +1045,18 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // Pin a building's dock to its current side before a resize, so growing the
+  // long axis can't flip the loading dock to a different face.
+  const freezeDockSide = (el) => {
+    if (el.type === "building" && !el.dockSide) {
+      const side = el.w >= el.h ? "bottom" : "right";
+      setEls((a) => a.map((x) => x.id === el.id ? { ...x, dockSide: side } : x));
+    }
+  };
   const startResize = (e, id, sx, sy) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
+    freezeDockSide(el);
     // fixed opposite corner in world feet
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
@@ -1059,6 +1068,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
+    freezeDockSide(el);
     // midpoint of the opposite edge stays fixed (world feet)
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
@@ -1091,6 +1101,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const setDockOf = (id, dock) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, dock } : el)));
+  };
+  const setDockSideOf = (id, side) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, dockSide: side, dock: (el.dock && el.dock !== "none") ? el.dock : "single" } : el)));
   };
 
   /* ------------ metrics ------------ */
@@ -1821,6 +1835,20 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                       {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                         <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
                       ))}
+                      {dock !== "none" && (() => {
+                        const side = t.dockSide || (t.w >= t.h ? "bottom" : "right");
+                        const active = dock === "cross"
+                          ? ((side === "top" || side === "bottom") ? ["top", "bottom"] : ["left", "right"])
+                          : [side];
+                        return (
+                          <>
+                            <div style={hdr(true)}>Dock side</div>
+                            {[["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"]].map(([k, label]) => (
+                              <button key={k} style={menuItem(active.includes(k))} onClick={() => setDockSideOf(typeMenu.id, k)}>{label}</button>
+                            ))}
+                          </>
+                        );
+                      })()}
                       <div style={hdr(true)}>Sidewalk</div>
                       <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
                     </>
@@ -1890,18 +1918,21 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   }
   if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
     const dock = el.dock || "single";
-    const wide = el.w >= el.h;            // dock faces go on the long side(s)
+    const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
-    const bands = wide
-      ? (dock === "cross" ? [[0, h - Dpx], [0, 0]] : [[0, h - Dpx]])   // bottom (+ top)
-      : (dock === "cross" ? [[w - Dpx, 0], [0, 0]] : [[w - Dpx, 0]]);  // right (+ left)
-    bands.forEach(([bx, by], bi) => {
-      const bw = wide ? w : Dpx, bh = wide ? Dpx : h;
-      parts.push(<rect key={`db${bi}`} x={tl.x + bx} y={tl.y + by} width={bw} height={bh} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-      const n = Math.floor((wide ? el.w : el.h) / 12); // door divisions every 12'
+    const sides = dock === "cross"
+      ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
+      : [side];
+    sides.forEach((s) => {
+      const horiz = s === "top" || s === "bottom";
+      const bx = s === "right" ? w - Dpx : 0;
+      const by = s === "bottom" ? h - Dpx : 0;
+      const bw = horiz ? w : Dpx, bh = horiz ? Dpx : h;
+      parts.push(<rect key={`db${s}`} x={tl.x + bx} y={tl.y + by} width={bw} height={bh} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+      const n = Math.floor((horiz ? el.w : el.h) / 12); // door divisions every 12'
       for (let k = 1; k < n; k++) {
-        if (wide) { const x = tl.x + bx + k * 12 * ppf; parts.push(<line key={`db${bi}d${k}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + bh} stroke="#5b6470" strokeWidth={0.5} />); }
-        else { const y = tl.y + by + k * 12 * ppf; parts.push(<line key={`db${bi}d${k}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + bw} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
+        if (horiz) { const x = tl.x + bx + k * 12 * ppf; parts.push(<line key={`db${s}d${k}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + bh} stroke="#5b6470" strokeWidth={0.5} />); }
+        else { const y = tl.y + by + k * 12 * ppf; parts.push(<line key={`db${s}d${k}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + bw} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
       }
     });
   }
