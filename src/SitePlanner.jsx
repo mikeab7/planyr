@@ -246,6 +246,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
+  const [underlayErr, setUnderlayErr] = useState(false);
   const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
   const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
@@ -946,6 +947,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   opacity={underlay.opacity} preserveAspectRatio="none"
                   style={{ cursor: tool === "select" && !underlay.locked ? "move" : "crosshair" }}
                   pointerEvents={underlay.locked ? "none" : "auto"}
+                  onError={() => setUnderlayErr(true)} onLoad={() => setUnderlayErr(false)}
                   onPointerDown={startMoveUnderlay} />;
               })()}
 
@@ -1121,6 +1123,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   <button style={{ ...chip, color: PAL.accent }} onClick={() => { setUnderlay(null); setCalib(null); }}>Remove</button>
                 </div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7 }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide</div>
+                {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
                 {tool === "calibrate" && (
                   <div style={{ marginTop: 9, padding: "9px 10px", borderRadius: 7, background: "#fbf3ee", border: `1px solid ${PAL.accentSoft}` }}>
                     {!calib?.a && <div style={{ fontSize: 11.5, color: PAL.ink }}>Click the <b>first</b> end of a known distance on the image (e.g. a building wall, a road width).</div>}

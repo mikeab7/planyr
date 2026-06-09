@@ -247,12 +247,15 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   };
 
   const clearSel = () => { clearHilites(); setSelected([]); };
+  // Always capture the planner underlay from Esri: it supports image `export`
+  // (USGS tiles render on the map but its export op returns no image). The
+  // boundary aligns to either source, so the planner aerial stays reliable.
   const planSelected = () => {
-    const asm = computeAssembly(selected, BASEMAPS[basemap].export);
+    const asm = computeAssembly(selected, BASEMAPS.esri.export);
     if (asm) onUseParcels({ ...asm, _key: Date.now() });
   };
 
-  const asm = selected.length ? computeAssembly(selected, BASEMAPS[basemap].export) : null;
+  const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;
 
   const btn = (primary) => ({
     padding: "7px 12px", fontSize: 13, borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
