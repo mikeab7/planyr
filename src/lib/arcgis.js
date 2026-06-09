@@ -202,14 +202,22 @@ export function lngLatRingToFeet(ring, lon0, lat0) {
   }));
 }
 
-// Feet-per-pixel + feet placement for an aerial export covering a lon/lat bbox,
-// expressed in the same local frame (origin lon0/lat0) as the parcels.
-export function aerialPlacement(bbox, lon0, lat0, maxPx = 1280) {
+// Feet placement for an aerial export covering a lon/lat bbox, in the same local
+// frame (origin lon0/lat0) as the parcels. The export is sized to the *degree*
+// aspect so the server returns exactly this bbox (no aspect padding); we then
+// stretch it (preserveAspectRatio="none") into the true-feet rectangle using the
+// same FT_PER_DEG constants the parcels use, so image and boundary align exactly.
+// ftPerPx is the horizontal scale, ftPerPxY the vertical (they differ at this
+// latitude — that vertical stretch is what was missing before).
+export function aerialPlacement(bbox, lon0, lat0, maxPx = 1400) {
   const FT_LON = ftPerDegLon(lat0);
-  const widthFt = (bbox.lonMax - bbox.lonMin) * FT_LON;
-  const heightFt = (bbox.latMax - bbox.latMin) * FT_PER_DEG_LAT;
-  const imgW = Math.max(16, Math.round(widthFt >= heightFt ? maxPx : maxPx * (widthFt / heightFt)));
-  const imgH = Math.max(16, Math.round(widthFt >= heightFt ? maxPx * (heightFt / widthFt) : maxPx));
+  const lonSpan = bbox.lonMax - bbox.lonMin;
+  const latSpan = bbox.latMax - bbox.latMin;
+  let imgW, imgH;
+  if (lonSpan >= latSpan) { imgW = maxPx; imgH = Math.max(16, Math.round(maxPx * (latSpan / lonSpan))); }
+  else { imgH = maxPx; imgW = Math.max(16, Math.round(maxPx * (lonSpan / latSpan))); }
+  const widthFt = lonSpan * FT_LON;
+  const heightFt = latSpan * FT_PER_DEG_LAT;
   const src =
     "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export" +
     `?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
@@ -219,6 +227,7 @@ export function aerialPlacement(bbox, lon0, lat0, maxPx = 1280) {
     imgW,
     imgH,
     ftPerPx: widthFt / imgW,
+    ftPerPxY: heightFt / imgH,
     x: (bbox.lonMin - lon0) * FT_LON,
     y: -(bbox.latMax - lat0) * FT_PER_DEG_LAT,
   };

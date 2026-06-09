@@ -298,8 +298,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     parcels.forEach((pc) => pts.push(...pc.points));
     els.forEach((e) => pts.push(...elCorners(e)));
     if (underlay) {
+      const sy = underlay.ftPerPxY || underlay.ftPerPx;
       pts.push({ x: underlay.x, y: underlay.y });
-      pts.push({ x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * underlay.ftPerPx });
+      pts.push({ x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy });
     }
     if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); return; }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -582,12 +583,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
     const measured = dist(calib.a, calib.b);
     if (measured <= 0) return;
-    const newFtPerPx = underlay.ftPerPx * (knownFt / measured);
+    const factor = knownFt / measured;
+    const sy = underlay.ftPerPxY || underlay.ftPerPx;
+    const newFtPerPx = underlay.ftPerPx * factor;
+    const newSy = sy * factor;
     // image-pixel coords of point a under the current placement
     const aPxX = (calib.a.x - underlay.x) / underlay.ftPerPx;
-    const aPxY = (calib.a.y - underlay.y) / underlay.ftPerPx;
+    const aPxY = (calib.a.y - underlay.y) / sy;
     // keep point a pinned in world space so the image scales about that point
-    setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newFtPerPx }));
+    setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, ftPerPxY: u.ftPerPxY ? newSy : undefined, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newSy }));
     setCalib(null);
     setCalibInput("");
     setTool("select");
@@ -935,8 +939,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {/* aerial underlay (drawn beneath everything) */}
               {underlay && (() => {
                 const tl = f2p({ x: underlay.x, y: underlay.y });
+                const sy = underlay.ftPerPxY || underlay.ftPerPx;
                 const w = underlay.imgW * underlay.ftPerPx * view.ppf;
-                const h = underlay.imgH * underlay.ftPerPx * view.ppf;
+                const h = underlay.imgH * sy * view.ppf;
                 return <image href={underlay.src} x={tl.x} y={tl.y} width={w} height={h}
                   opacity={underlay.opacity} preserveAspectRatio="none"
                   style={{ cursor: tool === "select" && !underlay.locked ? "move" : "crosshair" }}
