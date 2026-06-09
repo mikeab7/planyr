@@ -187,6 +187,15 @@ function segLineIntersect(p, q, A, B) {
   if (t < -1e-9 || t > 1 + 1e-9) return null;
   return { x: p.x + t * rx, y: p.y + t * ry };
 }
+// Closest point on segment a-b to point p (used for snapping to a boundary).
+function nearestPointOnSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 // Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
 function splitPolygon(points, A, B) {
   const n = points.length;
@@ -271,9 +280,45 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [scenList, setScenList] = useState([]);
   const [scenPick, setScenPick] = useState("");
 
+  const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
+
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+
+  // Undo/redo history (snapshots of the editable state, stored by reference).
+  const stateRef = useRef({ parcels: [], els: [], measures: [], underlay: null });
+  const pastRef = useRef([]);
+  const futureRef = useRef([]);
+  useEffect(() => { stateRef.current = { parcels, els, measures, underlay }; });
+  const histKey = (s) =>
+    JSON.stringify({ p: s.parcels, e: s.els, m: s.measures }) +
+    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
+  const pushHistory = () => {
+    pastRef.current.push(stateRef.current);
+    if (pastRef.current.length > 80) pastRef.current.shift();
+    futureRef.current = [];
+  };
+  const applySnapshot = (s) => {
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setUnderlay(s.underlay);
+    setSel(null); setSplitA(null); setTypeMenu(null);
+  };
+  const undo = () => {
+    let prev = null;
+    while (pastRef.current.length) {
+      const cand = pastRef.current.pop();
+      if (histKey(cand) !== histKey(stateRef.current)) { prev = cand; break; }
+    }
+    if (!prev) return;
+    futureRef.current.push(stateRef.current);
+    applySnapshot(prev);
+  };
+  const redo = () => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(stateRef.current);
+    applySnapshot(next);
+  };
 
   /* ------------ size tracking ------------ */
   useEffect(() => {
@@ -294,6 +339,21 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   }, [view]);
   const snap = useCallback((v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : Math.round(v * 100) / 100), [settings]);
   const snapPt = useCallback((p) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
+  // Snap to the nearest parcel boundary within ~5 ft (or ~10 px); used by Split.
+  const snapToBoundary = useCallback((p) => {
+    const tol = Math.max(5, 10 / view.ppf);
+    let best = null, bestD = Infinity;
+    for (const pc of parcels) {
+      const pts = pc.points;
+      for (let i = 0; i < pts.length; i++) {
+        const q = nearestPointOnSeg(p, pts[i], pts[(i + 1) % pts.length]);
+        const d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d < bestD) { bestD = d; best = q; }
+      }
+    }
+    return best && bestD <= tol ? best : null;
+  }, [parcels, view]);
+  const snapSplit = useCallback((p) => snapToBoundary(p) || snapPt(p), [snapToBoundary, snapPt]);
 
   /* ------------ fit to content ------------ */
   const fit = useCallback(() => {
@@ -327,6 +387,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   useEffect(() => {
     if (incoming && incoming !== consumedRef.current && incoming.parcels?.length) {
       consumedRef.current = incoming;
+      pushHistory();
       const pcs = incoming.parcels.filter((p) => p.points?.length >= 3).map((p) => ({ id: uid(), points: p.points }));
       setParcels(pcs);
       setEls([]);
@@ -367,7 +428,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const onKey = (e) => {
       const t = document.activeElement;
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTool("select"); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -376,6 +439,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
   const deleteSel = () => {
     if (!sel) return;
+    pushHistory();
     if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
@@ -401,7 +465,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (tool === "measure") {
       const sp = snapPt(fp);
       if (!pendMeasure) setPendMeasure(sp);
-      else { setMeasures((m) => [...m, { a: pendMeasure, b: sp }]); setPendMeasure(null); }
+      else { pushHistory(); setMeasures((m) => [...m, { a: pendMeasure, b: sp }]); setPendMeasure(null); }
       return;
     }
     if (tool === "calibrate") {
@@ -413,12 +477,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       return;
     }
     if (tool === "split") {
-      const sp = snapPt(fp);
+      const sp = snapSplit(fp);
       if (!splitA) setSplitA(sp);
       else { performSplit(splitA, sp); setSplitA(null); }
       return;
     }
     if (DRAW_TYPES.includes(tool)) {
+      pushHistory();
       const sp = snapPt(fp);
       drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
@@ -434,6 +499,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     for (const pc of ordered) {
       const halves = splitPolygon(pc.points, A, B);
       if (halves) {
+        pushHistory();
         const a = { id: uid(), points: halves[0] };
         const b = { id: uid(), points: halves[1] };
         setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
@@ -447,6 +513,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    pushHistory();
     if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
       setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3
         ? { ...pc, points: pc.points.filter((_, i) => i !== index) } : pc));
@@ -459,6 +526,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const addVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    pushHistory();
     setParcels((a) => a.map((pc) => {
       if (pc.id !== id) return pc;
       const p = pc.points[index], q = pc.points[(index + 1) % pc.points.length];
@@ -546,6 +614,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
+      pushHistory();
       const pc = { id: uid(), points: draftPoly };
       setParcels((a) => [...a, pc]);
       requestFit();
@@ -557,6 +626,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
+    pushHistory();
     const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }] };
     setParcels((a) => [...a, pc]);
     requestFit();
@@ -567,6 +637,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (!file) return;
     try {
       const { src, w, h } = await loadAndDownscaleImage(file);
+      pushHistory();
       // Start at ~600 ft across the image width; the user calibrates precisely next.
       setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 0.85, locked: false });
       setUnderlayErr(false);
@@ -582,6 +653,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
     setSel(null);
+    pushHistory();
     drag.current = { mode: "moveUnderlay", fx: fp.x, fy: fp.y, ox: underlay.x, oy: underlay.y };
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -597,6 +669,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     // image-pixel coords of point a under the current placement
     const aPxX = (calib.a.x - underlay.x) / underlay.ftPerPx;
     const aPxY = (calib.a.y - underlay.y) / sy;
+    pushHistory();
     // keep point a pinned in world space so the image scales about that point
     setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, ftPerPxY: u.ftPerPxY ? newSy : undefined, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newSy }));
     setCalib(null);
@@ -645,6 +718,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const importFeature = (entry) => {
     const pts = featureToParcel(entry.ft);
     if (!pts || pts.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
+    pushHistory();
     const pc = { id: uid(), points: pts };
     setParcels((a) => [...a, pc]);
     setSel({ kind: "parcel", id: pc.id });
@@ -659,6 +733,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const el = els.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
     setSel({ kind: "el", id });
+    pushHistory();
     drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, ocx: el.cx, ocy: el.cy };
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -668,6 +743,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
     setSel({ kind: "parcel", id });
+    pushHistory();
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
     svgRef.current.setPointerCapture(e.pointerId);
   };
@@ -677,13 +753,27 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     // fixed opposite corner in world feet
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
+    pushHistory();
     drag.current = { mode: "resize", id, sx, sy, opp };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
     e.stopPropagation();
+    pushHistory();
     drag.current = { mode: "rotate", id };
     svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // Double-click an element (its footprint or title) to change what it is.
+  const onElDouble = (e, id) => {
+    e.stopPropagation();
+    if (!els.find((x) => x.id === id)) return;
+    setSel({ kind: "el", id });
+    setTypeMenu({ id, x: e.clientX, y: e.clientY });
+  };
+  const changeType = (id, type) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, type } : el)));
+    setTypeMenu(null);
   };
 
   /* ------------ metrics ------------ */
@@ -958,11 +1048,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           <button style={btn(tool === "measure")} onClick={() => selectTool("measure")}>Measure</button>
         </div>
         <div style={{ flex: 1 }} />
+        <button style={chip} onClick={undo} title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button style={chip} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
         <button style={chip} onClick={fit}>Fit</button>
         <button style={{ ...chip, color: settings.snap ? PAL.accent : PAL.muted, borderColor: settings.snap ? PAL.accent : PAL.panelLine }} onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))}>Snap {settings.gridSize}′</button>
-        <button style={chip} onClick={() => setMeasures([])}>Clear measures</button>
+        <button style={chip} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
         <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
-        <button style={chip} onClick={() => { setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
+        <button style={chip} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
       </div>
 
       {/* body */}
@@ -1007,7 +1099,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p) */}
-              {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl))}
+              {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble))}
               {/* measurements */}
               {measures.map((m, i) => {
                 const a = f2p(m.a), b = f2p(m.b);
@@ -1054,13 +1146,14 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {/* split cut preview */}
               {tool === "split" && splitA && (() => {
                 const a = f2p(splitA);
-                const b = cursor ? f2p(snapPt(cursor)) : a;
+                const bp = cursor ? snapSplit(cursor) : splitA;
+                const b = f2p(bp);
                 const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
                 return (
                   <g pointerEvents="none">
                     <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
                     <circle cx={a.x} cy={a.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                    {cursor && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(dist(splitA, snapPt(cursor)))}′ cut</text>}
+                    {cursor && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(dist(splitA, bp))}′ cut</text>}
                   </g>
                 );
               })()}
@@ -1275,13 +1368,30 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           </div>
         </div>
       </div>
+
+      {typeMenu && (
+        <>
+          <div onClick={() => setTypeMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
+          <div style={{ position: "fixed", top: typeMenu.y + 6, left: typeMenu.x + 6, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: 184 }}>
+            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Change type to</div>
+            {Object.entries(TYPE).map(([k, v]) => {
+              const cur = els.find((el) => el.id === typeMenu.id)?.type === k;
+              return (
+                <button key={k} style={{ ...menuItem(cur), display: "flex", alignItems: "center", gap: 8 }} onClick={() => changeType(typeMenu.id, k)}>
+                  <span style={{ width: 12, height: 12, background: v.fill, border: `1px solid ${v.stroke}`, borderRadius: 2, display: "inline-block" }} />{v.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   const st = TYPE[el.type];
   const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
   const c = f2p({ x: el.cx, y: el.cy });
@@ -1323,7 +1433,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl) {
       parts.push(<line key={`dk${k}`} x1={tl.x + k * 12 * ppf} y1={tl.y + h} x2={tl.x + k * 12 * ppf} y2={tl.y + h + 6} stroke={PAL.ink} strokeWidth={1} />);
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
-    onPointerDown={(e) => startMoveEl(e, el.id)}>{parts}</g>;
+    onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}>{parts}</g>;
 }
 
 /* ----------------------------- small UI ----------------------------- */
