@@ -34,12 +34,12 @@ const PAL = {
 };
 
 const TYPE = {
-  building: { fill: "#c6ccd3", stroke: "#5b6470", label: "Building" },
-  paving: { fill: "#e7e2d4", stroke: "#b3a98f", label: "Paving / Drive" },
-  parking: { fill: "#efece0", stroke: "#b3a98f", label: "Car Parking" },
-  trailer: { fill: "#e9e2cc", stroke: "#a8915f", label: "Trailer Parking" },
-  pond: { fill: "#bcd6e6", stroke: "#5d89a6", label: "Detention Pond" },
-  sidewalk: { fill: "#d9dde1", stroke: "#9aa1a8", label: "Sidewalk" },
+  building: { fill: "#ffffff", stroke: "#333333", label: "Building" },
+  paving: { fill: "#585858", stroke: "#3a3a3a", label: "Paving / Drive" },
+  parking: { fill: "#6f6f6f", stroke: "#cfcfcf", label: "Car Parking" },
+  trailer: { fill: "#7c7c7c", stroke: "#d4d4d4", label: "Trailer Parking" },
+  pond: { fill: "#1fd0de", stroke: "#0c8a97", label: "Detention Pond" },
+  sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
 };
 
 const TOOLS = [
