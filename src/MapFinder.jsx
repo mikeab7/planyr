@@ -55,10 +55,11 @@ function makeParcelLayer(url) {
 }
 
 // Custom cursors so it's obvious you're adding (+) or removing (−) a parcel.
+// Just a + / − with a white halo for contrast — no circle around it.
 const ADD_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Ccircle cx='15' cy='15' r='11' fill='%23ffffff' fill-opacity='0.85' stroke='%23c2410c' stroke-width='2'/%3E%3Cpath d='M15 9 L15 21 M9 15 L21 15' stroke='%23c2410c' stroke-width='2.5'/%3E%3C/svg%3E\") 15 15, crosshair";
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23c2410c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
 const REMOVE_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Ccircle cx='15' cy='15' r='11' fill='%23ffffff' fill-opacity='0.85' stroke='%23b91c1c' stroke-width='2'/%3E%3Cpath d='M9 15 L21 15' stroke='%23b91c1c' stroke-width='2.5'/%3E%3C/svg%3E\") 15 15, crosshair";
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M5 14 L23 14' stroke='%23b91c1c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
 
 // Ray-cast point-in-polygon on a [[lat,lng], ...] ring.
 function pointInPoly(lat, lng, ring) {

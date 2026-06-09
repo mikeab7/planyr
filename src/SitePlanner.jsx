@@ -231,6 +231,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [els, setEls] = useState([]);           // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState([]); // {a,b}
   const [tool, setTool] = useState("select");
+  const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
@@ -898,6 +899,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   });
   const chip = { padding: "5px 9px", fontSize: 12, borderRadius: 6, border: `1px solid ${PAL.panelLine}`, background: "#fbfaf6", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
   const numInput = { width: 58, padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid ${PAL.panelLine}`, borderRadius: 5, color: PAL.ink, background: "#fff" };
+  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "8px 9px", fontSize: 12.5, borderRadius: 6, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 600 : 500 });
+  const toolDivider = <span style={{ width: 1, alignSelf: "stretch", background: PAL.panelLine, margin: "2px 3px" }} />;
+  // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
+  const selectTool = (id) => {
+    setTool(id);
+    setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setSplitA(null);
+    if (id !== "calibrate") setCalib(null);
+    setToolMenu(false);
+  };
   const metricRow = (label, value, sub) => (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
@@ -919,8 +929,33 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         <div style={{ fontWeight: 700, letterSpacing: "0.04em", fontSize: 13.5, textTransform: "uppercase", marginRight: 4 }}>
           <span style={{ color: PAL.accent }}>▦</span> Site Planner <span style={{ color: PAL.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· industrial</span>
         </div>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-          {TOOLS.map((t) => <button key={t.id} style={btn(tool === t.id)} onClick={() => { setTool(t.id); setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setSplitA(null); if (t.id !== "calibrate") setCalib(null); }}>{t.label}</button>)}
+        <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+          <button style={btn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
+
+          {/* parcel tools grouped in one menu */}
+          <div style={{ position: "relative" }}>
+            <button style={btn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
+            {toolMenu && (
+              <>
+                <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 248 }}>
+                  <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+                  <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
+                  <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                    <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {toolDivider}
+
+          {DRAW_TYPES.map((id) => { const t = TOOLS.find((x) => x.id === id); return <button key={id} style={btn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>; })}
+
+          {toolDivider}
+
+          <button style={btn(tool === "measure")} onClick={() => selectTool("measure")}>Measure</button>
         </div>
         <div style={{ flex: 1 }} />
         <button style={chip} onClick={fit}>Fit</button>
