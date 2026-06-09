@@ -472,8 +472,14 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (!sel) return;
     pushHistory();
     if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id));
+    else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
+  };
+  const selectMeasure = (e, i) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    setSel({ kind: "measure", i });
   };
 
   /* ------------ pointer handlers (svg root) ------------ */
@@ -1165,12 +1171,23 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {measures.map((m, i) => {
                 const a = f2p(m.a), b = f2p(m.b);
                 const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                const isSel = sel?.kind === "measure" && sel.i === i;
                 return (
-                  <g key={`m${i}`} pointerEvents="none">
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} />
-                    <circle cx={a.x} cy={a.y} r={3} fill={PAL.accent} /><circle cx={b.x} cy={b.y} r={3} fill={PAL.accent} />
+                  <g key={`m${i}`}>
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
+                    <circle cx={a.x} cy={a.y} r={3} fill={PAL.accent} pointerEvents="none" /><circle cx={b.x} cy={b.y} r={3} fill={PAL.accent} pointerEvents="none" />
                     <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
-                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(dist(m.a, m.b))}′</text>
+                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(m.a, m.b))}′</text>
+                    {/* wide invisible hit line to select the measurement (select tool only) */}
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14}
+                      pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }}
+                      onPointerDown={(e) => selectMeasure(e, i)} />
+                    {isSel && (
+                      <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
+                        <circle cx={mid.x} cy={mid.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
+                        <text x={mid.x} y={mid.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
+                      </g>
+                    )}
                   </g>
                 );
               })}
