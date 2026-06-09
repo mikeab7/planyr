@@ -17,14 +17,14 @@ export default function App() {
           visible={mode === "map"}
           county={county}
           onCounty={setCounty}
-          onUseParcel={(p) => { setIncoming({ ...p, _key: Date.now() }); setMode("plan"); }}
+          onUseParcels={(payload) => { setIncoming(payload); setMode("plan"); }}
           onSkip={() => setMode("plan")}
         />
       </div>
       <div style={{ display: mode === "plan" ? "block" : "none", height: "100vh" }}>
         <SitePlanner
           active={mode === "plan"}
-          incomingParcel={incoming}
+          incoming={incoming}
           onBackToMap={() => setMode("map")}
         />
       </div>

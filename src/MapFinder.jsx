@@ -3,7 +3,14 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP } from "./lib/counties.js";
-import { resolveLayerUrl, queryAtPoint, lngLatFeatureToParcel, humanizeError } from "./lib/arcgis.js";
+import {
+  resolveLayerUrl,
+  queryAtPoint,
+  largestRingLngLat,
+  lngLatRingToFeet,
+  aerialPlacement,
+  humanizeError,
+} from "./lib/arcgis.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -11,22 +18,52 @@ const PAL = {
 };
 
 const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
-const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$)/i;
+const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
 const findVal = (attrs, re) => {
   const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== "");
   return k ? String(attrs[k]) : null;
 };
+const shoelace = (pts) => {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
+  return Math.abs(a) / 2;
+};
 
-export default function MapFinder({ visible, county, onCounty, onUseParcel, onSkip }) {
+// Build the planner hand-off: all selected parcels in one shared feet frame,
+// plus an aerial export covering them.
+function computeAssembly(selected) {
+  if (!selected.length) return null;
+  let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
+  selected.forEach((s) => s.ring.forEach(([lon, lat]) => {
+    lonMin = Math.min(lonMin, lon); lonMax = Math.max(lonMax, lon);
+    latMin = Math.min(latMin, lat); latMax = Math.max(latMax, lat);
+  }));
+  const lon0 = (lonMin + lonMax) / 2, lat0 = (latMin + latMax) / 2;
+  const parcels = selected.map((s) => ({ points: lngLatRingToFeet(s.ring, lon0, lat0) }));
+  const totalSqft = parcels.reduce((sum, p) => sum + shoelace(p.points), 0);
+  const padLon = Math.max((lonMax - lonMin) * 0.18, 0.0006);
+  const padLat = Math.max((latMax - latMin) * 0.18, 0.0005);
+  const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
+  const underlay = { ...aerialPlacement(bbox, lon0, lat0), opacity: 1, locked: true, fromMap: true };
+  return { parcels, underlay, totalAc: totalSqft / 43560 };
+}
+
+export default function MapFinder({ visible, county, onCounty, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displayRef = useRef(null);   // visible parcel-line layer
-  const hiliteRef = useRef(null);    // selected-parcel outline
+  const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
   const layerUrlRef = useRef(null);  // queryable layer URL
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [picked, setPicked] = useState(null);
+  const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
+
+  const clearHilites = () => {
+    const map = mapRef.current;
+    Object.values(hilitesRef.current).forEach((p) => map && map.removeLayer(p));
+    hilitesRef.current = {};
+  };
 
   /* create the map once */
   useEffect(() => {
@@ -61,24 +98,20 @@ export default function MapFinder({ visible, county, onCounty, onUseParcel, onSk
     if (!map) return;
     const cfg = COUNTIES_MAP[county];
     if (!cfg) return;
-    setPicked(null); setErr("");
-    if (hiliteRef.current) { map.removeLayer(hiliteRef.current); hiliteRef.current = null; }
+    setSelected([]); setErr(""); clearHilites();
     if (displayRef.current) { map.removeLayer(displayRef.current); displayRef.current = null; }
     map.setView(cfg.center, cfg.zoom);
 
     let layer = null;
     try {
-      if (cfg.mapServer) {
-        layer = EL.dynamicMapLayer({ url: cfg.mapServer, opacity: 0.85 });
-      } else if (cfg.layerUrl) {
-        layer = EL.featureLayer({ url: cfg.layerUrl, minZoom: 15, style: () => ({ color: "#ffd24d", weight: 1, fillOpacity: 0 }) });
-      }
+      if (cfg.mapServer) layer = EL.dynamicMapLayer({ url: cfg.mapServer, opacity: 0.85 });
+      else if (cfg.layerUrl) layer = EL.featureLayer({ url: cfg.layerUrl, minZoom: 15, style: () => ({ color: "#ffd24d", weight: 1, fillOpacity: 0 }) });
       if (layer) {
-        layer.on("requesterror", () => setErr(`${COUNTIES[county]?.label || "County"} parcel layer didn't load — you can still pan the aerial and trace by hand in the planner.`));
+        layer.on("requesterror", () => setErr(`${COUNTIES[county]?.label || "County"} parcel lines didn't load — you can still pan the aerial and trace by hand in the planner.`));
         layer.addTo(map);
         displayRef.current = layer;
       }
-    } catch (_) { /* non-fatal: aerial still works */ }
+    } catch (_) { /* aerial still works */ }
 
     layerUrlRef.current = null;
     (async () => {
@@ -91,17 +124,25 @@ export default function MapFinder({ visible, county, onCounty, onUseParcel, onSk
   const handleClick = async (latlng) => {
     const url = layerUrlRef.current;
     if (!url) { setErr("Parcel layer is still loading — give it a second and click again."); return; }
-    setBusy(true); setErr(""); setPicked(null);
+    setBusy(true); setErr("");
     try {
       const feat = await queryAtPoint(url, latlng.lng, latlng.lat);
       if (!feat) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
-      const conv = lngLatFeatureToParcel(feat);
-      if (!conv) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
-      const map = mapRef.current;
-      if (hiliteRef.current) map.removeLayer(hiliteRef.current);
-      hiliteRef.current = L.polygon(conv.latlngs, { color: PAL.accent, weight: 3, fillColor: PAL.accent, fillOpacity: 0.12 }).addTo(map);
+      const ring = largestRingLngLat(feat);
+      if (!ring) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const attrs = feat.attributes || {};
-      setPicked({ points: conv.points, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE) });
+      const key = String(attrs.OBJECTID ?? attrs.objectid ?? `${ring[0][0].toFixed(6)},${ring[0][1].toFixed(6)}`);
+      const map = mapRef.current;
+      if (hilitesRef.current[key]) {
+        // toggle off
+        map.removeLayer(hilitesRef.current[key]);
+        delete hilitesRef.current[key];
+        setSelected((s) => s.filter((x) => x.key !== key));
+      } else {
+        const latlngs = ring.map(([lon, lat]) => [lat, lon]);
+        hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14 }).addTo(map);
+        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE) }]);
+      }
     } catch (e) {
       setErr(humanizeError(e));
     } finally {
@@ -126,7 +167,13 @@ export default function MapFinder({ visible, county, onCounty, onUseParcel, onSk
     }
   };
 
-  const usePicked = () => { if (picked) onUseParcel({ points: picked.points, meta: { addr: picked.addr, acct: picked.acct } }); };
+  const clearSel = () => { clearHilites(); setSelected([]); };
+  const planSelected = () => {
+    const asm = computeAssembly(selected);
+    if (asm) onUseParcels({ ...asm, _key: Date.now() });
+  };
+
+  const asm = selected.length ? computeAssembly(selected) : null;
 
   const btn = (primary) => ({
     padding: "7px 12px", fontSize: 13, borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
@@ -159,19 +206,22 @@ export default function MapFinder({ visible, county, onCounty, onUseParcel, onSk
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
 
         {/* instruction / error */}
-        <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 360, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
-          {err || "Zoom to your site, then click a parcel to load it into the planner. (Parcel lines appear as you zoom in.)"}
+        <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+          {err || "Zoom in until parcel lines show, then click lots to select them. Click several to assemble a site; click a selected lot again to drop it."}
         </div>
 
-        {/* picked parcel card */}
-        {picked && (
-          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: "12px 14px", minWidth: 280, maxWidth: 420 }}>
-            <div style={{ fontSize: 11, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>Selected parcel</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink }}>{picked.addr || "Parcel"}</div>
-            {picked.acct && <div style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>#{picked.acct}</div>}
+        {/* selection card */}
+        {selected.length > 0 && (
+          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: "12px 14px", minWidth: 300, maxWidth: 460 }}>
+            <div style={{ fontSize: 11, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>
+              {selected.length} parcel{selected.length > 1 ? "s" : ""} selected · {asm ? asm.totalAc.toFixed(2) : "—"} ac
+            </div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {selected[selected.length - 1].addr || "Parcel"}{selected.length > 1 ? ` +${selected.length - 1} more` : ""}
+            </div>
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button style={{ ...btn(true), flex: 1 }} onClick={usePicked}>Plan this site →</button>
-              <button style={btn(false)} onClick={() => { setPicked(null); if (hiliteRef.current) { mapRef.current.removeLayer(hiliteRef.current); hiliteRef.current = null; } }}>Cancel</button>
+              <button style={{ ...btn(true), flex: 1 }} onClick={planSelected}>Plan {selected.length > 1 ? "these" : "this"} {selected.length > 1 ? `${selected.length} parcels` : "site"} →</button>
+              <button style={btn(false)} onClick={clearSel}>Clear</button>
             </div>
           </div>
         )}

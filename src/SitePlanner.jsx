@@ -42,8 +42,9 @@ const TYPE = {
 };
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Drag to move • drag handles to resize/rotate • drag empty space to pan" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
+  { id: "split", label: "Split", hint: "Cut a parcel: click two points to draw a line across it (e.g. 275′ off the frontage); it splits into two — then delete the piece you don't want" },
   { id: "building", label: "Building", hint: "Click-drag to draw a building footprint" },
   { id: "paving", label: "Paving", hint: "Click-drag to draw paving / drive aisle / truck court" },
   { id: "parking", label: "Parking", hint: "Click-drag to draw a car-parking field (stalls auto-count)" },
@@ -123,30 +124,91 @@ function offsetPolygon(pts, d) {
 }
 
 /* --------------------------- parking math -------------------------- */
+// Double-loaded modules (two stall rows + a drive aisle) filling a rectangle.
+// Supports 90/60/45° stalls: angling narrows the row depth and the aisle the
+// user sets, and spaces stalls farther apart along the row.
 function carStalls(w, h, s) {
-  const sd = s.stallDepth, aw = s.stallW, ai = s.aisle;
-  const mod = sd * 2 + ai;
-  const perRow = Math.max(0, Math.floor(w / aw));
+  const ang = [45, 60, 90].includes(+s.parkAngle) ? +s.parkAngle : 90;
+  const rad = (ang * Math.PI) / 180, sinA = Math.sin(rad);
+  const rowDepth = s.stallDepth * sinA;        // perpendicular depth of a stall row
+  const pitch = s.stallW / sinA;               // spacing along the row
+  const ai = s.aisle;
+  const slantDx = ang === 90 ? 0 : rowDepth / Math.tan(rad); // lean across the depth
+  const mod = rowDepth * 2 + ai;
+  const perRow = Math.max(0, Math.floor((w - slantDx) / pitch));
   const mods = Math.max(0, Math.floor(h / mod));
-  let count = mods * perRow * 2;
+  let count = 0;
   const bands = [], aisles = [];
   for (let i = 0; i < mods; i++) {
     const y = i * mod;
-    bands.push({ y, depth: sd, w: perRow * aw, n: perRow });
-    aisles.push({ y0: y + sd, y1: y + sd + ai });
-    bands.push({ y: y + sd + ai, depth: sd, w: perRow * aw, n: perRow });
+    bands.push({ y, depth: rowDepth, n: perRow, pitch, slantDx, dir: 1 });
+    aisles.push({ y0: y + rowDepth, y1: y + rowDepth + ai });
+    bands.push({ y: y + rowDepth + ai, depth: rowDepth, n: perRow, pitch, slantDx, dir: -1 });
+    count += perRow * 2;
   }
   const used = mods * mod, left = h - used;
-  if (left >= sd && perRow > 0) {
+  if (left >= rowDepth && perRow > 0) {
+    bands.push({ y: used, depth: rowDepth, n: perRow, pitch, slantDx, dir: 1 });
     count += perRow;
-    bands.push({ y: used, depth: sd, w: perRow * aw, n: perRow });
   }
-  return { count, bands, aisles, stallW: aw };
+  return { count, bands, aisles, pitch, rowDepth, angle: ang };
 }
+// Trailer storage as double-loaded rows (53′ deep) separated by a maneuvering
+// drive lane (~60′) so tractors can back trailers in — not a solid pack.
 function trailerStalls(w, h, s) {
-  const cols = Math.max(0, Math.floor(w / s.trailerW));
-  const rows = Math.max(0, Math.floor(h / s.trailerL));
-  return { count: cols * rows, cols, rows, tw: s.trailerW, tl: s.trailerL };
+  const tl = s.trailerL, tw = s.trailerW, ai = Math.max(0, s.trailerAisle || 0);
+  const perRow = Math.max(0, Math.floor(w / tw));
+  const mod = tl * 2 + ai;
+  const mods = Math.max(0, Math.floor(h / mod));
+  let count = 0;
+  const bands = [], aisles = [];
+  for (let i = 0; i < mods; i++) {
+    const y = i * mod;
+    bands.push({ y, depth: tl, n: perRow });
+    aisles.push({ y0: y + tl, y1: y + tl + ai });
+    bands.push({ y: y + tl + ai, depth: tl, n: perRow });
+    count += perRow * 2;
+  }
+  const used = mods * mod, left = h - used;
+  if (left >= tl && perRow > 0) {
+    bands.push({ y: used, depth: tl, n: perRow });
+    count += perRow;
+  }
+  return { count, bands, aisles, cols: perRow, tw, tl };
+}
+
+/* ----------------------- polygon split (parcels) ------------------- */
+// Intersection of segment p->q with the infinite line through A,B (if within pq).
+function segLineIntersect(p, q, A, B) {
+  const rx = q.x - p.x, ry = q.y - p.y, sx = B.x - A.x, sy = B.y - A.y;
+  const denom = rx * sy - ry * sx;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((A.x - p.x) * sy - (A.y - p.y) * sx) / denom;
+  if (t < -1e-9 || t > 1 + 1e-9) return null;
+  return { x: p.x + t * rx, y: p.y + t * ry };
+}
+// Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
+function splitPolygon(points, A, B) {
+  const n = points.length;
+  const dx = B.x - A.x, dy = B.y - A.y, denom2 = dx * dx + dy * dy || 1;
+  const hits = [];
+  for (let i = 0; i < n; i++) {
+    const inter = segLineIntersect(points[i], points[(i + 1) % n], A, B);
+    if (inter) hits.push({ i, point: inter, t: ((inter.x - A.x) * dx + (inter.y - A.y) * dy) / denom2 });
+  }
+  if (hits.length < 2) return null;
+  hits.sort((u, v) => u.t - v.t);
+  const lo = hits[0], hi = hits[hits.length - 1];
+  if (lo.i === hi.i) return null;
+  const a1 = lo.i < hi.i ? lo : hi, a2 = lo.i < hi.i ? hi : lo;
+  const polyA = [a1.point];
+  for (let k = a1.i + 1; k <= a2.i; k++) polyA.push(points[k % n]);
+  polyA.push(a2.point);
+  const polyB = [a2.point];
+  for (let k = a2.i + 1; k <= a1.i + n; k++) polyB.push(points[k % n]);
+  polyB.push(a1.point);
+  if (polyA.length < 3 || polyB.length < 3) return null;
+  return [polyA, polyB];
 }
 
 /* ------------------------------ format ----------------------------- */
@@ -159,12 +221,12 @@ const uid = () => `e${_id++}`;
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: true,
   setback: 25, showSetback: true,
-  stallW: 9, stallDepth: 18, aisle: 24,
-  trailerW: 12, trailerL: 53,
+  stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
+  trailerW: 12, trailerL: 53, trailerAisle: 60,
   showDocks: true,
 };
 
-export default function SitePlanner({ active = true, incomingParcel = null, onBackToMap } = {}) {
+export default function SitePlanner({ active = true, incoming = null, onBackToMap } = {}) {
   const [parcels, setParcels] = useState([]);   // {id, points:[{x,y}]}
   const [els, setEls] = useState([]);           // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState([]); // {a,b}
@@ -180,6 +242,7 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [pendMeasure, setPendMeasure] = useState(null);
+  const [splitA, setSplitA] = useState(null);        // first point of a split cut
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
@@ -254,16 +317,20 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load a parcel handed in from the map finder (added once per selection).
+  // Load a site handed in from the map finder: one or more parcels in a shared
+  // feet frame plus the matching aerial. Each selection is a fresh site.
   const consumedRef = useRef(null);
   useEffect(() => {
-    if (incomingParcel && incomingParcel !== consumedRef.current && incomingParcel.points?.length >= 3) {
-      consumedRef.current = incomingParcel;
-      const pc = { id: uid(), points: incomingParcel.points };
-      setParcels((a) => [...a, pc]);
-      setSel({ kind: "parcel", id: pc.id });
+    if (incoming && incoming !== consumedRef.current && incoming.parcels?.length) {
+      consumedRef.current = incoming;
+      const pcs = incoming.parcels.filter((p) => p.points?.length >= 3).map((p) => ({ id: uid(), points: p.points }));
+      setParcels(pcs);
+      setEls([]);
+      setMeasures([]);
+      setUnderlay(incoming.underlay || null);
+      setSel(pcs.length === 1 ? { kind: "parcel", id: pcs[0].id } : null);
     }
-  }, [incomingParcel]);
+  }, [incoming]);
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
@@ -294,7 +361,7 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
     const onKey = (e) => {
       const t = document.activeElement;
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setCalib(null); setSel(null); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -339,12 +406,62 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
       else setCalib((c) => ({ a: c.a, b: fp }));
       return;
     }
+    if (tool === "split") {
+      const sp = snapPt(fp);
+      if (!splitA) setSplitA(sp);
+      else { performSplit(splitA, sp); setSplitA(null); }
+      return;
+    }
     if (DRAW_TYPES.includes(tool)) {
       const sp = snapPt(fp);
       drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
     }
+  };
+
+  // Split the selected parcel (or whichever parcel the cut line crosses).
+  const performSplit = (A, B) => {
+    const ordered = sel?.kind === "parcel"
+      ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
+      : parcels;
+    for (const pc of ordered) {
+      const halves = splitPolygon(pc.points, A, B);
+      if (halves) {
+        const a = { id: uid(), points: halves[0] };
+        const b = { id: uid(), points: halves[1] };
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
+        setSel({ kind: "parcel", id: a.id });
+        return;
+      }
+    }
+  };
+
+  /* ------------ parcel vertex editing ------------ */
+  const startVertex = (e, id, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
+      setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3
+        ? { ...pc, points: pc.points.filter((_, i) => i !== index) } : pc));
+      return;
+    }
+    setSel({ kind: "parcel", id });
+    drag.current = { mode: "vertex", id, index };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const addVertex = (e, id, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    setParcels((a) => a.map((pc) => {
+      if (pc.id !== id) return pc;
+      const p = pc.points[index], q = pc.points[(index + 1) % pc.points.length];
+      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+      const points = [...pc.points];
+      points.splice(index + 1, 0, mid);
+      return { ...pc, points };
+    }));
+    setSel({ kind: "parcel", id });
   };
 
   const onMove = (e) => {
@@ -375,6 +492,12 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
       } else {
         setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : pc));
       }
+      return;
+    }
+    if (d.mode === "vertex") {
+      const sp = snapPt(fp);
+      setParcels((a) => a.map((pc) => pc.id === d.id
+        ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc));
       return;
     }
     if (d.mode === "resize") {
@@ -702,6 +825,52 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
     );
   })();
 
+  // Edge-length labels on the selected parcel (so you can read/trim frontage).
+  const parcelEdgeLabels = (() => {
+    if (sel?.kind !== "parcel") return null;
+    const pc = parcels.find((p) => p.id === sel.id);
+    if (!pc) return null;
+    return pc.points.map((a, i) => {
+      const b = pc.points[(i + 1) % pc.points.length];
+      const am = f2p(a), bm = f2p(b);
+      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+      return (
+        <text key={`pe${i}`} x={mid.x} y={mid.y} dy={-7} textAnchor="middle" fontSize="11"
+          fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink} stroke={PAL.paper} strokeWidth={3}
+          paintOrder="stroke" pointerEvents="none" fontWeight="600">{f0(dist(a, b))}′</text>
+      );
+    });
+  })();
+
+  // Draggable vertices + add-point (+) handles on the selected parcel (select tool).
+  const parcelHandles = (() => {
+    if (sel?.kind !== "parcel" || tool !== "select") return null;
+    const pc = parcels.find((p) => p.id === sel.id);
+    if (!pc) return null;
+    const nodes = [];
+    pc.points.forEach((a, i) => {
+      const b = pc.points[(i + 1) % pc.points.length];
+      const am = f2p(a), bm = f2p(b);
+      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+      nodes.push(
+        <g key={`addv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addVertex(e, pc.id, i)}>
+          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
+        </g>
+      );
+    });
+    pc.points.forEach((a, i) => {
+      const c = f2p(a);
+      nodes.push(
+        <rect key={`pv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
+          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+          style={{ cursor: "move" }} onPointerDown={(e) => startVertex(e, pc.id, i)} />
+      );
+    });
+    return <g>{nodes}</g>;
+  })();
+
   const scaleBarFt = (() => {
     const targetPx = 120;
     const raw = targetPx / view.ppf;
@@ -741,7 +910,7 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
           <span style={{ color: PAL.accent }}>▦</span> Site Planner <span style={{ color: PAL.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· industrial</span>
         </div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-          {TOOLS.map((t) => <button key={t.id} style={btn(tool === t.id)} onClick={() => { setTool(t.id); setDraftPoly(null); setDraftRect(null); setPendMeasure(null); if (t.id !== "calibrate") setCalib(null); }}>{t.label}</button>)}
+          {TOOLS.map((t) => <button key={t.id} style={btn(tool === t.id)} onClick={() => { setTool(t.id); setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setSplitA(null); if (t.id !== "calibrate") setCalib(null); }}>{t.label}</button>)}
         </div>
         <div style={{ flex: 1 }} />
         <button style={chip} onClick={fit}>Fit</button>
@@ -835,10 +1004,25 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
               {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }); return (
                 <g pointerEvents="none"><rect x={a.x} y={a.y} width={draftRect.w * view.ppf} height={draftRect.h * view.ppf} fill={TYPE[draftRect.type].fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" /></g>
               ); })()}
+              {/* split cut preview */}
+              {tool === "split" && splitA && (() => {
+                const a = f2p(splitA);
+                const b = cursor ? f2p(snapPt(cursor)) : a;
+                const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                return (
+                  <g pointerEvents="none">
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
+                    <circle cx={a.x} cy={a.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
+                    {cursor && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(dist(splitA, snapPt(cursor)))}′ cut</text>}
+                  </g>
+                );
+              })()}
 
               {parcelLabels}
               {labelEls}
+              {parcelEdgeLabels}
               {handleNodes}
+              {parcelHandles}
             </g>
 
             {/* scale bar */}
@@ -974,8 +1158,8 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
               <Field label="Rotation (°)"><input style={numInput} value={Math.round(selEl.rot)} onChange={(e) => setSelEl({ rot: ((+e.target.value || 0) % 360 + 360) % 360 })} /></Field>
               <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                 Footprint: <b style={{ color: PAL.ink }}>{f0(selEl.w * selEl.h)} sf</b><br />
-                {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(carStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.stallW}′×{settings.stallDepth}′, {settings.aisle}′ aisle</>}
-                {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(trailerStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.trailerW}′×{settings.trailerL}′</>}
+                {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(carStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}
+                {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(trailerStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.trailerW}′×{settings.trailerL}′, {settings.trailerAisle}′ drive lane</>}
                 {selEl.type === "building" && <>Est. dock doors (long side): <b style={{ color: PAL.ink }}>{Math.floor(Math.max(selEl.w, selEl.h) / 12)}</b> @ 12′ o.c.</>}
               </div>
               <button style={{ ...chip, marginTop: 8, color: PAL.accent }} onClick={deleteSel}>Delete element</button>
@@ -1001,7 +1185,9 @@ export default function SitePlanner({ active = true, incomingParcel = null, onBa
             <Field label="Setback (ft)"><input style={numInput} value={settings.setback} onChange={(e) => setSettings((s) => ({ ...s, setback: Math.max(0, +e.target.value || 0) }))} /></Field>
             <Field label="Stall W / D"><span><input style={{ ...numInput, width: 42 }} value={settings.stallW} onChange={(e) => setSettings((s) => ({ ...s, stallW: +e.target.value || 9 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.stallDepth} onChange={(e) => setSettings((s) => ({ ...s, stallDepth: +e.target.value || 18 }))} /></span></Field>
             <Field label="Drive aisle"><input style={numInput} value={settings.aisle} onChange={(e) => setSettings((s) => ({ ...s, aisle: +e.target.value || 24 }))} /></Field>
+            <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
             <Field label="Trailer W / L"><span><input style={{ ...numInput, width: 42 }} value={settings.trailerW} onChange={(e) => setSettings((s) => ({ ...s, trailerW: +e.target.value || 12 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.trailerL} onChange={(e) => setSettings((s) => ({ ...s, trailerL: +e.target.value || 53 }))} /></span></Field>
+            <Field label="Trailer aisle"><input style={numInput} value={settings.trailerAisle} onChange={(e) => setSettings((s) => ({ ...s, trailerAisle: +e.target.value || 0 }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 4, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
@@ -1053,19 +1239,27 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl) {
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, settings);
     cs.bands.forEach((b, i) => {
-      parts.push(<rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={b.w * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
-      for (let k = 1; k < b.n; k++)
-        parts.push(<line key={`b${i}d${k}`} x1={tl.x + k * cs.stallW * ppf} y1={tl.y + b.y * ppf} x2={tl.x + k * cs.stallW * ppf} y2={tl.y + (b.y + b.depth) * ppf} stroke={st.stroke} strokeWidth={0.5} />);
+      const bandW = b.n * b.pitch;
+      parts.push(<rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
+      const lean = b.dir * b.slantDx; // angled stalls lean toward their aisle
+      for (let k = 1; k < b.n; k++) {
+        const x = tl.x + k * b.pitch * ppf;
+        parts.push(<line key={`b${i}d${k}`} x1={x} y1={tl.y + b.y * ppf} x2={x + lean * ppf} y2={tl.y + (b.y + b.depth) * ppf} stroke={st.stroke} strokeWidth={0.5} />);
+      }
     });
     cs.aisles.forEach((a, i) =>
       parts.push(<line key={`a${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="6 5" />));
   }
   if (el.type === "trailer") {
     const ts = trailerStalls(el.w, el.h, settings);
-    for (let cc = 1; cc < ts.cols; cc++)
-      parts.push(<line key={`tc${cc}`} x1={tl.x + cc * ts.tw * ppf} y1={tl.y} x2={tl.x + cc * ts.tw * ppf} y2={tl.y + ts.rows * ts.tl * ppf} stroke={st.stroke} strokeWidth={0.6} />);
-    for (let rr = 0; rr <= ts.rows; rr++)
-      parts.push(<line key={`tr${rr}`} x1={tl.x} y1={tl.y + rr * ts.tl * ppf} x2={tl.x + ts.cols * ts.tw * ppf} y2={tl.y + rr * ts.tl * ppf} stroke={st.stroke} strokeWidth={0.6} />);
+    ts.bands.forEach((b, i) => {
+      const bandW = b.n * ts.tw;
+      parts.push(<rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
+      for (let k = 1; k < b.n; k++)
+        parts.push(<line key={`tb${i}d${k}`} x1={tl.x + k * ts.tw * ppf} y1={tl.y + b.y * ppf} x2={tl.x + k * ts.tw * ppf} y2={tl.y + (b.y + b.depth) * ppf} stroke={st.stroke} strokeWidth={0.55} />);
+    });
+    ts.aisles.forEach((a, i) =>
+      parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
   }
   if (el.type === "building" && settings.showDocks) {
     const n = Math.floor(el.w / 12);

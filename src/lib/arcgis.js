@@ -173,6 +173,57 @@ export function lngLatFeatureToParcel(feature) {
   return { points, latlngs };
 }
 
+// The largest outer ring of a feature as an open [[lon,lat], ...] array (4326).
+export function largestRingLngLat(feature) {
+  const rings = feature?.geometry?.rings;
+  if (!rings || !rings.length) return null;
+  let best = rings[0];
+  let bestA = Math.abs(ringArea(rings[0]));
+  for (const r of rings) {
+    const a = Math.abs(ringArea(r));
+    if (a > bestA) { best = r; bestA = a; }
+  }
+  const closed =
+    best.length > 1 &&
+    best[0][0] === best[best.length - 1][0] &&
+    best[0][1] === best[best.length - 1][1];
+  return closed ? best.slice(0, -1) : best;
+}
+
+const FT_PER_DEG_LAT = 362776; // feet per degree of latitude (≈ constant)
+const ftPerDegLon = (lat) => 365223 * Math.cos((lat * Math.PI) / 180);
+
+// Project a lon/lat ring to local feet about a shared origin (north up).
+export function lngLatRingToFeet(ring, lon0, lat0) {
+  const FT_LON = ftPerDegLon(lat0);
+  return ring.map(([lon, lat]) => ({
+    x: (lon - lon0) * FT_LON,
+    y: -(lat - lat0) * FT_PER_DEG_LAT,
+  }));
+}
+
+// Feet-per-pixel + feet placement for an aerial export covering a lon/lat bbox,
+// expressed in the same local frame (origin lon0/lat0) as the parcels.
+export function aerialPlacement(bbox, lon0, lat0, maxPx = 1280) {
+  const FT_LON = ftPerDegLon(lat0);
+  const widthFt = (bbox.lonMax - bbox.lonMin) * FT_LON;
+  const heightFt = (bbox.latMax - bbox.latMin) * FT_PER_DEG_LAT;
+  const imgW = Math.max(16, Math.round(widthFt >= heightFt ? maxPx : maxPx * (widthFt / heightFt)));
+  const imgH = Math.max(16, Math.round(widthFt >= heightFt ? maxPx * (heightFt / widthFt) : maxPx));
+  const src =
+    "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export" +
+    `?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
+    `&bboxSR=4326&imageSR=4326&size=${imgW},${imgH}&format=jpg&transparent=false&f=image`;
+  return {
+    src,
+    imgW,
+    imgH,
+    ftPerPx: widthFt / imgW,
+    x: (bbox.lonMin - lon0) * FT_LON,
+    y: -(bbox.latMax - lat0) * FT_PER_DEG_LAT,
+  };
+}
+
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
   const m = String(e?.message || e);
