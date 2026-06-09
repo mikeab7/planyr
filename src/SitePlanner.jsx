@@ -34,11 +34,11 @@ const PAL = {
 };
 
 const TYPE = {
-  building: { fill: "#ffffff", stroke: "#333333", label: "Building" },
-  paving: { fill: "#585858", stroke: "#3a3a3a", label: "Paving / Drive" },
-  parking: { fill: "#6f6f6f", stroke: "#cfcfcf", label: "Car Parking" },
-  trailer: { fill: "#7c7c7c", stroke: "#d4d4d4", label: "Trailer Parking" },
-  pond: { fill: "#1fd0de", stroke: "#0c8a97", label: "Detention Pond" },
+  building: { fill: "#ffffff", stroke: "#2b2b2b", label: "Building" },
+  paving: { fill: "#555555", stroke: "#333333", label: "Paving / Drive" },
+  parking: { fill: "#555555", stroke: "#cfcfcf", label: "Car Parking" },
+  trailer: { fill: "#555555", stroke: "#d4d4d4", label: "Trailer Parking" },
+  pond: { fill: "#1ed4e1", stroke: "#0b8a96", label: "Detention Pond" },
   sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
 };
 
@@ -1905,7 +1905,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
-      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={el.type === "pond" ? 0.85 : 0.92}
+      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={1}
         stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2.5 : 1.25}
         style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -1917,7 +1917,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x); // px per foot
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={el.type === "pond" ? 0.85 : 0.92}
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={1}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2 : 1.25} rx={el.type === "pond" ? Math.min(w, h) * 0.12 : 0} />);
 
   if (el.type === "parking") {
