@@ -17,6 +17,27 @@ const PAL = {
   accent: "#c2410c", muted: "#8a8473",
 };
 
+// Free aerial sources (no API key). Both are ArcGIS MapServers that support
+// both XYZ tiles (for the map) and `export` (for the planner underlay capture).
+const BASEMAPS = {
+  esri: {
+    label: "Esri",
+    tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    export: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export",
+    maxNative: 19,
+    attr: "Imagery &copy; Esri, Maxar",
+  },
+  usgs: {
+    label: "USGS",
+    tiles: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+    export: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export",
+    maxNative: 16,
+    attr: "Imagery &copy; USGS",
+  },
+};
+// Subtle road/place labels overlay (drawn faint over the imagery).
+const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+
 const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
 const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
 const findVal = (attrs, re) => {
@@ -31,7 +52,7 @@ const shoelace = (pts) => {
 
 // Build the planner hand-off: all selected parcels in one shared feet frame,
 // plus an aerial export covering them.
-function computeAssembly(selected) {
+function computeAssembly(selected, exportBase) {
   if (!selected.length) return null;
   let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
   selected.forEach((s) => s.ring.forEach(([lon, lat]) => {
@@ -44,7 +65,7 @@ function computeAssembly(selected) {
   const padLon = Math.max((lonMax - lonMin) * 0.18, 0.0006);
   const padLat = Math.max((latMax - latMin) * 0.18, 0.0005);
   const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
-  const underlay = { ...aerialPlacement(bbox, lon0, lat0), opacity: 1, locked: true, fromMap: true };
+  const underlay = { ...aerialPlacement(bbox, lon0, lat0, { exportBase }), opacity: 1, locked: true, fromMap: true };
   return { parcels, underlay, totalAc: totalSqft / 43560 };
 }
 
@@ -54,9 +75,13 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   const displayRef = useRef(null);   // visible parcel-line layer
   const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
   const layerUrlRef = useRef(null);  // queryable layer URL
+  const imageryRef = useRef(null);
+  const labelsRef = useRef(null);
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [basemap, setBasemap] = useState("esri");
+  const [labels, setLabels] = useState(true);
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
 
   const clearHilites = () => {
@@ -70,19 +95,36 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     const cfg = COUNTIES_MAP[county] || COUNTIES_MAP.harris;
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
-    L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 21, attribution: "Imagery &copy; Esri, Maxar, USDA" }
-    ).addTo(map);
-    L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 21, opacity: 0.9 }
-    ).addTo(map);
     const onClick = (e) => handleClick(e.latlng);
     map.on("click", onClick);
     return () => { map.off("click", onClick); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* aerial imagery layer (swappable source) */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bm = BASEMAPS[basemap] || BASEMAPS.esri;
+    const layer = L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, attribution: bm.attr });
+    layer.setZIndex(1);
+    layer.addTo(map);
+    imageryRef.current = layer;
+    return () => { try { map.removeLayer(layer); } catch (_) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basemap]);
+
+  /* faint labels overlay (toggle) */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !labels) return;
+    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, opacity: 0.4 });
+    layer.setZIndex(2);
+    layer.addTo(map);
+    labelsRef.current = layer;
+    return () => { try { map.removeLayer(layer); } catch (_) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labels]);
 
   /* keep the map sized correctly when shown after being hidden */
   useEffect(() => {
@@ -169,11 +211,11 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
 
   const clearSel = () => { clearHilites(); setSelected([]); };
   const planSelected = () => {
-    const asm = computeAssembly(selected);
+    const asm = computeAssembly(selected, BASEMAPS[basemap].export);
     if (asm) onUseParcels({ ...asm, _key: Date.now() });
   };
 
-  const asm = selected.length ? computeAssembly(selected) : null;
+  const asm = selected.length ? computeAssembly(selected, BASEMAPS[basemap].export) : null;
 
   const btn = (primary) => ({
     padding: "7px 12px", fontSize: 13, borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
@@ -204,6 +246,17 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
+
+        {/* imagery + labels control */}
+        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px", display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+          <span style={{ color: PAL.muted }}>Imagery</span>
+          <select style={{ ...field, padding: "4px 6px", fontSize: 12 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
+            {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
+          </select>
+          <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
+            <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
+          </label>
+        </div>
 
         {/* instruction / error */}
         <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>

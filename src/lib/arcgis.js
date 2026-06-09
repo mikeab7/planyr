@@ -209,7 +209,11 @@ export function lngLatRingToFeet(ring, lon0, lat0) {
 // same FT_PER_DEG constants the parcels use, so image and boundary align exactly.
 // ftPerPx is the horizontal scale, ftPerPxY the vertical (they differ at this
 // latitude — that vertical stretch is what was missing before).
-export function aerialPlacement(bbox, lon0, lat0, maxPx = 1400) {
+export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
+  const maxPx = opts.maxPx || 1400;
+  const exportBase =
+    opts.exportBase ||
+    "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export";
   const FT_LON = ftPerDegLon(lat0);
   const lonSpan = bbox.lonMax - bbox.lonMin;
   const latSpan = bbox.latMax - bbox.latMin;
@@ -219,8 +223,7 @@ export function aerialPlacement(bbox, lon0, lat0, maxPx = 1400) {
   const widthFt = lonSpan * FT_LON;
   const heightFt = latSpan * FT_PER_DEG_LAT;
   const src =
-    "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export" +
-    `?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
+    `${exportBase}?bbox=${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax}` +
     `&bboxSR=4326&imageSR=4326&size=${imgW},${imgH}&format=jpg&transparent=false&f=image`;
   return {
     src,
