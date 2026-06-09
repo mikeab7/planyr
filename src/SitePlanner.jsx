@@ -164,7 +164,7 @@ const DEFAULT_SETTINGS = {
   showDocks: true,
 };
 
-export default function SitePlanner() {
+export default function SitePlanner({ active = true, incomingParcel = null, onBackToMap } = {}) {
   const [parcels, setParcels] = useState([]);   // {id, points:[{x,y}]}
   const [els, setEls] = useState([]);           // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState([]); // {a,b}
@@ -253,6 +253,22 @@ export default function SitePlanner() {
   const [fitNonce, setFitNonce] = useState(0);
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load a parcel handed in from the map finder (added once per selection).
+  const consumedRef = useRef(null);
+  useEffect(() => {
+    if (incomingParcel && incomingParcel !== consumedRef.current && incomingParcel.points?.length >= 3) {
+      consumedRef.current = incomingParcel;
+      const pc = { id: uid(), points: incomingParcel.points };
+      setParcels((a) => [...a, pc]);
+      setSel({ kind: "parcel", id: pc.id });
+    }
+  }, [incomingParcel]);
+
+  // Reframe when this view becomes active — its real size is known only once shown.
+  useEffect(() => {
+    if (active) { const t = setTimeout(() => requestFit(), 120); return () => clearTimeout(t); }
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ------------ wheel zoom (non-passive) ------------ */
   useEffect(() => {
@@ -720,6 +736,7 @@ export default function SitePlanner() {
 
       {/* top bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: PAL.panelBg, borderBottom: `1px solid ${PAL.panelLine}`, flexWrap: "wrap" }}>
+        {onBackToMap && <button style={chip} onClick={onBackToMap}>← Map</button>}
         <div style={{ fontWeight: 700, letterSpacing: "0.04em", fontSize: 13.5, textTransform: "uppercase", marginRight: 4 }}>
           <span style={{ color: PAL.accent }}>▦</span> Site Planner <span style={{ color: PAL.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· industrial</span>
         </div>

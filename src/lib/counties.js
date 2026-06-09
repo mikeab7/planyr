@@ -62,3 +62,32 @@ export function detectField(fields, kind) {
   const f = (fields || []).find((x) => re.test(x.name));
   return f ? f.name : null;
 }
+
+/* Map-view config per county: where to center the slippy map, and which ArcGIS
+ * service to draw parcel lines from.
+ *   - mapServer: a MapServer root used as a dynamic image overlay (renders all
+ *     parcel lines across the view, scales to the whole county). Preferred.
+ *   - layerUrl:  a specific feature layer, used both to render (when there's no
+ *     MapServer) and to query the parcel under a click.
+ * If layerUrl is null it's resolved from mapServer at runtime. */
+export const COUNTIES_MAP = {
+  harris: {
+    center: [29.76, -95.37],
+    zoom: 11,
+    mapServer: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer",
+    layerUrl: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
+  },
+  fortbend: {
+    center: [29.53, -95.77],
+    zoom: 11,
+    mapServer: "https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer",
+    layerUrl: null,
+  },
+  chambers: {
+    center: [29.7, -94.66],
+    zoom: 11,
+    mapServer: null,
+    layerUrl:
+      "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Hosted_Parcels_Test_WebMer_20201016/FeatureServer/0",
+  },
+};
