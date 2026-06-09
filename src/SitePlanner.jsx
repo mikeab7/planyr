@@ -45,11 +45,11 @@ const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click two points to draw a line across it (e.g. 275′ off the frontage); it splits into two — then delete the piece you don't want" },
-  { id: "building", label: "Building", hint: "Click-drag to draw a building footprint" },
-  { id: "paving", label: "Paving", hint: "Click-drag to draw paving / drive aisle / truck court" },
-  { id: "parking", label: "Parking", hint: "Click-drag to draw a car-parking field (stalls auto-count)" },
-  { id: "trailer", label: "Trailer", hint: "Click-drag to draw trailer-stall storage (auto-count)" },
-  { id: "pond", label: "Pond", hint: "Click-drag to draw a detention area (rectangle in this version)" },
+  { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
+  { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
+  { id: "parking", label: "Parking", hint: "Drag for a rectangle, or click points to outline an irregular parking field (double-click to close); stalls auto-count" },
+  { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
+  { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "measure", label: "Measure", hint: "Click two points to measure a distance (truck court depth, setbacks, drive widths)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
 ];
@@ -176,6 +176,16 @@ function trailerStalls(w, h, s) {
   }
   return { count, bands, aisles, cols: perRow, tw, tl };
 }
+// Area-based stall estimates for irregular (polygon) fields — gross sf per stall
+// including its share of drive aisle, with an efficiency factor for edge loss.
+function estStalls(area, s) {
+  const per = s.stallW * (s.stallDepth + s.aisle / 2) || 1;
+  return Math.max(0, Math.floor((area * 0.8) / per));
+}
+function estTrailers(area, s) {
+  const per = s.trailerW * (s.trailerL + (s.trailerAisle || 0) / 2) || 1;
+  return Math.max(0, Math.floor((area * 0.8) / per));
+}
 
 /* ----------------------- polygon split (parcels) ------------------- */
 // Intersection of segment p->q with the infinite line through A,B (if within pq).
@@ -266,6 +276,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
+  const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
   const [pendMeasure, setPendMeasure] = useState(null);
   const [splitA, setSplitA] = useState(null);        // first point of a split cut
 
@@ -379,7 +390,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const fit = useCallback(() => {
     const pts = [];
     parcels.forEach((pc) => pts.push(...pc.points));
-    els.forEach((e) => pts.push(...elCorners(e)));
+    els.forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
     if (underlay) {
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       pts.push({ x: underlay.x, y: underlay.y });
@@ -450,7 +461,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -504,8 +515,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       return;
     }
     if (DRAW_TYPES.includes(tool)) {
-      pushHistory();
       const sp = snapPt(fp);
+      if (draftElPoly) { // adding points to an in-progress polygon element
+        if (draftElPoly.pts.length >= 3 && dist(f2p(sp), f2p(draftElPoly.pts[0])) < 12) { closeElPoly(); return; }
+        setDraftElPoly((d) => ({ ...d, pts: [...d.pts, sp] }));
+        return;
+      }
+      pushHistory();
       drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
@@ -584,6 +600,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       if (d.kind === "el") {
         setEls((a) => a.map((el) => el.id === d.id ? { ...el, cx: snap(d.ocx + dx), cy: snap(d.ocy + dy) } : el));
+      } else if (d.kind === "elpoly") {
+        setEls((a) => a.map((el) => el.id === d.id ? { ...el, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : el));
       } else {
         setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : pc));
       }
@@ -623,9 +641,12 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const d = drag.current;
     if (d && d.mode === "draw" && draftRect) {
       if (draftRect.w >= 4 && draftRect.h >= 4) {
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0 };
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: "single" } : {}) };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
+      } else {
+        // a click (no drag) → begin a polygon element by dropping perimeter points
+        setDraftElPoly({ type: draftRect.type, pts: [{ x: draftRect.x, y: draftRect.y }] });
       }
       setDraftRect(null);
     }
@@ -644,7 +665,16 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setDraftPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (tool === "parcel") closePoly(); };
+  const closeElPoly = () => {
+    if (draftElPoly && draftElPoly.pts.length >= 3) {
+      const el = { id: uid(), type: draftElPoly.type, points: draftElPoly.pts, rot: 0 };
+      setEls((a) => [...a, el]);
+      setSel({ kind: "el", id: el.id });
+    }
+    setDraftElPoly(null);
+    setTool("select");
+  };
+  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (draftElPoly) closeElPoly(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -756,7 +786,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const fp = p2f(e.clientX, e.clientY);
     setSel({ kind: "el", id });
     pushHistory();
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, ocx: el.cx, ocy: el.cy };
+    if (el.points) drag.current = { mode: "move", kind: "elpoly", id, fx: fp.x, fy: fp.y, opts: el.points };
+    else drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, ocx: el.cx, ocy: el.cy };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
@@ -797,16 +828,20 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setEls((a) => a.map((el) => (el.id === id ? { ...el, type, ...(type === "building" && !el.dock ? { dock: "single" } : {}) } : el)));
     setTypeMenu(null);
   };
+  const setDockOf = (id, dock) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, dock } : el)));
+  };
 
   /* ------------ metrics ------------ */
   const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   els.forEach((e) => {
-    const a = e.w * e.h;
+    const a = e.points ? polyArea(e.points) : e.w * e.h;
     if (e.type === "building") bldg += a;
     else if (e.type === "paving") paving += a;
-    else if (e.type === "parking") { parkArea += a; stalls += carStalls(e.w, e.h, settings).count; }
-    else if (e.type === "trailer") { trailArea += a; trailers += trailerStalls(e.w, e.h, settings).count; }
+    else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
+    else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, settings).count; }
     else if (e.type === "pond") pondArea += a;
   });
   const impervious = bldg + paving + parkArea + trailArea;
@@ -900,12 +935,14 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
   /* labels + handles in screen space */
   const labelEls = els.map((el) => {
-    const c = f2p({ x: el.cx, y: el.cy });
+    const poly = !!el.points;
+    const area = poly ? polyArea(el.points) : el.w * el.h;
+    const c = f2p(poly ? centroid(el.points) : { x: el.cx, y: el.cy });
     const lines = [TYPE[el.type].label.split(" / ")[0]];
-    if (el.type === "parking") lines.push(`${f0(carStalls(el.w, el.h, settings).count)} stalls`);
-    else if (el.type === "trailer") lines.push(`${f0(trailerStalls(el.w, el.h, settings).count)} trailers`);
-    else lines.push(`${f0(el.w * el.h)} sf`);
-    lines.push(`${f0(el.w)}′ × ${f0(el.h)}′`);
+    if (el.type === "parking") lines.push(`${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`);
+    else if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
+    else lines.push(`${f0(area)} sf`);
+    lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
     return (
       <text key={`lbl${el.id}`} x={c.x} y={c.y - (lines.length - 1) * 7} textAnchor="middle" pointerEvents="none"
         fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}
@@ -928,7 +965,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const handleNodes = (() => {
     if (sel?.kind !== "el") return null;
     const el = els.find((x) => x.id === sel.id);
-    if (!el) return null;
+    if (!el || el.points) return null; // polygon elements have no box resize/rotate handles
     const corners = elCorners(el).map(f2p);
     const signs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const topMid = f2p({ x: el.cx + rot2(0, -el.h / 2, el.rot).x, y: el.cy + rot2(0, -el.h / 2, el.rot).y });
@@ -1017,7 +1054,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
-    setDraftPoly(null); setDraftRect(null); setPendMeasure(null); setSplitA(null);
+    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setSplitA(null);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
   };
@@ -1166,6 +1203,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }); return (
                 <g pointerEvents="none"><rect x={a.x} y={a.y} width={draftRect.w * view.ppf} height={draftRect.h * view.ppf} fill={TYPE[draftRect.type].fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" /></g>
               ); })()}
+              {/* draft polygon element (clicking perimeter points) */}
+              {draftElPoly && (
+                <g pointerEvents="none">
+                  <polyline points={[...draftElPoly.pts, ...(cursor ? [snapPt(cursor)] : [])].map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill={TYPE[draftElPoly.type].fill} fillOpacity={0.35} stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="6 5" />
+                  {draftElPoly.pts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
+                </g>
+              )}
               {/* split cut preview */}
               {tool === "split" && splitA && (() => {
                 const a = f2p(splitA);
@@ -1325,29 +1369,41 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           {/* selected element */}
           {selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
-              <Field label="Width (ft)"><input style={numInput} value={Math.round(selEl.w)} onChange={(e) => setSelEl({ w: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
-              <Field label="Depth (ft)"><input style={numInput} value={Math.round(selEl.h)} onChange={(e) => setSelEl({ h: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
-              <Field label="Rotation (°)"><input style={numInput} value={Math.round(selEl.rot)} onChange={(e) => setSelEl({ rot: ((+e.target.value || 0) % 360 + 360) % 360 })} /></Field>
-              {selEl.type === "building" && (
-                <Field label="Docks">
-                  <select style={{ ...numInput, width: 112, fontFamily: "inherit" }} value={selEl.dock || "single"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
-                    <option value="single">Single-load</option>
-                    <option value="cross">Cross-dock</option>
-                    <option value="none">None</option>
-                  </select>
-                </Field>
+              {!selEl.points ? (
+                <>
+                  <Field label="Width (ft)"><input style={numInput} value={Math.round(selEl.w)} onChange={(e) => setSelEl({ w: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
+                  <Field label="Depth (ft)"><input style={numInput} value={Math.round(selEl.h)} onChange={(e) => setSelEl({ h: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
+                  <Field label="Rotation (°)"><input style={numInput} value={Math.round(selEl.rot)} onChange={(e) => setSelEl({ rot: ((+e.target.value || 0) % 360 + 360) % 360 })} /></Field>
+                  {selEl.type === "building" && (
+                    <Field label="Docks">
+                      <select style={{ ...numInput, width: 112, fontFamily: "inherit" }} value={selEl.dock || "single"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
+                        <option value="single">Single-load</option>
+                        <option value="cross">Cross-dock</option>
+                        <option value="none">None</option>
+                      </select>
+                    </Field>
+                  )}
+                </>
+              ) : (
+                <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon area · {selEl.points.length} points. Drag to move; double-click to change type; re-draw to reshape.</div>
               )}
-              <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
-                Footprint: <b style={{ color: PAL.ink }}>{f0(selEl.w * selEl.h)} sf</b><br />
-                {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(carStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}
-                {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(trailerStalls(selEl.w, selEl.h, settings).count)}</b> @ {settings.trailerW}′×{settings.trailerL}′, {settings.trailerAisle}′ drive lane</>}
-                {selEl.type === "building" && (() => {
-                  const dock = selEl.dock || "single";
-                  const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
-                  const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
-                  return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
-                })()}
-              </div>
+              {(() => {
+                const poly = !!selEl.points;
+                const area = poly ? polyArea(selEl.points) : selEl.w * selEl.h;
+                return (
+                  <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
+                    {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
+                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
+                    {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.trailerW}′×{settings.trailerL}′, {settings.trailerAisle}′ drive lane</>}</>}
+                    {selEl.type === "building" && !poly && (() => {
+                      const dock = selEl.dock || "single";
+                      const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
+                      const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
+                      return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
+                    })()}
+                  </div>
+                );
+              })()}
               <button style={{ ...chip, marginTop: 8, color: PAL.accent }} onClick={deleteSel}>Delete element</button>
             </Section>
           )}
@@ -1419,6 +1475,19 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                 </button>
               );
             })}
+            {(() => {
+              const t = els.find((el) => el.id === typeMenu.id);
+              if (!t || t.type !== "building" || t.points) return null;
+              const dock = t.dock || "single";
+              return (
+                <>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Dock layout</div>
+                  {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                    <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </>
       )}
@@ -1430,11 +1499,20 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   const st = TYPE[el.type];
+  const isSel = sel?.kind === "el" && sel.id === el.id;
+  if (el.points) { // polygon element (irregular area drawn by clicking points)
+    const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+    return (
+      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={el.type === "pond" ? 0.85 : 0.92}
+        stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2.5 : 1.25}
+        style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+        onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)} />
+    );
+  }
   const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
   const c = f2p({ x: el.cx, y: el.cy });
   const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x); // px per foot
   const w = el.w * ppf, h = el.h * ppf;
-  const isSel = sel?.kind === "el" && sel.id === el.id;
   const parts = [];
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={el.type === "pond" ? 0.85 : 0.92}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2 : 1.25} rx={el.type === "pond" ? Math.min(w, h) * 0.12 : 0} />);
