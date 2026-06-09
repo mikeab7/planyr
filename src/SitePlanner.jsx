@@ -39,6 +39,7 @@ const TYPE = {
   parking: { fill: "#efece0", stroke: "#b3a98f", label: "Car Parking" },
   trailer: { fill: "#e9e2cc", stroke: "#a8915f", label: "Trailer Parking" },
   pond: { fill: "#bcd6e6", stroke: "#5d89a6", label: "Detention Pond" },
+  sidewalk: { fill: "#d9dde1", stroke: "#9aa1a8", label: "Sidewalk" },
 };
 
 const TOOLS = [
@@ -59,6 +60,46 @@ const DRAW_TYPES = ["building", "paving", "parking", "trailer", "pond"];
 const rot2 = (x, y, deg) => {
   const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
   return { x: x * c - y * s, y: x * s + y * c };
+};
+// Pick the CSS resize cursor that matches an on-screen direction vector
+// (so grips read correctly even when the element is rotated).
+const resizeCursor = (dx, dy) => {
+  let a = (Math.atan2(dy, dx) * 180) / Math.PI;
+  a = ((a % 180) + 180) % 180; // fold to [0,180)
+  if (a < 22.5 || a >= 157.5) return "ew-resize";
+  if (a < 67.5) return "nwse-resize";
+  if (a < 112.5) return "ns-resize";
+  return "nesw-resize";
+};
+// Snap a dragged rectangle flush against nearby axis-aligned rectangles ("glue").
+// Returns an adjusted {cx,cy}. thr = contact/alignment threshold in feet.
+const glueCenter = (moved, others, thr) => {
+  let cx = moved.cx, cy = moved.cy;
+  const hw = moved.w / 2, hh = moved.h / 2;
+  const mx0 = cx - hw, mx1 = cx + hw, my0 = cy - hh, my1 = cy + hh;
+  let bestX = { d: thr }, bestY = { d: thr }, alignX = { d: thr }, alignY = { d: thr };
+  for (const t of others) {
+    if (t.points || (((t.rot % 360) + 360) % 360) !== 0) continue;
+    const thw = t.w / 2, thh = t.h / 2;
+    const tx0 = t.cx - thw, tx1 = t.cx + thw, ty0 = t.cy - thh, ty1 = t.cy + thh;
+    const yNear = Math.min(my1, ty1) - Math.max(my0, ty0) > -thr; // roughly side-by-side
+    const xNear = Math.min(mx1, tx1) - Math.max(mx0, tx0) > -thr; // roughly stacked
+    if (yNear) {
+      let d = Math.abs(mx0 - tx1); if (d < bestX.d) bestX = { d, cx: tx1 + hw }; // our left → their right
+      d = Math.abs(mx1 - tx0); if (d < bestX.d) bestX = { d, cx: tx0 - hw };     // our right → their left
+      let dy = Math.abs(my0 - ty0); if (dy < alignY.d) alignY = { d: dy, cy: ty0 + hh };
+      dy = Math.abs(my1 - ty1); if (dy < alignY.d) alignY = { d: dy, cy: ty1 - hh };
+    }
+    if (xNear) {
+      let d = Math.abs(my0 - ty1); if (d < bestY.d) bestY = { d, cy: ty1 + hh }; // our top → their bottom
+      d = Math.abs(my1 - ty0); if (d < bestY.d) bestY = { d, cy: ty0 - hh };     // our bottom → their top
+      let dx = Math.abs(mx0 - tx0); if (dx < alignX.d) alignX = { d: dx, cx: tx0 + hw };
+      dx = Math.abs(mx1 - tx1); if (dx < alignX.d) alignX = { d: dx, cx: tx1 - hw };
+    }
+  }
+  if (bestX.cx !== undefined) { cx = bestX.cx; if (alignY.cy !== undefined) cy = alignY.cy; }
+  if (bestY.cy !== undefined) { cy = bestY.cy; if (alignX.cx !== undefined) cx = alignX.cx; }
+  return { cx, cy };
 };
 const elCorners = (el) => {
   const hw = el.w / 2, hh = el.h / 2;
@@ -300,6 +341,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
+  const [glue, setGlue] = useState(false);          // snap moved elements flush against neighbours
+  const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
@@ -501,7 +544,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSidewalkFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -541,6 +584,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (e.button !== 0) return;
     const fp = p2f(e.clientX, e.clientY);
 
+    if (sidewalkFor) { setSidewalkFor(null); return; } // clicked off the building → cancel
     if (tool === "select") {
       setSel(null);
       setPanning(true);
@@ -671,7 +715,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (d.mode === "move") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       if (d.kind === "el") {
-        setEls((a) => a.map((el) => el.id === d.id ? { ...el, cx: snap(d.ocx + dx), cy: snap(d.ocy + dy) } : el));
+        let ncx = snap(d.ocx + dx), ncy = snap(d.ocy + dy);
+        const moved = els.find((x) => x.id === d.id);
+        if (glue && moved && !moved.points && (((moved.rot % 360) + 360) % 360) === 0) {
+          const g = glueCenter({ cx: ncx, cy: ncy, w: moved.w, h: moved.h }, els.filter((x) => x.id !== d.id), Math.min(20, 10 / view.ppf));
+          ncx = g.cx; ncy = g.cy;
+        }
+        setEls((a) => a.map((el) => el.id === d.id ? { ...el, cx: ncx, cy: ncy } : el));
       } else if (d.kind === "elpoly") {
         setEls((a) => a.map((el) => el.id === d.id ? { ...el, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : el));
       } else {
@@ -866,11 +916,32 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
 
   /* ------------ element / handle interactions ------------ */
+  // Add a sidewalk strip flush against whichever side of the building was clicked.
+  const SIDEWALK_W = 5;
+  const addSidewalk = (b, clickFp) => {
+    const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
+    const hw = b.w / 2, hh = b.h / 2;
+    let nx = 0, ny = 0;
+    if (Math.abs(local.x) / hw >= Math.abs(local.y) / hh) nx = local.x >= 0 ? 1 : -1;
+    else ny = local.y >= 0 ? 1 : -1;
+    const w = nx !== 0 ? SIDEWALK_W : b.w;
+    const h = ny !== 0 ? SIDEWALK_W : b.h;
+    const off = rot2(nx * (hw + SIDEWALK_W / 2), ny * (hh + SIDEWALK_W / 2), b.rot);
+    const el = { id: uid(), type: "sidewalk", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360 };
+    pushHistory();
+    setEls((a) => [...a, el]);
+    setSel({ kind: "el", id: el.id });
+  };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
+    if (sidewalkFor) { // placing a sidewalk: this click picks the building side
+      if (el && el.id === sidewalkFor && !el.points) addSidewalk(el, fp);
+      setSidewalkFor(null);
+      return;
+    }
     setSel({ kind: "el", id });
     pushHistory();
     if (el.points) drag.current = { mode: "move", kind: "elpoly", id, fx: fp.x, fy: fp.y, opts: el.points };
@@ -937,7 +1008,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   els.forEach((e) => {
     const a = e.points ? polyArea(e.points) : e.w * e.h;
     if (e.type === "building") bldg += a;
-    else if (e.type === "paving") paving += a;
+    else if (e.type === "paving" || e.type === "sidewalk") paving += a;
     else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
     else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, settings).count; }
     else if (e.type === "pond") pondArea += a;
@@ -1078,7 +1149,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           style={{ cursor: "grab" }} onPointerDown={(e) => startRotate(e, el.id)} />
         {corners.map((c, i) => (
           <rect key={i} x={c.x - 5} y={c.y - 5} width={10} height={10} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
-            style={{ cursor: "nwse-resize" }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
+            style={{ cursor: resizeCursor(c.x - cpx.x, c.y - cpx.y) }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
         ))}
         {/* side grips: drag one edge to expand/shrink that side (opposite side stays put) */}
         {[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([nx, ny], i) => {
@@ -1087,7 +1158,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           return (
             <rect key={`edge${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
               fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-              style={{ cursor: nx !== 0 ? "ew-resize" : "ns-resize" }}
+              style={{ cursor: resizeCursor(m.x - cpx.x, m.y - cpx.y) }}
               onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />
           );
         })}
@@ -1241,6 +1312,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         <button style={chip} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
         <button style={chip} onClick={fit}>Fit</button>
         <button style={{ ...chip, color: settings.snap ? PAL.accent : PAL.muted, borderColor: settings.snap ? PAL.accent : PAL.panelLine }} onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))}>Snap {settings.gridSize}′</button>
+        <button style={{ ...chip, color: glue ? PAL.accent : PAL.muted, borderColor: glue ? PAL.accent : PAL.panelLine }} onClick={() => setGlue((g) => !g)} title="Snap dragged elements flush against their neighbours">Glue</button>
         <button style={chip} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
         <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
         <button style={chip} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
@@ -1251,7 +1323,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: sidewalkFor ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -1406,7 +1478,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           <div style={{ position: "absolute", left: 0, bottom: 0, display: "flex", gap: 14, alignItems: "center", padding: "5px 12px", fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace", background: "rgba(244,241,234,0.85)", borderTop: `1px solid ${PAL.panelLine}`, borderRight: `1px solid ${PAL.panelLine}`, borderTopRightRadius: 8 }}>
             <span>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span>{Math.round(view.ppf * 100) / 100} px/ft</span>
-            <span style={{ color: PAL.ink }}>{curHint}</span>
+            <span style={{ color: PAL.ink }}>{sidewalkFor ? "Click the side of the building where you want the sidewalk (Esc to cancel)" : curHint}</span>
           </div>
         </div>
 
@@ -1628,6 +1700,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                     <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
                   ))}
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Sidewalk</div>
+                  <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
                 </>
               );
             })()}
@@ -1649,7 +1723,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
       <path key={el.id} d={dPath} fill={st.fill} fillOpacity={el.type === "pond" ? 0.85 : 0.92}
         stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2.5 : 1.25}
         style={{ cursor: tool === "select" ? "move" : "crosshair" }}
-        onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)} />
+        onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
+        onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }} />
     );
   }
   const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
@@ -1703,7 +1778,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
     });
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
-    onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}>{parts}</g>;
+    onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
+    onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>{parts}</g>;
 }
 
 /* ----------------------------- small UI ----------------------------- */
