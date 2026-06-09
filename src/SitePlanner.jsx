@@ -681,6 +681,20 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       setEls((a) => a.map((x) => x.id === d.id ? { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y } : x));
       return;
     }
+    if (d.mode === "edgeResize") {
+      // Drag one side; the opposite side stays put (only that dimension changes).
+      const el = els.find((x) => x.id === d.id);
+      if (!el) return;
+      const { nx, ny, opp } = d; // outward local normal of the dragged edge
+      const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
+      const snapDim = (v) => Math.max(settings.gridSize, settings.snap ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      const nw = nx !== 0 ? snapDim(local.x) : el.w;
+      const nh = ny !== 0 ? snapDim(local.y) : el.h;
+      const half = rot2(nx * nw, ny * nh, el.rot);
+      const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
+      setEls((a) => a.map((x) => x.id === d.id ? { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y } : x));
+      return;
+    }
     if (d.mode === "rotate") {
       const el = els.find((x) => x.id === d.id);
       if (!el) return;
@@ -865,6 +879,17 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     drag.current = { mode: "resize", id, sx, sy, opp };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  const startEdgeResize = (e, id, nx, ny) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    // midpoint of the opposite edge stays fixed (world feet)
+    const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
+    const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
+    pushHistory();
+    drag.current = { mode: "edgeResize", id, nx, ny, opp };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   const startRotate = (e, id) => {
     e.stopPropagation();
     pushHistory();
@@ -1037,6 +1062,17 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           <rect key={i} x={c.x - 5} y={c.y - 5} width={10} height={10} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
             style={{ cursor: "nwse-resize" }} onPointerDown={(e) => startResize(e, el.id, signs[i][0], signs[i][1])} />
         ))}
+        {/* side grips: drag one edge to expand/shrink that side (opposite side stays put) */}
+        {[[1, 0], [-1, 0], [0, 1], [0, -1]].map(([nx, ny], i) => {
+          const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
+          const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
+          return (
+            <rect key={`edge${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
+              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              style={{ cursor: nx !== 0 ? "ew-resize" : "ns-resize" }}
+              onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />
+          );
+        })}
       </g>
     );
   })();
