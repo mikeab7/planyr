@@ -1122,7 +1122,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", cursor: tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
             <g>{gridLines()}</g>
