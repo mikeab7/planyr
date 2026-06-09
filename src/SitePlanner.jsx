@@ -346,6 +346,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
   const stateRef = useRef({ parcels: [], els: [], measures: [], underlay: null });
@@ -496,13 +497,16 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings]); // eslint-disable-line
 
   const deleteSel = () => {
     if (!sel) return;
@@ -511,6 +515,20 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
+  };
+  // Copy / cut / paste the selected element (rectangles or polygons).
+  const copySel = () => { if (sel?.kind === "el") clip.current = els.find((x) => x.id === sel.id) || clip.current; };
+  const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
+  const pasteClip = () => {
+    if (!clip.current) return;
+    const src = clip.current;
+    const off = (settings.gridSize || 10) * 2; // nudge the copy so it's visible
+    const el = src.points
+      ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+      : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+    pushHistory();
+    setEls((a) => [...a, el]);
+    setSel({ kind: "el", id: el.id });
   };
   const selectMeasure = (e, i) => {
     if (tool !== "select" || e.button !== 0) return;
