@@ -43,8 +43,13 @@ jobs:
         with:
           path: dist
 
+  # Publish only from the default branch. The github-pages environment only
+  # permits deployments from main, and Pages serves one site per repo — so the
+  # site goes live when this PR is merged. On feature branches this job is
+  # skipped, leaving the build above as a green check.
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
