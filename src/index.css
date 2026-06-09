@@ -11,4 +11,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* App-like UI: double-clicking the canvas/labels is a real action (close a
+   polygon, change an element's type), so suppress the browser's default
+   text selection that would otherwise highlight stray labels across the page. */
+#root {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+/* Re-enable selection where the user genuinely edits or copies text. */
+input, textarea {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
 input, select, button, textarea { font-family: inherit; }
