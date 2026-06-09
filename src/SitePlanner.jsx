@@ -822,6 +822,17 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       }
       setDraftRect(null);
     }
+    // Auto-bond: an unattached element dropped flush against another (Snap on,
+    // not a host itself) attaches to it so they move together. Alt drops it free.
+    if (d && d.mode === "move" && d.kind === "el" && settings.snap && !e.altKey) {
+      const m = els.find((x) => x.id === d.id);
+      const isHost = els.some((x) => x.attachedTo === d.id);
+      if (m && !m.attachedTo && !m.points && !isHost) {
+        const memberIds = new Set(d.members.map((mm) => mm.id));
+        const host = flushHostId(m, els.filter((x) => !memberIds.has(x.id)), 2);
+        if (host && rootIdOf(host) !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: rootIdOf(host) } : x));
+      }
+    }
     drag.current = null;
     setPanning(false);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -968,6 +979,22 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     pushHistory();
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
+  // Find an axis-aligned rect element that `m` is sitting flush against (a shared
+  // edge with real overlap). Used to auto-bond an element dropped against another.
+  const flushHostId = (m, others, eps) => {
+    if (m.points || !isAxisRect(m)) return null;
+    const mx0 = m.cx - m.w / 2, mx1 = m.cx + m.w / 2, my0 = m.cy - m.h / 2, my1 = m.cy + m.h / 2;
+    let best = null;
+    for (const t of others) {
+      if (t.points || !isAxisRect(t)) continue;
+      const tx0 = t.cx - t.w / 2, tx1 = t.cx + t.w / 2, ty0 = t.cy - t.h / 2, ty1 = t.cy + t.h / 2;
+      const yov = Math.min(my1, ty1) - Math.max(my0, ty0);
+      const xov = Math.min(mx1, tx1) - Math.max(mx0, tx0);
+      if (yov > 5 && (Math.abs(mx0 - tx1) <= eps || Math.abs(mx1 - tx0) <= eps) && (!best || yov > best.ov)) best = { id: t.id, ov: yov };
+      if (xov > 5 && (Math.abs(my0 - ty1) <= eps || Math.abs(my1 - ty0) <= eps) && (!best || xov > best.ov)) best = { id: t.id, ov: xov };
+    }
+    return best?.id || null;
+  };
   // Sidewalks / parking / trailer fields attached to a building track the wall
   // they hug when the building is resized. At drag start, capture each child in
   // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
@@ -977,9 +1004,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     const perpIsY = outY >= outX; // hugs a horizontal (top/bottom) wall → perpendicular axis is Y
+    // perpGap = clearance between the child's near face and the building edge
+    // (0 when flush; e.g. a sidewalk's width when parking sits beyond a sidewalk).
     return perpIsY
-      ? { id: c.id, perpIsY: true, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: c.h, alongCenter: l.x, alongHalf: c.w / 2, oldAlongHalf: b.w / 2 }
-      : { id: c.id, perpIsY: false, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: c.w, alongCenter: l.y, alongHalf: c.h / 2, oldAlongHalf: b.h / 2 };
+      ? { id: c.id, perpIsY: true, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: c.h, perpGap: Math.abs(l.y) - b.h / 2 - c.h / 2, alongCenter: l.x, alongHalf: c.w / 2, oldAlongHalf: b.w / 2 }
+      : { id: c.id, perpIsY: false, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: c.w, perpGap: Math.abs(l.x) - b.w / 2 - c.w / 2, alongCenter: l.y, alongHalf: c.h / 2, oldAlongHalf: b.h / 2 };
   });
   // ...then re-fit each child: it stays flush against the wall and keeps its
   // depth, while its length/position ALONG the wall scale with that wall.
@@ -989,7 +1018,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const ratio = k.oldAlongHalf ? newAlongHalf / k.oldAlongHalf : 1;
     const along = k.alongCenter * ratio;          // position along the wall
     const alongDim = 2 * k.alongHalf * ratio;      // length along the wall
-    const perp = k.sidePerp * (newPerpHalf + k.perpDepth / 2); // flush outside the wall
+    const perp = k.sidePerp * (newPerpHalf + k.perpDepth / 2 + Math.max(0, k.perpGap || 0)); // keep its clearance outside the wall
     const lx = k.perpIsY ? along : perp, ly = k.perpIsY ? perp : along;
     const w = k.perpIsY ? alongDim : k.perpDepth, h = k.perpIsY ? k.perpDepth : alongDim;
     const off = rot2(lx, ly, nb.rot);
