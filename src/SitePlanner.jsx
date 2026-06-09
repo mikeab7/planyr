@@ -44,7 +44,7 @@ const TYPE = {
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
-  { id: "split", label: "Split", hint: "Cut a parcel: click two points to draw a line across it (e.g. 275′ off the frontage); it splits into two — then delete the piece you don't want" },
+  { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
   { id: "parking", label: "Parking", hint: "Drag for a rectangle, or click points to outline an irregular parking field (double-click to close); stalls auto-count" },
@@ -206,6 +206,39 @@ function nearestPointOnSeg(p, a, b) {
   return { x: a.x + t * dx, y: a.y + t * dy };
 }
 
+// Split a polygon along an open polyline cut (>=2 vertices). The first and last
+// vertices are projected onto the nearest polygon edge (the entry/exit points);
+// interior vertices bend the cut across the interior. Returns [ringA, ringB] or null.
+function splitPolygonPath(points, path) {
+  const n = points.length;
+  if (path.length < 2) return null;
+  // nearest polygon edge (+ projected point) for an endpoint
+  const projectToEdge = (pt) => {
+    let best = null;
+    for (let i = 0; i < n; i++) {
+      const proj = nearestPointOnSeg(pt, points[i], points[(i + 1) % n]);
+      const d = (proj.x - pt.x) ** 2 + (proj.y - pt.y) ** 2;
+      if (!best || d < best.d) best = { edge: i, point: proj, d };
+    }
+    return best;
+  };
+  const inHit = projectToEdge(path[0]);
+  const outHit = projectToEdge(path[path.length - 1]);
+  if (!inHit || !outHit || inHit.edge === outHit.edge) return null;
+  const interior = path.slice(1, -1); // oriented path[0] -> path[last]
+  let a1, a2, midPath;
+  if (inHit.edge < outHit.edge) { a1 = inHit; a2 = outHit; midPath = interior; }
+  else { a1 = outHit; a2 = inHit; midPath = interior.slice().reverse(); }
+  const polyA = [a1.point];
+  for (let k = a1.edge + 1; k <= a2.edge; k++) polyA.push(points[k % n]);
+  polyA.push(a2.point, ...midPath.slice().reverse());
+  const polyB = [a2.point];
+  for (let k = a2.edge + 1; k <= a1.edge + n; k++) polyB.push(points[k % n]);
+  polyB.push(a1.point, ...midPath);
+  if (polyA.length < 3 || polyB.length < 3) return null;
+  return [polyA, polyB];
+}
+
 // Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
 function splitPolygon(points, A, B) {
   const n = points.length;
@@ -278,7 +311,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
   const [pendMeasure, setPendMeasure] = useState(null);
-  const [splitA, setSplitA] = useState(null);        // first point of a split cut
+  const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
@@ -332,7 +365,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setUnderlay(s.underlay);
-    setSel(null); setSplitA(null); setTypeMenu(null);
+    setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
     let prev = null;
@@ -461,12 +494,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitA(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
+      if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel]); // eslint-disable-line
+  }, [sel, tool, splitPath]); // eslint-disable-line
 
   const deleteSel = () => {
     if (!sel) return;
@@ -515,9 +549,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       return;
     }
     if (tool === "split") {
+      // Build up a cut polyline; double-click (or Enter) finishes the cut.
       const sp = snapSplit(fp);
-      if (!splitA) setSplitA(sp);
-      else { performSplit(splitA, sp); setSplitA(null); }
+      setSplitPath((pts) => [...pts, sp]);
       return;
     }
     if (DRAW_TYPES.includes(tool)) {
@@ -534,13 +568,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     }
   };
 
-  // Split the selected parcel (or whichever parcel the cut line crosses).
-  const performSplit = (A, B) => {
+  // Finish the in-progress cut polyline and split.
+  const finishSplit = () => {
+    if (splitPath.length >= 2) performSplit(splitPath);
+    setSplitPath([]);
+  };
+  // Split the selected parcel (or whichever parcel the cut crosses) along a
+  // polyline of >=2 points. Two points cut along the infinite line through them
+  // (the original behaviour); 3+ points bend the cut through the interior.
+  const performSplit = (path) => {
+    // Drop consecutive coincident points (a finishing double-click adds the last twice).
+    const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
+    if (pts.length < 2) return;
     const ordered = sel?.kind === "parcel"
       ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
       : parcels;
     for (const pc of ordered) {
-      const halves = splitPolygon(pc.points, A, B);
+      const halves = pts.length === 2
+        ? splitPolygon(pc.points, pts[0], pts[1])
+        : splitPolygonPath(pc.points, pts);
       if (halves) {
         pushHistory();
         const a = { id: uid(), points: halves[0] };
@@ -680,7 +726,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (draftElPoly) closeElPoly(); };
+  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (draftElPoly) closeElPoly(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -1060,7 +1106,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
-    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setSplitA(null);
+    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setSplitPath([]);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
   };
@@ -1228,17 +1274,19 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   {draftElPoly.pts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
                 </g>
               )}
-              {/* split cut preview */}
-              {tool === "split" && splitA && (() => {
-                const a = f2p(splitA);
-                const bp = cursor ? snapSplit(cursor) : splitA;
-                const b = f2p(bp);
-                const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+              {/* split cut preview (polyline) */}
+              {tool === "split" && splitPath.length > 0 && (() => {
+                const live = cursor ? snapSplit(cursor) : null;
+                const all = live ? [...splitPath, live] : splitPath;
+                const ptsStr = all.map((p) => { const c = f2p(p); return `${c.x},${c.y}`; }).join(" ");
+                let total = 0;
+                for (let i = 1; i < all.length; i++) total += dist(all[i - 1], all[i]);
+                const lp = f2p(all[all.length - 1]);
                 return (
                   <g pointerEvents="none">
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
-                    <circle cx={a.x} cy={a.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                    {cursor && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(dist(splitA, bp))}′ cut</text>}
+                    <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 5" />
+                    {splitPath.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={4} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />; })}
+                    {live && all.length >= 2 && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(total)}′ cut</text>}
                   </g>
                 );
               })()}
