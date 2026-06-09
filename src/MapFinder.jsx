@@ -113,6 +113,7 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
   const selectedRef = useRef([]);
+  const draggingRef = useRef(false);
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -138,14 +139,18 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
     const onMouseMove = (e) => {
-      if (!selectModeRef.current) return;
+      if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
       const inside = selectedRef.current.some((s) => pointInPoly(e.latlng.lat, e.latlng.lng, s.latlngs));
       map.getContainer().style.cursor = inside ? REMOVE_CURSOR : ADD_CURSOR;
     };
+    const onDragStart = () => { draggingRef.current = true; map.getContainer().style.cursor = "grabbing"; };
+    const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
     map.on("mousemove", onMouseMove);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("mousemove", onMouseMove); map.remove(); mapRef.current = null; };
+    map.on("dragstart", onDragStart);
+    map.on("dragend", onDragEnd);
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

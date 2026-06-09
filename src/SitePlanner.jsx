@@ -241,6 +241,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [measures, setMeasures] = useState([]); // {a,b}
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
+  const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
@@ -452,6 +453,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
     if (tool === "select") {
       setSel(null);
+      setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       svgRef.current.setPointerCapture(e.pointerId);
       return;
@@ -609,6 +611,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       setDraftRect(null);
     }
     drag.current = null;
+    setPanning(false);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
   };
 
@@ -1062,7 +1065,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", cursor: tool === "select" ? "default" : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", cursor: tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
             <g>{gridLines()}</g>
