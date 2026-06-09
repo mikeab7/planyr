@@ -117,6 +117,62 @@ export function featureToParcel(feature) {
   return ring.map(([x, y]) => ({ x: x - cx, y: -(y - cy) }));
 }
 
+// Find the parcel polygon under a clicked map point. Returns the ArcGIS feature
+// with geometry in lon/lat (EPSG:4326), which every service supports, or null.
+export async function queryAtPoint(layerUrl, lng, lat) {
+  const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
+  const j = await fetchJson(trim(layerUrl) + "/query", {
+    geometry,
+    geometryType: "esriGeometryPoint",
+    inSR: 4326,
+    spatialRel: "esriSpatialRelIntersects",
+    outFields: "*",
+    returnGeometry: "true",
+    outSR: 4326,
+  });
+  return (j.features || [])[0] || null;
+}
+
+/* Convert a lon/lat polygon feature into local feet for the planner, plus the
+ * [lat,lng] ring for drawing a highlight on the Leaflet map. Uses a local
+ * equirectangular projection about the parcel centroid — exact enough for a
+ * single lot (sub-0.3% over a few hundred feet) and avoids depending on the
+ * server reprojecting to State Plane. North is flipped up to match the planner. */
+export function lngLatFeatureToParcel(feature) {
+  const rings = feature?.geometry?.rings;
+  if (!rings || !rings.length) return null;
+  let best = rings[0];
+  let bestA = Math.abs(ringArea(rings[0]));
+  for (const r of rings) {
+    const a = Math.abs(ringArea(r));
+    if (a > bestA) {
+      best = r;
+      bestA = a;
+    }
+  }
+  let lon0 = 0;
+  let lat0 = 0;
+  best.forEach(([x, y]) => {
+    lon0 += x;
+    lat0 += y;
+  });
+  lon0 /= best.length;
+  lat0 /= best.length;
+  const closed =
+    best.length > 1 &&
+    best[0][0] === best[best.length - 1][0] &&
+    best[0][1] === best[best.length - 1][1];
+  const ring = closed ? best.slice(0, -1) : best;
+  const FT_PER_DEG_LAT = 362776; // ~ feet per degree of latitude
+  const FT_PER_DEG_LON = 365223 * Math.cos((lat0 * Math.PI) / 180);
+  const points = ring.map(([lon, lat]) => ({
+    x: (lon - lon0) * FT_PER_DEG_LON,
+    y: -(lat - lat0) * FT_PER_DEG_LAT,
+  }));
+  const latlngs = ring.map(([lon, lat]) => [lat, lon]);
+  return { points, latlngs };
+}
+
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
   const m = String(e?.message || e);
