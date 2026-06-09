@@ -1677,10 +1677,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         </div>
       </div>
 
-      {typeMenu && (
+      {typeMenu && (() => {
+        const MW = 200, vw = window.innerWidth, vh = window.innerHeight;
+        const left = Math.max(8, Math.min(typeMenu.x + 6, vw - MW - 8));
+        const openUp = typeMenu.y > vh / 2; // anchor upward when near the bottom
+        const vEdge = openUp ? { bottom: Math.max(8, vh - typeMenu.y + 6) } : { top: Math.min(typeMenu.y + 6, vh - 8) };
+        return (
         <>
           <div onClick={() => setTypeMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-          <div style={{ position: "fixed", top: typeMenu.y + 6, left: typeMenu.x + 6, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: 184 }}>
+          <div style={{ position: "fixed", left, ...vEdge, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: MW, maxHeight: vh - 16, overflowY: "auto" }}>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Change type to</div>
             {Object.entries(TYPE).map(([k, v]) => {
               const cur = els.find((el) => el.id === typeMenu.id)?.type === k;
@@ -1707,7 +1712,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
             })()}
           </div>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 }
