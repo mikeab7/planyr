@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { storage } from "./lib/storage.js";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { storage, loadAutosave, saveAutosave } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { COUNTIES, detectField } from "./lib/counties.js";
 import {
@@ -226,6 +226,14 @@ const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimu
 
 let _id = 1;
 const uid = () => `e${_id++}`;
+// After restoring saved work, bump the id counter past any restored ids so new
+// elements don't collide with old ones (which would break keys/selection).
+const ensureIdAbove = (ids) => {
+  (ids || []).forEach((id) => {
+    const n = parseInt(String(id).replace(/\D/g, ""), 10);
+    if (!isNaN(n) && n >= _id) _id = n + 1;
+  });
+};
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: true,
@@ -236,14 +244,20 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function SitePlanner({ active = true, incoming = null, onBackToMap } = {}) {
-  const [parcels, setParcels] = useState([]);   // {id, points:[{x,y}]}
-  const [els, setEls] = useState([]);           // {id,type,cx,cy,w,h,rot}
-  const [measures, setMeasures] = useState([]); // {a,b}
+  // Restore the autosaved canvas (and advance the id counter past saved ids).
+  const restored = useMemo(() => {
+    const s = loadAutosave();
+    if (s) ensureIdAbove([...(s.parcels || []).map((p) => p.id), ...(s.els || []).map((e) => e.id)]);
+    return s;
+  }, []);
+  const [parcels, setParcels] = useState(() => restored?.parcels || []);    // {id, points:[{x,y}]}
+  const [els, setEls] = useState(() => restored?.els || []);                // {id,type,cx,cy,w,h,rot}
+  const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
@@ -256,7 +270,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [splitA, setSplitA] = useState(null);        // first point of a split cut
 
   // aerial underlay + scale calibration
-  const [underlay, setUnderlay] = useState(null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
+  const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
   const [underlayErr, setUnderlayErr] = useState(false);
   const [underlayLoading, setUnderlayLoading] = useState(false);
   const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
@@ -292,6 +306,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const pastRef = useRef([]);
   const futureRef = useRef([]);
   useEffect(() => { stateRef.current = { parcels, els, measures, underlay }; });
+  // Autosave the working canvas (debounced) so a reload restores it automatically.
+  useEffect(() => {
+    const t = setTimeout(() => saveAutosave({ parcels, els, measures, settings, underlay }), 400);
+    return () => clearTimeout(t);
+  }, [parcels, els, measures, settings, underlay]);
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
@@ -823,8 +842,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       const r = await storage.get(`scenario:${scenPick}`);
       if (r?.value) {
         const d = JSON.parse(r.value);
+        ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
-        if (d.settings) setSettings(d.settings);
+        setSettings({ ...DEFAULT_SETTINGS, ...(d.settings || {}) });
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
