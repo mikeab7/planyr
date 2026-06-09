@@ -761,7 +761,12 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       // opposite stays fixed; new center is the midpoint of opp and the dragged corner
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
-      setEls((a) => a.map((x) => x.id === d.id ? { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y } : x));
+      const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
+      setEls((a) => a.map((x) => {
+        if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
+        const k = d.kids?.find((kk) => kk.id === x.id);
+        return k ? { ...x, ...fitKid(nb, k) } : x;
+      }));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -775,7 +780,12 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       const nh = ny !== 0 ? snapDim(local.y) : el.h;
       const half = rot2(nx * nw, ny * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
-      setEls((a) => a.map((x) => x.id === d.id ? { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y } : x));
+      const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
+      setEls((a) => a.map((x) => {
+        if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
+        const k = d.kids?.find((kk) => kk.id === x.id);
+        return k ? { ...x, ...fitKid(nb, k) } : x;
+      }));
       return;
     }
     if (d.mode === "rotate") {
@@ -958,6 +968,19 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     pushHistory();
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
+  // Sidewalks attached to a building track the wall they hug when the building
+  // is resized. Capture which side each sits on (+ its depth) at drag start...
+  const sidewalkKids = (b) => els.filter((x) => x.attachedTo === b.id && x.type === "sidewalk" && !x.points).map((c) => {
+    const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
+    return Math.abs(l.x) >= Math.abs(l.y)
+      ? { id: c.id, nx: l.x >= 0 ? 1 : -1, ny: 0, depth: c.w }
+      : { id: c.id, nx: 0, ny: l.y >= 0 ? 1 : -1, depth: c.h };
+  });
+  // ...then re-fit each one flush against the resized wall, full wall length.
+  const fitKid = (nb, k) => {
+    const off = rot2(k.nx * (nb.w / 2 + k.depth / 2), k.ny * (nb.h / 2 + k.depth / 2), nb.rot);
+    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w: k.nx !== 0 ? k.depth : nb.w, h: k.ny !== 0 ? k.depth : nb.h, rot: ((nb.rot % 360) + 360) % 360 };
+  };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
   const addSidewalk = (b, clickFp) => {
@@ -1015,7 +1038,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "resize", id, sx, sy, opp };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: sidewalkKids(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startEdgeResize = (e, id, nx, ny) => {
@@ -1026,7 +1049,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "edgeResize", id, nx, ny, opp };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: sidewalkKids(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
