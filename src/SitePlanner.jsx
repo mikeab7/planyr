@@ -985,17 +985,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     drag.current = { mode: "rotate", id };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  // Double-click an element (its footprint or title) to change what it is.
+  // Double- or right-click a rectangular building to open its dock/sidewalk menu.
   const onElDouble = (e, id) => {
     e.stopPropagation();
-    if (!els.find((x) => x.id === id)) return;
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
     setSel({ kind: "el", id });
-    setTypeMenu({ id, x: e.clientX, y: e.clientY });
-  };
-  const changeType = (id, type) => {
-    pushHistory();
-    setEls((a) => a.map((el) => (el.id === id ? { ...el, type, ...(type === "building" && !el.dock ? { dock: "single" } : {}) } : el)));
-    setTypeMenu(null);
+    if (el.type === "building" && !el.points) setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
   const setDockOf = (id, dock) => {
     pushHistory();
@@ -1688,22 +1684,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         <>
           <div onClick={() => setTypeMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
           <div style={{ position: "fixed", left, ...vEdge, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: MW, maxHeight: maxH, overflowY: "auto" }}>
-            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Change type to</div>
-            {Object.entries(TYPE).map(([k, v]) => {
-              const cur = els.find((el) => el.id === typeMenu.id)?.type === k;
-              return (
-                <button key={k} style={{ ...menuItem(cur), display: "flex", alignItems: "center", gap: 8 }} onClick={() => changeType(typeMenu.id, k)}>
-                  <span style={{ width: 12, height: 12, background: v.fill, border: `1px solid ${v.stroke}`, borderRadius: 2, display: "inline-block" }} />{v.label}
-                </button>
-              );
-            })}
             {(() => {
               const t = els.find((el) => el.id === typeMenu.id);
               if (!t || t.type !== "building" || t.points) return null;
               const dock = t.dock || "single";
               return (
                 <>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Dock layout</div>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
                   {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                     <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
                   ))}
