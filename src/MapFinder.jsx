@@ -38,6 +38,21 @@ const BASEMAPS = {
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
+// Parcel boundaries are drawn as styleable vector lines (same query path that
+// powers click-to-select), not a server image — so they render reliably. They
+// load once zoomed in past this level (too many to draw across a whole county).
+const PARCEL_MINZOOM = 16;
+function makeParcelLayer(url) {
+  return EL.featureLayer({
+    url,
+    minZoom: PARCEL_MINZOOM,
+    simplifyFactor: 0.5,
+    precision: 6,
+    fields: ["OBJECTID"],
+    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
+  });
+}
+
 const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
 const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
 const findVal = (attrs, re) => {
@@ -82,6 +97,8 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   const [err, setErr] = useState("");
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
+  const [showParcels, setShowParcels] = useState(true);
+  const [zoom, setZoom] = useState(null);
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
 
   const clearHilites = () => {
@@ -95,9 +112,12 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     const cfg = COUNTIES_MAP[county] || COUNTIES_MAP.harris;
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
+    setZoom(map.getZoom());
     const onClick = (e) => handleClick(e.latlng);
+    const onZoom = () => setZoom(map.getZoom());
     map.on("click", onClick);
-    return () => { map.off("click", onClick); map.remove(); mapRef.current = null; };
+    map.on("zoomend", onZoom);
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -134,7 +154,7 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     }
   }, [visible]);
 
-  /* swap the parcel layer + resolve the queryable URL when the county changes */
+  /* resolve the parcel layer URL + draw boundaries when the county changes */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -143,25 +163,42 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     setSelected([]); setErr(""); clearHilites();
     if (displayRef.current) { map.removeLayer(displayRef.current); displayRef.current = null; }
     map.setView(cfg.center, cfg.zoom);
-
-    let layer = null;
-    try {
-      if (cfg.mapServer) layer = EL.dynamicMapLayer({ url: cfg.mapServer, opacity: 0.85 });
-      else if (cfg.layerUrl) layer = EL.featureLayer({ url: cfg.layerUrl, minZoom: 15, style: () => ({ color: "#ffd24d", weight: 1, fillOpacity: 0 }) });
-      if (layer) {
-        layer.on("requesterror", () => setErr(`${COUNTIES[county]?.label || "County"} parcel lines didn't load — you can still pan the aerial and trace by hand in the planner.`));
-        layer.addTo(map);
-        displayRef.current = layer;
-      }
-    } catch (_) { /* aerial still works */ }
-
     layerUrlRef.current = null;
+    let cancelled = false;
     (async () => {
-      try { layerUrlRef.current = await resolveLayerUrl(cfg.layerUrl || cfg.mapServer); }
-      catch (_) { /* surfaced on click */ }
+      try {
+        const url = await resolveLayerUrl(cfg.layerUrl || cfg.mapServer);
+        if (cancelled) return;
+        layerUrlRef.current = url;
+        if (showParcels && !displayRef.current) {
+          const fl = makeParcelLayer(url);
+          fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still selects it."));
+          fl.addTo(map);
+          displayRef.current = fl;
+        }
+      } catch (e) {
+        if (!cancelled) setErr(`Couldn't reach the ${COUNTIES[county]?.label || "county"} parcel service. Pan the aerial and trace by hand, or try again.`);
+      }
     })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [county]);
+
+  /* show/hide parcel boundaries */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (showParcels && !displayRef.current && layerUrlRef.current) {
+      const fl = makeParcelLayer(layerUrlRef.current);
+      fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still selects it."));
+      fl.addTo(map);
+      displayRef.current = fl;
+    } else if (!showParcels && displayRef.current) {
+      map.removeLayer(displayRef.current);
+      displayRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showParcels]);
 
   const handleClick = async (latlng) => {
     const url = layerUrlRef.current;
@@ -254,13 +291,22 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
             {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
           </select>
           <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
+            <input type="checkbox" checked={showParcels} onChange={(e) => setShowParcels(e.target.checked)} /> Parcels
+          </label>
+          <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
             <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
           </label>
         </div>
 
         {/* instruction / error */}
         <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
-          {err || "Zoom in until parcel lines show, then click lots to select them. Click several to assemble a site; click a selected lot again to drop it."}
+          {err
+            ? err
+            : !showParcels
+              ? 'Parcel outlines hidden — click any lot to select it, or tick “Parcels” (top right) to show boundaries.'
+              : zoom != null && zoom < PARCEL_MINZOOM
+                ? "Zoom in to see purple parcel outlines (you can still click any lot to select it). Click several to assemble; click again to drop."
+                : "Click a lot to select it. Click several to assemble a site; click a selected lot again to drop it."}
         </div>
 
         {/* selection card */}
