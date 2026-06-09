@@ -49,8 +49,25 @@ function makeParcelLayer(url) {
     simplifyFactor: 0.5,
     precision: 6,
     fields: ["OBJECTID"],
+    interactive: false, // purely visual; clicks go to the map for add/remove
     style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
   });
+}
+
+// Custom cursors so it's obvious you're adding (+) or removing (−) a parcel.
+const ADD_CURSOR =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Ccircle cx='15' cy='15' r='11' fill='%23ffffff' fill-opacity='0.85' stroke='%23c2410c' stroke-width='2'/%3E%3Cpath d='M15 9 L15 21 M9 15 L21 15' stroke='%23c2410c' stroke-width='2.5'/%3E%3C/svg%3E\") 15 15, crosshair";
+const REMOVE_CURSOR =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Ccircle cx='15' cy='15' r='11' fill='%23ffffff' fill-opacity='0.85' stroke='%23b91c1c' stroke-width='2'/%3E%3Cpath d='M9 15 L21 15' stroke='%23b91c1c' stroke-width='2.5'/%3E%3C/svg%3E\") 15 15, crosshair";
+
+// Ray-cast point-in-polygon on a [[lat,lng], ...] ring.
+function pointInPoly(lat, lng, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i][0], xi = ring[i][1], yj = ring[j][0], xj = ring[j][1];
+    if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
 }
 
 const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
@@ -93,14 +110,17 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   const layerUrlRef = useRef(null);  // queryable layer URL
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
+  const selectModeRef = useRef(false); // read by the once-bound map handlers
+  const selectedRef = useRef([]);
   const [addr, setAddr] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
-  const [showParcels, setShowParcels] = useState(true);
+  const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const clearHilites = () => {
     const map = mapRef.current;
@@ -114,11 +134,17 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
     setZoom(map.getZoom());
-    const onClick = (e) => handleClick(e.latlng);
+    const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
+    const onMouseMove = (e) => {
+      if (!selectModeRef.current) return;
+      const inside = selectedRef.current.some((s) => pointInPoly(e.latlng.lat, e.latlng.lng, s.latlngs));
+      map.getContainer().style.cursor = inside ? REMOVE_CURSOR : ADD_CURSOR;
+    };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.remove(); mapRef.current = null; };
+    map.on("mousemove", onMouseMove);
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("mousemove", onMouseMove); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -171,9 +197,9 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
         const url = await resolveLayerUrl(cfg.layerUrl || cfg.mapServer);
         if (cancelled) return;
         layerUrlRef.current = url;
-        if (showParcels && !displayRef.current) {
+        if (selectModeRef.current && !displayRef.current) {
           const fl = makeParcelLayer(url);
-          fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still selects it."));
+          fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
           fl.addTo(map);
           displayRef.current = fl;
         }
@@ -185,21 +211,25 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [county]);
 
-  /* show/hide parcel boundaries */
+  /* enter/leave select mode: show outlines, set the +/− cursor, enable clicks */
   useEffect(() => {
+    selectModeRef.current = selectMode;
     const map = mapRef.current;
     if (!map) return;
-    if (showParcels && !displayRef.current && layerUrlRef.current) {
-      const fl = makeParcelLayer(layerUrlRef.current);
-      fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still selects it."));
-      fl.addTo(map);
-      displayRef.current = fl;
-    } else if (!showParcels && displayRef.current) {
-      map.removeLayer(displayRef.current);
-      displayRef.current = null;
+    if (selectMode) {
+      if (!displayRef.current && layerUrlRef.current) {
+        const fl = makeParcelLayer(layerUrlRef.current);
+        fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
+        fl.addTo(map);
+        displayRef.current = fl;
+      }
+      map.getContainer().style.cursor = ADD_CURSOR;
+    } else {
+      if (displayRef.current) { map.removeLayer(displayRef.current); displayRef.current = null; }
+      map.getContainer().style.cursor = "";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showParcels]);
+  }, [selectMode]);
 
   const handleClick = async (latlng) => {
     const url = layerUrlRef.current;
@@ -220,7 +250,7 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
         const latlngs = ring.map(([lon, lat]) => [lat, lon]);
-        hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14 }).addTo(map);
+        hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
         setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE) }]);
       }
     } catch (e) {
@@ -290,13 +320,14 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
 
         {/* imagery + labels control */}
         <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px", display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+          <button onClick={() => setSelectMode((m) => !m)} style={{
+            padding: "6px 11px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", fontWeight: 600, fontFamily: "inherit",
+            border: `1px solid ${PAL.accent}`, background: selectMode ? "#fff" : PAL.accent, color: selectMode ? PAL.accent : "#fff",
+          }}>{selectMode ? "✓ Selecting — click lots" : "+ Select parcels"}</button>
           <span style={{ color: PAL.muted }}>Imagery</span>
           <select style={{ ...field, padding: "4px 6px", fontSize: 12 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
             {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
           </select>
-          <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-            <input type="checkbox" checked={showParcels} onChange={(e) => setShowParcels(e.target.checked)} /> Parcels
-          </label>
           <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
             <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
           </label>
@@ -306,11 +337,11 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
         <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
           {err
             ? err
-            : !showParcels
-              ? 'Parcel outlines hidden — click any lot to select it, or tick “Parcels” (top right) to show boundaries.'
+            : !selectMode
+              ? "Drag to move the map. Hit “+ Select parcels” (top-right) to start adding lots."
               : zoom != null && zoom < PARCEL_MINZOOM
-                ? "Zoom in to see purple parcel outlines (you can still click any lot to select it). Click several to assemble; click again to drop."
-                : "Click a lot to select it. Click several to assemble a site; click a selected lot again to drop it."}
+                ? "Zoom in until the purple lot lines show, then click a lot to add it (＋). Click an added lot to remove it (−)."
+                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
         </div>
 
         {/* selection card */}
