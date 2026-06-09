@@ -77,8 +77,9 @@ function computeAssembly(selected, exportBase) {
   const lon0 = (lonMin + lonMax) / 2, lat0 = (latMin + latMax) / 2;
   const parcels = selected.map((s) => ({ points: lngLatRingToFeet(s.ring, lon0, lat0) }));
   const totalSqft = parcels.reduce((sum, p) => sum + shoelace(p.points), 0);
-  const padLon = Math.max((lonMax - lonMin) * 0.18, 0.0006);
-  const padLat = Math.max((latMax - latMin) * 0.18, 0.0005);
+  // Generous context around the site so you can see access roads / neighbors.
+  const padLon = Math.max((lonMax - lonMin) * 0.4, 0.0012);
+  const padLat = Math.max((latMax - latMin) * 0.4, 0.001);
   const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
   const underlay = { ...aerialPlacement(bbox, lon0, lat0, { exportBase }), opacity: 1, locked: true, fromMap: true };
   return { parcels, underlay, totalAc: totalSqft / 43560 };

@@ -247,6 +247,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
   const [underlayErr, setUnderlayErr] = useState(false);
+  const [underlayLoading, setUnderlayLoading] = useState(false);
   const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
   const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
@@ -330,6 +331,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       setEls([]);
       setMeasures([]);
       setUnderlay(incoming.underlay || null);
+      setUnderlayErr(false);
+      setUnderlayLoading(!!incoming.underlay);
       setSel(pcs.length === 1 ? { kind: "parcel", id: pcs[0].id } : null);
     }
   }, [incoming]);
@@ -565,6 +568,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       const { src, w, h } = await loadAndDownscaleImage(file);
       // Start at ~600 ft across the image width; the user calibrates precisely next.
       setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 0.85, locked: false });
+      setUnderlayErr(false);
+      setUnderlayLoading(true);
       setCalib(null);
       requestFit();
     } catch (err) {
@@ -947,7 +952,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   opacity={underlay.opacity} preserveAspectRatio="none"
                   style={{ cursor: tool === "select" && !underlay.locked ? "move" : "crosshair" }}
                   pointerEvents={underlay.locked ? "none" : "auto"}
-                  onError={() => setUnderlayErr(true)} onLoad={() => setUnderlayErr(false)}
+                  onError={() => { setUnderlayErr(true); setUnderlayLoading(false); }} onLoad={() => { setUnderlayErr(false); setUnderlayLoading(false); }}
                   onPointerDown={startMoveUnderlay} />;
               })()}
 
@@ -1048,6 +1053,14 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                 <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink, marginBottom: 4 }}>Start your site</div>
                 <div style={{ fontSize: 12.5 }}>Look up a parcel by county at right, drop a screenshot underlay, type a lot size, or use the <b>Parcel</b> tool to draw a boundary.</div>
               </div>
+            </div>
+          )}
+
+          {/* aerial loading indicator */}
+          {underlayLoading && (
+            <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: "rgba(44,42,38,0.85)", color: "#fff", padding: "6px 13px", borderRadius: 7, fontSize: 12.5, pointerEvents: "none", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.accent, display: "inline-block" }} />
+              Loading aerial…
             </div>
           )}
 

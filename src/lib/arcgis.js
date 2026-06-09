@@ -210,7 +210,7 @@ export function lngLatRingToFeet(ring, lon0, lat0) {
 // ftPerPx is the horizontal scale, ftPerPxY the vertical (they differ at this
 // latitude — that vertical stretch is what was missing before).
 export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
-  const maxPx = opts.maxPx || 1400;
+  const maxPx = opts.maxPx || 1800;
   const exportBase =
     opts.exportBase ||
     "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export";
