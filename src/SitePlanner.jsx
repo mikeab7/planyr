@@ -968,9 +968,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     pushHistory();
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
-  // Sidewalks attached to a building track the wall they hug when the building
-  // is resized. Capture which side each sits on (+ its depth) at drag start...
-  const sidewalkKids = (b) => els.filter((x) => x.attachedTo === b.id && x.type === "sidewalk" && !x.points).map((c) => {
+  // Sidewalks / parking / trailer fields attached to a building track the wall
+  // they hug when the building is resized. Capture which side each sits on
+  // (+ its depth) at drag start...
+  const WALL_KID_TYPES = ["sidewalk", "parking", "trailer"];
+  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     return Math.abs(l.x) >= Math.abs(l.y)
       ? { id: c.id, nx: l.x >= 0 ? 1 : -1, ny: 0, depth: c.w }
@@ -1038,7 +1040,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "resize", id, sx, sy, opp, kids: sidewalkKids(el) };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startEdgeResize = (e, id, nx, ny) => {
@@ -1049,7 +1051,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: sidewalkKids(el) };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
