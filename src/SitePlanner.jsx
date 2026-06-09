@@ -298,6 +298,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
+  const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
+  const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
@@ -693,9 +695,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const d = drag.current;
     if (d && d.mode === "draw" && draftRect) {
       if (draftRect.w >= 4 && draftRect.h >= 4) {
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: "single" } : {}) };
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: buildingDock } : {}) };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
+        setTool("select"); // one element per click — drop back to Select
       } else {
         // a click (no drag) → begin a polygon element by dropping perimeter points
         setDraftElPoly({ type: draftRect.type, pts: [{ x: draftRect.x, y: draftRect.y }] });
@@ -1109,6 +1112,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setSplitPath([]);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
+    if (id !== "building") setBuildingMenu(false);
   };
   const metricRow = (label, value, sub) => (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
@@ -1153,7 +1157,26 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
 
           {toolDivider}
 
-          {DRAW_TYPES.map((id) => { const t = TOOLS.find((x) => x.id === id); return <button key={id} style={btn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>; })}
+          {DRAW_TYPES.map((id) => {
+            const t = TOOLS.find((x) => x.id === id);
+            if (id === "building") return (
+              <div key={id} style={{ position: "relative" }}>
+                <button style={btn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
+                {buildingMenu && (
+                  <>
+                    <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                    <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 200 }}>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
+                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                        <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+            return <button key={id} style={btn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
+          })}
 
           {toolDivider}
 
