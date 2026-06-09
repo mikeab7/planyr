@@ -969,19 +969,31 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
   // Sidewalks / parking / trailer fields attached to a building track the wall
-  // they hug when the building is resized. Capture which side each sits on
-  // (+ its depth) at drag start...
+  // they hug when the building is resized. At drag start, capture each child in
+  // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
+  // its fixed depth, and its position/length along the wall.
   const WALL_KID_TYPES = ["sidewalk", "parking", "trailer"];
   const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
-    return Math.abs(l.x) >= Math.abs(l.y)
-      ? { id: c.id, nx: l.x >= 0 ? 1 : -1, ny: 0, depth: c.w }
-      : { id: c.id, nx: 0, ny: l.y >= 0 ? 1 : -1, depth: c.h };
+    const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
+    const perpIsY = outY >= outX; // hugs a horizontal (top/bottom) wall → perpendicular axis is Y
+    return perpIsY
+      ? { id: c.id, perpIsY: true, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: c.h, alongCenter: l.x, alongHalf: c.w / 2, oldAlongHalf: b.w / 2 }
+      : { id: c.id, perpIsY: false, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: c.w, alongCenter: l.y, alongHalf: c.h / 2, oldAlongHalf: b.h / 2 };
   });
-  // ...then re-fit each one flush against the resized wall, full wall length.
+  // ...then re-fit each child: it stays flush against the wall and keeps its
+  // depth, while its length/position ALONG the wall scale with that wall.
   const fitKid = (nb, k) => {
-    const off = rot2(k.nx * (nb.w / 2 + k.depth / 2), k.ny * (nb.h / 2 + k.depth / 2), nb.rot);
-    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w: k.nx !== 0 ? k.depth : nb.w, h: k.ny !== 0 ? k.depth : nb.h, rot: ((nb.rot % 360) + 360) % 360 };
+    const newAlongHalf = (k.perpIsY ? nb.w : nb.h) / 2;
+    const newPerpHalf = (k.perpIsY ? nb.h : nb.w) / 2;
+    const ratio = k.oldAlongHalf ? newAlongHalf / k.oldAlongHalf : 1;
+    const along = k.alongCenter * ratio;          // position along the wall
+    const alongDim = 2 * k.alongHalf * ratio;      // length along the wall
+    const perp = k.sidePerp * (newPerpHalf + k.perpDepth / 2); // flush outside the wall
+    const lx = k.perpIsY ? along : perp, ly = k.perpIsY ? perp : along;
+    const w = k.perpIsY ? alongDim : k.perpDepth, h = k.perpIsY ? k.perpDepth : alongDim;
+    const off = rot2(lx, ly, nb.rot);
+    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w, h, rot: ((nb.rot % 360) + 360) % 360 };
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
