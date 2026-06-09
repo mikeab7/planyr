@@ -71,9 +71,9 @@ const resizeCursor = (dx, dy) => {
   if (a < 112.5) return "ns-resize";
   return "nesw-resize";
 };
-// Snap a dragged rectangle flush against nearby axis-aligned rectangles ("glue").
+// Snap a dragged rectangle flush against nearby axis-aligned rectangles.
 // Returns an adjusted {cx,cy}. thr = contact/alignment threshold in feet.
-const glueCenter = (moved, others, thr) => {
+const edgeSnapCenter = (moved, others, thr) => {
   let cx = moved.cx, cy = moved.cy;
   const hw = moved.w / 2, hh = moved.h / 2;
   const mx0 = cx - hw, mx1 = cx + hw, my0 = cy - hh, my1 = cy + hh;
@@ -341,8 +341,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
-  const [glue, setGlue] = useState(false);          // snap moved elements flush against neighbours
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
+  const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
@@ -544,7 +544,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSidewalkFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -554,7 +554,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const deleteSel = () => {
     if (!sel) return;
     pushHistory();
-    if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id));
+    if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
@@ -564,7 +564,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
   const pasteClip = () => {
     if (!clip.current) return;
-    const src = clip.current;
+    const { attachedTo, ...src } = clip.current; // a pasted copy starts unattached
     const off = (settings.gridSize || 10) * 2; // nudge the copy so it's visible
     const el = src.points
       ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
@@ -585,6 +585,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const fp = p2f(e.clientX, e.clientY);
 
     if (sidewalkFor) { setSidewalkFor(null); return; } // clicked off the building → cancel
+    if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (tool === "select") {
       setSel(null);
       setPanning(true);
@@ -715,15 +716,29 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (d.mode === "move") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       if (d.kind === "el") {
-        let ncx = snap(d.ocx + dx), ncy = snap(d.ocy + dy);
-        const moved = els.find((x) => x.id === d.id);
-        if (glue && moved && !moved.points && (((moved.rot % 360) + 360) % 360) === 0) {
-          const g = glueCenter({ cx: ncx, cy: ncy, w: moved.w, h: moved.h }, els.filter((x) => x.id !== d.id), Math.min(20, 10 / view.ppf));
-          ncx = g.cx; ncy = g.cy;
+        // Snap based on the grabbed element, then shift the whole assembly by that delta.
+        const g = d.members.find((m) => m.id === d.id);
+        let effDx, effDy;
+        if (g.cx !== undefined) {
+          let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
+          if (settings.snap) { // flush-snap to neighbouring (non-member) element edges
+            const ids = new Set(d.members.map((m) => m.id));
+            const others = els.filter((x) => !ids.has(x.id) && isAxisRect(x));
+            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: g.w, h: g.h }, others, Math.min(20, 10 / view.ppf));
+            ncx = sc.cx; ncy = sc.cy;
+          }
+          effDx = ncx - g.cx; effDy = ncy - g.cy;
+        } else {
+          effDx = snap(g.points[0].x + dx) - g.points[0].x;
+          effDy = snap(g.points[0].y + dy) - g.points[0].y;
         }
-        setEls((a) => a.map((el) => el.id === d.id ? { ...el, cx: ncx, cy: ncy } : el));
-      } else if (d.kind === "elpoly") {
-        setEls((a) => a.map((el) => el.id === d.id ? { ...el, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : el));
+        setEls((a) => a.map((el) => {
+          const m = d.members.find((x) => x.id === el.id);
+          if (!m) return el;
+          return m.points
+            ? { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) }
+            : { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
+        }));
       } else {
         setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : pc));
       }
@@ -764,11 +779,21 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       return;
     }
     if (d.mode === "rotate") {
-      const el = els.find((x) => x.id === d.id);
-      if (!el) return;
-      let ang = Math.atan2(fp.y - el.cy, fp.x - el.cx) * 180 / Math.PI + 90;
-      ang = settings.snap ? Math.round(ang / 15) * 15 : Math.round(ang);
-      setEls((a) => a.map((x) => x.id === d.id ? { ...x, rot: ((ang % 360) + 360) % 360 } : x));
+      const cur = (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) * 180) / Math.PI;
+      let delta = cur - d.startPtr;
+      const prim = d.start.find((s) => s.id === d.id);
+      if (prim && prim.rot !== undefined) { // snap the grabbed element to 15°, carry the rest along
+        let target = prim.rot + delta;
+        target = settings.snap ? Math.round(target / 15) * 15 : Math.round(target);
+        delta = target - prim.rot;
+      }
+      setEls((a) => a.map((el) => {
+        const s = d.start.find((x) => x.id === el.id);
+        if (!s) return el;
+        if (s.points) return { ...el, points: s.points.map((p) => { const r = rot2(p.x - d.pivot.x, p.y - d.pivot.y, delta); return { x: d.pivot.x + r.x, y: d.pivot.y + r.y }; }) };
+        const r = rot2(s.cx - d.pivot.x, s.cy - d.pivot.y, delta);
+        return { ...el, cx: d.pivot.x + r.x, cy: d.pivot.y + r.y, rot: ((s.rot + delta) % 360 + 360) % 360 };
+      }));
       return;
     }
   };
@@ -916,6 +941,23 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
 
   /* ------------ element / handle interactions ------------ */
+  // Attachment: an element may be bonded to a host (attachedTo). Bonded members
+  // move and rotate as one assembly and can't be separated by dragging.
+  const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
+  const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
+  const isAxisRect = (el) => !el.points && (((el.rot % 360) + 360) % 360) === 0;
+  const attachTo = (childId, hostId) => {
+    if (childId === hostId) return;
+    const hostRoot = rootIdOf(hostId);
+    if (hostRoot === childId) return; // don't bond a host to its own child
+    pushHistory();
+    setEls((a) => a.map((e) => (e.id === childId ? { ...e, attachedTo: hostRoot } : e)));
+    setSel({ kind: "el", id: childId });
+  };
+  const detach = (id) => {
+    pushHistory();
+    setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
+  };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
   const addSidewalk = (b, clickFp) => {
@@ -927,7 +969,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const w = nx !== 0 ? SIDEWALK_W : b.w;
     const h = ny !== 0 ? SIDEWALK_W : b.h;
     const off = rot2(nx * (hw + SIDEWALK_W / 2), ny * (hh + SIDEWALK_W / 2), b.rot);
-    const el = { id: uid(), type: "sidewalk", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360 };
+    const el = { id: uid(), type: "sidewalk", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id };
     pushHistory();
     setEls((a) => [...a, el]);
     setSel({ kind: "el", id: el.id });
@@ -942,10 +984,18 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       setSidewalkFor(null);
       return;
     }
+    if (attachFor) { // bonding: this click picks the host to attach to
+      if (el) attachTo(attachFor, el.id);
+      setAttachFor(null);
+      return;
+    }
     setSel({ kind: "el", id });
     pushHistory();
-    if (el.points) drag.current = { mode: "move", kind: "elpoly", id, fx: fp.x, fy: fp.y, opts: el.points };
-    else drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, ocx: el.cx, ocy: el.cy };
+    // Snapshot every member of the assembly so they move together.
+    const members = assemblyOf(id).map((m) => m.points
+      ? { id: m.id, points: m.points }
+      : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
@@ -981,17 +1031,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
   const startRotate = (e, id) => {
     e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    const fp = p2f(e.clientX, e.clientY);
+    const pivot = { x: el.cx, y: el.cy };
+    const startPtr = (Math.atan2(fp.y - pivot.y, fp.x - pivot.x) * 180) / Math.PI;
+    // Rotate the whole assembly about this element's centre.
+    const start = assemblyOf(id).map((m) => m.points
+      ? { id: m.id, points: m.points }
+      : { id: m.id, cx: m.cx, cy: m.cy, rot: m.rot });
     pushHistory();
-    drag.current = { mode: "rotate", id };
+    drag.current = { mode: "rotate", id, pivot, startPtr, start };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  // Double- or right-click a rectangular building to open its dock/sidewalk menu.
+  // Double- or right-click an element to open its actions menu (dock / sidewalk / attach).
   const onElDouble = (e, id) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
     setSel({ kind: "el", id });
-    if (el.type === "building" && !el.points) setTypeMenu({ id, x: e.clientX, y: e.clientY });
+    setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
   const setDockOf = (id, dock) => {
     pushHistory();
@@ -1126,6 +1184,23 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         stroke={PAL.paper} strokeWidth={3} paintOrder="stroke">{f2(ac)} ac</text>
     );
   });
+
+  // Dashed tethers between the selected element and anything bonded to it.
+  const attachLinks = (() => {
+    if (sel?.kind !== "el") return null;
+    const members = assemblyOf(sel.id);
+    if (members.length < 2) return null;
+    const ctr = (m) => (m.points ? centroid(m.points) : { x: m.cx, y: m.cy });
+    const sc = f2p(ctr(els.find((x) => x.id === sel.id)));
+    return (
+      <g pointerEvents="none">
+        {members.filter((m) => m.id !== sel.id).map((m) => {
+          const p = f2p(ctr(m));
+          return <line key={`lk${m.id}`} x1={sc.x} y1={sc.y} x2={p.x} y2={p.y} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />;
+        })}
+      </g>
+    );
+  })();
 
   const handleNodes = (() => {
     if (sel?.kind !== "el") return null;
@@ -1307,8 +1382,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         <button style={chip} onClick={undo} title="Undo (Ctrl+Z)">↶ Undo</button>
         <button style={chip} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
         <button style={chip} onClick={fit}>Fit</button>
-        <button style={{ ...chip, color: settings.snap ? PAL.accent : PAL.muted, borderColor: settings.snap ? PAL.accent : PAL.panelLine }} onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))}>Snap {settings.gridSize}′</button>
-        <button style={{ ...chip, color: glue ? PAL.accent : PAL.muted, borderColor: glue ? PAL.accent : PAL.panelLine }} onClick={() => setGlue((g) => !g)} title="Snap dragged elements flush against their neighbours">Glue</button>
+        <button style={{ ...chip, color: settings.snap ? PAL.accent : PAL.muted, borderColor: settings.snap ? PAL.accent : PAL.panelLine }} onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">Snap {settings.gridSize}′</button>
         <button style={chip} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
         <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
         <button style={chip} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
@@ -1319,7 +1393,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: sidewalkFor ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor) ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -1436,6 +1510,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                 );
               })()}
 
+              {attachLinks}
               {parcelLabels}
               {labelEls}
               {parcelEdgeLabels}
@@ -1474,7 +1549,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           <div style={{ position: "absolute", left: 0, bottom: 0, display: "flex", gap: 14, alignItems: "center", padding: "5px 12px", fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace", background: "rgba(244,241,234,0.85)", borderTop: `1px solid ${PAL.panelLine}`, borderRight: `1px solid ${PAL.panelLine}`, borderTopRightRadius: 8 }}>
             <span>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span>{Math.round(view.ppf * 100) / 100} px/ft</span>
-            <span style={{ color: PAL.ink }}>{sidewalkFor ? "Click the side of the building where you want the sidewalk (Esc to cancel)" : curHint}</span>
+            <span style={{ color: PAL.ink }}>{sidewalkFor ? "Click the side of the building where you want the sidewalk (Esc to cancel)" : attachFor ? "Click the element to attach the selected one to — they'll move together (Esc to cancel)" : curHint}</span>
           </div>
         </div>
 
@@ -1686,16 +1761,26 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           <div style={{ position: "fixed", left, ...vEdge, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: MW, maxHeight: maxH, overflowY: "auto" }}>
             {(() => {
               const t = els.find((el) => el.id === typeMenu.id);
-              if (!t || t.type !== "building" || t.points) return null;
+              if (!t) return null;
+              const isBuildingRect = t.type === "building" && !t.points;
+              const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
               const dock = t.dock || "single";
               return (
                 <>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
-                  {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                    <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
-                  ))}
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Sidewalk</div>
-                  <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
+                  {isBuildingRect && (
+                    <>
+                      <div style={hdr(false)}>Dock layout</div>
+                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                        <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
+                      ))}
+                      <div style={hdr(true)}>Sidewalk</div>
+                      <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
+                    </>
+                  )}
+                  <div style={hdr(isBuildingRect)}>Attach</div>
+                  {t.attachedTo
+                    ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach from its host</button>
+                    : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to another element — then click it</button>}
                 </>
               );
             })()}
