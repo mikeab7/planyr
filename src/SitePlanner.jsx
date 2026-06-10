@@ -761,6 +761,39 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     setSel({ kind: "parcel", id });
   };
 
+  /* ------------ polygon element vertex editing (drag/add/delete points) ------------ */
+  const startElVertex = (e, id, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el || !el.points || el.locked) return;
+    pushHistory();
+    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
+      setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3
+        ? { ...x, points: x.points.filter((_, i) => i !== index) } : x));
+      return;
+    }
+    setSel({ kind: "el", id });
+    drag.current = { mode: "elVertex", id, index };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const addElVertex = (e, id, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el || !el.points || el.locked) return;
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id !== id || !x.points) return x;
+      const p = x.points[index], q = x.points[(index + 1) % x.points.length];
+      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+      const points = [...x.points];
+      points.splice(index + 1, 0, mid);
+      return { ...x, points };
+    }));
+    setSel({ kind: "el", id });
+  };
+
   const onMove = (e) => {
     const fp = p2f(e.clientX, e.clientY);
     setCursor(fp);
@@ -842,6 +875,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const sp = snapPt(fp);
       setParcels((a) => a.map((pc) => pc.id === d.id
         ? { ...pc, points: pc.points.map((p, i) => (i === d.index ? sp : p)) } : pc));
+      return;
+    }
+    if (d.mode === "elVertex") {
+      const sp = snapPt(fp);
+      setEls((a) => a.map((x) => x.id === d.id && x.points
+        ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x));
       return;
     }
     if (d.mode === "resize") {
@@ -1782,6 +1821,37 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     return <g>{nodes}</g>;
   })();
 
+  // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond):
+  // drag a dot to move a corner, click a ＋ on an edge to add one, Shift-click a
+  // dot to delete it — same as parcels.
+  const elPolyHandles = (() => {
+    if (sel?.kind !== "el" || tool !== "select") return null;
+    const el = els.find((x) => x.id === sel.id);
+    if (!el || !el.points || el.locked) return null;
+    const nodes = [];
+    el.points.forEach((a, i) => {
+      const b = el.points[(i + 1) % el.points.length];
+      const am = f2p(a), bm = f2p(b);
+      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+      nodes.push(
+        <g key={`eaddv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addElVertex(e, el.id, i)}>
+          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
+        </g>
+      );
+    });
+    el.points.forEach((a, i) => {
+      const c = f2p(a);
+      nodes.push(
+        <rect key={`epv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
+          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+          style={{ cursor: "move" }} onPointerDown={(e) => startElVertex(e, el.id, i)} />
+      );
+    });
+    return <g>{nodes}</g>;
+  })();
+
   const scaleBarFt = (() => {
     const targetPx = 120;
     const raw = targetPx / view.ppf;
@@ -2090,6 +2160,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 {handleNodes}
                 {sideAddNodes}
                 {parcelHandles}
+                {elPolyHandles}
                 {attachHint && (() => {
                   const p = f2p(attachHint);
                   return (
@@ -2307,7 +2378,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                   })()}
                 </>
               ) : (
-                <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon area · {selEl.points.length} points. Drag to move; double-click to change type; re-draw to reshape.</div>
+                <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
               )}
               {(() => {
                 const poly = !!selEl.points;

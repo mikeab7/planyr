@@ -67,8 +67,9 @@ npm run preview
   estimates.
 
 ## 5. Known limitations / roadmap
-- Polygon elements: **no vertex editing yet** (re-draw to reshape) and **no
-  clipped striping** (counts are estimates).
+- Polygon elements: vertex editing **is** supported (drag a dot, ＋ on an edge
+  adds a corner, Shift-click deletes — same as parcels), but striping is **not
+  clipped** to the polygon (counts are area-based estimates).
 - Parcel setback is a simple inward offset (good for convex/mildly-concave lots).
 - Single-story FAR assumption.
 - Counties limited to Harris / Fort Bend / **Chambers (endpoint is provisional)**.
