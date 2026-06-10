@@ -48,7 +48,7 @@ const TOOLS = [
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
-  { id: "parking", label: "Parking", hint: "Drag for a rectangle, or click points to outline an irregular parking field (double-click to close); stalls auto-count" },
+  { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "measure", label: "Measure", hint: "Click two points to measure a distance (truck court depth, setbacks, drive widths)" },
@@ -341,6 +341,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
+  const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
+  const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
@@ -627,7 +629,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         return;
       }
       pushHistory();
-      drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y };
+      const parkDepth = tool === "parking" && parkingRows !== "free"
+        ? (parkingRows === "double" ? settings.stallDepth * 2 + settings.aisle : settings.stallDepth + settings.aisle)
+        : 0;
+      drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y, depth: parkDepth };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
     }
@@ -709,6 +714,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     }
     if (d.mode === "draw") {
       const sp = snapPt(fp);
+      if (d.depth) { // parking preset: lock the depth, drag sets length & direction
+        const dx = sp.x - d.ox, dy = sp.y - d.oy, depth = d.depth;
+        const horizontal = Math.abs(dx) >= Math.abs(dy);
+        const len = Math.max(0, horizontal ? Math.abs(dx) : Math.abs(dy));
+        const x = horizontal ? (dx >= 0 ? d.ox : d.ox - len) : (dx >= 0 ? d.ox : d.ox - depth);
+        const y = horizontal ? (dy >= 0 ? d.oy : d.oy - depth) : (dy >= 0 ? d.oy : d.oy - len);
+        setDraftRect({ type: d.type, x, y, w: horizontal ? len : depth, h: horizontal ? depth : len, parkLen: len, parkDepth: depth, parkRot: horizontal ? 0 : 90 });
+        return;
+      }
       const x = Math.min(d.ox, sp.x), y = Math.min(d.oy, sp.y);
       setDraftRect({ type: d.type, x, y, w: Math.abs(sp.x - d.ox), h: Math.abs(sp.y - d.oy) });
       return;
@@ -811,7 +825,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const onUp = (e) => {
     const d = drag.current;
     if (d && d.mode === "draw" && draftRect) {
-      if (draftRect.w >= 4 && draftRect.h >= 4) {
+      if (d.depth) {
+        // parking preset: build as a length×depth strip, rotated for a vertical drag
+        if (draftRect.parkLen >= 4) {
+          const el = { id: uid(), type: "parking", cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.parkLen, h: draftRect.parkDepth, rot: draftRect.parkRot };
+          setEls((a) => [...a, el]);
+          setSel({ kind: "el", id: el.id });
+          setTool("select");
+        }
+      } else if (draftRect.w >= 4 && draftRect.h >= 4) {
         const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {}) };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
@@ -1415,6 +1437,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
     if (id !== "building") setBuildingMenu(false);
+    if (id !== "parking") setParkingMenu(false);
   };
   const metricRow = (label, value, sub) => (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
@@ -1477,6 +1500,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                 )}
               </div>
             );
+            if (id === "parking") {
+              const sd = settings.stallDepth, ai = settings.aisle;
+              return (
+                <div key={id} style={{ position: "relative" }}>
+                  <button style={btn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
+                  {parkingMenu && (
+                    <>
+                      <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                      <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 248 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Parking rows</div>
+                        {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
+                          <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
             return <button key={id} style={btn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
           })}
 
