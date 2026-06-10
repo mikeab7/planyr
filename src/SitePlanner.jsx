@@ -43,6 +43,27 @@ const TYPE = {
   road: { fill: "#4a4a4a", stroke: "#e8e8e8", label: "Road" },
 };
 
+// Resolved style for a type = built-in default merged with any user-set default
+// (settings.typeStyles). An individual element may further override fill/stroke/
+// fillOpacity on itself (the Bluebeam-style per-element Properties).
+const typeStyle = (type, settings) => ({ ...TYPE[type], ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}) });
+const elStyle = (el, settings) => {
+  const base = typeStyle(el.type, settings);
+  return {
+    label: base.label,
+    fill: el.fill ?? base.fill,
+    stroke: el.stroke ?? base.stroke,
+    fillOpacity: el.fillOpacity ?? base.fillOpacity ?? 1,
+  };
+};
+// Coerce any CSS color we store into the #rrggbb form an <input type=color> needs.
+const toHex6 = (c) => {
+  if (!c) return "#000000";
+  if (/^#[0-9a-f]{6}$/i.test(c)) return c;
+  if (/^#[0-9a-f]{3}$/i.test(c)) return "#" + c.slice(1).split("").map((h) => h + h).join("");
+  return c;
+};
+
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
@@ -53,7 +74,7 @@ const TOOLS = [
   { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Drag for a straight road, or click points for a bent road (double-click to close); shows a centerline" },
-  { id: "measure", label: "Measure", hint: "Click two points to measure a distance (truck court depth, setbacks, drive widths)" },
+  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
@@ -130,6 +151,10 @@ const centroid = (pts) => {
   return { x: x / pts.length, y: y / pts.length };
 };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+// Measure records are {mode, pts}. Old records were {a,b} — normalize both.
+const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
+const measMode = (m) => m.mode || "line";
+const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); return t; };
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
   const d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
@@ -333,6 +358,7 @@ const DEFAULT_SETTINGS = {
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
   showDocks: true,
+  typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
 export default function SitePlanner({ active = true, siteId = null, onBackToMap } = {}) {
@@ -369,7 +395,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
-  const [pendMeasure, setPendMeasure] = useState(null);
+  const [measDraft, setMeasDraft] = useState([]);    // in-progress measure vertices
+  const [measureMode, setMeasureMode] = useState("line"); // "line" | "polyline" | "area"
+  const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
   const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
 
   // aerial underlay + scale calibration
@@ -561,12 +589,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
+      if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode]); // eslint-disable-line
 
   const deleteSel = () => {
     if (!sel) return;
@@ -618,8 +647,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     }
     if (tool === "measure") {
       const sp = snapPt(fp);
-      if (!pendMeasure) setPendMeasure(sp);
-      else { pushHistory(); setMeasures((m) => [...m, { a: pendMeasure, b: sp }]); setPendMeasure(null); }
+      if (measureMode === "line") {
+        // two-click distance
+        if (measDraft.length === 0) setMeasDraft([sp]);
+        else { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "line", pts: [measDraft[0], sp] }]); setMeasDraft([]); }
+      } else {
+        // polyline / area: accumulate points; close an area by clicking the first dot
+        if (measureMode === "area" && measDraft.length >= 3 && dist(f2p(sp), f2p(measDraft[0])) < 12) { finishMeasure(); return; }
+        setMeasDraft((d) => [...d, sp]);
+      }
       return;
     }
     if (tool === "calibrate") {
@@ -657,6 +693,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const finishSplit = () => {
     if (splitPath.length >= 2) performSplit(splitPath);
     setSplitPath([]);
+  };
+  // Commit the in-progress polyline / area measurement.
+  const finishMeasure = () => {
+    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); }
+    setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
   // polyline of >=2 points. Two points cut along the infinite line through them
@@ -906,7 +948,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (draftElPoly) closeElPoly(); };
+  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (draftElPoly) closeElPoly(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -1490,7 +1532,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const fs = 11 * ls, lh = 14.5 * ls;
     // Element fills are solid, so labels need no chip — just contrasting text.
     const top = c.y - (lines.length * lh) / 2, first = top + fs * 0.82;
-    const ink = labelInk(TYPE[el.type].fill);
+    const ink = labelInk(elStyle(el, settings).fill);
     return (
       <g key={`lbl${el.id}`} pointerEvents="none">
         {el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
@@ -1676,6 +1718,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     fontWeight: active ? 700 : 500, fontFamily: "inherit",
     boxShadow: active ? "0 1px 3px rgba(28,25,20,0.16)" : "none",
   });
+  // right-side tool-rail buttons (full-width, left-aligned)
+  const rbtn = (active) => ({ ...tbtn(active), width: "100%", textAlign: "left", padding: "7px 11px", borderRadius: 8, border: `1px solid ${active ? PAL.accent : "transparent"}` });
   // quiet (ghost) buttons for the top-bar action cluster
   const ghostBtn = { padding: "5px 10px", fontSize: 12, borderRadius: 7, border: "1px solid transparent", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const iconBtn = { ...ghostBtn, width: 28, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 14.5 };
@@ -1688,11 +1732,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
-    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setSplitPath([]);
+    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setSplitPath([]);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
     if (id !== "building") setBuildingMenu(false);
     if (id !== "parking") setParkingMenu(false);
+    if (id !== "measure") setMeasureMenu(false);
   };
   const metricRow = (label, value, sub) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5" }}>
@@ -1704,6 +1749,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const selEl = sel?.kind === "el" ? els.find((e) => e.id === sel.id) : null;
   const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
+
+  /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
+  const curStyle = selEl ? elStyle(selEl, settings) : null;
+  // Merge a default-color patch for one type into settings.typeStyles.
+  const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
+  // Make the selected element's current colors the default for its type.
+  const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
+  // Drop the selected element's per-element overrides (back to the type default).
+  const clearElStyle = () => { if (!selEl) return; pushHistory(); setEls((a) => a.map((e) => { if (e.id !== selEl.id) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 600, background: "#efeadf",
@@ -1718,73 +1772,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           <span style={{ color: PAL.muted, fontSize: 11.5, fontWeight: 500, borderLeft: `1px solid ${PAL.panelLine}`, paddingLeft: 8 }}>Industrial Site Planner</span>
         </div>
 
-        {/* tools — segmented control */}
-        <div className="seg" style={{ display: "flex", alignItems: "center", gap: 2, background: "#f1ece1", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, padding: 3, flexWrap: "wrap" }}>
-          <button style={tbtn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
-
-          {/* parcel tools grouped in one menu */}
-          <div style={{ position: "relative" }}>
-            <button style={tbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
-            {toolMenu && (
-              <>
-                <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 248 }}>
-                  <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-                  <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-                  <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
-                    <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {toolDivider}
-
-          {DRAW_TYPES.map((id) => {
-            const t = TOOLS.find((x) => x.id === id);
-            if (id === "building") return (
-              <div key={id} style={{ position: "relative" }}>
-                <button style={tbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
-                {buildingMenu && (
-                  <>
-                    <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 200 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
-                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                        <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-            if (id === "parking") {
-              const sd = settings.stallDepth, ai = settings.aisle;
-              return (
-                <div key={id} style={{ position: "relative" }}>
-                  <button style={tbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
-                  {parkingMenu && (
-                    <>
-                      <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 248 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Parking rows</div>
-                        {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
-                          <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            }
-            return <button key={id} style={tbtn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
-          })}
-
-          {toolDivider}
-
-          <button style={tbtn(tool === "measure")} onClick={() => selectTool("measure")}>Measure</button>
-        </div>
         <div style={{ flex: 1 }} />
 
         {/* action cluster */}
@@ -1855,40 +1842,74 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
-                  fill={isSel ? PAL.accentSoft : "#faf7f0"} fillOpacity={isSel ? 0.5 : 0.55}
+                  fill={isSel ? PAL.accentSoft : "#faf7f0"} fillOpacity={isSel ? 0.28 : 0.12}
                   stroke={isSel ? PAL.accent : PAL.parcel} strokeWidth={isSel ? 3 : 2}
                   style={{ cursor: tool === "select" ? "move" : "crosshair" }}
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p) */}
               {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble))}
-              {/* measurements */}
+              {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
-                const a = f2p(m.a), b = f2p(m.b);
-                const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                const fpts = measPts(m);
+                if (fpts.length < 2) return null;
+                const mode = measMode(m);
+                const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
+                const isArea = mode === "area";
+                const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                // label + anchor point
+                const lbl = isArea
+                  ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac`
+                  : `${f0(pathLen(fpts))}′`;
+                const anchor = isArea ? f2p(centroid(fpts)) : (() => {
+                  const a = pts[pts.length - 2], b = pts[pts.length - 1];
+                  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                })();
                 return (
-                  <g key={`m${i}`}>
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
-                    <circle cx={a.x} cy={a.y} r={3} fill={PAL.accent} pointerEvents="none" /><circle cx={b.x} cy={b.y} r={3} fill={PAL.accent} pointerEvents="none" />
-                    <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
-                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(m.a, m.b))}′</text>
-                    {/* wide invisible hit line to select the measurement (select tool only) */}
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14}
-                      pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }}
-                      onPointerDown={(e) => selectMeasure(e, i)} />
+                  <g key={m.id || `m${i}`}>
+                    {isArea
+                      ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={isSel ? 0.16 : 0.1} stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
+                      : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
+                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={PAL.accent} pointerEvents="none" />)}
+                    <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
+                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
+                    {/* wide invisible hit path to select the measurement (select tool only) */}
+                    {isArea
+                      ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
+                          pointerEvents={tool === "select" ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                      : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
+                          pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && (
                       <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
-                        <circle cx={mid.x} cy={mid.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                        <text x={mid.x} y={mid.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
+                        <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
+                        <text x={anchor.x} y={anchor.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
                       </g>
                     )}
                   </g>
                 );
               })}
-              {pendMeasure && cursor && (
-                <line x1={f2p(pendMeasure).x} y1={f2p(pendMeasure).y} x2={f2p(snapPt(cursor)).x} y2={f2p(snapPt(cursor)).y} stroke={PAL.accent} strokeWidth={1.25} strokeDasharray="5 4" pointerEvents="none" />
-              )}
+              {/* in-progress measure draft */}
+              {tool === "measure" && measDraft.length > 0 && (() => {
+                const live = cursor ? snapPt(cursor) : null;
+                const all = live ? [...measDraft, live] : measDraft;
+                const pts = all.map(f2p);
+                const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                const isArea = measureMode === "area";
+                const lp = pts[pts.length - 1];
+                const lbl = isArea
+                  ? (all.length >= 3 ? `${f0(polyArea(all))} sf` : "")
+                  : (all.length >= 2 ? `${f0(pathLen(all))}′` : "");
+                return (
+                  <g pointerEvents="none">
+                    {isArea && all.length >= 3
+                      ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={0.1} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
+                      : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
+                    {measDraft.map((p, k) => { const c = f2p(p); return <circle key={k} cx={c.x} cy={c.y} r={k === 0 ? 5 : 3.5} fill={k === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
+                    {lbl && <text x={lp.x} y={lp.y - 8} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{lbl}</text>}
+                  </g>
+                );
+              })()}
               {/* calibration pick (unsnapped, drawn over the underlay) */}
               {calib?.a && (() => {
                 const a = f2p(calib.a);
@@ -1914,12 +1935,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               )}
               {/* draft rect */}
               {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }); return (
-                <g pointerEvents="none"><rect x={a.x} y={a.y} width={draftRect.w * view.ppf} height={draftRect.h * view.ppf} fill={TYPE[draftRect.type].fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" /></g>
+                <g pointerEvents="none"><rect x={a.x} y={a.y} width={draftRect.w * view.ppf} height={draftRect.h * view.ppf} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" /></g>
               ); })()}
               {/* draft polygon element (clicking perimeter points) */}
               {draftElPoly && (
                 <g pointerEvents="none">
-                  <polyline points={[...draftElPoly.pts, ...(cursor ? [snapPt(cursor)] : [])].map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill={TYPE[draftElPoly.type].fill} fillOpacity={0.35} stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="6 5" />
+                  <polyline points={[...draftElPoly.pts, ...(cursor ? [snapPt(cursor)] : [])].map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill={typeStyle(draftElPoly.type, settings).fill} fillOpacity={0.35} stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="6 5" />
                   {draftElPoly.pts.map((p, i) => { const c = f2p(p); return <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 5 : 3.5} fill={i === 0 ? PAL.paper : PAL.accent} stroke={PAL.accent} strokeWidth={1.5} />; })}
                 </g>
               )}
@@ -2006,6 +2027,89 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <span style={{ color: (sidewalkFor || attachFor) ? PAL.accent : "#6b6557", fontWeight: (sidewalkFor || attachFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : curHint}
             </span>
+          </div>
+        </div>
+
+        {/* right-side tool rail */}
+        <div style={{ width: 150, flex: "none", background: PAL.panelBg, borderLeft: `1px solid ${PAL.panelLine}`, display: "flex", flexDirection: "column", gap: 4, padding: "12px 10px", overflowY: "visible", position: "relative", zIndex: 30 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b6557", padding: "0 2px 4px" }}>Tools</div>
+          <button style={rbtn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
+
+          {/* parcel tools grouped in one menu (opens to the left) */}
+          <div style={{ position: "relative" }}>
+            <button style={rbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
+            {toolMenu && (
+              <>
+                <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 248 }}>
+                  <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+                  <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
+                  <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                    <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ height: 1, background: "#e7e2d6", margin: "3px 2px" }} />
+
+          {DRAW_TYPES.map((id) => {
+            const t = TOOLS.find((x) => x.id === id);
+            if (id === "building") return (
+              <div key={id} style={{ position: "relative" }}>
+                <button style={rbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
+                {buildingMenu && (
+                  <>
+                    <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 200 }}>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
+                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                        <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+            if (id === "parking") {
+              const sd = settings.stallDepth, ai = settings.aisle;
+              return (
+                <div key={id} style={{ position: "relative" }}>
+                  <button style={rbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
+                  {parkingMenu && (
+                    <>
+                      <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 248 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Parking rows</div>
+                        {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
+                          <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
+            return <button key={id} style={rbtn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
+          })}
+
+          <div style={{ height: 1, background: "#e7e2d6", margin: "3px 2px" }} />
+
+          {/* measure with line / polyline / area modes */}
+          <div style={{ position: "relative" }}>
+            <button style={rbtn(tool === "measure")} onClick={() => setMeasureMenu((o) => !o)}>Measure ▾</button>
+            {measureMenu && (
+              <>
+                <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 230 }}>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Measure</div>
+                  {[["line", "Line (two-point distance)"], ["polyline", "Polyline (path length)"], ["area", "Area (closed region)"]].map(([k, label]) => (
+                    <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -2153,6 +2257,32 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             </Section>
           )}
 
+          {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
+          {selEl && curStyle && (
+            <Section title="Properties">
+              <Field label="Fill color">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <span style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{toHex6(curStyle.fill)}</span>
+                </span>
+              </Field>
+              <Field label="Line color">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <span style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{toHex6(curStyle.stroke)}</span>
+                </span>
+              </Field>
+              <Field label="Fill opacity">
+                <input type="range" min={0.1} max={1} step={0.05} value={curStyle.fillOpacity}
+                  onChange={(e) => setSelEl({ fillOpacity: +e.target.value })} />
+              </Field>
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
+                <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+              </div>
+            </Section>
+          )}
+
           {/* metrics */}
           <Section title="Site yield">
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
@@ -2201,13 +2331,32 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             </div>
           </Section>
 
+          {/* element default colors — edit without selecting anything */}
+          <Section title="Element defaults" collapsed>
+            <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Default fill / line color for each element type. New elements use these; per-element overrides live in <b style={{ color: PAL.ink }}>Properties</b>.</div>
+            {Object.keys(TYPE).map((k) => {
+              const st = typeStyle(k, settings);
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
+                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                </div>
+              );
+            })}
+            <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
+          </Section>
+
           {/* legend */}
           <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: "7px 14px", padding: "10px 12px", background: "#f7f4ec", borderRadius: 10 }}>
-            {Object.entries(TYPE).map(([k, v]) => (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
-                <span style={{ width: 11, height: 11, background: v.fill, border: `1px solid ${v.stroke}`, borderRadius: 3, display: "inline-block" }} />{v.label.split(" / ")[0]}
-              </div>
-            ))}
+            {Object.keys(TYPE).map((k) => {
+              const st = typeStyle(k, settings);
+              return (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
+                  <span style={{ width: 11, height: 11, background: st.fill, border: `1px solid ${st.stroke}`, borderRadius: 3, display: "inline-block" }} />{TYPE[k].label.split(" / ")[0]}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -2275,12 +2424,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
-  const st = TYPE[el.type];
+  const st = elStyle(el, settings);
+  const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
-      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={1}
+      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={fillOp}
         stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2.5 : 1.25}
         style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
@@ -2292,7 +2442,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
   const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x); // px per foot
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={1}
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2 : 1.25} rx={el.type === "pond" ? Math.min(w, h) * 0.12 : 0} />);
 
   if (el.type === "parking") {
