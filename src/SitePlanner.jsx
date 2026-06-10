@@ -1237,6 +1237,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const p2fStatic = (px, py) => ({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf });
 
   /* labels + handles in screen space */
+  // Labels scale with zoom so they stay proportional to the plan when zoomed
+  // out (no ballooning chips), capping at a comfortable size when zoomed in.
+  const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
   const labelEls = els.map((el) => {
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
@@ -1257,13 +1260,13 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
-    const fs = 11, lh = 14.5, padX = 9, padY = 5.5, charW = fs * 0.6;
+    const fs = 11 * ls, lh = 14.5 * ls, padX = 9 * ls, padY = 5.5 * ls, charW = fs * 0.6;
     const maxLen = Math.max(...lines.map((t) => t.length));
     const boxW = maxLen * charW + padX * 2, boxH = lines.length * lh + padY * 2;
     const top = c.y - boxH / 2, first = top + padY + fs * 0.82;
     return (
       <g key={`lbl${el.id}`} pointerEvents="none">
-        <rect x={c.x - boxW / 2} y={top} width={boxW} height={boxH} rx={7}
+        <rect x={c.x - boxW / 2} y={top} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.74)" stroke="rgba(255,255,255,0.16)" strokeWidth={1} />
         <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill="#f4f6f9" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>
@@ -1276,11 +1279,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const parcelLabels = parcels.map((pc) => {
     const c = f2p(centroid(pc.points));
     const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
-    const fs = 12, padX = 9, padY = 5, charW = fs * 0.6;
+    const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return (
       <g key={`pl${pc.id}`} pointerEvents="none">
-        <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7}
+        <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
         <text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
