@@ -40,6 +40,7 @@ const TYPE = {
   trailer: { fill: "#555555", stroke: "#d4d4d4", label: "Trailer Parking" },
   pond: { fill: "#1ed4e1", stroke: "#0b8a96", label: "Detention Pond" },
   sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
+  road: { fill: "#4a4a4a", stroke: "#e8e8e8", label: "Road" },
 };
 
 const TOOLS = [
@@ -51,10 +52,11 @@ const TOOLS = [
   { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
+  { id: "road", label: "Road", hint: "Drag for a straight road, or click points for a bent road (double-click to close); shows a centerline" },
   { id: "measure", label: "Measure", hint: "Click two points to measure a distance (truck court depth, setbacks, drive widths)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
 ];
-const DRAW_TYPES = ["building", "paving", "parking", "trailer", "pond"];
+const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
 
 /* ----------------------------- geometry ---------------------------- */
 const rot2 = (x, y, deg) => {
@@ -1238,7 +1240,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   els.forEach((e) => {
     const a = e.points ? polyArea(e.points) : e.w * e.h;
     if (e.type === "building") bldg += a;
-    else if (e.type === "paving" || e.type === "sidewalk") paving += a;
+    else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a;
     else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
     else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, settings).count; }
     else if (e.type === "pond") pondArea += a;
@@ -1336,7 +1338,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // Labels scale with zoom so they stay proportional to the plan when zoomed
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
   const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
+  const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
   const labelEls = els.map((el) => {
+    if (NO_LABEL.includes(el.type)) return null;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
     const c = f2p(poly ? centroid(el.points) : { x: el.cx, y: el.cy });
@@ -1344,12 +1348,6 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (el.type === "sidewalk") {
       // e.g. "5′ Sidewalk" — width only, no sf / length
       lines = [poly ? "Sidewalk" : `${f0(Math.min(el.w, el.h))}′ Sidewalk`];
-    } else if (el.type === "parking") {
-      lines = ["Car Parking", `${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`,
-        poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(Math.min(el.w, el.h))}′ deep`]; // depth, not length
-    } else if (el.type === "paving") {
-      lines = ["Paving", `${f0(area)} sf`];
-      if (!poly) lines.push(`${f0(Math.min(el.w, el.h))}′ deep`); // depth only — length doesn't matter
     } else if (el.type === "pond") {
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
@@ -2145,6 +2143,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
         else { const y = tl.y + by + k * 12 * ppf; parts.push(<line key={`db${s}d${k}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + bw} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
       }
     });
+  }
+  if (el.type === "road") { // dashed centerline down the long axis
+    if (el.w >= el.h) parts.push(<line key="cl" x1={tl.x} y1={tl.y + h / 2} x2={tl.x + w} y2={tl.y + h / 2} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
+    else parts.push(<line key="cl" x1={tl.x + w / 2} y1={tl.y} x2={tl.x + w / 2} y2={tl.y + h} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
