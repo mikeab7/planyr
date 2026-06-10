@@ -754,6 +754,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           effDx = snap(g.points[0].x + dx) - g.points[0].x;
           effDy = snap(g.points[0].y + dy) - g.points[0].y;
         }
+        d.bondTarget = hint ? hint.id : null; // remember for the drop (els may lag a frame)
         setEls((a) => a.map((el) => {
           const m = d.members.find((x) => x.id === el.id);
           if (!m) return el;
@@ -855,13 +856,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     }
     // Bond on drop: an element dropped flush against another attaches to it so
     // they move together — via Shift-drag, or with Snap on. Alt drops it free.
-    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && !e.altKey && (d.shift || settings.snap)) {
-      const m = els.find((x) => x.id === d.id);
-      if (m) {
-        const memberIds = new Set(d.members.map((mm) => mm.id));
-        const host = flushContact(m, els.filter((x) => !memberIds.has(x.id)), d.shift ? 6 : 2);
-        if (host && rootIdOf(host.id) !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: rootIdOf(host.id) } : x));
-      }
+    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && !e.altKey && d.bondTarget && (d.shift || settings.snap)) {
+      const root = rootIdOf(d.bondTarget);
+      if (root !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: root } : x));
     }
     setAttachHint(null);
     drag.current = null;
