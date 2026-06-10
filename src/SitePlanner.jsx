@@ -1344,17 +1344,19 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (el.type === "sidewalk") {
       // e.g. "5′ Sidewalk" — width only, no sf / length
       lines = [poly ? "Sidewalk" : `${f0(Math.min(el.w, el.h))}′ Sidewalk`];
+    } else if (el.type === "parking") {
+      lines = ["Car Parking", `${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`,
+        poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(Math.min(el.w, el.h))}′ deep`]; // depth, not length
+    } else if (el.type === "paving") {
+      lines = ["Paving", `${f0(area)} sf`];
+      if (!poly) lines.push(`${f0(Math.min(el.w, el.h))}′ deep`); // depth only — length doesn't matter
+    } else if (el.type === "pond") {
+      lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
       lines = [TYPE[el.type].label.split(" / ")[0]];
-      if (el.type === "parking") {
-        lines.push(`${f0(poly ? estStalls(area, settings) : carStalls(el.w, el.h, settings).count)} stalls${poly ? " (est)" : ""}`);
-        // show the depth (narrow dimension), not the length
-        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(Math.min(el.w, el.h))}′ deep`);
-      } else {
-        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
-        else lines.push(`${f0(area)} sf`);
-        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
-      }
+      if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
+      else lines.push(`${f0(area)} sf`);
+      lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
     }
     const fs = 11 * ls, lh = 14.5 * ls;
     // Element fills are solid, so labels need no chip — just contrasting text.
