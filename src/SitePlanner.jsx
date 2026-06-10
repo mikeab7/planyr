@@ -2291,6 +2291,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                       </select>
                     </Field>
                   )}
+                  {selEl.type === "building" && (() => {
+                    const { dockSides, trailerSides } = dockSidesOf(selEl);
+                    return (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <button style={{ ...chip, textAlign: "left" }} disabled={!dockSides.length} onClick={() => addTruckCourt(selEl)}>＋ {TRUCK_COURT_D}′ truck court</button>
+                          <button style={{ ...chip, textAlign: "left" }} disabled={!dockSides.length} onClick={() => addDogEars(selEl)}>＋ Dock dog-ears ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                          <button style={{ ...chip, textAlign: "left", color: !trailerSides.length ? PAL.muted : "#0e7490" }} disabled={!trailerSides.length} onClick={() => addOppTrailerAll(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (opposite docks)</button>
+                        </div>
+                        {!trailerSides.length && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>Trailer parking needs a free side opposite the docks — set <b>Docks</b> to Single-load or Cross-dock.</div>}
+                      </div>
+                    );
+                  })()}
                 </>
               ) : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon area · {selEl.points.length} points. Drag to move; double-click to change type; re-draw to reshape.</div>
