@@ -202,6 +202,12 @@ export function lngLatRingToFeet(ring, lon0, lat0) {
   }));
 }
 
+// Inverse of the above: a planner-feet point back to [lat, lng] for Leaflet,
+// given the site's geographic origin. Lets the map redraw saved-site footprints.
+export function feetToLatLng(pt, lat0, lon0) {
+  return [lat0 - pt.y / FT_PER_DEG_LAT, lon0 + pt.x / ftPerDegLon(lat0)];
+}
+
 // Feet placement for an aerial export covering a lon/lat bbox, in the same local
 // frame (origin lon0/lat0) as the parcels. The export is sized to the *degree*
 // aspect so the server returns exactly this bbox (no aspect padding); we then

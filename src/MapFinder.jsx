@@ -8,6 +8,7 @@ import {
   queryAtPoint,
   largestRingLngLat,
   lngLatRingToFeet,
+  feetToLatLng,
   aerialPlacement,
   humanizeError,
 } from "./lib/arcgis.js";
@@ -100,13 +101,22 @@ function computeAssembly(selected, exportBase) {
   const padLat = Math.max((latMax - latMin) * 0.4, 0.001);
   const bbox = { lonMin: lonMin - padLon, lonMax: lonMax + padLon, latMin: latMin - padLat, latMax: latMax + padLat };
   const underlay = { ...aerialPlacement(bbox, lon0, lat0, { exportBase }), opacity: 1, locked: true, fromMap: true };
-  return { parcels, underlay, totalAc: totalSqft / 43560 };
+  return { parcels, underlay, totalAc: totalSqft / 43560, origin: { lat: lat0, lon: lon0 } };
 }
 
-export default function MapFinder({ visible, county, onCounty, onUseParcels, onSkip }) {
+// Acreage of a stored site from its planner-feet parcels.
+function siteAcres(site) {
+  if (!site.parcels?.length) return 0;
+  return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
+}
+
+export default function MapFinder({ visible, county, onCounty, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displayRef = useRef(null);   // visible parcel-line layer
+  const sitesLayerRef = useRef(null); // saved-site footprints
+  const onOpenSiteRef = useRef(onOpenSite);
+  useEffect(() => { onOpenSiteRef.current = onOpenSite; }, [onOpenSite]);
   const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
   const layerUrlRef = useRef(null);  // queryable layer URL
   const imageryRef = useRef(null);
@@ -186,6 +196,38 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
       return () => clearTimeout(t);
     }
   }, [visible]);
+
+  /* draw saved-site footprints, redrawn whenever the list changes. Clickable to
+     open (unless we're in parcel-select mode, where clicks add parcels). */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
+    const group = L.layerGroup();
+    sites.forEach((site) => {
+      if (!site.origin || !site.parcels?.length) return;
+      const { lat, lon } = site.origin;
+      const active = site.id === activeSiteId;
+      site.parcels.forEach((p) => {
+        if (!p.points?.length) return;
+        const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
+          color: active ? "#c2410c" : "#0e7490", weight: 2,
+          fillColor: active ? "#c2410c" : "#22d3ee", fillOpacity: 0.16, interactive: !selectMode,
+        });
+        if (!selectMode) poly.on("click", () => onOpenSiteRef.current && onOpenSiteRef.current(site.id))
+          .bindTooltip(`${site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`, { direction: "top", sticky: true });
+        poly.addTo(group);
+      });
+    });
+    group.addTo(map);
+    sitesLayerRef.current = group;
+    return () => { try { map.removeLayer(group); } catch (_) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sites, activeSiteId, selectMode]);
+
+  const flyToSite = (site) => {
+    if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
+  };
 
   /* resolve the parcel layer URL + draw boundaries when the county changes */
   useEffect(() => {
@@ -289,7 +331,7 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
   // boundary aligns to either source, so the planner aerial stays reliable.
   const planSelected = () => {
     const asm = computeAssembly(selected, BASEMAPS.esri.export);
-    if (asm) onUseParcels({ ...asm, _key: Date.now() });
+    if (asm) onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site" });
   };
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;
@@ -323,6 +365,32 @@ export default function MapFinder({ visible, county, onCounty, onUseParcels, onS
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
+
+        {/* saved sites */}
+        {sites.length > 0 && (
+          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
+            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px 6px" }}>Your sites · {sites.length}</div>
+            <div style={{ maxHeight: 280, overflowY: "auto", paddingBottom: 4 }}>
+              {sites.map((s) => {
+                const isActive = s.id === activeSiteId;
+                return (
+                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here)" : "Open site"}
+                    onClick={() => onOpenSite && onOpenSite(s.id)}
+                    onDoubleClick={() => flyToSite(s)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2.5, flex: "none", background: s.origin ? "#22d3ee" : "#d6cfbe", border: "1px solid rgba(0,0,0,0.15)" }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled site"}</div>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
+                    </div>
+                    <button title="Delete site" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.name || "this site"}"? This can't be undone.`)) onDeleteSite && onDeleteSite(s.id); }}
+                      style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 4px", borderRadius: 5 }}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* imagery + labels control */}
         <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px", display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>

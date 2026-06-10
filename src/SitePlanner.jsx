@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { storage, loadAutosave, saveAutosave } from "./lib/storage.js";
+import { storage, loadSite, saveSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { COUNTIES, detectField } from "./lib/counties.js";
 import {
@@ -335,12 +335,14 @@ const DEFAULT_SETTINGS = {
   showDocks: true,
 };
 
-export default function SitePlanner({ active = true, incoming = null, onBackToMap } = {}) {
-  // Restore the autosaved canvas (and advance the id counter past saved ids).
+export default function SitePlanner({ active = true, siteId = null, onBackToMap } = {}) {
+  // Restore this site's saved canvas (and advance the id counter past saved ids).
+  // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
-    const s = loadAutosave();
+    const s = loadSite(siteId);
     if (s) ensureIdAbove([...(s.parcels || []).map((p) => p.id), ...(s.els || []).map((e) => e.id)]);
     return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [parcels, setParcels] = useState(() => restored?.parcels || []);    // {id, points:[{x,y}]}
   const [els, setEls] = useState(() => restored?.els || []);                // {id,type,cx,cy,w,h,rot}
@@ -372,7 +374,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
   const [underlayErr, setUnderlayErr] = useState(false);
-  const [underlayLoading, setUnderlayLoading] = useState(false);
+  const [underlayLoading, setUnderlayLoading] = useState(() => {
+    const u = restored?.underlay;
+    return !!(u && u.src && !String(u.src).startsWith("data:")); // show spinner until the remote aerial loads
+  });
   const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
   const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
@@ -407,11 +412,22 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const pastRef = useRef([]);
   const futureRef = useRef([]);
   useEffect(() => { stateRef.current = { parcels, els, measures, underlay }; });
-  // Autosave the working canvas (debounced) so a reload restores it automatically.
+  // Autosave this site (debounced) so reloads, switching sites, and the map
+  // list all stay current. saveSite merges, preserving name/origin.
   useEffect(() => {
-    const t = setTimeout(() => saveAutosave({ parcels, els, measures, settings, underlay }), 400);
+    if (!siteId) return;
+    const t = setTimeout(() => saveSite({ id: siteId, parcels, els, measures, settings, underlay }), 400);
     return () => clearTimeout(t);
-  }, [parcels, els, measures, settings, underlay]);
+  }, [siteId, parcels, els, measures, settings, underlay]);
+  // Flush immediately when this site goes inactive (back to map) or unmounts
+  // (switching sites), so nothing in the last debounce window is lost.
+  const liveRef = useRef({});
+  useEffect(() => { liveRef.current = { parcels, els, measures, settings, underlay }; });
+  useEffect(() => {
+    if (active || !siteId) return;
+    saveSite({ id: siteId, ...liveRef.current });
+  }, [active]); // eslint-disable-line
+  useEffect(() => () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); }, []); // eslint-disable-line
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
@@ -502,23 +518,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load a site handed in from the map finder: one or more parcels in a shared
-  // feet frame plus the matching aerial. Each selection is a fresh site.
-  const consumedRef = useRef(null);
+  // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
-    if (incoming && incoming !== consumedRef.current && incoming.parcels?.length) {
-      consumedRef.current = incoming;
-      pushHistory();
-      const pcs = incoming.parcels.filter((p) => p.points?.length >= 3).map((p) => ({ id: uid(), points: p.points }));
-      setParcels(pcs);
-      setEls([]);
-      setMeasures([]);
-      setUnderlay(incoming.underlay || null);
-      setUnderlayErr(false);
-      setUnderlayLoading(!!incoming.underlay);
-      setSel(pcs.length === 1 ? { kind: "parcel", id: pcs[0].id } : null);
-    }
-  }, [incoming]);
+    if (restored?.parcels?.length === 1 && !(restored?.els?.length)) setSel({ kind: "parcel", id: restored.parcels[0].id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {

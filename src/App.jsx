@@ -1,19 +1,55 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
-import { loadAutosave } from "./lib/storage.js";
+import { migrateOldAutosave, loadSitesList, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
-/* Two surfaces: a map to find/select a parcel, and the planner to design on it.
- * Both stay mounted (toggled with display) so the planner keeps its work when
- * you pop back to the map for another site. */
+migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
+
+const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+/* Two surfaces: a map to find/select parcels, and the planner to design on a
+ * site. Every site autosaves to its own record, so the map can list them and
+ * starting/opening another never loses the one you were on. */
 export default function App() {
-  // Resume in the planner if there's autosaved work; otherwise start at the map.
-  const [mode, setMode] = useState(() => {
-    const s = loadAutosave();
-    return s && ((s.parcels && s.parcels.length) || (s.els && s.els.length) || s.underlay) ? "plan" : "map";
-  });
   const [county, setCounty] = useState("harris");
-  const [incoming, setIncoming] = useState(null);
+  const [sites, setSites] = useState(() => loadSitesList());
+  const [activeSiteId, setActiveSiteId] = useState(() => {
+    const cur = getCurrentSiteId();
+    return cur && loadSite(cur) ? cur : null;
+  });
+  // Resume into the planner if there's an active site to pick up.
+  const [mode, setMode] = useState(() => (getCurrentSiteId() && loadSite(getCurrentSiteId()) ? "plan" : "map"));
+
+  const refreshSites = () => setSites(loadSitesList());
+  const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
+
+  // Open a saved site from the map.
+  const openSite = (id) => { if (loadSite(id)) goPlan(id); };
+
+  // A fresh selection from the map → a brand-new site (current one is autosaved).
+  const newSiteFromMap = (payload) => {
+    const id = newId();
+    const parcels = (payload.parcels || [])
+      .filter((p) => p.points?.length >= 3)
+      .map((p, i) => ({ id: `p${id}_${i}`, points: p.points }));
+    saveSite({ id, name: payload.name || "Untitled site", origin: payload.origin || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    refreshSites();
+    goPlan(id);
+  };
+
+  // "Open blank planner" → a new empty (un-located) site.
+  const newBlankSite = () => {
+    const id = newId();
+    saveSite({ id, name: "Untitled site", origin: null, parcels: [], els: [], measures: [], settings: {}, underlay: null });
+    refreshSites();
+    goPlan(id);
+  };
+
+  // Refresh the map's site list when we land back on it (after the planner has
+  // autosaved the latest edits).
+  useEffect(() => {
+    if (mode === "map") { const t = setTimeout(refreshSites, 80); return () => clearTimeout(t); }
+  }, [mode]);
 
   return (
     <>
@@ -22,16 +58,23 @@ export default function App() {
           visible={mode === "map"}
           county={county}
           onCounty={setCounty}
-          onUseParcels={(payload) => { setIncoming(payload); setMode("plan"); }}
-          onSkip={() => setMode("plan")}
+          sites={sites}
+          activeSiteId={activeSiteId}
+          onOpenSite={openSite}
+          onDeleteSite={(id) => { deleteSite(id); if (id === activeSiteId) setActiveSiteId(null); refreshSites(); }}
+          onUseParcels={newSiteFromMap}
+          onSkip={newBlankSite}
         />
       </div>
       <div style={{ display: mode === "plan" ? "block" : "none", height: "100vh" }}>
-        <SitePlanner
-          active={mode === "plan"}
-          incoming={incoming}
-          onBackToMap={() => setMode("map")}
-        />
+        {activeSiteId && (
+          <SitePlanner
+            key={activeSiteId}
+            active={mode === "plan"}
+            siteId={activeSiteId}
+            onBackToMap={() => setMode("map")}
+          />
+        )}
       </div>
     </>
   );
