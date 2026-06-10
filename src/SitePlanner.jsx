@@ -232,6 +232,12 @@ function carStalls(w, h, s) {
 function trailerStalls(w, h, s) {
   const tl = s.trailerL, tw = s.trailerW, ai = Math.max(0, s.trailerAisle || 0);
   const perRow = Math.max(0, Math.floor(w / tw));
+  // Single striped row (e.g. trailer parking flush against a wall): one band
+  // filling the strip depth, columns every tw.
+  if (s.single) {
+    const bands = perRow > 0 ? [{ y: 0, depth: h, n: perRow }] : [];
+    return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
+  }
   const mod = tl * 2 + ai;
   const mods = Math.max(0, Math.floor(h / mod));
   let count = 0;
@@ -1133,7 +1139,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
   // its fixed depth, and its position/length along the wall.
   const WALL_KID_TYPES = ["sidewalk", "parking", "trailer", "paving"];
-  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
+  // noFit children (dog-ears, the rotated opposite-dock trailer strip) keep their
+  // fixed size/position when the building is resized instead of scaling with a wall.
+  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     const perpIsY = outY >= outX; // hugs a horizontal (top/bottom) wall → perpendicular axis is Y
@@ -1160,18 +1168,67 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
   const TRUCK_COURT_D = 135; // truck dock apron + drive depth
-  // Add a strip element of `type`/`depth` flush against one side of the building
-  // (local normal nx,ny), full wall length, bonded to the building. Keeps the
-  // building selected so several can be added in a row.
-  const addStripSide = (b, nx, ny, type, depth) => {
+  const DOGEAR_W = 55;       // dog-ear / corner bump-out: along the dock wall
+  const DOGEAR_D = 60;       // dog-ear projection out from the dock face
+  const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
+  const OPP_TRAILER_W = 12;  // trailer stall width for that strip
+  const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+  // Resolve a building's dock side(s) and the side opposite a single-load dock.
+  const dockSidesOf = (el) => {
+    const dock = el.dock || "single";
+    const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
+    if (dock === "none") return { dside, dockSides: [], opp: null };
+    if (dock === "cross") return { dside, dockSides: (dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"], opp: null };
+    return { dside, dockSides: [dside], opp: { top: "bottom", bottom: "top", left: "right", right: "left" }[dside] };
+  };
+  // Build (don't commit) a full-wall strip element flush against one building side.
+  const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
     const w = nx !== 0 ? depth : b.w;
     const h = ny !== 0 ? depth : b.h;
     const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
-    const el = { id: uid(), type, cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id };
-    pushHistory();
-    setEls((a) => [...a, el]);
-    setSel({ kind: "el", id: b.id });
+    return { id: uid(), type, cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra };
   };
+  // Build a 55′×60′ dog-ear bump-out at one corner (sign = ±1 along the wall) of a dock side.
+  const makeDogEar = (b, nx, ny, sign) => {
+    const alongIsX = ny !== 0; // horizontal (top/bottom) dock wall → corners spread along X
+    const w = alongIsX ? DOGEAR_W : DOGEAR_D;
+    const h = alongIsX ? DOGEAR_D : DOGEAR_W;
+    const lx = alongIsX ? sign * (b.w / 2 + DOGEAR_W / 2) : nx * (b.w / 2 + DOGEAR_D / 2);
+    const ly = alongIsX ? ny * (b.h / 2 + DOGEAR_D / 2) : sign * (b.h / 2 + DOGEAR_W / 2);
+    const off = rot2(lx, ly, b.rot);
+    return { id: uid(), type: "paving", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, noFit: true };
+  };
+  // Commit a batch of building-attached elements in one history step.
+  const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
+  // Add a strip element of `type`/`depth` flush against one side of the building
+  // (local normal nx,ny), full wall length, bonded to the building. Keeps the
+  // building selected so several can be added in a row.
+  const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
+  // Striped 50′-deep, 12′-stall trailer parking on the side opposite a single-load
+  // dock. Oriented so the stalls stripe ALONG the wall (rotate +90 on a side wall).
+  const makeOppTrailer = (b, name) => {
+    const [nx, ny] = SIDE_N[name];
+    const horiz = ny !== 0;                 // top/bottom wall → stalls run along X
+    const depth = OPP_TRAILER_D, along = horiz ? b.w : b.h;
+    const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
+    return {
+      id: uid(), type: "trailer", cx: b.cx + off.x, cy: b.cy + off.y,
+      w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360,
+      attachedTo: b.id, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
+    };
+  };
+  const addOppTrailer = (b, name) => addBuildingEls([makeOppTrailer(b, name)], b.id);
+  // 135′ truck court on every dock side.
+  const addTruckCourt = (b) => { const { dockSides } = dockSidesOf(b); addBuildingEls(dockSides.map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D)), b.id); };
+  // Dog-ears at both corners of every dock side.
+  const addDogEars = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    const list = [];
+    dockSides.forEach((s) => { const [nx, ny] = SIDE_N[s]; list.push(makeDogEar(b, nx, ny, 1), makeDogEar(b, nx, ny, -1)); });
+    addBuildingEls(list, b.id);
+  };
+  // Trailer parking opposite the dock (single-load only).
+  const addOppTrailerAll = (b) => { const { opp } = dockSidesOf(b); if (opp) addOppTrailer(b, opp); };
   const addSidewalk = (b, clickFp) => {
     const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
     let nx = 0, ny = 0;
@@ -1284,6 +1341,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   };
 
   /* ------------ metrics ------------ */
+  // Per-element striping/count config: a strip may override the global standards
+  // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
+  const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
   const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   els.forEach((e) => {
@@ -1291,7 +1351,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     if (e.type === "building") bldg += a;
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a;
     else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
-    else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, settings).count; }
+    else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") pondArea += a;
   });
   const impervious = bldg + paving + parkArea + trailArea;
@@ -1527,7 +1587,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
       lines = [TYPE[el.type].label.split(" / ")[0]];
-      if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, settings).count)} trailers${poly ? " (est)" : ""}`);
+      if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
       else lines.push(`${f0(area)} sf`);
       lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
     }
@@ -1578,18 +1638,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     );
   })();
 
-  // "+" quick-add handles on each side of a selected building: sidewalk on the
-  // non-dock sides, a 135′ truck dock + drive on the dock side(s).
+  // "+" quick-add handles on a selected building:
+  //  • dock side(s): a 135′ truck dock + drive (orange)
+  //  • side opposite a single-load dock: 50′ striped trailer parking (teal)
+  //  • other sides: a 5′ sidewalk (green)
+  //  • each dock-side corner: a 55′×60′ dog-ear / bump-out (purple)
+  const plusNode = (key, pos, fill, title, onAdd, r = 9) => (
+    <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onAdd(); }}>
+      <title>{title}</title>
+      <circle cx={pos.x} cy={pos.y} r={r} fill={fill} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+    </g>
+  );
   const sideAddNodes = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
     if (el && el.locked) return null;
     if (!el || el.type !== "building" || el.points) return null;
-    const dock = el.dock || "single";
-    const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
-    const dockSides = dock === "none" ? [] : (dock === "cross"
-      ? ((dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"])
-      : [dside]);
+    const { dockSides, opp } = dockSidesOf(el);
     const cpx = f2p({ x: el.cx, y: el.cy });
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     return (
@@ -1599,16 +1666,26 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
           const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          const isDock = dockSides.includes(name);
-          return (
-            <g key={`add${name}`} style={{ cursor: "pointer" }}
-              onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); isDock ? addStripSide(el, nx, ny, "paving", TRUCK_COURT_D) : addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W); }}>
-              <title>{isDock ? `Add ${TRUCK_COURT_D}′ truck dock + drive` : `Add ${SIDEWALK_W}′ sidewalk`}</title>
-              <circle cx={pos.x} cy={pos.y} r={9} fill={isDock ? "#b45309" : "#16a34a"} stroke="#ffffff" strokeWidth={1.75} />
-              <line x1={pos.x - 4.5} y1={pos.y} x2={pos.x + 4.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
-              <line x1={pos.x} y1={pos.y - 4.5} x2={pos.x} y2={pos.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
-            </g>
-          );
+          const isDock = dockSides.includes(name), isOpp = name === opp;
+          const fill = isDock ? "#b45309" : isOpp ? "#0e7490" : "#16a34a";
+          const title = isDock ? `Add ${TRUCK_COURT_D}′ truck dock + drive` : isOpp ? `Add ${OPP_TRAILER_D}′ striped trailer parking` : `Add ${SIDEWALK_W}′ sidewalk`;
+          const onAdd = isDock ? () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D)
+            : isOpp ? () => addOppTrailer(el, name)
+            : () => addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W);
+          return plusNode(`add${name}`, pos, fill, title, onAdd);
+        })}
+        {/* dog-ear bump-outs at each corner of every dock side */}
+        {dockSides.flatMap((name) => {
+          const [nx, ny] = SIDE_N[name];
+          const alongIsX = ny !== 0;
+          return [1, -1].map((sign) => {
+            const cl = alongIsX ? { x: sign * el.w / 2, y: ny * el.h / 2 } : { x: nx * el.w / 2, y: sign * el.h / 2 };
+            const co = rot2(cl.x, cl.y, el.rot);
+            const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
+            let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+            const pos = { x: cs.x + dx * 15, y: cs.y + dy * 15 }; // just outside the corner
+            return plusNode(`dog${name}${sign}`, pos, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear`, () => addBuildingEls([makeDogEar(el, nx, ny, sign)], el.id), 8);
+          });
         })}
       </g>
     );
@@ -2215,7 +2292,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
-                    {selEl.type === "trailer" && <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.trailerW}′×{settings.trailerL}′, {settings.trailerAisle}′ drive lane</>}</>}
+                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
                       const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
@@ -2378,6 +2455,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                       })()}
                       <div style={hdr(true)}>Sidewalk</div>
                       <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
+                      {dock !== "none" && (
+                        <>
+                          <div style={hdr(true)}>Dock features</div>
+                          <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
+                          <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add dock dog-ears ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                          {dockSidesOf(t).opp && <button style={menuItem(false)} onClick={() => { addOppTrailerAll(t); setTypeMenu(null); }}>Add {OPP_TRAILER_D}′ trailer parking (opposite docks)</button>}
+                        </>
+                      )}
                     </>
                   )}
                   <div style={hdr(isBuildingRect)}>Attach</div>
@@ -2436,7 +2521,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
       parts.push(<line key={`a${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="6 5" />));
   }
   if (el.type === "trailer") {
-    const ts = trailerStalls(el.w, el.h, settings);
+    const ts = trailerStalls(el.w, el.h, el.cfg ? { ...settings, ...el.cfg } : settings);
     ts.bands.forEach((b, i) => {
       const bandW = b.n * ts.tw;
       parts.push(<rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
