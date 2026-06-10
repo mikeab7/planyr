@@ -352,6 +352,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
+  const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
@@ -1295,13 +1296,139 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     if (!scenPick) return;
     try { await storage.delete(`scenario:${scenPick}`); setScenPick(""); refreshScen(); } catch (_) {}
   };
+  const importRef = useRef(null);
+  const importJSONFile = (file) => {
+    if (!file) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      try {
+        const d = JSON.parse(fr.result);
+        if (!d || (!Array.isArray(d.parcels) && !Array.isArray(d.els))) throw new Error();
+        ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
+        pushHistory();
+        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
+        setSettings((s) => ({ ...s, ...(d.settings || {}) }));
+        setUnderlay(d.underlay || null);
+        setSel(null);
+        requestFit();
+      } catch (_) { alert("That file doesn't look like a Planar Fit export."); }
+    };
+    fr.readAsText(file);
+  };
+  const siteName = useMemo(() => loadSite(siteId)?.name || "Site plan", [siteId]);
+  const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ parcels, els, measures, settings, underlay }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "site-plan.json";
+    a.download = `${fileSlug()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  /* ------------ export (PNG / print-to-PDF) ------------ */
+  // Snapshot the live SVG cropped to the site, with editor chrome (grid,
+  // handles, scale bar) stripped via data-export="skip" tags.
+  const buildExportSvg = () => {
+    let pts = [];
+    parcels.forEach((p) => pts.push(...p.points));
+    els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e))));
+    if (!pts.length && underlay) {
+      const sy = underlay.ftPerPxY || underlay.ftPerPx;
+      pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
+    }
+    if (!pts.length || !svgRef.current) return null;
+    const PAD = 60; // ft of margin around the site
+    const minX = Math.min(...pts.map((p) => p.x)) - PAD, maxX = Math.max(...pts.map((p) => p.x)) + PAD;
+    const minY = Math.min(...pts.map((p) => p.y)) - PAD, maxY = Math.max(...pts.map((p) => p.y)) + PAD;
+    const a = f2p({ x: minX, y: minY }), b = f2p({ x: maxX, y: maxY });
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+    const clone = svgRef.current.cloneNode(true);
+    clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
+    clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    clone.setAttribute("width", Math.round(w));
+    clone.setAttribute("height", Math.round(h));
+    clone.removeAttribute("style");
+    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
+    bg.setAttribute("fill", PAL.paper);
+    clone.insertBefore(bg, clone.firstChild);
+    return { clone, w, h };
+  };
+  const exportPNG = async () => {
+    const built = buildExportSvg();
+    if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
+    const { clone, w, h } = built;
+    // Rasterizing an SVG can't fetch external resources, so inline the aerial.
+    for (const img of clone.querySelectorAll("image")) {
+      const href = img.getAttribute("href") || img.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+      if (href && !href.startsWith("data:")) {
+        try {
+          const blob = await fetch(href, { mode: "cors" }).then((r) => { if (!r.ok) throw new Error(); return r.blob(); });
+          const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+          img.setAttribute("href", dataUrl);
+        } catch (_) { img.remove(); } // aerial blocked → export the plan without it
+      }
+    }
+    const xml = new XMLSerializer().serializeToString(clone);
+    const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
+    try {
+      const image = new Image();
+      await new Promise((res, rej) => { image.onload = res; image.onerror = rej; image.src = url; });
+      const scale = Math.max(1, Math.min(3, 3500 / Math.max(w, h))); // crisp but bounded
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((png) => {
+        if (!png) return;
+        const aEl = document.createElement("a");
+        aEl.href = URL.createObjectURL(png);
+        aEl.download = `${fileSlug()}.png`;
+        aEl.click();
+        URL.revokeObjectURL(aEl.href);
+      }, "image/png");
+    } finally { URL.revokeObjectURL(url); }
+  };
+  const printPDF = () => {
+    const built = buildExportSvg();
+    if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
+    const xml = new XMLSerializer().serializeToString(built.clone);
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const rows = [
+      ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
+      ["Building", `${f0(bldg)} sf`],
+      ["Lot coverage", `${f0(cov)}%`],
+      ["FAR (1-story)", f2(far)],
+      ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
+      ["Trailer stalls", f0(trailers)],
+      ["Impervious", `${f0(impPct)}%`],
+      ["Detention", `${f0(pondArea)} sf`],
+      ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
+    ];
+    const win = window.open("", "_blank");
+    if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
+    win.document.write(`<!doctype html><html><head><title>${esc(siteName)}</title><style>
+      @page { size: letter landscape; margin: 11mm; }
+      body { font-family: "Helvetica Neue", Helvetica, system-ui, sans-serif; color: #26231e; margin: 0; }
+      header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #26231e; padding-bottom: 6px; margin-bottom: 10px; }
+      h1 { font-size: 17px; margin: 0; } .sub { font-size: 11px; color: #6b6557; }
+      .wrap { display: flex; gap: 14px; align-items: flex-start; }
+      .plan { flex: 1; min-width: 0; } .plan svg { width: 100%; height: auto; border: 1px solid #d8d2c2; }
+      table { border-collapse: collapse; font-size: 11px; width: 200px; }
+      td { padding: 4px 6px; border-bottom: 1px solid #eee8da; } td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+      footer { margin-top: 8px; font-size: 9.5px; color: #8a8473; }
+    </style></head><body>
+      <header><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Planar Fit</span></header>
+      <div class="wrap">
+        <div class="plan">${xml}</div>
+        <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
+      </div>
+      <footer>Concept site plan — areas and counts are planning-level estimates, not a survey.</footer>
+    </body></html>`);
+    win.document.close();
+    // Print once the aerial has loaded (or after a beat if it's cached/absent).
+    const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
+    if (win.document.readyState === "complete") go(); else win.onload = go;
   };
 
   /* ------------ grid lines ------------ */
@@ -1671,6 +1798,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             Snap {settings.gridSize}′
           </button>
           {vSep}
+          <div style={{ position: "relative" }}>
+            <button className="gbtn" style={{ ...ghostBtn, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>Export ▾</button>
+            {exportMenu && (
+              <>
+                <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, width: 196 }}>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF(); }}>Print / save as PDF…</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>PNG image</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>JSON file (re-importable)</button>
+                </div>
+              </>
+            )}
+          </div>
+          {vSep}
           <button className="gbtn" style={{ ...ghostBtn, color: PAL.muted }} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
           <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
           <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
@@ -1686,7 +1827,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
-            <g>{gridLines()}</g>
+            <g data-export="skip">{gridLines()}</g>
 
             {/* scaled feet space */}
             <g>
@@ -1799,27 +1940,30 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 );
               })()}
 
-              {attachLinks}
               {parcelLabels}
               {labelEls}
-              {parcelEdgeLabels}
-              {handleNodes}
-              {sideAddNodes}
-              {parcelHandles}
-              {attachHint && (() => {
-                const p = f2p(attachHint);
-                return (
-                  <g pointerEvents="none">
-                    <circle cx={p.x} cy={p.y} r={9} fill="#16a34a" stroke="#ffffff" strokeWidth={1.75} />
-                    <line x1={p.x - 4.5} y1={p.y} x2={p.x + 4.5} y2={p.y} stroke="#ffffff" strokeWidth={1.75} />
-                    <line x1={p.x} y1={p.y - 4.5} x2={p.x} y2={p.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
-                  </g>
-                );
-              })()}
+              {/* selection / editing chrome — stripped from exports */}
+              <g data-export="skip">
+                {attachLinks}
+                {parcelEdgeLabels}
+                {handleNodes}
+                {sideAddNodes}
+                {parcelHandles}
+                {attachHint && (() => {
+                  const p = f2p(attachHint);
+                  return (
+                    <g pointerEvents="none">
+                      <circle cx={p.x} cy={p.y} r={9} fill="#16a34a" stroke="#ffffff" strokeWidth={1.75} />
+                      <line x1={p.x - 4.5} y1={p.y} x2={p.x + 4.5} y2={p.y} stroke="#ffffff" strokeWidth={1.75} />
+                      <line x1={p.x} y1={p.y - 4.5} x2={p.x} y2={p.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
+                    </g>
+                  );
+                })()}
+              </g>
             </g>
 
             {/* scale bar (sits above the status bar) */}
-            <g transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 42})`} pointerEvents="none">
+            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 42})`} pointerEvents="none">
               <line x1={0} y1={0} x2={scaleBarFt.px} y2={0} stroke={PAL.ink} strokeWidth={2} />
               <line x1={0} y1={-4} x2={0} y2={4} stroke={PAL.ink} strokeWidth={2} />
               <line x1={scaleBarFt.px} y1={-4} x2={scaleBarFt.px} y2={4} stroke={PAL.ink} strokeWidth={2} />
@@ -2049,7 +2193,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               <button style={chip} onClick={loadScen}>Load</button>
               <button style={{ ...chip, color: PAL.accent }} onClick={delScen}>✕</button>
             </div>
-            <button style={{ ...chip, marginTop: 7, width: "100%" }} onClick={exportJSON}>Export JSON</button>
+            <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+              <button style={{ ...chip, flex: 1 }} onClick={exportJSON}>Export JSON</button>
+              <button style={{ ...chip, flex: 1 }} onClick={() => importRef.current?.click()}>Import JSON</button>
+              <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+            </div>
           </Section>
 
           {/* legend */}
