@@ -897,6 +897,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       setEls((a) => a.map((x) => {
         if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
+        if (x.attachedTo === d.id && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
         const k = d.kids?.find((kk) => kk.id === x.id);
         return k ? { ...x, ...fitKid(nb, k) } : x;
       }));
@@ -916,6 +917,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       setEls((a) => a.map((x) => {
         if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
+        if (x.attachedTo === d.id && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
         const k = d.kids?.find((kk) => kk.id === x.id);
         return k ? { ...x, ...fitKid(nb, k) } : x;
       }));
@@ -1236,17 +1238,26 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // dock side. A dog-ear is part of the building: it sits flush at the end of the
   // dock wall and projects out into the court, taking that span out of dock use.
   // It's a building element (adds to SF), with no docks/label of its own.
-  const makeDogEar = (b, nx, ny, sign) => {
+  // Geometry of a dog-ear (size + center offset) for a given building box.
+  const dogEarGeom = (bx, side, sign) => {
+    const [nx, ny] = SIDE_N[side];
     const alongIsX = ny !== 0; // horizontal (top/bottom) dock wall → corners spread along X
     const w = alongIsX ? DOGEAR_W : DOGEAR_D;
     const h = alongIsX ? DOGEAR_D : DOGEAR_W;
     // outer edge flush with the building corner (inset half its along-span), and
     // projecting DOGEAR_D out past the dock face.
-    const lx = alongIsX ? sign * (b.w / 2 - DOGEAR_W / 2) : nx * (b.w / 2 + DOGEAR_D / 2);
-    const ly = alongIsX ? ny * (b.h / 2 + DOGEAR_D / 2) : sign * (b.h / 2 - DOGEAR_W / 2);
-    const off = rot2(lx, ly, b.rot);
-    return { id: uid(), type: "building", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, noFit: true, noLabel: true, dock: "none" };
+    const lx = alongIsX ? sign * (bx.w / 2 - DOGEAR_W / 2) : nx * (bx.w / 2 + DOGEAR_D / 2);
+    const ly = alongIsX ? ny * (bx.h / 2 + DOGEAR_D / 2) : sign * (bx.h / 2 - DOGEAR_W / 2);
+    const off = rot2(lx, ly, bx.rot);
+    return { cx: bx.cx + off.x, cy: bx.cy + off.y, w, h, rot: ((bx.rot % 360) + 360) % 360 };
   };
+  const makeDogEar = (b, side, sign) => ({
+    id: uid(), type: "building", ...dogEarGeom(b, side, sign),
+    attachedTo: b.id, noFit: true, noLabel: true, dock: "none", dogEar: { side, sign },
+  });
+  // Re-anchor a dog-ear to the building corner when the building is resized
+  // (keeps its fixed 55′×60′ size, slides to the new corner / dock face).
+  const fitDogEar = (nb, de) => dogEarGeom(nb, de.side, de.sign);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
   // Add a strip element of `type`/`depth` flush against one side of the building
@@ -1273,7 +1284,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const addDogEars = (b) => {
     const { dockSides } = dockSidesOf(b);
     const list = [];
-    dockSides.forEach((s) => { const [nx, ny] = SIDE_N[s]; list.push(makeDogEar(b, nx, ny, 1), makeDogEar(b, nx, ny, -1)); });
+    dockSides.forEach((s) => list.push(makeDogEar(b, s, 1), makeDogEar(b, s, -1)));
     addBuildingEls(list, b.id);
   };
   // Trailer parking on every free side opposite the dock(s).
@@ -1733,7 +1744,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
             let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
             const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
-            return plusNode(`dog${name}${sign}`, pos, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => addBuildingEls([makeDogEar(el, nx, ny, sign)], el.id), 8);
+            return plusNode(`dog${name}${sign}`, pos, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => addBuildingEls([makeDogEar(el, name, sign)], el.id), 8);
           });
         })}
       </g>
@@ -2476,7 +2487,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
             <Field label="Trailer W / L"><span><input style={{ ...numInput, width: 42 }} value={settings.trailerW} onChange={(e) => setSettings((s) => ({ ...s, trailerW: +e.target.value || 12 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.trailerL} onChange={(e) => setSettings((s) => ({ ...s, trailerL: +e.target.value || 53 }))} /></span></Field>
             <Field label="Trailer aisle"><input style={numInput} value={settings.trailerAisle} onChange={(e) => setSettings((s) => ({ ...s, trailerAisle: +e.target.value || 0 }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
           {/* element default colors — edit without selecting anything */}
@@ -2625,26 +2635,6 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
     });
     ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
-  }
-  if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
-    const dock = el.dock || "single";
-    const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
-    const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
-    const sides = dock === "cross"
-      ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
-      : [side];
-    sides.forEach((s) => {
-      const horiz = s === "top" || s === "bottom";
-      const bx = s === "right" ? w - Dpx : 0;
-      const by = s === "bottom" ? h - Dpx : 0;
-      const bw = horiz ? w : Dpx, bh = horiz ? Dpx : h;
-      parts.push(<rect key={`db${s}`} x={tl.x + bx} y={tl.y + by} width={bw} height={bh} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-      const n = Math.floor((horiz ? el.w : el.h) / 12); // door divisions every 12'
-      for (let k = 1; k < n; k++) {
-        if (horiz) { const x = tl.x + bx + k * 12 * ppf; parts.push(<line key={`db${s}d${k}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + bh} stroke="#5b6470" strokeWidth={0.5} />); }
-        else { const y = tl.y + by + k * 12 * ppf; parts.push(<line key={`db${s}d${k}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + bw} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
-      }
-    });
   }
   if (el.type === "road") { // dashed centerline down the long axis
     if (el.w >= el.h) parts.push(<line key="cl" x1={tl.x} y1={tl.y + h / 2} x2={tl.x + w} y2={tl.y + h / 2} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
