@@ -1529,16 +1529,31 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   })();
 
   /* ----------------------------- UI ----------------------------- */
+  // primary buttons (inspector actions)
   const btn = (active) => ({
-    padding: "6px 11px", fontSize: 12.5, borderRadius: 7, cursor: "pointer",
-    border: `1px solid ${active ? PAL.accent : PAL.panelLine}`,
-    background: active ? PAL.accent : "#fbfaf6", color: active ? "#fff" : PAL.ink,
-    fontWeight: active ? 600 : 500, fontFamily: "inherit",
+    padding: "6px 12px", fontSize: 12.5, borderRadius: 8, cursor: "pointer",
+    border: `1px solid ${active ? PAL.accent : "#ddd6c5"}`,
+    background: active ? PAL.accent : "#fff", color: active ? "#fff" : PAL.ink,
+    fontWeight: 600, fontFamily: "inherit",
+    boxShadow: active ? "none" : "0 1px 2px rgba(28,25,20,0.05)",
   });
-  const chip = { padding: "5px 9px", fontSize: 12, borderRadius: 6, border: `1px solid ${PAL.panelLine}`, background: "#fbfaf6", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
-  const numInput = { width: 58, padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid ${PAL.panelLine}`, borderRadius: 5, color: PAL.ink, background: "#fff" };
-  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "8px 9px", fontSize: 12.5, borderRadius: 6, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 600 : 500 });
-  const toolDivider = <span style={{ width: 1, alignSelf: "stretch", background: PAL.panelLine, margin: "2px 3px" }} />;
+  // toolbar segmented-control buttons (active = raised white card)
+  const tbtn = (active) => ({
+    padding: "5px 11px", fontSize: 12.5, borderRadius: 7, cursor: "pointer",
+    border: "1px solid transparent", whiteSpace: "nowrap",
+    background: active ? "#fff" : "transparent", color: active ? PAL.accent : PAL.ink,
+    fontWeight: active ? 700 : 500, fontFamily: "inherit",
+    boxShadow: active ? "0 1px 3px rgba(28,25,20,0.16)" : "none",
+  });
+  // quiet (ghost) buttons for the top-bar action cluster
+  const ghostBtn = { padding: "5px 10px", fontSize: 12, borderRadius: 7, border: "1px solid transparent", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
+  const iconBtn = { ...ghostBtn, width: 28, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 14.5 };
+  const chip = { padding: "5px 10px", fontSize: 12, borderRadius: 7, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const numInput = { width: 58, padding: "5px 8px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 7, color: PAL.ink, background: "#fff" };
+  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 9px", fontSize: 12.5, borderRadius: 6, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
+  const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 10px 32px rgba(28,25,20,0.16), 0 2px 8px rgba(28,25,20,0.08)", padding: 5 };
+  const vSep = <span style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 5px" }} />;
+  const toolDivider = <span style={{ width: 1, height: 16, background: "#ddd5c4", margin: "0 3px", alignSelf: "center" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
@@ -1549,9 +1564,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (id !== "parking") setParkingMenu(false);
   };
   const metricRow = (label, value, sub) => (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: `1px solid ${PAL.panelLine}` }}>
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5" }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
-      <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13.5, color: PAL.ink, fontWeight: 600 }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 11 }}> {sub}</span>}</span>
+      <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, color: PAL.ink, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>{value}{sub && <span style={{ color: PAL.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span>}</span>
     </div>
   );
 
@@ -1564,21 +1579,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       fontFamily: "'Helvetica Neue', Helvetica, system-ui, sans-serif", color: PAL.ink, overflow: "hidden" }}>
 
       {/* top bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: PAL.panelBg, borderBottom: `1px solid ${PAL.panelLine}`, flexWrap: "wrap" }}>
-        {onBackToMap && <button style={chip} onClick={onBackToMap}>← Map</button>}
-        <div style={{ fontWeight: 700, letterSpacing: "0.04em", fontSize: 13.5, textTransform: "uppercase", marginRight: 4 }}>
-          <span style={{ color: PAL.accent }}>▦</span> Site Planner <span style={{ color: PAL.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· industrial</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", background: PAL.panelBg, borderBottom: `1px solid ${PAL.panelLine}`, boxShadow: "0 1px 6px rgba(28,25,20,0.05)", flexWrap: "wrap", position: "relative", zIndex: 60 }}>
+        {onBackToMap && <button className="gbtn" style={ghostBtn} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3.5, background: PAL.accent, display: "inline-block", boxShadow: "0 1px 2px rgba(194,65,12,0.4)" }} />
+          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15 }}>Planar Fit</span>
+          <span style={{ color: PAL.muted, fontSize: 11.5, fontWeight: 500, borderLeft: `1px solid ${PAL.panelLine}`, paddingLeft: 8 }}>Industrial Site Planner</span>
         </div>
-        <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-          <button style={btn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
+
+        {/* tools — segmented control */}
+        <div className="seg" style={{ display: "flex", alignItems: "center", gap: 2, background: "#f1ece1", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, padding: 3, flexWrap: "wrap" }}>
+          <button style={tbtn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
 
           {/* parcel tools grouped in one menu */}
           <div style={{ position: "relative" }}>
-            <button style={btn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
+            <button style={tbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
             {toolMenu && (
               <>
                 <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 248 }}>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 248 }}>
                   <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
                   <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
                   <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
@@ -1595,11 +1614,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
             const t = TOOLS.find((x) => x.id === id);
             if (id === "building") return (
               <div key={id} style={{ position: "relative" }}>
-                <button style={btn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
+                <button style={tbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
                 {buildingMenu && (
                   <>
                     <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 200 }}>
+                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 200 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
                       {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                         <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
@@ -1613,11 +1632,11 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
                 <div key={id} style={{ position: "relative" }}>
-                  <button style={btn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
+                  <button style={tbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
                   {parkingMenu && (
                     <>
                       <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div style={{ position: "absolute", top: "calc(100% + 5px)", left: 0, zIndex: 50, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.16)", padding: 6, width: 248 }}>
+                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, width: 248 }}>
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Parking rows</div>
                         {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
                           <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
@@ -1628,21 +1647,30 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                 </div>
               );
             }
-            return <button key={id} style={btn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
+            return <button key={id} style={tbtn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
           })}
 
           {toolDivider}
 
-          <button style={btn(tool === "measure")} onClick={() => selectTool("measure")}>Measure</button>
+          <button style={tbtn(tool === "measure")} onClick={() => selectTool("measure")}>Measure</button>
         </div>
         <div style={{ flex: 1 }} />
-        <button style={chip} onClick={undo} title="Undo (Ctrl+Z)">↶ Undo</button>
-        <button style={chip} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
-        <button style={chip} onClick={fit}>Fit</button>
-        <button style={{ ...chip, color: settings.snap ? PAL.accent : PAL.muted, borderColor: settings.snap ? PAL.accent : PAL.panelLine }} onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">Snap {settings.gridSize}′</button>
-        <button style={chip} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
-        <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
-        <button style={chip} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
+
+        {/* action cluster */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <button className="gbtn" style={iconBtn} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
+          <button className="gbtn" style={iconBtn} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
+          <button className="gbtn" style={iconBtn} onClick={fit} title="Zoom to fit">⤢</button>
+          <button className="gbtn" style={{ ...ghostBtn, display: "flex", alignItems: "center", gap: 6, color: settings.snap ? PAL.ink : PAL.muted, fontWeight: 600 }}
+            onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
+            <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#16a34a" : "#cfc6af", display: "inline-block" }} />
+            Snap {settings.gridSize}′
+          </button>
+          {vSep}
+          <button className="gbtn" style={{ ...ghostBtn, color: PAL.muted }} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
+          <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
+          <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
+        </div>
       </div>
 
       {/* body */}
@@ -1786,8 +1814,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               })()}
             </g>
 
-            {/* scale bar */}
-            <g transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 26})`} pointerEvents="none">
+            {/* scale bar (sits above the status bar) */}
+            <g transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 42})`} pointerEvents="none">
               <line x1={0} y1={0} x2={scaleBarFt.px} y2={0} stroke={PAL.ink} strokeWidth={2} />
               <line x1={0} y1={-4} x2={0} y2={4} stroke={PAL.ink} strokeWidth={2} />
               <line x1={scaleBarFt.px} y1={-4} x2={scaleBarFt.px} y2={4} stroke={PAL.ink} strokeWidth={2} />
@@ -1798,9 +1826,18 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-              <div style={{ textAlign: "center", color: PAL.muted, background: "rgba(255,255,255,0.7)", padding: "16px 22px", borderRadius: 10, border: `1px dashed ${PAL.gridMajor}` }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink, marginBottom: 4 }}>Start your site</div>
-                <div style={{ fontSize: 12.5 }}>Look up a parcel by county at right, drop a screenshot underlay, type a lot size, or use the <b>Parcel</b> tool to draw a boundary.</div>
+              <div style={{ textAlign: "left", color: PAL.muted, background: "rgba(255,255,255,0.88)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
+                {[
+                  ["1", <>Look up a <b>parcel by county</b> in the panel at right,</>],
+                  ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
+                  ["3", <>or draw a boundary with the <b>Parcel</b> tool / type a lot size.</>],
+                ].map(([n, body]) => (
+                  <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
+                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
+                    <span>{body}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1814,15 +1851,18 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           )}
 
           {/* status bar */}
-          <div style={{ position: "absolute", left: 0, bottom: 0, display: "flex", gap: 14, alignItems: "center", padding: "5px 12px", fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace", background: "rgba(244,241,234,0.85)", borderTop: `1px solid ${PAL.panelLine}`, borderRight: `1px solid ${PAL.panelLine}`, borderTopRightRadius: 8 }}>
-            <span>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
-            <span>{Math.round(view.ppf * 100) / 100} px/ft</span>
-            <span style={{ color: PAL.ink }}>{sidewalkFor ? "Click the side of the building where you want the sidewalk (Esc to cancel)" : attachFor ? "Click the element to attach the selected one to — they'll move together (Esc to cancel)" : curHint}</span>
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", gap: 0, alignItems: "center", padding: "5px 14px", fontSize: 11.5, color: PAL.muted, background: "rgba(252,251,247,0.92)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", borderTop: `1px solid ${PAL.panelLine}` }}>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 110, fontVariantNumeric: "tabular-nums" }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 80 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
+            <span style={{ width: 1, height: 14, background: PAL.panelLine, margin: "0 12px" }} />
+            <span style={{ color: (sidewalkFor || attachFor) ? PAL.accent : "#6b6557", fontWeight: (sidewalkFor || attachFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : curHint}
+            </span>
           </div>
         </div>
 
         {/* inspector */}
-        <div style={{ width: 300, background: PAL.panelBg, borderLeft: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "12px 14px" }}>
+        <div style={{ width: 312, background: "#fcfbf7", borderLeft: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "14px 16px" }}>
           {/* county parcel lookup */}
           <Section title="Parcel lookup">
             <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
@@ -1958,7 +1998,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   </div>
                 );
               })()}
-              <button style={{ ...chip, marginTop: 8, color: PAL.accent }} onClick={deleteSel}>Delete element</button>
+              <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                <button style={chip} onClick={() => toggleLock(selEl.id)}>{selEl.locked ? "🔒 Unlock" : "Lock"}</button>
+                <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete element</button>
+              </div>
             </Section>
           )}
 
@@ -2006,10 +2049,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           </Section>
 
           {/* legend */}
-          <div style={{ marginTop: 8, paddingTop: 10, borderTop: `1px solid ${PAL.panelLine}`, display: "flex", flexWrap: "wrap", gap: "6px 12px" }}>
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: "7px 14px", padding: "10px 12px", background: "#f7f4ec", borderRadius: 10 }}>
             {Object.entries(TYPE).map(([k, v]) => (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: PAL.muted }}>
-                <span style={{ width: 12, height: 12, background: v.fill, border: `1px solid ${v.stroke}`, borderRadius: 2, display: "inline-block" }} />{v.label.split(" / ")[0]}
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
+                <span style={{ width: 11, height: 11, background: v.fill, border: `1px solid ${v.stroke}`, borderRadius: 3, display: "inline-block" }} />{v.label.split(" / ")[0]}
               </div>
             ))}
           </div>
@@ -2026,7 +2069,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         return (
         <>
           <div onClick={() => setTypeMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
-          <div style={{ position: "fixed", left, ...vEdge, zIndex: 1999, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", padding: 6, width: MW, maxHeight: maxH, overflowY: "auto" }}>
+          <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
             {(() => {
               const t = els.find((el) => el.id === typeMenu.id);
               if (!t) return null;
@@ -2179,12 +2222,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
 function Section({ title, children, collapsed }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginBottom: 8, userSelect: "none" }}>
-        <span style={{ fontSize: 10, color: "#c2410c", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#2c2a26" }}>{title}</span>
+    <div style={{ marginBottom: 4, paddingBottom: 12, borderBottom: "1px solid #f0ebdf" }}>
+      <div onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "6px 0", userSelect: "none" }}>
+        <span style={{ fontSize: 8.5, color: "#b3aa92", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", width: 9 }}>▶</span>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b6557" }}>{title}</span>
       </div>
-      {open && <div>{children}</div>}
+      {open && <div style={{ paddingTop: 4 }}>{children}</div>}
     </div>
   );
 }

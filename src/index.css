@@ -1,5 +1,12 @@
 * { box-sizing: border-box; }
 
+:root {
+  --ink: #26231e;
+  --muted: #8a8473;
+  --line: #e7e2d6;
+  --accent: #c2410c;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -7,12 +14,14 @@ html, body, #root {
 
 body {
   background: #efeadf;
-  font-family: "Helvetica Neue", Helvetica, system-ui, sans-serif;
+  font-family: "Inter", "Helvetica Neue", Helvetica, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color: var(--ink);
 }
 
 /* App-like UI: double-clicking the canvas/labels is a real action (close a
-   polygon, change an element's type), so suppress the browser's default text
+   polygon, open an element's menu), so suppress the browser's default text
    selection that would otherwise highlight stray labels across the page. */
 #root {
   -webkit-user-select: none;
@@ -28,3 +37,38 @@ input, textarea {
 }
 
 input, select, button, textarea { font-family: inherit; }
+
+/* ---- interaction states (inline styles can't express these) ---- */
+button { transition: filter .12s ease, background-color .12s ease, border-color .12s ease, box-shadow .12s ease, transform .04s ease; }
+button:hover:not(:disabled) { filter: brightness(.965); }
+button:active:not(:disabled) { transform: translateY(0.5px); }
+button:disabled { opacity: .55; cursor: default; }
+
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid rgba(194, 65, 12, .4);
+  outline-offset: 1px;
+}
+input:not([type="checkbox"]):not([type="range"]):focus, select:focus {
+  border-color: #c9ba9f !important;
+  box-shadow: 0 0 0 3px rgba(194, 65, 12, .08);
+  outline: none;
+}
+input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
+
+/* ghost buttons (transparent at rest) need explicit hover fills */
+.gbtn:hover:not(:disabled) { background: #f1ece1 !important; }
+.gbtn-danger:hover:not(:disabled) { background: #fcebe3 !important; }
+
+/* segmented tool control + dropdown menus */
+.seg button:hover:not(:disabled) { background: rgba(255, 255, 255, .65) !important; filter: none; }
+.menu button:hover:not(:disabled) { background: #f4efe5 !important; filter: none; }
+
+/* panel scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #d9d2c1;
+  border-radius: 8px;
+  border: 2.5px solid #fcfbf7;
+}
+::-webkit-scrollbar-thumb:hover { background: #c8c0ac; }
