@@ -730,22 +730,23 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     }
     if (d.mode === "move") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      const shift = e.shiftKey; // live — works whether Shift is held before or mid-drag
       if (d.kind === "el") {
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
         const g = d.members.find((m) => m.id === d.id);
         let effDx, effDy, hint = null;
         if (g.cx !== undefined) {
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
-          const wantSnap = settings.snap || d.shift; // Shift forces eager flush-snap
+          const wantSnap = settings.snap || shift; // Shift forces eager flush-snap
           if (wantSnap) { // flush-snap to neighbouring (non-member) element edges
             const ids = new Set(d.members.map((m) => m.id));
             const others = els.filter((x) => !ids.has(x.id) && isAxisRect(x));
-            const thr = d.shift ? Math.min(40, 24 / view.ppf) : Math.min(20, 10 / view.ppf);
+            const thr = shift ? Math.min(40, 24 / view.ppf) : Math.min(20, 10 / view.ppf);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: g.w, h: g.h }, others, thr);
             ncx = sc.cx; ncy = sc.cy;
             // pending-bond indicator: is the grabbed element now flush against a host?
             if (d.canAttach) {
-              const hit = flushContact({ cx: ncx, cy: ncy, w: g.w, h: g.h, rot: 0 }, others, d.shift ? 6 : 2);
+              const hit = flushContact({ cx: ncx, cy: ncy, w: g.w, h: g.h, rot: 0 }, others, shift ? 6 : 2);
               if (hit && rootIdOf(hit.id) !== d.id) hint = hit;
             }
           }
@@ -854,9 +855,9 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       }
       setDraftRect(null);
     }
-    // Bond on drop: an element dropped flush against another attaches to it so
-    // they move together — via Shift-drag, or with Snap on. Alt drops it free.
-    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && !e.altKey && d.bondTarget && (d.shift || settings.snap)) {
+    // Bond on drop: if a flush bond target was found during the drag (Shift held,
+    // or Snap on), attach so they move together. Alt drops it free.
+    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && d.bondTarget && !e.altKey) {
       const root = rootIdOf(d.bondTarget);
       if (root !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: root } : x));
     }
@@ -1096,10 +1097,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const members = assemblyOf(id).map((m) => m.points
       ? { id: m.id, points: m.points }
       : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
-    // Shift-drag = bond mode (eager snap + green "+"). Can only bond a free,
-    // rectangular element that isn't already a host of something else.
+    // Bonding (Shift-drag / snap) can only attach a free, rectangular element
+    // that isn't already a host of something else. Shift is read live in onMove.
     const canAttach = !el.attachedTo && !el.points && !els.some((x) => x.attachedTo === id);
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, shift: e.shiftKey, canAttach };
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canAttach };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
