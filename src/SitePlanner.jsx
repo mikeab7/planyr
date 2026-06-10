@@ -2031,7 +2031,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               <div style={{ textAlign: "left", color: PAL.muted, background: "rgba(255,255,255,0.88)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
                 {[
-                  ["1", <>Look up a <b>parcel by county</b> in the panel at left,</>],
+                  ["1", <>Pick a <b>parcel from the map</b> (‹ Map) to start from real county data,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
                   ["3", <>or draw a boundary with the <b>Parcel</b> tool on the right.</>],
                 ].map(([n, body]) => (
@@ -2148,46 +2148,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
         {/* left properties panel */}
         <div style={{ width: 312, flex: "none", order: 1, background: "#fcfbf7", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "14px 16px" }}>
-          {/* county parcel lookup — collapses itself once a parcel exists */}
-          <Section title="Parcel lookup" collapsed={parcels.length > 0}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
-              <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={county} onChange={(e) => onCountyChange(e.target.value)}>
-                {Object.entries(COUNTIES).map(([k, c]) => <option key={k} value={k}>{c.label}{c.experimental ? " (beta)" : ""}</option>)}
-              </select>
-            </div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
-              <select style={{ ...numInput, width: 96, fontFamily: "inherit" }} value={searchMode} onChange={(e) => setSearchMode(e.target.value)}>
-                <option value="address">Address</option>
-                <option value="id">Account #</option>
-              </select>
-              <input style={{ ...numInput, width: "100%", fontFamily: "inherit" }} placeholder={searchMode === "address" ? "1234 Main St" : "Account / parcel id"} value={searchVal}
-                onChange={(e) => setSearchVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runLookup(); }} />
-              <button style={btn(false)} disabled={lookupBusy} onClick={runLookup}>{lookupBusy ? "…" : "Find"}</button>
-            </div>
-            {COUNTIES[county]?.help && <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 6 }}>{COUNTIES[county].help}</div>}
-            <details style={{ marginBottom: 6 }}>
-              <summary style={{ fontSize: 11, color: PAL.muted, cursor: "pointer" }}>Service / layer URL</summary>
-              <input style={{ ...numInput, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: 10.5, marginTop: 5 }} value={lookupUrl} onChange={(e) => setLookupUrl(e.target.value)} />
-            </details>
-            {lookupErr && <div style={{ fontSize: 11.5, color: PAL.accent, marginBottom: 6, lineHeight: 1.45 }}>{lookupErr}</div>}
-            {lookupRes.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 4 }}>
-                {lookupRes.map((entry, i) => {
-                  const attrs = entry.ft.attributes || {};
-                  const addr = entry.addrField ? attrs[entry.addrField] : null;
-                  const id = entry.idField ? attrs[entry.idField] : null;
-                  return (
-                    <button key={i} style={{ ...chip, textAlign: "left", lineHeight: 1.35 }} onClick={() => importFeature(entry)}>
-                      <div style={{ color: PAL.ink, fontWeight: 600, fontSize: 11.5 }}>{addr || "(no address)"}</div>
-                      {id != null && <div style={{ color: PAL.muted, fontSize: 10.5, fontFamily: "ui-monospace, monospace" }}>#{String(id)}</div>}
-                    </button>
-                  );
-                })}
-                <div style={{ fontSize: 10.5, color: PAL.muted }}>Click a result to import its boundary →</div>
-              </div>
-            )}
-          </Section>
-
           {/* aerial underlay */}
           <Section title="Aerial underlay">
             {!underlay ? (
