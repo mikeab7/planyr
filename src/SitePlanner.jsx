@@ -1266,7 +1266,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
   // Striped 50′-deep, 12′-stall trailer parking on the side opposite a single-load
   // dock. Oriented so the stalls stripe ALONG the wall (rotate +90 on a side wall).
-  const makeOppTrailer = (b, name) => {
+  const makeOppTrailer = (b, name, attachId = b.id) => {
     const [nx, ny] = SIDE_N[name];
     const horiz = ny !== 0;                 // top/bottom wall → stalls run along X
     const depth = OPP_TRAILER_D, along = horiz ? b.w : b.h;
@@ -1274,12 +1274,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     return {
       id: uid(), type: "trailer", cx: b.cx + off.x, cy: b.cy + off.y,
       w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360,
-      attachedTo: b.id, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
+      attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
     };
   };
   const addOppTrailer = (b, name) => addBuildingEls([makeOppTrailer(b, name)], b.id);
-  // 135′ truck court on every dock side.
-  const addTruckCourt = (b) => { const { dockSides } = dockSidesOf(b); addBuildingEls(dockSides.map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D)), b.id); };
+  // Trailer parking flush against the FAR (outer) edge of a truck court — where
+  // trailers actually back in. Bonded to the court's building so it moves as one.
+  const addCourtTrailer = (tc) => { const root = rootIdOf(tc.id); addBuildingEls([makeOppTrailer(tc, tc.truckCourt.side, root)], root); };
+  // 135′ truck court on every dock side (tagged so it can sprout trailer parking).
+  const addTruckCourt = (b) => { const { dockSides } = dockSidesOf(b); addBuildingEls(dockSides.map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id); };
   // Dog-ears at both corners of every dock side.
   const addDogEars = (b) => {
     const { dockSides } = dockSidesOf(b);
@@ -1730,7 +1733,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           const isDock = dockSides.includes(name), isTrailer = trailerSides.includes(name);
           const fill = isDock ? "#b45309" : isTrailer ? "#0e7490" : "#16a34a";
           const title = isDock ? `Add ${TRUCK_COURT_D}′ truck dock + drive` : isTrailer ? `Add ${OPP_TRAILER_D}′ striped trailer parking` : `Add ${SIDEWALK_W}′ sidewalk`;
-          const onAdd = isDock ? () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D)
+          const onAdd = isDock ? () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } })
             : isTrailer ? () => addOppTrailer(el, name)
             : () => addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W);
           return plusNode(`add${name}`, pos, fill, title, onAdd);
@@ -1750,6 +1753,21 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
         })}
       </g>
     );
+  })();
+
+  // "+" on a selected TRUCK COURT, on its far (outer) edge — where trailer
+  // parking backs in. Adds 50′ striped trailer parking there.
+  const courtAddNodes = (() => {
+    if (sel?.kind !== "el" || tool !== "select") return null;
+    const el = els.find((x) => x.id === sel.id);
+    if (!el || el.locked || el.points || !el.truckCourt) return null;
+    const [nx, ny] = SIDE_N[el.truckCourt.side];
+    const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
+    const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });        // outer-edge midpoint
+    const cpx = f2p({ x: el.cx, y: el.cy });
+    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
+    return <g>{plusNode("courtTrailer", pos, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el))}</g>;
   })();
 
   const handleNodes = (() => {
@@ -2171,6 +2189,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 {parcelEdgeLabels}
                 {handleNodes}
                 {sideAddNodes}
+                {courtAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
                 {attachHint && (() => {
@@ -2388,6 +2407,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                       </div>
                     );
                   })()}
+                  {selEl.truckCourt && (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Truck court</div>
+                      <button style={{ ...chip, textAlign: "left", color: "#0e7490", width: "100%" }} onClick={() => addCourtTrailer(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (far side)</button>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
