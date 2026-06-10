@@ -61,6 +61,12 @@ const rot2 = (x, y, deg) => {
   const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
   return { x: x * c - y * s, y: x * s + y * c };
 };
+// Black or white label text depending on how light the element's fill is.
+const labelInk = (hex) => {
+  const h = (hex || "#ffffff").replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16) / 255, g = parseInt(h.slice(2, 4), 16) / 255, b = parseInt(h.slice(4, 6), 16) / 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 0.6 ? "#1a1a1a" : "#ffffff";
+};
 // Pick the CSS resize cursor that matches an on-screen direction vector
 // (so grips read correctly even when the element is rotated).
 const resizeCursor = (dx, dy) => {
@@ -546,6 +552,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
+      if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setPendMeasure(null); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
@@ -1136,6 +1143,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       setAttachFor(null);
       return;
     }
+    if (el && el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     pushHistory();
     // Snapshot every member of the assembly so they move together.
@@ -1214,6 +1222,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const setDockOf = (id, dock) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, dock } : el)));
+  };
+  const toggleLock = (id) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
   };
   const setDockSideOf = (id, side) => {
     pushHistory();
@@ -1344,16 +1356,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
-    const fs = 11 * ls, lh = 14.5 * ls, padX = 9 * ls, padY = 5.5 * ls, charW = fs * 0.6;
-    const maxLen = Math.max(...lines.map((t) => t.length));
-    const boxW = maxLen * charW + padX * 2, boxH = lines.length * lh + padY * 2;
-    const top = c.y - boxH / 2, first = top + padY + fs * 0.82;
+    const fs = 11 * ls, lh = 14.5 * ls;
+    // Element fills are solid, so labels need no chip — just contrasting text.
+    const top = c.y - (lines.length * lh) / 2, first = top + fs * 0.82;
+    const ink = labelInk(TYPE[el.type].fill);
     return (
       <g key={`lbl${el.id}`} pointerEvents="none">
-        <rect x={c.x - boxW / 2} y={top} width={boxW} height={boxH} rx={7 * ls}
-          fill="rgba(17,24,39,0.74)" stroke="rgba(255,255,255,0.16)" strokeWidth={1} />
+        {el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
         <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
-          fontFamily="ui-monospace, Menlo, monospace" fill="#f4f6f9" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>
+          fontFamily="ui-monospace, Menlo, monospace" fill={ink} style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
         </text>
       </g>
@@ -1397,6 +1408,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const sideAddNodes = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
+    if (el && el.locked) return null;
     if (!el || el.type !== "building" || el.points) return null;
     const dock = el.dock || "single";
     const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
@@ -1430,7 +1442,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const handleNodes = (() => {
     if (sel?.kind !== "el") return null;
     const el = els.find((x) => x.id === sel.id);
-    if (!el || el.points) return null; // polygon elements have no box resize/rotate handles
+    if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const corners = elCorners(el).map(f2p);
     const signs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const topMid = f2p({ x: el.cx + rot2(0, -el.h / 2, el.rot).x, y: el.cy + rot2(0, -el.h / 2, el.rot).y });
@@ -2051,6 +2063,8 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
                   {t.attachedTo
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach from its host</button>
                     : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to another element — then click it</button>}
+                  <div style={hdr(true)}>Lock</div>
+                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "🔒 Unlock" : "🔒 Lock in place"} <span style={{ color: PAL.muted }}>(L)</span></button>
                 </>
               );
             })()}
