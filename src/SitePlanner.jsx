@@ -379,6 +379,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
+  const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
@@ -965,7 +966,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const { src, w, h } = await loadAndDownscaleImage(file);
       pushHistory();
       // Start at ~600 ft across the image width; the user calibrates precisely next.
-      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 0.85, locked: false });
+      // Auto-locked (click-through) so you can immediately draw over it.
+      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
       setUnderlayErr(false);
       setUnderlayLoading(true);
       setCalib(null);
@@ -1748,6 +1750,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
   const selEl = sel?.kind === "el" ? els.find((e) => e.id === sel.id) : null;
   const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
+  const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+  const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
@@ -1786,6 +1790,35 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           </button>
           {vSep}
           <div style={{ position: "relative" }}>
+            <button className="gbtn" style={{ ...ghostBtn, fontWeight: 600 }} onClick={() => setSaveMenu((o) => !o)}>Save / load ▾</button>
+            {saveMenu && (
+              <>
+                <div onClick={() => setSaveMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, width: 268, padding: 10 }}>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Scenarios</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input style={{ ...numInput, width: "100%", fontFamily: "inherit" }} placeholder="Scenario name" value={scenName} onChange={(e) => setScenName(e.target.value)} />
+                    <button style={chip} onClick={saveScen}>Save</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+                    <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={scenPick} onChange={(e) => setScenPick(e.target.value)}>
+                      <option value="">— saved scenarios —</option>
+                      {scenList.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <button style={chip} onClick={loadScen}>Load</button>
+                    <button style={{ ...chip, color: PAL.accent }} onClick={delScen}>✕</button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+                    <button style={{ ...chip, flex: 1 }} onClick={() => { setSaveMenu(false); exportJSON(); }}>Export JSON</button>
+                    <button style={{ ...chip, flex: 1 }} onClick={() => importRef.current?.click()}>Import JSON</button>
+                    <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                      onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <div style={{ position: "relative" }}>
             <button className="gbtn" style={{ ...ghostBtn, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>Export ▾</button>
             {exportMenu && (
               <>
@@ -1808,7 +1841,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       {/* body */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
             style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor) ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
@@ -1842,8 +1875,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
-                  fill={isSel ? PAL.accentSoft : "#faf7f0"} fillOpacity={isSel ? 0.28 : 0.12}
-                  stroke={isSel ? PAL.accent : PAL.parcel} strokeWidth={isSel ? 3 : 2}
+                  fill={pc.fill || "#faf7f0"} fillOpacity={pc.fillOpacity ?? 0.12}
+                  stroke={isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={isSel ? 3 : 2}
                   style={{ cursor: tool === "select" ? "move" : "crosshair" }}
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
@@ -1998,9 +2031,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               <div style={{ textAlign: "left", color: PAL.muted, background: "rgba(255,255,255,0.88)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
                 {[
-                  ["1", <>Look up a <b>parcel by county</b> in the panel at right,</>],
+                  ["1", <>Look up a <b>parcel by county</b> in the panel at left,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
-                  ["3", <>or draw a boundary with the <b>Parcel</b> tool / type a lot size.</>],
+                  ["3", <>or draw a boundary with the <b>Parcel</b> tool on the right.</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
                     <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
@@ -2031,7 +2064,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
         </div>
 
         {/* right-side tool rail */}
-        <div style={{ width: 150, flex: "none", background: PAL.panelBg, borderLeft: `1px solid ${PAL.panelLine}`, display: "flex", flexDirection: "column", gap: 4, padding: "12px 10px", overflowY: "visible", position: "relative", zIndex: 30 }}>
+        <div style={{ width: 158, flex: "none", order: 3, background: PAL.panelBg, borderLeft: `1px solid ${PAL.panelLine}`, display: "flex", flexDirection: "column", gap: 4, padding: "12px 10px", overflowY: "visible", position: "relative", zIndex: 30 }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b6557", padding: "0 2px 4px" }}>Tools</div>
           <button style={rbtn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
 
@@ -2113,10 +2146,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           </div>
         </div>
 
-        {/* inspector */}
-        <div style={{ width: 312, background: "#fcfbf7", borderLeft: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "14px 16px" }}>
-          {/* county parcel lookup */}
-          <Section title="Parcel lookup">
+        {/* left properties panel */}
+        <div style={{ width: 312, flex: "none", order: 1, background: "#fcfbf7", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "14px 16px" }}>
+          {/* county parcel lookup — collapses itself once a parcel exists */}
+          <Section title="Parcel lookup" collapsed={parcels.length > 0}>
             <div style={{ display: "flex", gap: 6, marginBottom: 7 }}>
               <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={county} onChange={(e) => onCountyChange(e.target.value)}>
                 {Object.entries(COUNTIES).map(([k, c]) => <option key={k} value={k}>{c.label}{c.experimental ? " (beta)" : ""}</option>)}
@@ -2165,12 +2198,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               </>
             ) : (
               <>
-                <Field label="Opacity">
-                  <input type="range" min={0.1} max={1} step={0.05} value={underlay.opacity} onChange={(e) => setUnderlay((u) => ({ ...u, opacity: +e.target.value }))} />
-                </Field>
-                <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 8px", cursor: "pointer" }}>
-                  <input type="checkbox" checked={underlay.locked} onChange={(e) => setUnderlay((u) => ({ ...u, locked: e.target.checked }))} /> Lock (click-through so you can draw over it)
-                </label>
+                <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Locked &amp; click-through so you can draw right over it. Calibrate it to a known distance for true scale.</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button style={{ ...btn(tool === "calibrate"), flex: 1 }} onClick={() => { setTool("calibrate"); setCalib(null); }}>Calibrate scale</button>
                   <button style={chip} onClick={requestFit}>Fit</button>
@@ -2197,19 +2225,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 )}
               </>
             )}
-          </Section>
-
-          {/* quick parcel */}
-          <Section title="New parcel" collapsed>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ fontSize: 12, color: PAL.muted }}>W</label>
-              <input style={numInput} value={lotW} onChange={(e) => setLotW(e.target.value)} />
-              <label style={{ fontSize: 12, color: PAL.muted }}>D</label>
-              <input style={numInput} value={lotD} onChange={(e) => setLotD(e.target.value)} />
-              <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
-              <button style={{ ...btn(false), marginLeft: "auto" }} onClick={addRectParcel}>Add</button>
-            </div>
-            <div style={{ fontSize: 11, color: PAL.muted, marginTop: 6 }}>= {f2((Math.max(0, +lotW || 0) * Math.max(0, +lotD || 0)) / SQFT_PER_ACRE)} ac. Draw multiple to model an assemblage.</div>
           </Section>
 
           {/* selected element */}
@@ -2283,6 +2298,31 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             </Section>
           )}
 
+          {/* selected parcel — translucence + setback standards */}
+          {selParcel && (
+            <Section title="Parcel">
+              <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
+                Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
+              </div>
+              <Field label="Translucence">
+                <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
+                  onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
+              </Field>
+              <Field label="Fill color">
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="color" value={toHex6(selParcel.fill || "#faf7f0")} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <span style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{toHex6(selParcel.fill || "#faf7f0")}</span>
+                </span>
+              </Field>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 4px" }}>Standards</div>
+              <Field label="Setback (ft)"><input style={numInput} value={settings.setback} onChange={(e) => setSettings((s) => ({ ...s, setback: Math.max(0, +e.target.value || 0) }))} /></Field>
+              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 2, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete parcel</button>
+              </div>
+            </Section>
+          )}
+
           {/* metrics */}
           <Section title="Site yield">
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
@@ -2299,36 +2339,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           {/* settings */}
           <Section title="Standards" collapsed>
             <Field label="Grid (ft)"><input style={numInput} value={settings.gridSize} onChange={(e) => setSettings((s) => ({ ...s, gridSize: Math.max(1, +e.target.value || 1) }))} /></Field>
-            <Field label="Setback (ft)"><input style={numInput} value={settings.setback} onChange={(e) => setSettings((s) => ({ ...s, setback: Math.max(0, +e.target.value || 0) }))} /></Field>
             <Field label="Stall W / D"><span><input style={{ ...numInput, width: 42 }} value={settings.stallW} onChange={(e) => setSettings((s) => ({ ...s, stallW: +e.target.value || 9 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.stallDepth} onChange={(e) => setSettings((s) => ({ ...s, stallDepth: +e.target.value || 18 }))} /></span></Field>
             <Field label="Drive aisle"><input style={numInput} value={settings.aisle} onChange={(e) => setSettings((s) => ({ ...s, aisle: +e.target.value || 24 }))} /></Field>
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
             <Field label="Trailer W / L"><span><input style={{ ...numInput, width: 42 }} value={settings.trailerW} onChange={(e) => setSettings((s) => ({ ...s, trailerW: +e.target.value || 12 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.trailerL} onChange={(e) => setSettings((s) => ({ ...s, trailerL: +e.target.value || 53 }))} /></span></Field>
             <Field label="Trailer aisle"><input style={numInput} value={settings.trailerAisle} onChange={(e) => setSettings((s) => ({ ...s, trailerAisle: +e.target.value || 0 }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 4, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
-          </Section>
-
-          {/* scenarios */}
-          <Section title="Save / load" collapsed>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input style={{ ...numInput, width: "100%", fontFamily: "inherit" }} placeholder="Scenario name" value={scenName} onChange={(e) => setScenName(e.target.value)} />
-              <button style={chip} onClick={saveScen}>Save</button>
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-              <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={scenPick} onChange={(e) => setScenPick(e.target.value)}>
-                <option value="">— saved scenarios —</option>
-                {scenList.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              <button style={chip} onClick={loadScen}>Load</button>
-              <button style={{ ...chip, color: PAL.accent }} onClick={delScen}>✕</button>
-            </div>
-            <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-              <button style={{ ...chip, flex: 1 }} onClick={exportJSON}>Export JSON</button>
-              <button style={{ ...chip, flex: 1 }} onClick={() => importRef.current?.click()}>Import JSON</button>
-              <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-                onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-            </div>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
           {/* element default colors — edit without selecting anything */}
