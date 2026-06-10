@@ -18,6 +18,8 @@ import {
  * ------------------------------------------------------------------ */
 
 const SQFT_PER_ACRE = 43560;
+const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
+const DOGEAR_D = 60; // dog-ear projection out from the dock face
 
 const PAL = {
   paper: "#f4f1ea",
@@ -1209,8 +1211,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
   const TRUCK_COURT_D = 135; // truck dock apron + drive depth
-  const DOGEAR_W = 55;       // dog-ear / corner bump-out: along the dock wall
-  const DOGEAR_D = 60;       // dog-ear projection out from the dock face
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -1418,6 +1418,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const cov = siteSqft ? (bldg / siteSqft) * 100 : 0;
   const far = siteSqft ? bldg / siteSqft : 0; // single-story assumption
   const impPct = siteSqft ? (impervious / siteSqft) * 100 : 0;
+  const detPct = siteSqft ? (pondArea / siteSqft) * 100 : 0;
   const ratio = bldg ? stalls / (bldg / 1000) : 0;
   const open = Math.max(0, siteSqft - impervious - pondArea);
 
@@ -2049,7 +2050,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p) */}
-              {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble))}
+              {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
               {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
                 const fpts = measPts(m);
@@ -2476,6 +2477,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             {metricRow("Trailer stalls", f0(trailers))}
             {metricRow("Impervious", `${f0(impPct)}%`)}
             {metricRow("Detention", `${f0(pondArea)} sf`)}
+            {metricRow("Detention (ac)", `${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+            {metricRow("Detention %", `${f0(detPct)}%`)}
             {metricRow("Open/green", `${f2(open / SQFT_PER_ACRE)} ac`)}
           </Section>
 
@@ -2487,6 +2490,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
             <Field label="Trailer W / L"><span><input style={{ ...numInput, width: 42 }} value={settings.trailerW} onChange={(e) => setSettings((s) => ({ ...s, trailerW: +e.target.value || 12 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.trailerL} onChange={(e) => setSettings((s) => ({ ...s, trailerL: +e.target.value || 53 }))} /></span></Field>
             <Field label="Trailer aisle"><input style={numInput} value={settings.trailerAisle} onChange={(e) => setSettings((s) => ({ ...s, trailerAisle: +e.target.value || 0 }))} /></Field>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
           {/* element default colors — edit without selecting anything */}
@@ -2589,7 +2593,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls) {
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
@@ -2635,6 +2639,34 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble) {
     });
     ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
+  }
+  if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
+    const dock = el.dock || "single";
+    const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
+    const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
+    const sides = dock === "cross"
+      ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
+      : [side];
+    const dogEars = (allEls || []).filter((x) => x.attachedTo === el.id && x.dogEar);
+    sides.forEach((s) => {
+      const horiz = s === "top" || s === "bottom";
+      const L = horiz ? el.w : el.h; // wall length (ft)
+      // Don't draw doors where a dog-ear takes up the end of the wall.
+      const startF = dogEars.some((d) => d.dogEar.side === s && d.dogEar.sign === -1) ? DOGEAR_W : 0;
+      const endF = dogEars.some((d) => d.dogEar.side === s && d.dogEar.sign === 1) ? L - DOGEAR_W : L;
+      if (endF - startF < 12) return; // no room for a door
+      if (horiz) {
+        const by = s === "bottom" ? h - Dpx : 0;
+        const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
+        parts.push(<rect key={`db${s}`} x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+        for (let f = startF + 12; f < endF - 0.5; f += 12) { const x = tl.x + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + Dpx} stroke="#5b6470" strokeWidth={0.5} />); }
+      } else {
+        const bx = s === "right" ? w - Dpx : 0;
+        const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
+        parts.push(<rect key={`db${s}`} x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+        for (let f = startF + 12; f < endF - 0.5; f += 12) { const y = tl.y + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + Dpx} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
+      }
+    });
   }
   if (el.type === "road") { // dashed centerline down the long axis
     if (el.w >= el.h) parts.push(<line key="cl" x1={tl.x} y1={tl.y + h / 2} x2={tl.x + w} y2={tl.y + h / 2} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
