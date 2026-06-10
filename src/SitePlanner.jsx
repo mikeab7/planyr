@@ -734,20 +734,23 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if (d.kind === "el") {
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
         const g = d.members.find((m) => m.id === d.id);
-        let effDx, effDy, hint = null;
-        const gbox = ortho(els.find((x) => x.id === d.id)); // effective box (handles 90/180/270)
+        let effDx, effDy, hint = null, newRot = null;
+        const gel = els.find((x) => x.id === d.id);
+        const gbox = ortho(gel); // effective box (handles 90/180/270)
         if (g.cx !== undefined) {
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
-          const wantSnap = settings.snap || shift; // Shift forces eager flush-snap
-          if (wantSnap && gbox) { // flush-snap to neighbouring (non-member) element edges
-            const ids = new Set(d.members.map((m) => m.id));
+          const ids = new Set(d.members.map((m) => m.id));
+          if (shift && d.canAttach && !gel.points) {
+            // Shift: align to a nearby host's angle and snap flush in its frame
+            const cands = els.filter((x) => !ids.has(x.id) && !x.points && rootIdOf(x.id) !== d.id);
+            const res = alignSnap(gel, ncx, ncy, cands, Math.min(40, 24 / view.ppf));
+            if (res) { ncx = res.cx; ncy = res.cy; newRot = res.rot; hint = { id: res.hostId, x: res.hintX, y: res.hintY }; }
+          } else if (settings.snap && gbox) { // ambient flush-snap along world axes
             const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
-            const thr = shift ? Math.min(40, 24 / view.ppf) : Math.min(20, 10 / view.ppf);
-            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, thr);
+            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
-            // pending-bond indicator: is the grabbed element now flush against a host?
             if (d.canAttach) {
-              const hit = flushContact({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h, rot: 0 }, others, shift ? 6 : 2);
+              const hit = flushContact({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h, rot: 0 }, others, 2);
               if (hit && rootIdOf(hit.id) !== d.id) hint = hit;
             }
           }
@@ -757,12 +760,14 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
           effDy = snap(g.points[0].y + dy) - g.points[0].y;
         }
         d.bondTarget = hint ? hint.id : null; // remember for the drop (els may lag a frame)
+        d.bondRot = newRot; // remember the aligned angle for the drop
         setEls((a) => a.map((el) => {
           const m = d.members.find((x) => x.id === el.id);
           if (!m) return el;
-          return m.points
-            ? { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) }
-            : { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
+          if (m.points) return { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) };
+          const moved = { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
+          if (newRot != null && el.id === d.id) moved.rot = newRot; // align to host angle
+          return moved;
         }));
         setAttachHint(hint ? { x: hint.x, y: hint.y } : null);
       } else {
@@ -860,7 +865,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     // or Snap on), attach so they move together. Alt drops it free.
     if (d && d.mode === "move" && d.kind === "el" && d.canAttach && d.bondTarget && !e.altKey) {
       const root = rootIdOf(d.bondTarget);
-      if (root !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: root } : x));
+      if (root !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: root, ...(d.bondRot != null ? { rot: d.bondRot } : {}) } : x));
     }
     setAttachHint(null);
     drag.current = null;
@@ -1005,6 +1010,30 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     if (r % 90 !== 0) return null;
     const swap = r === 90 || r === 270;
     return { id: el.id, cx: el.cx, cy: el.cy, w: swap ? el.h : el.w, h: swap ? el.w : el.h, rot: 0 };
+  };
+  // Align a dragged rect to a nearby host's angle and snap it flush in the host's
+  // own frame — so an off-angle element drops onto a rotated building/sidewalk.
+  // Returns { cx, cy, rot, hostId, hintX, hintY } or null.
+  const alignSnap = (gel, ncx, ncy, cands, thr) => {
+    let best = null;
+    for (const host of cands) {
+      const th = host.rot || 0;
+      const q = (((Math.round((gel.rot - th) / 90)) % 4) + 4) % 4; // quarter-turns off the host
+      const swap = q === 1 || q === 3;
+      const gbw = swap ? gel.h : gel.w, gbh = swap ? gel.w : gel.h;
+      const loc = rot2(ncx - host.cx, ncy - host.cy, -th);          // grabbed centre in host frame
+      const box = [{ id: host.id, cx: 0, cy: 0, w: host.w, h: host.h, rot: 0 }];
+      const sc = edgeSnapCenter({ cx: loc.x, cy: loc.y, w: gbw, h: gbh }, box, thr);
+      const hit = flushContact({ cx: sc.cx, cy: sc.cy, w: gbw, h: gbh, rot: 0 }, box, 6);
+      if (!hit) continue;
+      const back = rot2(sc.cx, sc.cy, th);
+      const cx = host.cx + back.x, cy = host.cy + back.y, move2 = (cx - ncx) ** 2 + (cy - ncy) ** 2;
+      if (!best || move2 < best.move2) {
+        const hp = rot2(hit.x, hit.y, th);
+        best = { cx, cy, rot: ((th + q * 90) % 360 + 360) % 360, hostId: host.id, hintX: host.cx + hp.x, hintY: host.cy + hp.y, move2 };
+      }
+    }
+    return best;
   };
   const attachTo = (childId, hostId) => {
     if (childId === hostId) return;
