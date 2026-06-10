@@ -1074,7 +1074,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   // they hug when the building is resized. At drag start, capture each child in
   // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
   // its fixed depth, and its position/length along the wall.
-  const WALL_KID_TYPES = ["sidewalk", "parking", "trailer"];
+  const WALL_KID_TYPES = ["sidewalk", "parking", "trailer", "paving"];
   const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
@@ -1101,19 +1101,25 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
-  const addSidewalk = (b, clickFp) => {
-    const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
-    const hw = b.w / 2, hh = b.h / 2;
-    let nx = 0, ny = 0;
-    if (Math.abs(local.x) / hw >= Math.abs(local.y) / hh) nx = local.x >= 0 ? 1 : -1;
-    else ny = local.y >= 0 ? 1 : -1;
-    const w = nx !== 0 ? SIDEWALK_W : b.w;
-    const h = ny !== 0 ? SIDEWALK_W : b.h;
-    const off = rot2(nx * (hw + SIDEWALK_W / 2), ny * (hh + SIDEWALK_W / 2), b.rot);
-    const el = { id: uid(), type: "sidewalk", cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id };
+  const TRUCK_COURT_D = 135; // truck dock apron + drive depth
+  // Add a strip element of `type`/`depth` flush against one side of the building
+  // (local normal nx,ny), full wall length, bonded to the building. Keeps the
+  // building selected so several can be added in a row.
+  const addStripSide = (b, nx, ny, type, depth) => {
+    const w = nx !== 0 ? depth : b.w;
+    const h = ny !== 0 ? depth : b.h;
+    const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
+    const el = { id: uid(), type, cx: b.cx + off.x, cy: b.cy + off.y, w, h, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id };
     pushHistory();
     setEls((a) => [...a, el]);
-    setSel({ kind: "el", id: el.id });
+    setSel({ kind: "el", id: b.id });
+  };
+  const addSidewalk = (b, clickFp) => {
+    const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
+    let nx = 0, ny = 0;
+    if (Math.abs(local.x) / (b.w / 2) >= Math.abs(local.y) / (b.h / 2)) nx = local.x >= 0 ? 1 : -1;
+    else ny = local.y >= 0 ? 1 : -1;
+    addStripSide(b, nx, ny, "sidewalk", SIDEWALK_W);
   };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -1381,6 +1387,41 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         {members.filter((m) => m.id !== sel.id).map((m) => {
           const p = f2p(ctr(m));
           return <line key={`lk${m.id}`} x1={sc.x} y1={sc.y} x2={p.x} y2={p.y} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />;
+        })}
+      </g>
+    );
+  })();
+
+  // "+" quick-add handles on each side of a selected building: sidewalk on the
+  // non-dock sides, a 135′ truck dock + drive on the dock side(s).
+  const sideAddNodes = (() => {
+    if (sel?.kind !== "el" || tool !== "select") return null;
+    const el = els.find((x) => x.id === sel.id);
+    if (!el || el.type !== "building" || el.points) return null;
+    const dock = el.dock || "single";
+    const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
+    const dockSides = dock === "none" ? [] : (dock === "cross"
+      ? ((dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"])
+      : [dside]);
+    const cpx = f2p({ x: el.cx, y: el.cy });
+    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
+    return (
+      <g>
+        {sides.map(([name, nx, ny]) => {
+          const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
+          const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
+          let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+          const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
+          const isDock = dockSides.includes(name);
+          return (
+            <g key={`add${name}`} style={{ cursor: "pointer" }}
+              onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); isDock ? addStripSide(el, nx, ny, "paving", TRUCK_COURT_D) : addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W); }}>
+              <title>{isDock ? `Add ${TRUCK_COURT_D}′ truck dock + drive` : `Add ${SIDEWALK_W}′ sidewalk`}</title>
+              <circle cx={pos.x} cy={pos.y} r={9} fill={isDock ? "#b45309" : "#16a34a"} stroke="#ffffff" strokeWidth={1.75} />
+              <line x1={pos.x - 4.5} y1={pos.y} x2={pos.x + 4.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
+              <line x1={pos.x} y1={pos.y - 4.5} x2={pos.x} y2={pos.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
+            </g>
+          );
         })}
       </g>
     );
@@ -1719,6 +1760,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {labelEls}
               {parcelEdgeLabels}
               {handleNodes}
+              {sideAddNodes}
               {parcelHandles}
               {attachHint && (() => {
                 const p = f2p(attachHint);
