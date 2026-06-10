@@ -735,18 +735,19 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
         const g = d.members.find((m) => m.id === d.id);
         let effDx, effDy, hint = null;
+        const gbox = ortho(els.find((x) => x.id === d.id)); // effective box (handles 90/180/270)
         if (g.cx !== undefined) {
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
           const wantSnap = settings.snap || shift; // Shift forces eager flush-snap
-          if (wantSnap) { // flush-snap to neighbouring (non-member) element edges
+          if (wantSnap && gbox) { // flush-snap to neighbouring (non-member) element edges
             const ids = new Set(d.members.map((m) => m.id));
-            const others = els.filter((x) => !ids.has(x.id) && isAxisRect(x));
+            const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const thr = shift ? Math.min(40, 24 / view.ppf) : Math.min(20, 10 / view.ppf);
-            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: g.w, h: g.h }, others, thr);
+            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, thr);
             ncx = sc.cx; ncy = sc.cy;
             // pending-bond indicator: is the grabbed element now flush against a host?
             if (d.canAttach) {
-              const hit = flushContact({ cx: ncx, cy: ncy, w: g.w, h: g.h, rot: 0 }, others, shift ? 6 : 2);
+              const hit = flushContact({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h, rot: 0 }, others, shift ? 6 : 2);
               if (hit && rootIdOf(hit.id) !== d.id) hint = hit;
             }
           }
@@ -996,6 +997,15 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
   const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
   const isAxisRect = (el) => !el.points && (((el.rot % 360) + 360) % 360) === 0;
+  // Axis-aligned bounding box of a rect element at any quarter-turn (0/90/180/270),
+  // swapping w/h for 90/270. Returns {cx,cy,w,h,rot:0} or null if not orthogonal.
+  const ortho = (el) => {
+    if (el.points) return null;
+    const r = (((el.rot || 0) % 360) + 360) % 360;
+    if (r % 90 !== 0) return null;
+    const swap = r === 90 || r === 270;
+    return { id: el.id, cx: el.cx, cy: el.cy, w: swap ? el.h : el.w, h: swap ? el.w : el.h, rot: 0 };
+  };
   const attachTo = (childId, hostId) => {
     if (childId === hostId) return;
     const hostRoot = rootIdOf(hostId);
