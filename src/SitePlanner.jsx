@@ -43,7 +43,7 @@ const TYPE = {
 };
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
@@ -345,6 +345,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
+  const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
@@ -732,14 +733,21 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       if (d.kind === "el") {
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
         const g = d.members.find((m) => m.id === d.id);
-        let effDx, effDy;
+        let effDx, effDy, hint = null;
         if (g.cx !== undefined) {
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
-          if (settings.snap) { // flush-snap to neighbouring (non-member) element edges
+          const wantSnap = settings.snap || d.shift; // Shift forces eager flush-snap
+          if (wantSnap) { // flush-snap to neighbouring (non-member) element edges
             const ids = new Set(d.members.map((m) => m.id));
             const others = els.filter((x) => !ids.has(x.id) && isAxisRect(x));
-            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: g.w, h: g.h }, others, Math.min(20, 10 / view.ppf));
+            const thr = d.shift ? Math.min(40, 24 / view.ppf) : Math.min(20, 10 / view.ppf);
+            const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: g.w, h: g.h }, others, thr);
             ncx = sc.cx; ncy = sc.cy;
+            // pending-bond indicator: is the grabbed element now flush against a host?
+            if (d.canAttach) {
+              const hit = flushContact({ cx: ncx, cy: ncy, w: g.w, h: g.h, rot: 0 }, others, d.shift ? 6 : 2);
+              if (hit && rootIdOf(hit.id) !== d.id) hint = hit;
+            }
           }
           effDx = ncx - g.cx; effDy = ncy - g.cy;
         } else {
@@ -753,6 +761,7 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
             ? { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) }
             : { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
         }));
+        setAttachHint(hint ? { x: hint.x, y: hint.y } : null);
       } else {
         setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : pc));
       }
@@ -844,17 +853,17 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
       }
       setDraftRect(null);
     }
-    // Auto-bond: an unattached element dropped flush against another (Snap on,
-    // not a host itself) attaches to it so they move together. Alt drops it free.
-    if (d && d.mode === "move" && d.kind === "el" && settings.snap && !e.altKey) {
+    // Bond on drop: an element dropped flush against another attaches to it so
+    // they move together — via Shift-drag, or with Snap on. Alt drops it free.
+    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && !e.altKey && (d.shift || settings.snap)) {
       const m = els.find((x) => x.id === d.id);
-      const isHost = els.some((x) => x.attachedTo === d.id);
-      if (m && !m.attachedTo && !m.points && !isHost) {
+      if (m) {
         const memberIds = new Set(d.members.map((mm) => mm.id));
-        const host = flushHostId(m, els.filter((x) => !memberIds.has(x.id)), 2);
-        if (host && rootIdOf(host) !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: rootIdOf(host) } : x));
+        const host = flushContact(m, els.filter((x) => !memberIds.has(x.id)), d.shift ? 6 : 2);
+        if (host && rootIdOf(host.id) !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: rootIdOf(host.id) } : x));
       }
     }
+    setAttachHint(null);
     drag.current = null;
     setPanning(false);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -1002,20 +1011,27 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
   };
   // Find an axis-aligned rect element that `m` is sitting flush against (a shared
-  // edge with real overlap). Used to auto-bond an element dropped against another.
-  const flushHostId = (m, others, eps) => {
+  // edge with real overlap). Returns { id, x, y } where x,y is the contact-edge
+  // midpoint (for the snap/attach indicator), or null.
+  const flushContact = (m, others, eps) => {
     if (m.points || !isAxisRect(m)) return null;
     const mx0 = m.cx - m.w / 2, mx1 = m.cx + m.w / 2, my0 = m.cy - m.h / 2, my1 = m.cy + m.h / 2;
     let best = null;
     for (const t of others) {
       if (t.points || !isAxisRect(t)) continue;
       const tx0 = t.cx - t.w / 2, tx1 = t.cx + t.w / 2, ty0 = t.cy - t.h / 2, ty1 = t.cy + t.h / 2;
-      const yov = Math.min(my1, ty1) - Math.max(my0, ty0);
-      const xov = Math.min(mx1, tx1) - Math.max(mx0, tx0);
-      if (yov > 5 && (Math.abs(mx0 - tx1) <= eps || Math.abs(mx1 - tx0) <= eps) && (!best || yov > best.ov)) best = { id: t.id, ov: yov };
-      if (xov > 5 && (Math.abs(my0 - ty1) <= eps || Math.abs(my1 - ty0) <= eps) && (!best || xov > best.ov)) best = { id: t.id, ov: xov };
+      const ya = Math.max(my0, ty0), yb = Math.min(my1, ty1), yov = yb - ya;
+      const xa = Math.max(mx0, tx0), xb = Math.min(mx1, tx1), xov = xb - xa;
+      if (yov > 5) {
+        if (Math.abs(mx0 - tx1) <= eps && (!best || yov > best.ov)) best = { id: t.id, x: tx1, y: (ya + yb) / 2, ov: yov };
+        if (Math.abs(mx1 - tx0) <= eps && (!best || yov > best.ov)) best = { id: t.id, x: tx0, y: (ya + yb) / 2, ov: yov };
+      }
+      if (xov > 5) {
+        if (Math.abs(my0 - ty1) <= eps && (!best || xov > best.ov)) best = { id: t.id, x: (xa + xb) / 2, y: ty1, ov: xov };
+        if (Math.abs(my1 - ty0) <= eps && (!best || xov > best.ov)) best = { id: t.id, x: (xa + xb) / 2, y: ty0, ov: xov };
+      }
     }
-    return best?.id || null;
+    return best;
   };
   // Sidewalks / parking / trailer fields attached to a building track the wall
   // they hug when the building is resized. At drag start, capture each child in
@@ -1083,7 +1099,10 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
     const members = assemblyOf(id).map((m) => m.points
       ? { id: m.id, points: m.points }
       : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members };
+    // Shift-drag = bond mode (eager snap + green "+"). Can only bond a free,
+    // rectangular element that isn't already a host of something else.
+    const canAttach = !el.attachedTo && !el.points && !els.some((x) => x.attachedTo === id);
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, shift: e.shiftKey, canAttach };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
@@ -1664,6 +1683,16 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
               {parcelEdgeLabels}
               {handleNodes}
               {parcelHandles}
+              {attachHint && (() => {
+                const p = f2p(attachHint);
+                return (
+                  <g pointerEvents="none">
+                    <circle cx={p.x} cy={p.y} r={9} fill="#16a34a" stroke="#ffffff" strokeWidth={1.75} />
+                    <line x1={p.x - 4.5} y1={p.y} x2={p.x + 4.5} y2={p.y} stroke="#ffffff" strokeWidth={1.75} />
+                    <line x1={p.x} y1={p.y - 4.5} x2={p.x} y2={p.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
+                  </g>
+                );
+              })()}
             </g>
 
             {/* scale bar */}
