@@ -1257,22 +1257,34 @@ export default function SitePlanner({ active = true, incoming = null, onBackToMa
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
+    const fs = 11, lh = 14.5, padX = 9, padY = 5.5, charW = fs * 0.6;
+    const maxLen = Math.max(...lines.map((t) => t.length));
+    const boxW = maxLen * charW + padX * 2, boxH = lines.length * lh + padY * 2;
+    const top = c.y - boxH / 2, first = top + padY + fs * 0.82;
     return (
-      <text key={`lbl${el.id}`} x={c.x} y={c.y - (lines.length - 1) * 7} textAnchor="middle" pointerEvents="none"
-        fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}
-        stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" style={{ fontWeight: 500 }}>
-        {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : 13}>{t}</tspan>)}
-      </text>
+      <g key={`lbl${el.id}`} pointerEvents="none">
+        <rect x={c.x - boxW / 2} y={top} width={boxW} height={boxH} rx={7}
+          fill="rgba(17,24,39,0.74)" stroke="rgba(255,255,255,0.16)" strokeWidth={1} />
+        <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
+          fontFamily="ui-monospace, Menlo, monospace" fill="#f4f6f9" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>
+          {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
+        </text>
+      </g>
     );
   });
 
   const parcelLabels = parcels.map((pc) => {
     const c = f2p(centroid(pc.points));
-    const ac = polyArea(pc.points) / SQFT_PER_ACRE;
+    const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
+    const fs = 12, padX = 9, padY = 5, charW = fs * 0.6;
+    const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
     return (
-      <text key={`pl${pc.id}`} x={c.x} y={c.y} textAnchor="middle" pointerEvents="none"
-        fontSize="12" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.muted}
-        stroke={PAL.paper} strokeWidth={3} paintOrder="stroke">{f2(ac)} ac</text>
+      <g key={`pl${pc.id}`} pointerEvents="none">
+        <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7}
+          fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+        <text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
+          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
+      </g>
     );
   });
 
