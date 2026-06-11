@@ -1315,7 +1315,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     let nx = 0, ny = 0;
     if (Math.abs(local.x) / (b.w / 2) >= Math.abs(local.y) / (b.h / 2)) nx = local.x >= 0 ? 1 : -1;
     else ny = local.y >= 0 ? 1 : -1;
-    addStripSide(b, nx, ny, "sidewalk", SIDEWALK_W);
+    const name = nx === 1 ? "right" : nx === -1 ? "left" : ny === 1 ? "bottom" : "top";
+    if (els.some((x) => x.attachedTo === b.id && x.sidewalkSide === name)) return; // one sidewalk per side
+    addStripSide(b, nx, ny, "sidewalk", SIDEWALK_W, { sidewalkSide: name });
   };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -1664,11 +1666,16 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
   const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
   const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
+  const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
   const labelEls = els.map((el) => {
     if (NO_LABEL.includes(el.type) || el.noLabel) return null;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
-    const c = f2p(poly ? centroid(el.points) : { x: el.cx, y: el.cy });
+    const fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
+    const dupKey = `${el.type}@${Math.round(fc.x / 12)},${Math.round(fc.y / 12)}`;
+    if (seenLabels.has(dupKey)) return null; // same type stacked at (nearly) the same spot
+    seenLabels.add(dupKey);
+    const c = f2p(fc);
     let lines;
     if (el.type === "sidewalk") {
       // e.g. "5′ Sidewalk" — width only, no sf / length
@@ -1815,6 +1822,39 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
     const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
     return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
+  })();
+
+  // One repeating parking band = a row of stalls + its drive aisle.
+  const parkBand = () => settings.stallDepth + settings.aisle;
+  // Grow a parking field one band deeper (keeping its near edge fixed); the
+  // stall striping auto-fills the new depth. Loops, so you can stack rows/aisles.
+  const growParking = (el, dir = 1) => {
+    const inc = parkBand();
+    if (dir < 0 && el.h - inc < settings.stallDepth) return; // keep at least one row
+    const off = rot2(0, dir * inc / 2, el.rot); // extend the +local-y (depth) edge
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: x.h + dir * inc, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+  };
+  // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
+  // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
+  const parkingAddNodes = (() => {
+    if (sel?.kind !== "el" || tool !== "select") return null;
+    const el = els.find((x) => x.id === sel.id);
+    if (!el || el.locked || el.points || el.type !== "parking") return null;
+    const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
+    const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
+    const cpx = f2p({ x: el.cx, y: el.cy });
+    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    const tx = -uy, ty = ux;                          // tangent along the edge
+    const plus = { x: ms.x + ux * 16 - tx * 12, y: ms.y + uy * 16 - ty * 12 };
+    const minus = { x: ms.x + ux * 16 + tx * 12, y: ms.y + uy * 16 + ty * 12 };
+    const canShrink = el.h - parkBand() >= settings.stallDepth;
+    return (
+      <g>
+        {featNode("parkAdd", plus, false, "#2563eb", "Add a parking row + drive aisle", () => growParking(el, 1), null)}
+        {canShrink && featNode("parkSub", minus, true, "#b91c1c", "", null, () => growParking(el, -1))}
+      </g>
+    );
   })();
 
   const handleNodes = (() => {
@@ -2271,6 +2311,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 {handleNodes}
                 {sideAddNodes}
                 {courtAddNodes}
+                {parkingAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
                 {attachHint && (() => {
