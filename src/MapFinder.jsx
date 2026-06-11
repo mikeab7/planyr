@@ -16,6 +16,7 @@ import {
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
   accent: "#c2410c", muted: "#8a8473",
+  chrome: "#191613", chromeLine: "#2e2a23", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c",
 };
 
 // Free aerial sources (no API key). Both are ArcGIS MapServers that support
@@ -337,29 +338,34 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;
 
   const btn = (primary) => ({
-    padding: "7px 12px", fontSize: 13, borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
+    padding: "8px 14px", fontSize: 13, borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
     border: `1px solid ${primary ? PAL.accent : PAL.panelLine}`, background: primary ? PAL.accent : "#fbfaf6",
     color: primary ? "#fff" : PAL.ink, fontWeight: primary ? 600 : 500,
+    boxShadow: primary ? "0 2px 8px rgba(232,89,12,0.3)" : "none",
   });
-  const field = { padding: "7px 9px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 6, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
+  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#efeadf" }}>
-      {/* top bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: PAL.panelBg, borderBottom: `1px solid ${PAL.panelLine}`, flexWrap: "wrap", zIndex: 1000 }}>
-        <div style={{ fontWeight: 700, letterSpacing: "0.04em", fontSize: 13.5, textTransform: "uppercase" }}>
-          <span style={{ color: PAL.accent }}>◎</span> Find a site
+      {/* top bar — dark graphite chrome */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", zIndex: 1000 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
+          </span>
+          <span style={{ fontWeight: 800, fontSize: 15, color: "#fff", letterSpacing: "-0.01em" }}>Planar Fit</span>
+          <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9 }}>Find a site</span>
         </div>
-        <select style={{ ...field, fontWeight: 600 }} value={county} onChange={(e) => onCounty(e.target.value)}>
+        <select style={{ ...field, fontWeight: 600, marginLeft: 4 }} value={county} onChange={(e) => onCounty(e.target.value)}>
           {Object.entries(COUNTIES).map(([k, c]) => <option key={k} value={k}>{c.label}{c.experimental ? " (beta)" : ""}</option>)}
         </select>
         <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
-          <input style={{ ...field, flex: 1, borderRadius: "6px 0 0 6px" }} placeholder="Go to an address or place…" value={addr}
+          <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
             onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") goAddress(); }} />
-          <button style={{ ...btn(false), borderRadius: "0 6px 6px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
+          <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
         </div>
         <div style={{ flex: 1 }} />
-        <button style={btn(false)} onClick={onSkip}>Open blank planner →</button>
+        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Open blank planner →</button>
       </div>
 
       {/* map */}
@@ -420,15 +426,16 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
 
         {/* selection card */}
         {selected.length > 0 && (
-          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: "12px 14px", minWidth: 300, maxWidth: 460 }}>
-            <div style={{ fontSize: 11, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 3 }}>
-              {selected.length} parcel{selected.length > 1 ? "s" : ""} selected · {asm ? asm.totalAc.toFixed(2) : "—"} ac
+          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 20, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 14, boxShadow: "0 14px 40px rgba(0,0,0,0.26), 0 2px 8px rgba(0,0,0,0.12)", padding: "14px 16px", minWidth: 320, maxWidth: 480 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: PAL.accent }} />
+              {selected.length} parcel{selected.length > 1 ? "s" : ""} · <span style={{ color: PAL.ink, fontWeight: 700 }}>{asm ? asm.totalAc.toFixed(2) : "—"} ac</span>
             </div>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {selected[selected.length - 1].addr || "Parcel"}{selected.length > 1 ? ` +${selected.length - 1} more` : ""}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button style={{ ...btn(true), flex: 1 }} onClick={planSelected}>Plan {selected.length > 1 ? "these" : "this"} {selected.length > 1 ? `${selected.length} parcels` : "site"} →</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button style={{ ...btn(true), flex: 1, padding: "9px 14px" }} onClick={planSelected}>Plan {selected.length > 1 ? `${selected.length} parcels` : "this site"} →</button>
               <button style={btn(false)} onClick={clearSel}>Clear</button>
             </div>
           </div>

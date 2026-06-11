@@ -26,14 +26,39 @@ const PAL = {
   gridMinor: "#e3ddd0",
   gridMajor: "#cfc6af",
   ink: "#2c2a26",
-  accent: "#c2410c", // drafting red-orange (selection)
+  accent: "#c2410c", // drafting red-orange (canvas selection)
   accentSoft: "#f0d9cc",
   setback: "#b45309",
   parcel: "#5b6650", // parcel boundary line (drafting green)
   panelBg: "#ffffff",
   panelLine: "#e7e2d6",
   muted: "#8a8473",
+  // dark chrome (top bar, tool rail, status bar)
+  chrome: "#191613",
+  chromeLine: "#2e2a23",
+  chromeInk: "#ece7db",
+  chromeMuted: "#9b9482",
+  ember: "#e8590c", // UI accent on dark chrome
 };
+
+/* Lucide-style 16×16 stroke icons for the tool rail (inherit currentColor). */
+const ICON_PATHS = {
+  select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
+  parcel: <path d="M3 5.2 L8 2.6 L13.2 5.6 L12.2 12.4 L4.2 13.2 Z" />,
+  building: <><rect x="2.5" y="4" width="11" height="8.5" rx="0.5" /><path d="M5.5 12.5 v-2.5 h2 v2.5 M10 6.8 h1.5 M4.5 6.8 H6" /></>,
+  paving: <><rect x="2.5" y="2.5" width="11" height="11" rx="1" /><path d="M2.5 9.8 L9.8 2.5 M6.2 13.5 L13.5 6.2" /></>,
+  parking: <path d="M5.2 13.5 V2.8 h3.6 a3.1 3.1 0 0 1 0 6.2 H5.2" />,
+  trailer: <><rect x="1.8" y="4.5" width="9" height="5.5" rx="0.5" /><path d="M10.8 6.5 h2.6 l0.8 2.4 v1.1 h-3.4" /><circle cx="4.6" cy="11.8" r="1.3" /><circle cx="12.2" cy="11.8" r="1.3" /></>,
+  pond: <path d="M8 2.6 C8 2.6 3.6 7.8 3.6 10.4 a4.4 4.4 0 0 0 8.8 0 C12.4 7.8 8 2.6 8 2.6 Z" />,
+  road: <><path d="M5.2 2.5 L3.2 13.5 M10.8 2.5 L12.8 13.5" /><path d="M8 3 v2.2 M8 7 v2.2 M8 11 v2.2" /></>,
+  measure: <><path d="M2.2 10.8 L10.8 2.2 L13.8 5.2 L5.2 13.8 Z" /><path d="M5.6 7.4 l1.4 1.4 M8 5 l1.4 1.4" /></>,
+};
+const ToolIcon = ({ id, size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+    strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
+    {ICON_PATHS[id] || <circle cx="8" cy="8" r="5.5" />}
+  </svg>
+);
 
 const TYPE = {
   building: { fill: "#ffffff", stroke: "#2b2b2b", label: "Building" },
@@ -1893,31 +1918,30 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   /* ----------------------------- UI ----------------------------- */
   // primary buttons (inspector actions)
   const btn = (active) => ({
-    padding: "6px 12px", fontSize: 12.5, borderRadius: 8, cursor: "pointer",
+    padding: "7px 13px", fontSize: 12.5, borderRadius: 9, cursor: "pointer",
     border: `1px solid ${active ? PAL.accent : "#ddd6c5"}`,
     background: active ? PAL.accent : "#fff", color: active ? "#fff" : PAL.ink,
     fontWeight: 600, fontFamily: "inherit",
-    boxShadow: active ? "none" : "0 1px 2px rgba(28,25,20,0.05)",
+    boxShadow: active ? "0 2px 6px rgba(232,89,12,0.28)" : "0 1px 2px rgba(28,25,20,0.05)",
   });
-  // toolbar segmented-control buttons (active = raised white card)
-  const tbtn = (active) => ({
-    padding: "5px 11px", fontSize: 12.5, borderRadius: 7, cursor: "pointer",
-    border: "1px solid transparent", whiteSpace: "nowrap",
-    background: active ? "#fff" : "transparent", color: active ? PAL.accent : PAL.ink,
-    fontWeight: active ? 700 : 500, fontFamily: "inherit",
-    boxShadow: active ? "0 1px 3px rgba(28,25,20,0.16)" : "none",
+  // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
+  const rbtn = (active) => ({
+    display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
+    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    border: "1px solid transparent", fontFamily: "inherit",
+    background: active ? PAL.ember : "transparent",
+    color: active ? "#fff" : PAL.chromeInk,
+    fontWeight: active ? 650 : 500,
+    boxShadow: active ? "0 2px 8px rgba(232,89,12,0.32)" : "none",
   });
-  // right-side tool-rail buttons (full-width, left-aligned)
-  const rbtn = (active) => ({ ...tbtn(active), width: "100%", textAlign: "left", padding: "7px 11px", borderRadius: 8, border: `1px solid ${active ? PAL.accent : "transparent"}` });
-  // quiet (ghost) buttons for the top-bar action cluster
-  const ghostBtn = { padding: "5px 10px", fontSize: 12, borderRadius: 7, border: "1px solid transparent", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
-  const iconBtn = { ...ghostBtn, width: 28, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 14.5 };
-  const chip = { padding: "5px 10px", fontSize: 12, borderRadius: 7, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
-  const numInput = { width: 58, padding: "5px 8px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 7, color: PAL.ink, background: "#fff" };
-  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 9px", fontSize: 12.5, borderRadius: 6, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
-  const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 10px 32px rgba(28,25,20,0.16), 0 2px 8px rgba(28,25,20,0.08)", padding: 5 };
-  const vSep = <span style={{ width: 1, height: 18, background: PAL.panelLine, margin: "0 5px" }} />;
-  const toolDivider = <span style={{ width: 1, height: 16, background: "#ddd5c4", margin: "0 3px", alignSelf: "center" }} />;
+  // ghost buttons on the DARK top bar
+  const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
+  const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
+  const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
+  const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
+  const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
@@ -1954,38 +1978,43 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 600, background: "#efeadf",
       fontFamily: "'Helvetica Neue', Helvetica, system-ui, sans-serif", color: PAL.ink, overflow: "hidden" }}>
 
-      {/* top bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", background: PAL.panelBg, borderBottom: `1px solid ${PAL.panelLine}`, boxShadow: "0 1px 6px rgba(28,25,20,0.05)", flexWrap: "wrap", position: "relative", zIndex: 60 }}>
-        {onBackToMap && <button className="gbtn" style={ghostBtn} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
-          <span style={{ width: 11, height: 11, borderRadius: 3.5, background: PAL.accent, display: "inline-block", boxShadow: "0 1px 2px rgba(194,65,12,0.4)" }} />
-          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15 }}>Planar Fit</span>
-          <span style={{ color: PAL.muted, fontSize: 11.5, fontWeight: 500, borderLeft: `1px solid ${PAL.panelLine}`, paddingLeft: 8 }}>Industrial Site Planner</span>
+      {/* top bar — dark graphite chrome */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", position: "relative", zIndex: 60 }}>
+        {onBackToMap && <button className="dbtn" style={{ ...dGhost, marginLeft: -4 }} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 2 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
+          </span>
+          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Planar Fit</span>
+          <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>{siteName}</span>
         </div>
 
         <div style={{ flex: 1 }} />
 
+        {/* history + view cluster */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2 }}>
+          <button className="dbtn" style={dIcon} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
+          <button className="dbtn" style={dIcon} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
+          <button className="dbtn" style={dIcon} onClick={fit} title="Zoom to fit">⤢</button>
+        </div>
+        <button className="dbtn" style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+          onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          Snap {settings.gridSize}′
+        </button>
+        {vSep}
         {/* action cluster */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <button className="gbtn" style={iconBtn} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
-          <button className="gbtn" style={iconBtn} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
-          <button className="gbtn" style={iconBtn} onClick={fit} title="Zoom to fit">⤢</button>
-          <button className="gbtn" style={{ ...ghostBtn, display: "flex", alignItems: "center", gap: 6, color: settings.snap ? PAL.ink : PAL.muted, fontWeight: 600 }}
-            onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
-            <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#16a34a" : "#cfc6af", display: "inline-block" }} />
-            Snap {settings.gridSize}′
-          </button>
-          {vSep}
           <div style={{ position: "relative" }}>
-            <button className="gbtn" style={{ ...ghostBtn, fontWeight: 600 }} onClick={() => setSaveMenu((o) => !o)}>Save / load ▾</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setSaveMenu((o) => !o)}>Save / load ▾</button>
             {saveMenu && (
               <>
                 <div onClick={() => setSaveMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, width: 268, padding: 10 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Scenarios</div>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 268, padding: 10 }}>
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 7 }}>Scenarios</div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <input style={{ ...numInput, width: "100%", fontFamily: "inherit" }} placeholder="Scenario name" value={scenName} onChange={(e) => setScenName(e.target.value)} />
-                    <button style={chip} onClick={saveScen}>Save</button>
+                    <button style={btn(true)} onClick={saveScen}>Save</button>
                   </div>
                   <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
                     <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={scenPick} onChange={(e) => setScenPick(e.target.value)}>
@@ -1995,7 +2024,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                     <button style={chip} onClick={loadScen}>Load</button>
                     <button style={{ ...chip, color: PAL.accent }} onClick={delScen}>✕</button>
                   </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+                  <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
                     <button style={{ ...chip, flex: 1 }} onClick={() => { setSaveMenu(false); exportJSON(); }}>Export JSON</button>
                     <button style={{ ...chip, flex: 1 }} onClick={() => importRef.current?.click()}>Import JSON</button>
                     <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
@@ -2006,11 +2035,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             )}
           </div>
           <div style={{ position: "relative" }}>
-            <button className="gbtn" style={{ ...ghostBtn, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>Export ▾</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>Export ▾</button>
             {exportMenu && (
               <>
                 <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, width: 196 }}>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 210 }}>
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF(); }}>Print / save as PDF…</button>
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>PNG image</button>
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>JSON file (re-importable)</button>
@@ -2019,9 +2048,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             )}
           </div>
           {vSep}
-          <button className="gbtn" style={{ ...ghostBtn, color: PAL.muted }} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
-          <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
-          <button className="gbtn-danger" style={{ ...ghostBtn, color: "#b3361b" }} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
+          <button className="dbtn" style={{ ...dGhost, color: PAL.chromeMuted }} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
+          <button className="dbtn-danger" style={{ ...dGhost, color: "#f08a6e" }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
+          <button className="dbtn-danger" style={{ ...dGhost, color: "#f08a6e" }} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
         </div>
       </div>
 
@@ -2235,35 +2264,36 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
           {/* aerial loading indicator */}
           {underlayLoading && (
-            <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", background: "rgba(44,42,38,0.85)", color: "#fff", padding: "6px 13px", borderRadius: 7, fontSize: 12.5, pointerEvents: "none", display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.accent, display: "inline-block" }} />
+            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, pointerEvents: "none", display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.ember, display: "inline-block", animation: "pf-pulse 1.1s ease-in-out infinite" }} />
               Loading aerial…
             </div>
           )}
 
-          {/* status bar */}
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", gap: 0, alignItems: "center", padding: "5px 14px", fontSize: 11.5, color: PAL.muted, background: "rgba(252,251,247,0.92)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", borderTop: `1px solid ${PAL.panelLine}` }}>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 110, fontVariantNumeric: "tabular-nums" }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 80 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
-            <span style={{ width: 1, height: 14, background: PAL.panelLine, margin: "0 12px" }} />
-            <span style={{ color: (sidewalkFor || attachFor) ? PAL.accent : "#6b6557", fontWeight: (sidewalkFor || attachFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {/* status bar — dark chrome */}
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: "rgba(25,22,19,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 82 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
+            <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
+            <span style={{ color: (sidewalkFor || attachFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (sidewalkFor || attachFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : curHint}
             </span>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
           </div>
         </div>
 
-        {/* right-side tool rail */}
-        <div style={{ width: 158, flex: "none", order: 3, background: PAL.panelBg, borderLeft: `1px solid ${PAL.panelLine}`, display: "flex", flexDirection: "column", gap: 4, padding: "12px 10px", overflowY: "visible", position: "relative", zIndex: 30 }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b6557", padding: "0 2px 4px" }}>Tools</div>
-          <button style={rbtn(tool === "select")} onClick={() => selectTool("select")}>Select</button>
+        {/* right-side tool rail — dark chrome */}
+        <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "0 4px 6px" }}>Tools</div>
+          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select</button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div style={{ position: "relative" }}>
-            <button style={rbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}>Parcel ▾</button>
+            <button className={`rbtn${tool === "parcel" || tool === "split" ? " on" : ""}`} style={rbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             {toolMenu && (
               <>
                 <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 248 }}>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
                   <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
                   <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
                   <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
@@ -2274,18 +2304,18 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             )}
           </div>
 
-          <div style={{ height: 1, background: "#e7e2d6", margin: "3px 2px" }} />
+          <div style={{ height: 1, background: PAL.chromeLine, margin: "5px 2px" }} />
 
           {DRAW_TYPES.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
             if (id === "building") return (
               <div key={id} style={{ position: "relative" }}>
-                <button style={rbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}>Building ▾</button>
+                <button className={`rbtn${tool === "building" ? " on" : ""}`} style={rbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}><ToolIcon id="building" /> Building <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
                 {buildingMenu && (
                   <>
                     <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 200 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Dock layout</div>
+                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 200 }}>
+                      <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
                       {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                         <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
                       ))}
@@ -2298,12 +2328,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
                 <div key={id} style={{ position: "relative" }}>
-                  <button style={rbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}>Parking ▾</button>
+                  <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={rbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}><ToolIcon id="parking" /> Parking <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
                   {parkingMenu && (
                     <>
                       <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 248 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Parking rows</div>
+                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
+                        <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
                         {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
                           <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
                         ))}
@@ -2313,19 +2343,19 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 </div>
               );
             }
-            return <button key={id} style={rbtn(tool === id)} onClick={() => selectTool(id)}>{t.label}</button>;
+            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label}</button>;
           })}
 
-          <div style={{ height: 1, background: "#e7e2d6", margin: "3px 2px" }} />
+          <div style={{ height: 1, background: PAL.chromeLine, margin: "5px 2px" }} />
 
           {/* measure with line / polyline / area modes */}
           <div style={{ position: "relative" }}>
-            <button style={rbtn(tool === "measure")} onClick={() => setMeasureMenu((o) => !o)}>Measure ▾</button>
+            <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={rbtn(tool === "measure")} onClick={() => setMeasureMenu((o) => !o)}><ToolIcon id="measure" /> Measure <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             {measureMenu && (
               <>
                 <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 8px)", zIndex: 50, width: 230 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px 8px 6px" }}>Measure</div>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
                   {[["line", "Line (two-point distance)"], ["polyline", "Polyline (path length)"], ["area", "Area (closed region)"]].map(([k, label]) => (
                     <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
                   ))}
@@ -2333,10 +2363,18 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               </>
             )}
           </div>
+
+          <div style={{ flex: 1 }} />
+          {curHint && (
+            <div style={{ fontSize: 10.5, color: PAL.chromeMuted, lineHeight: 1.5, padding: "8px 6px 2px", borderTop: `1px solid ${PAL.chromeLine}` }}>
+              <span style={{ color: PAL.ember, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 9.5 }}>{TOOLS.find((t) => t.id === tool)?.label}</span>
+              <div style={{ marginTop: 3 }}>{curHint.split("•")[0].trim()}</div>
+            </div>
+          )}
         </div>
 
         {/* left properties panel */}
-        <div style={{ width: 312, flex: "none", order: 1, background: "#fcfbf7", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "14px 16px" }}>
+        <div style={{ width: 320, flex: "none", order: 1, background: "#efe9dd", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "13px 13px 24px" }}>
           {/* aerial underlay */}
           <Section title="Aerial underlay">
             {!underlay ? (
@@ -2493,18 +2531,29 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           )}
 
           {/* metrics */}
-          <Section title="Site yield">
+          <Section title="Site yield" accent={PAL.accent}>
+            {/* hero stat tiles */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
+              {[
+                ["Site", `${f2(siteSqft / SQFT_PER_ACRE)}`, "ac"],
+                ["Building", `${f0(bldg / 1000)}k`, "sf"],
+                ["Coverage", `${f0(cov)}`, "%"],
+              ].map(([k, v, u]) => (
+                <div key={k} style={{ background: "linear-gradient(160deg,#fbf8f2,#f3eee3)", border: "1px solid #ece4d4", borderRadius: 9, padding: "8px 9px" }}>
+                  <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{k}</div>
+                  <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: PAL.ink, fontSize: 16, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{v}<span style={{ fontSize: 10, color: PAL.muted, fontWeight: 500, marginLeft: 2 }}>{u}</span></div>
+                </div>
+              ))}
+            </div>
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
             {metricRow("Building", `${f0(bldg)} sf`)}
-            {metricRow("Lot coverage", `${f0(cov)}%`)}
             {metricRow("FAR", f2(far), "(1-story)")}
             {metricRow("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {metricRow("Trailer stalls", f0(trailers))}
             {metricRow("Impervious", `${f0(impPct)}%`)}
-            {metricRow("Detention", `${f0(pondArea)} sf`)}
-            {metricRow("Detention (ac)", `${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+            {metricRow("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
             {metricRow("Detention %", `${f0(detPct)}%`)}
-            {metricRow("Open/green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+            {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
           </Section>
 
           {/* settings */}
@@ -2535,7 +2584,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           </Section>
 
           {/* legend */}
-          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: "7px 14px", padding: "10px 12px", background: "#f7f4ec", borderRadius: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", padding: "11px 13px", background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" }}>
             {Object.keys(TYPE).map((k) => {
               const st = typeStyle(k, settings);
               return (
@@ -2725,21 +2774,22 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
 }
 
 /* ----------------------------- small UI ----------------------------- */
-function Section({ title, children, collapsed }) {
+function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 4, paddingBottom: 12, borderBottom: "1px solid #f0ebdf" }}>
-      <div onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", padding: "6px 0", userSelect: "none" }}>
-        <span style={{ fontSize: 8.5, color: "#b3aa92", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s", width: 9 }}>▶</span>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6b6557" }}>{title}</span>
+    <div style={{ marginBottom: 9, background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      <div className="sec-head" onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
+        {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
+        <span className="sec-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "#6b6557", flex: 1, transition: "color .12s" }}>{title}</span>
+        <span style={{ fontSize: 9, color: "#b3aa92", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>
       </div>
-      {open && <div style={{ paddingTop: 4 }}>{children}</div>}
+      {open && <div style={{ padding: "0 12px 12px" }}>{children}</div>}
     </div>
   );
 }
 function Field({ label, children }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "#8a8473" }}>{label}</span>{children}
     </div>
   );
