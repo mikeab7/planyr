@@ -365,7 +365,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, onBackToMap } = {}) {
+export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onDuplicateSite } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -385,6 +385,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
   const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
+  const [plansMenu, setPlansMenu] = useState(false);     // Plans ▾ (multi-site switcher) dropdown open
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
@@ -410,6 +411,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
+  const [showAerial, setShowAerial] = useState(false);  // aerial underlay is hidden until you click a parcel (or toggle it on)
   const [underlayErr, setUnderlayErr] = useState(false);
   const [underlayLoading, setUnderlayLoading] = useState(() => {
     const u = restored?.underlay;
@@ -737,6 +739,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   /* ------------ parcel vertex editing ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
+    if (parcels.find((p) => p.id === id)?.locked) { e.stopPropagation(); setSel({ kind: "parcel", id }); return; }
     e.stopPropagation();
     pushHistory();
     if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
@@ -750,6 +753,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   };
   const addVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
+    if (parcels.find((p) => p.id === id)?.locked) return;
     e.stopPropagation();
     pushHistory();
     setParcels((a) => a.map((pc) => {
@@ -1414,6 +1418,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const fp = p2f(e.clientX, e.clientY);
     if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
     setSel({ kind: "parcel", id });
+    if (underlay) setShowAerial(true); // clicking a parcel pops up the aerial underlay
+    if (pc.locked) return;             // locked parcel: select only, don't move
     pushHistory();
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
     svgRef.current.setPointerCapture(e.pointerId);
@@ -1524,6 +1530,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
   };
+  const toggleParcelLock = (id) => {
+    pushHistory();
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
+  };
   const setDockSideOf = (id, side) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, dockSide: side, dock: (el.dock && el.dock !== "none") ? el.dock : "single" } : el)));
@@ -1618,6 +1628,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     fr.readAsText(file);
   };
   const siteName = useMemo(() => loadSite(siteId)?.name || "Site plan", [siteId]);
+  // Multi-site switching: flush this site's live state first so nothing in the
+  // last debounce window is lost (and a Duplicate clones the very latest edits).
+  const flushSite = () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); };
+  const handleNewSite = () => { setPlansMenu(false); flushSite(); onNewSite?.(); };
+  const handleOpenSite = (id) => { setPlansMenu(false); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
+  const handleDuplicate = () => { setPlansMenu(false); flushSite(); onDuplicateSite?.(siteId); };
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ parcels, els, measures, settings, underlay }, null, 2)], { type: "application/json" });
@@ -2187,6 +2203,36 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>{siteName}</span>
         </div>
 
+        {/* multi-site switcher — open / start / duplicate site plans without leaving the planner */}
+        {onNewSite && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2, position: "relative" }}>
+            {vSep}
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setPlansMenu((o) => !o)} title="Switch between your site plans">▦ Plans ▾</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={handleNewSite} title="Start a new blank site plan">＋ New</button>
+            {plansMenu && (
+              <>
+                <div onClick={() => setPlansMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 286, maxHeight: 440, overflowY: "auto", padding: 10 }}>
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 7 }}>Site plans</div>
+                  {(sites || []).length === 0 && <div style={{ fontSize: 12, color: PAL.muted, padding: "4px 2px" }}>No saved plans yet.</div>}
+                  {(sites || []).map((s) => (
+                    <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => handleOpenSite(s.id)}>
+                      <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled site"}</span>
+                        {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                      </span>
+                    </button>
+                  ))}
+                  <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                    <button style={{ ...chip, flex: 1 }} onClick={handleNewSite}>＋ New blank</button>
+                    <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan as a new variant to iterate on">⧉ Duplicate</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         <div style={{ flex: 1 }} />
 
         {/* history + view cluster */}
@@ -2265,8 +2311,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
             {/* scaled feet space */}
             <g>
-              {/* aerial underlay (drawn beneath everything) */}
-              {underlay && (() => {
+              {/* aerial underlay (drawn beneath everything) — hidden until you
+                  click a parcel or toggle it on, so it doesn't fill the canvas by default */}
+              {showAerial && underlay && (() => {
                 const tl = f2p({ x: underlay.x, y: underlay.y });
                 const sy = underlay.ftPerPxY || underlay.ftPerPx;
                 const w = underlay.imgW * underlay.ftPerPx * view.ppf;
@@ -2289,9 +2336,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
-                  fill={pc.fill || "#faf7f0"} fillOpacity={pc.fillOpacity ?? 0.12}
+                  fill={pc.fill || "none"} fillOpacity={pc.fill ? (pc.fillOpacity ?? 0.12) : 1}
                   stroke={isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={isSel ? 3 : 2}
-                  style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+                  style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                  pointerEvents="all"
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
@@ -2464,7 +2512,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           )}
 
           {/* aerial loading indicator */}
-          {underlayLoading && (
+          {showAerial && underlayLoading && (
             <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, pointerEvents: "none", display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.ember, display: "inline-block", animation: "pf-pulse 1.1s ease-in-out infinite" }} />
               Loading aerial…
@@ -2605,11 +2653,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               </>
             ) : (
               <>
-                <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Locked &amp; click-through so you can draw right over it. Calibrate it to a known distance for true scale.</div>
+                <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Hidden by default — click a parcel (or “Show” below) to reveal it. Locked &amp; click-through so you can draw right over it. Calibrate it to a known distance for true scale.</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button style={{ ...btn(tool === "calibrate"), flex: 1 }} onClick={() => { setTool("calibrate"); setCalib(null); }}>Calibrate scale</button>
+                  <button style={{ ...btn(showAerial), flex: 1 }} onClick={() => setShowAerial((v) => !v)}>{showAerial ? "Hide aerial" : "Show aerial"}</button>
+                  <button style={{ ...btn(tool === "calibrate") }} onClick={() => { setShowAerial(true); setTool("calibrate"); setCalib(null); }}>Calibrate</button>
                   <button style={chip} onClick={requestFit}>Fit</button>
-                  <button style={{ ...chip, color: PAL.accent }} onClick={() => { setUnderlay(null); setCalib(null); }}>Remove</button>
+                  <button style={{ ...chip, color: PAL.accent }} onClick={() => { setUnderlay(null); setCalib(null); setShowAerial(false); }}>Remove</button>
                 </div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7 }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide</div>
                 {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
@@ -2745,16 +2794,26 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
                 Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
               </div>
-              <Field label="Translucence">
-                <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
-                  onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
-              </Field>
-              <Field label="Fill color">
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(selParcel.fill || "#faf7f0")} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
-                  <span style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{toHex6(selParcel.fill || "#faf7f0")}</span>
-                </span>
-              </Field>
+              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                <button style={{ ...chip, flex: 1 }} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock parcel" : "🔓 Lock in place"}</button>
+              </div>
+              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
+              </label>
+              {selParcel.fill && (
+                <>
+                  <Field label="Translucence">
+                    <input type="range" min={0} max={0.6} step={0.02} value={selParcel.fillOpacity ?? 0.12}
+                      onChange={(e) => setSelParcel({ fillOpacity: +e.target.value })} />
+                  </Field>
+                  <Field label="Fill color">
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                      <span style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{toHex6(selParcel.fill)}</span>
+                    </span>
+                  </Field>
+                </>
+              )}
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 4px" }}>Standards</div>
               <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 2, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>

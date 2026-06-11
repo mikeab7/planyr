@@ -45,6 +45,18 @@ export default function App() {
     goPlan(id);
   };
 
+  // Iteration: clone an existing site into a fresh record (its own id) so you can
+  // explore a variant without touching the original. The planner flushes its live
+  // state before calling this, so loadSite() here sees the latest edits.
+  const duplicateSite = (srcId) => {
+    const src = loadSite(srcId);
+    if (!src) return;
+    const id = newId();
+    saveSite({ ...src, id, name: `${src.name || "Untitled site"} (copy)`, origin: src.origin || null });
+    refreshSites();
+    goPlan(id);
+  };
+
   // Refresh the map's site list when we land back on it (after the planner has
   // autosaved the latest edits).
   useEffect(() => {
@@ -72,7 +84,11 @@ export default function App() {
             key={activeSiteId}
             active={mode === "plan"}
             siteId={activeSiteId}
+            sites={sites}
             onBackToMap={() => setMode("map")}
+            onOpenSite={openSite}
+            onNewSite={newBlankSite}
+            onDuplicateSite={duplicateSite}
           />
         )}
       </div>
