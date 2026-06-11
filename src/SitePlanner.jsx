@@ -670,7 +670,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Bluebeam-style left rail: selecting something opens its menu (element →
   // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
   useEffect(() => {
-    if (sel?.kind === "el") setLeftPanel("props");
+    if (sel?.kind === "el" || sel?.kind === "callout") setLeftPanel("props");
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
@@ -900,6 +900,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   /* ------------ callouts (annotations) ------------ */
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  // Resolved style for a callout (defaults + per-callout overrides).
+  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; pushHistory(); setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); };
   const commitEditCallout = () => {
@@ -2418,6 +2420,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   };
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
+  const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
+  const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
@@ -2635,25 +2639,30 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               {callouts.map((c) => {
                 const bp = f2p(c.box), tp = f2p(c.tip);
                 const isSel = sel?.kind === "callout" && sel.id === c.id;
+                const st = calloutStyle(c);
                 const lines = String(c.text || "").split("\n");
-                const tw = Math.max(24, ...lines.map((l) => l.length * 6.6));
-                const w = tw + 16, h = lines.length * 15 + 10;
+                const charW = st.size * 0.56 * (st.bold ? 1.05 : 1), lineH = st.size * 1.3, pad = 8;
+                const tw = Math.max(20, ...lines.map((l) => l.length * charW));
+                const w = tw + pad * 2, h = lines.length * lineH + pad * 2;
                 const ang = Math.atan2(tp.y - bp.y, tp.x - bp.x), ah = 9;
                 const a1 = { x: tp.x - ah * Math.cos(ang - 0.4), y: tp.y - ah * Math.sin(ang - 0.4) };
                 const a2 = { x: tp.x - ah * Math.cos(ang + 0.4), y: tp.y - ah * Math.sin(ang + 0.4) };
-                const stroke = isSel ? PAL.accent : "#1f2937";
+                const border = isSel ? PAL.accent : st.stroke;
+                const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
+                const tx = st.align === "left" ? bp.x - w / 2 + pad : st.align === "right" ? bp.x + w / 2 - pad : bp.x;
                 return (
                   <g key={c.id}>
-                    <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={stroke} strokeWidth={1.6} />
-                    <polygon points={`${tp.x},${tp.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`} fill={stroke} />
+                    <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
+                    <polygon points={`${tp.x},${tp.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`} fill={border} />
                     <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
-                      fill="#fffbe8" stroke={stroke} strokeWidth={isSel ? 2 : 1.4}
+                      fill={st.fill} stroke={border} strokeWidth={isSel ? 2 : 1.4}
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={bp.x} y={bp.y - h / 2 + 16 + i * 15} textAnchor="middle" fontSize="12"
-                        fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill="#1f2937" pointerEvents="none">{ln}</text>
+                      <text key={i} x={tx} y={bp.y - h / 2 + pad + st.size * 0.82 + i * lineH} textAnchor={anchor}
+                        fontSize={st.size} fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill={st.color}
+                        fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
                     {isSel && tool === "select" && (
                       <circle cx={tp.x} cy={tp.y} r={5} fill="#fff" stroke={PAL.accent} strokeWidth={2}
@@ -2671,7 +2680,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               {editCallout && (() => {
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
-                const bp = f2p(c.box), W = 180, H = 60;
+                const st = calloutStyle(c);
+                const bp = f2p(c.box), W = 200, H = 64;
                 return (
                   <foreignObject x={bp.x - W / 2} y={bp.y - H / 2} width={W} height={H} style={{ overflow: "visible" }}>
                     <textarea autoFocus value={editCallout.text}
@@ -2685,7 +2695,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                         else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
                       }}
                       placeholder="Type, Enter to save"
-                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: 12, fontFamily: "'Helvetica Neue', Helvetica, sans-serif", color: "#1f2937", background: "#fffbe8", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: st.size, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", fontFamily: "'Helvetica Neue', Helvetica, sans-serif", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -3055,11 +3065,42 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
 
           {/* Element menu — selection details + properties (or an empty hint) */}
-          {leftPanel === "props" && !selEl && (
+          {leftPanel === "props" && !selEl && !selCallout && (
             <Section title="Element">
-              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element on the canvas to edit its size, rotation, dock features, and colors here.</div>
+              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element or callout on the canvas to edit its properties here.</div>
             </Section>
           )}
+          {/* selected callout — text styling */}
+          {leftPanel === "props" && selCallout && (() => {
+            const cs = calloutStyle(selCallout);
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            return (
+              <Section title="Callout">
+                <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
+                <Field label="Text size"><NumInput style={numInput} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} /></Field>
+                <Field label="Align">
+                  <span style={{ display: "flex", gap: 5, width: 150 }}>
+                    {["left", "center", "right"].map((a) => (
+                      <button key={a} style={seg(cs.align === a)} title={a} onClick={() => setSelCallout({ align: a })}>{a === "left" ? "⤙" : a === "right" ? "⤚" : "≡"}</button>
+                    ))}
+                  </span>
+                </Field>
+                <Field label="Style">
+                  <span style={{ display: "flex", gap: 5, width: 150 }}>
+                    <button style={{ ...seg(cs.bold), fontWeight: 800 }} onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                    <button style={{ ...seg(cs.italic), fontStyle: "italic" }} onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                  </span>
+                </Field>
+                <Field label="Text color"><input type="color" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} /></Field>
+                <Field label="Fill color"><input type="color" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} /></Field>
+                <Field label="Line color"><input type="color" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} /></Field>
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete callout</button>
+                </div>
+              </Section>
+            );
+          })()}
           {/* selected element */}
           {leftPanel === "props" && selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
