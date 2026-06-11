@@ -55,6 +55,7 @@ const ICON_PATHS = {
   road: <><path d="M5.2 2.5 L3.2 13.5 M10.8 2.5 L12.8 13.5" /><path d="M8 3 v2.2 M8 7 v2.2 M8 11 v2.2" /></>,
   measure: <><path d="M2.2 10.8 L10.8 2.2 L13.8 5.2 L5.2 13.8 Z" /><path d="M5.6 7.4 l1.4 1.4 M8 5 l1.4 1.4" /></>,
   combine: <><path d="M2.5 2.5 h7 v4 h4 v7 h-7 v-4 h-4 Z" /></>,
+  pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
   callout: <><rect x="2.2" y="2.4" width="8.6" height="6" rx="1" /><path d="M5.2 8.4 L4 11.2 L7.2 8.4" /><path d="M11 11.5 L13.8 13.8" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
@@ -65,7 +66,8 @@ const ToolIcon = ({ id, size = 15 }) => (
 );
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
+  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: Shift+V (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "combine", label: "Combine", hint: "Merge parcels: click two or more adjacent parcels (they share a boundary) to pick them, then press Enter (or the Merge button) to fuse them into one. Esc clears the pick" },
@@ -393,6 +395,37 @@ function mergeRings(ringA, ringB, tol = 0.75) {
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/* --------------- county appraisal-district attribute view --------------- */
+// Curated, human-labelled rows pulled from the raw county GIS attributes that
+// rode along with a map-imported parcel.
+const APPR_FIELDS = [
+  [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
+  [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
+  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre)/i, "Acreage"],
+  [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
+  [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
+  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt)/i, "Total value"],
+  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type)/i, "Land use"],
+  [/zoning/i, "Zoning"],
+  [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
+];
+const prettyKey = (k) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const apprRows = (attrs) => {
+  if (!attrs) return [];
+  const used = new Set(), rows = [];
+  for (const [re, label] of APPR_FIELDS) {
+    const k = Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
+    if (k) { used.add(k); rows.push({ label, value: attrs[k] }); }
+  }
+  return rows;
+};
+const apprAll = (attrs) => Object.entries(attrs || {})
+  .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
+  .map(([k, v]) => ({ label: prettyKey(k), value: v }));
+// Format a value, adding $ + thousands for the money fields.
+const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
+
 let _id = 1;
 const uid = () => `e${_id++}`;
 // After restoring saved work, bump the id counter past any restored ids so new
@@ -671,6 +704,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
+      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
@@ -719,6 +753,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (sidewalkFor) { setSidewalkFor(null); return; } // clicked off the building → cancel
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
+    if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (tool === "select") {
       setSel(null);
       setPanning(true);
@@ -804,8 +844,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         : splitPolygonPath(pc.points, pts);
       if (halves) {
         pushHistory();
-        const a = { id: uid(), points: halves[0], locked: true };
-        const b = { id: uid(), points: halves[1], locked: true };
+        const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
+        const a = { id: uid(), points: halves[0], locked: true, ...inherit };
+        const b = { id: uid(), points: halves[1], locked: true, ...inherit };
         setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
         setSel({ kind: "parcel", id: a.id });
         return;
@@ -2508,7 +2549,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor || alignFor) ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor || alignFor) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -2808,7 +2849,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         {/* right-side tool rail — dark chrome */}
         <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "0 4px 6px" }}>Tools</div>
-          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select</button>
+          <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
+          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")}><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>⇧V</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div style={{ position: "relative" }}>
@@ -3086,14 +3128,54 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
 
           {/* Parcel menu — empty hint when no parcel is selected */}
-          {leftPanel === "parcel" && !selParcel && (
-            <Section title="Parcel">
-              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Click a parcel boundary on the canvas to see its area, lock it in place, set a setback, or give it a fill.</div>
+          {/* every parcel in this plan — click to select */}
+          {leftPanel === "parcel" && (
+            <Section title={`Parcels · ${parcels.length}`}>
+              {parcels.length === 0 ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Parcel tool.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {parcels.map((pc, i) => {
+                    const on = selParcel?.id === pc.id;
+                    return (
+                      <button key={pc.id} onClick={() => setSel({ kind: "parcel", id: pc.id })}
+                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${on ? PAL.accent : "#e2dccb"}`, background: on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}</div>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </Section>
+          )}
+          {/* appraisal-district property data for the selected parcel */}
+          {leftPanel === "parcel" && selParcel && selParcel.attrs && (
+            <Section title="Appraisal data">
+              {apprRows(selParcel.attrs).length === 0 ? (
+                <div style={{ fontSize: 12, color: PAL.muted }}>No recognizable fields in the county record.</div>
+              ) : apprRows(selParcel.attrs).map((r) => (
+                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "5px 0", borderBottom: "1px solid #f3efe5" }}>
+                  <span style={{ fontSize: 11.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
+                  <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{apprVal(r.label, r.value)}</span>
+                </div>
+              ))}
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 11, color: PAL.muted, cursor: "pointer" }}>All county fields</summary>
+                <div style={{ marginTop: 6 }}>
+                  {apprAll(selParcel.attrs).map((r) => (
+                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "3px 0" }}>
+                      <span style={{ fontSize: 10.5, color: PAL.muted, flex: "none" }}>{r.label}</span>
+                      <span style={{ fontSize: 10.5, color: PAL.ink, fontFamily: "ui-monospace, monospace", textAlign: "right", wordBreak: "break-word" }}>{String(r.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </Section>
           )}
           {/* selected parcel — translucence + setback standards */}
           {leftPanel === "parcel" && selParcel && (
-            <Section title="Parcel">
+            <Section title="Boundary">
               <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
                 Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
               </div>

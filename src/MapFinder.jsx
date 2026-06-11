@@ -96,7 +96,7 @@ function computeAssembly(selected, exportBase) {
     latMin = Math.min(latMin, lat); latMax = Math.max(latMax, lat);
   }));
   const lon0 = (lonMin + lonMax) / 2, lat0 = (latMin + latMax) / 2;
-  const parcels = selected.map((s) => ({ points: lngLatRingToFeet(s.ring, lon0, lat0) }));
+  const parcels = selected.map((s) => ({ points: lngLatRingToFeet(s.ring, lon0, lat0), addr: s.addr || null, acct: s.acct || null, attrs: s.attrs || null }));
   const totalSqft = parcels.reduce((sum, p) => sum + shoelace(p.points), 0);
   // Generous context around the site so you can see access roads / neighbors.
   const padLon = Math.max((lonMax - lonMin) * 0.4, 0.0012);
@@ -340,7 +340,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
       } else {
         const latlngs = ring.map(([lon, lat]) => [lat, lon]);
         hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE) }]);
+        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs }]);
       }
     } catch (e) {
       setErr(humanizeError(e));
