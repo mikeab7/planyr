@@ -2803,10 +2803,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const isSel = sel?.kind === "measure" && sel.i === i;
                 const isArea = mode === "area";
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                // label + anchor point
-                const lbl = isArea
-                  ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac`
-                  : `${f0(pathLen(fpts))}′`;
+                // label + anchor point. Area shows area + perimeter; amber + ⚠ when uncalibrated.
+                const warn = calibrationState === "uncalibrated";
+                const mcolor = warn ? "#b45309" : PAL.accent;
+                const perim = pathLen([...fpts, fpts[0]]);
+                const lbl = (warn ? "⚠ " : "") + (isArea
+                  ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac · ${f0(perim)}′ perim`
+                  : `${f0(pathLen(fpts))}′`);
                 const anchor = isArea ? f2p(centroid(fpts)) : (() => {
                   const a = pts[pts.length - 2], b = pts[pts.length - 1];
                   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -2814,11 +2817,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 return (
                   <g key={m.id || `m${i}`}>
                     {isArea
-                      ? <polygon points={ptsStr} fill={PAL.accent} fillOpacity={isSel ? 0.16 : 0.1} stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
-                      : <polyline points={ptsStr} fill="none" stroke={PAL.accent} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
-                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={PAL.accent} pointerEvents="none" />)}
+                      ? <polygon points={ptsStr} fill={mcolor} fillOpacity={isSel ? 0.16 : 0.1} stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />
+                      : <polyline points={ptsStr} fill="none" stroke={mcolor} strokeWidth={isSel ? 2.5 : 1.5} pointerEvents="none" />}
+                    {pts.map((p, k) => <circle key={k} cx={p.x} cy={p.y} r={3} fill={mcolor} pointerEvents="none" />)}
                     <text x={anchor.x} y={anchor.y - 5} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
-                      fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
+                      fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{lbl}</text>
                     {/* wide invisible hit path to select the measurement (select tool only) */}
                     {isArea
                       ? <polygon points={ptsStr} fill="transparent" stroke="transparent" strokeWidth={14}
@@ -3105,6 +3108,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")}><ToolIcon id="text" /> Text <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>T</span></button>
 
           <div style={{ flex: 1 }} />
+          {tool === "measure" && calibrationState === "uncalibrated" && (
+            <div style={{ fontSize: 10.5, color: "#fbbf24", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Underlay isn't calibrated — distances may be wrong.</div>
+          )}
           {curHint && (
             <div style={{ fontSize: 10.5, color: PAL.chromeMuted, lineHeight: 1.5, padding: "8px 6px 2px", borderTop: `1px solid ${PAL.chromeLine}` }}>
               <span style={{ color: PAL.ember, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 9.5 }}>{TOOLS.find((t) => t.id === tool)?.label}</span>
