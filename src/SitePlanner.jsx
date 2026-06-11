@@ -843,7 +843,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       pushHistory();
       let presetDepth = 0; // fixed cross-width for a preset strip (0 = free draw)
       if (tool === "parking" && parkingRows !== "free") presetDepth = parkingRows === "double" ? settings.stallDepth * 2 + settings.aisle : settings.stallDepth + settings.aisle;
-      else if (tool === "road" && roadWidth !== "free") presetDepth = +roadWidth + 2 * CURB; // +6" curb each side
+      else if (tool === "road" && roadWidth !== "free") presetDepth = +roadWidth + 2 * (+settings.roadCurb || CURB); // travel + curb each side
       drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y, depth: presetDepth };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
@@ -1173,13 +1173,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         // fixed-width preset (parking rows / road width): a length×depth strip,
         // rotated for a vertical drag.
         if (draftRect.parkLen >= 4) {
-          const el = { id: uid(), type: d.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.parkLen, h: draftRect.parkDepth, rot: draftRect.parkRot };
+          const curb = +settings.roadCurb || CURB;
+          const roadExtra = d.type === "road" ? { travelW: Math.max(0, draftRect.parkDepth - 2 * curb), curb } : {};
+          const el = { id: uid(), type: d.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.parkLen, h: draftRect.parkDepth, rot: draftRect.parkRot, ...roadExtra };
           setEls((a) => [...a, el]);
           setSel({ kind: "el", id: el.id });
           setTool("select");
         }
       } else if (draftRect.w >= 4 && draftRect.h >= 4) {
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0 };
+        const curb = +settings.roadCurb || CURB;
+        const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -2454,6 +2458,19 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const kids = wallKids(selEl);
     setEls((a) => refitChildren(a, selEl.id, nb, kids));
   };
+  // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
+  const roadCurbOf = (el) => el.curb ?? (+settings.roadCurb || CURB);
+  const roadTravel = (el) => el.travelW ?? Math.max(0, Math.min(el.w, el.h) - 2 * roadCurbOf(el));
+  const setRoadTravel = (el, travel) => {
+    const curb = roadCurbOf(el), cross = Math.max(1, travel) + 2 * curb, crossIsH = el.h <= el.w;
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { h: cross } : { w: cross }), travelW: Math.max(1, travel), curb } : x));
+  };
+  const setRoadLength = (el, len) => {
+    const crossIsH = el.h <= el.w; // the length axis is the other one
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { w: Math.max(1, len) } : { h: Math.max(1, len) }) } : x));
+  };
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
@@ -3134,8 +3151,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
-                  <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                  <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                  {selEl.type === "road" ? (
+                    <>
+                      <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
+                      <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                    </>
+                  ) : (
+                    <>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                    </>
+                  )}
                   <Field label="Rotation (°)">
                     <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
@@ -3542,8 +3568,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       }
     });
   }
-  if (el.type === "road") { // curb lines 6" inside each long edge; pavement between
-    const cp = CURB * ppf;
+  if (el.type === "road") { // curb lines inside each long edge; pavement between
+    const cp = (el.curb ?? CURB) * ppf;
     if (el.w >= el.h) {
       parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={1} />);
       parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={1} />);
@@ -3557,7 +3583,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // of a drive/road). A road's callout excludes its 6" curbs (true width − 1′).
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
-    const dimW = el.type === "road" ? Math.max(0, fullMin - 2 * CURB) : fullMin;
+    const dimW = el.type === "road" ? (el.travelW ?? Math.max(0, fullMin - 2 * (el.curb ?? CURB))) : fullMin;
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const dim = [];
