@@ -473,8 +473,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
-  const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
-  const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
@@ -485,7 +483,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
-  const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
@@ -735,7 +732,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setSidewalkFor(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -776,7 +773,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (e.button !== 0) return;
     const fp = p2f(e.clientX, e.clientY);
 
-    if (sidewalkFor) { setSidewalkFor(null); return; } // clicked off the building → cancel
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
@@ -1177,7 +1173,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           setTool("select");
         }
       } else if (draftRect.w >= 4 && draftRect.h >= 4) {
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...(draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {}) };
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0 };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -1443,14 +1439,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
-  // Resolve a building's dock side(s). Non-dock sides take a sidewalk; trailer
-  // parking is added off a truck court's far edge (not the building wall itself).
+  // A building's dock-capable sides are simply its TWO LONG sides; truck courts,
+  // trailer parking (off a court) and bump-outs attach there.
   const dockSidesOf = (el) => {
-    const dock = el.dock || "single";
-    const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
-    if (dock === "none") return { dside, dockSides: [], trailerSides: [] };
-    if (dock === "cross") return { dside, dockSides: (dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"], trailerSides: [] };
-    return { dside, dockSides: [dside], trailerSides: [] };
+    const dockSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
+    return { dside: dockSides[1], dockSides, trailerSides: [] };
   };
   // Build (don't commit) a full-wall strip element flush against one building side.
   const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
@@ -1523,7 +1516,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     });
     return pass1.map((x) => (x.forCourt && courtBox[x.forCourt]) ? { ...x, ...fitWallTrailer(courtBox[x.forCourt].box, courtBox[x.forCourt].side) } : x);
   };
-  const addOppTrailer = (b, name) => addBuildingEls([{ ...makeOppTrailer(b, name), oppSide: name }], b.id);
   // Trailer parking flush against the FAR (outer) edge of a truck court — where
   // trailers actually back in. Bonded to the court's building so it moves as one.
   const addCourtTrailer = (tc) => { if (els.some((x) => x.forCourt === tc.id)) return; const root = rootIdOf(tc.id); addBuildingEls([{ ...makeOppTrailer(tc, tc.truckCourt.side, root), forCourt: tc.id }], root); };
@@ -1583,12 +1575,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
   };
-  // Trailer parking on every free side opposite the dock(s) that doesn't have it.
-  const addOppTrailerAll = (b) => {
-    const { trailerSides } = dockSidesOf(b);
-    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.oppSide).map((x) => x.oppSide));
-    addBuildingEls(trailerSides.filter((s) => !have.has(s)).map((s) => ({ ...makeOppTrailer(b, s), oppSide: s })), b.id);
-  };
   // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
   // from the kid's position (so legacy / untagged strips are still recognised).
   const sideOfKid = (b, kid) => {
@@ -1598,57 +1584,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
   };
-  const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
-  // Add a sidewalk on side `name`, pre-extended over any bump-outs already on that
-  // wall so it spans the full (bump-out-inclusive) length right away.
-  const addSidewalkSide = (b, name) => {
-    if (sidewalkOnSide(b, name)) return; // one sidewalk per side
-    let sw = makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name });
-    els.forEach((de) => {
-      if (de.attachedTo === b.id && de.dogEar && bumpSidewalkSide(de.dogEar.side, de.dogEar.sign) === name) sw = adjustSidewalkForBump(sw, de.dogEar.side, 1);
-    });
-    addBuildingEls([sw], b.id);
-  };
-  // Parking already added off a non-dock side (just outside its sidewalk).
-  const sideParkingOn = (b, name) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === name);
-  // Add a single row of parking + its drive aisle flush against the OUTER face of
-  // the sidewalk on side `name`, running the wall's length, growing outward.
-  // Rotation per side so the strip's +local-y (its depth axis) points OUTWARD,
-  // away from the building. That makes "inner" always local-y 0, so the drive
-  // aisle (flipDepth) lands against the building and stalls on the far side, and
-  // growing rows always extends outward.
-  const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
-  const addParkingRowSide = (b, name) => {
-    if (sideParkingOn(b, name)) return;
-    const [nx, ny] = SIDE_N[name];
-    const sw = sidewalkOnSide(b, name);
-    const swDepth = sw ? (nx !== 0 ? sw.w : sw.h) : 0; // clear the sidewalk
-    const parkDepth = settings.stallDepth + settings.aisle; // one stall row + drive
-    const along = ny !== 0 ? b.w : b.h;
-    const half = (nx !== 0 ? b.w : b.h) / 2;
-    const perp = half + swDepth + parkDepth / 2;
-    const off = rot2(nx * perp, ny * perp, b.rot);
-    const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
-    addBuildingEls([el], b.id);
-  };
-  const addSidewalk = (b, clickFp) => {
-    const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
-    let nx = 0, ny = 0;
-    if (Math.abs(local.x) / (b.w / 2) >= Math.abs(local.y) / (b.h / 2)) nx = local.x >= 0 ? 1 : -1;
-    else ny = local.y >= 0 ? 1 : -1;
-    addSidewalkSide(b, nx === 1 ? "right" : nx === -1 ? "left" : ny === 1 ? "bottom" : "top");
-  };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
-    if (sidewalkFor) { // placing a sidewalk: this click picks the building side
-      if (el && el.id === sidewalkFor && !el.points) addSidewalk(el, fp);
-      setSidewalkFor(null);
-      return;
-    }
     if (attachFor) { // bonding: this click picks the host to attach to
       if (el) attachTo(attachFor, el.id);
       setAttachFor(null);
@@ -1727,14 +1667,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (ang == null) return; // polygon target has no single rotation
     rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
   };
-  // Pin a building's dock to its current side before a resize, so growing the
-  // long axis can't flip the loading dock to a different face.
-  const freezeDockSide = (el) => {
-    if (el.type === "building" && !el.dockSide) {
-      const side = el.w >= el.h ? "bottom" : "right";
-      setEls((a) => a.map((x) => x.id === el.id ? { ...x, dockSide: side } : x));
-    }
-  };
   // When a rectangular element is bonded to a (rect) building, capture which of
   // the host's edges it hugs plus the gap, so a resize keeps that host-facing
   // face pinned — the element then grows AWAY from the building, not over it.
@@ -1767,7 +1699,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const startResize = (e, id, sx, sy) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
-    freezeDockSide(el);
     // fixed opposite corner in world feet
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
@@ -1779,7 +1710,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
-    freezeDockSide(el);
     // midpoint of the opposite edge stays fixed (world feet)
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
@@ -1809,10 +1739,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setSel({ kind: "el", id });
     setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
-  const setDockOf = (id, dock) => {
-    pushHistory();
-    setEls((a) => a.map((el) => (el.id === id ? { ...el, dock } : el)));
-  };
   const toggleLock = (id) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
@@ -1820,10 +1746,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const toggleParcelLock = (id) => {
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
-  };
-  const setDockSideOf = (id, side) => {
-    pushHistory();
-    setEls((a) => a.map((el) => (el.id === id ? { ...el, dockSide: side, dock: (el.dock && el.dock !== "none") ? el.dock : "single" } : el)));
   };
 
   /* ------------ metrics ------------ */
@@ -2186,10 +2108,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   })();
 
   // "+" quick-add handles on a selected building:
-  //  • dock side(s): a 135′ truck dock + drive (orange)
-  //  • side opposite a single-load dock: 50′ striped trailer parking (teal)
-  //  • other sides: a 5′ sidewalk (green)
-  //  • each dock-side corner: a 55′×60′ dog-ear / bump-out (purple)
+  //  • each long (dock-capable) side: a 135′ truck dock + drive (orange)
+  //  • each long-side corner: a 55′×60′ bump-out (purple)
   // A side/corner handle: a coloured "+" to add a feature, or a red "−" to
   // remove the one already there (so a feature can't be stacked twice).
   const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = 9) => (
@@ -2207,10 +2127,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / sidewalk / trailer handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
-    const { dockSides, trailerSides } = dockSidesOf(el);
+    const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
-    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
+    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]].filter(([name]) => dockSides.includes(name));
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
@@ -2218,26 +2138,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
           const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          const isDock = dockSides.includes(name), isTrailer = trailerSides.includes(name);
-          let existing, color, addTitle, onAdd;
-          if (isDock) {
-            existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
-            color = "#b45309"; addTitle = `Add ${TRUCK_COURT_D}′ truck dock + drive`;
-            onAdd = () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } });
-          } else if (isTrailer) {
-            existing = kids.find((x) => x.oppSide === name);
-            color = "#0e7490"; addTitle = `Add ${OPP_TRAILER_D}′ striped trailer parking`;
-            onAdd = () => addOppTrailer(el, name);
-          } else {
-            // Non-dock side: progress sidewalk → single parking row + drive → remove parking.
-            const swExisting = kids.find((x) => isWallStrip(x) && !x.points && sideOfKid(el, x) === name);
-            const parkExisting = kids.find((x) => x.sideParkSide === name);
-            existing = parkExisting; // only the parking step shows a "−" to remove
-            color = swExisting ? "#2563eb" : "#16a34a";
-            addTitle = swExisting ? "Add a single parking row + drive" : `Add ${SIDEWALK_W}′ sidewalk`;
-            onAdd = swExisting ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name);
-          }
-          return featNode(`add${name}`, pos, !!existing, color, addTitle, onAdd, existing ? () => removeFeature(existing.id) : null);
+          const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
+          return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${TRUCK_COURT_D}′ truck dock + drive`,
+            () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } }),
+            existing ? () => removeFeature(existing.id) : null);
         })}
         {/* dog-ear bump-outs at each corner of every dock side */}
         {dockSides.flatMap((name) => {
@@ -2250,7 +2154,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
             const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
             const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
-            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null);
+            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ bump-out`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null);
           });
         })}
       </g>
@@ -2504,7 +2408,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (id !== "callout") setCalloutDraft(null);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
-    if (id !== "building") setBuildingMenu(false);
     if (id !== "parking") setParkingMenu(false);
     if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
@@ -2718,7 +2621,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor || alignFor) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -3021,8 +2924,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 82 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
             <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
-            <span style={{ color: (sidewalkFor || attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (sidewalkFor || attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : alignFor ? "Click a parcel edge (or another element) to align this element's rotation to it · Esc cancels" : curHint}
+            <span style={{ color: (attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : alignFor ? "Click a parcel edge (or another element) to align this element's rotation to it · Esc cancels" : curHint}
             </span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
           </div>
@@ -3056,22 +2959,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
           {DRAW_TYPES.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
-            if (id === "building") return (
-              <div key={id} style={{ position: "relative" }}>
-                <button className={`rbtn${tool === "building" ? " on" : ""}`} style={rbtn(tool === "building")} onClick={() => setBuildingMenu((o) => !o)}><ToolIcon id="building" /> Building <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
-                {buildingMenu && (
-                  <>
-                    <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                    <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 200 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
-                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                        <button key={k} style={menuItem(tool === "building" && buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
             if (id === "parking") {
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
@@ -3253,28 +3140,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     </span>
                   </Field>
                   {selEl.type === "building" && (
-                    <Field label="Docks">
-                      <select style={{ ...numInput, width: 112, fontFamily: "inherit" }} value={selEl.dock || "single"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
-                        <option value="single">Single-load</option>
-                        <option value="cross">Cross-dock</option>
-                        <option value="none">None</option>
-                      </select>
-                    </Field>
-                  )}
-                  {selEl.type === "building" && (() => {
-                    const { dockSides, trailerSides } = dockSidesOf(selEl);
-                    return (
-                      <div style={{ marginTop: 4 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <button style={{ ...chip, textAlign: "left" }} disabled={!dockSides.length} onClick={() => addTruckCourt(selEl)}>＋ {TRUCK_COURT_D}′ truck court</button>
-                          <button style={{ ...chip, textAlign: "left" }} disabled={!dockSides.length} onClick={() => addDogEars(selEl)}>＋ Dock dog-ears ({DOGEAR_W}′×{DOGEAR_D}′)</button>
-                          <button style={{ ...chip, textAlign: "left", color: !trailerSides.length ? PAL.muted : "#0e7490" }} disabled={!trailerSides.length} onClick={() => addOppTrailerAll(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (opposite docks)</button>
-                        </div>
-                        {!trailerSides.length && <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>Trailer parking needs a free side opposite the docks — set <b>Docks</b> to Single-load or Cross-dock.</div>}
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addTruckCourt(selEl)}>＋ {TRUCK_COURT_D}′ truck court</button>
+                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addDogEars(selEl)}>＋ Bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                       </div>
-                    );
-                  })()}
+                    </div>
+                  )}
                   {selEl.truckCourt && (
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Truck court</div>
@@ -3558,34 +3431,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   )}
                   {isBuildingRect && (
                     <>
-                      <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock layout</div>
-                      {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                        <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
-                      ))}
-                      {dock !== "none" && (() => {
-                        const side = t.dockSide || (t.w >= t.h ? "bottom" : "right");
-                        const active = dock === "cross"
-                          ? ((side === "top" || side === "bottom") ? ["top", "bottom"] : ["left", "right"])
-                          : [side];
-                        return (
-                          <>
-                            <div style={hdr(true)}>Dock side</div>
-                            {[["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"]].map(([k, label]) => (
-                              <button key={k} style={menuItem(active.includes(k))} onClick={() => setDockSideOf(typeMenu.id, k)}>{label}</button>
-                            ))}
-                          </>
-                        );
-                      })()}
-                      <div style={hdr(true)}>Sidewalk</div>
-                      <button style={menuItem(false)} onClick={() => { setSidewalkFor(typeMenu.id); setTypeMenu(null); }}>Add sidewalk — then click a side</button>
-                      {dock !== "none" && (
-                        <>
-                          <div style={hdr(true)}>Dock features</div>
-                          <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
-                          <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add dock dog-ears ({DOGEAR_W}′×{DOGEAR_D}′)</button>
-                          {dockSidesOf(t).trailerSides.length > 0 && <button style={menuItem(false)} onClick={() => { addOppTrailerAll(t); setTypeMenu(null); }}>Add {OPP_TRAILER_D}′ trailer parking (opposite docks)</button>}
-                        </>
-                      )}
+                      <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
+                      <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
+                      <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                     </>
                   )}
                   {!t.points && (
