@@ -6,7 +6,11 @@ import {
   getLayerInfo,
   resolveLayerUrl,
   queryFeatures,
+  queryAtPoint,
   featureToParcel,
+  largestRingLngLat,
+  lngLatRingToFeet,
+  feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
@@ -458,6 +462,7 @@ const apprAll = (attrs) => Object.entries(attrs || {})
   .map(([k, v]) => ({ label: prettyKey(k), value: v }));
 // Format a value, adding $ + thousands for the money fields.
 const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
+const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== ""); return k ? String(attrs[k]) : null; };
 // County stated acreage from the attributes. Prefer an explicit acres field;
 // fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
 // { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
@@ -789,7 +794,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -833,6 +838,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
+    if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
@@ -1971,8 +1977,38 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
+  const origin = restored?.origin || null;
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
   const [taxInfo, setTaxInfo] = useState(null);
+  // In-planner parcel identify (click any spot → county record without importing).
+  const [identifyMode, setIdentifyMode] = useState(false);
+  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, addr } | { error }
+  const idLayerRef = useRef(null);
+  const identifyAt = async (fp) => {
+    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
+    setIdentifyRes({ busy: true });
+    try {
+      const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+      if (!idLayerRef.current) {
+        const cm = COUNTIES_MAP[siteCounty] || COUNTIES_MAP.harris;
+        idLayerRef.current = cm.layerUrl || await resolveLayerUrl(cm.mapServer || COUNTIES[siteCounty]?.layerUrl || COUNTIES.harris.layerUrl);
+      }
+      const feat = await queryAtPoint(idLayerRef.current, lng, lat);
+      if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
+      const ring = largestRingLngLat(feat);
+      setIdentifyRes({ attrs: feat.attributes || {}, ring, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+    } catch (e) { setIdentifyRes({ error: humanizeError(e) }); }
+  };
+  const addIdentifiedParcel = () => {
+    if (!identifyRes?.ring || !origin) return;
+    const points = lngLatRingToFeet(identifyRes.ring, origin.lon, origin.lat);
+    if (points.length < 3) return;
+    pushHistory();
+    const pc = { id: uid(), points, locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null };
+    setParcels((a) => [...a, pc]);
+    setSel({ kind: "parcel", id: pc.id });
+    setIdentifyRes(null); setIdentifyMode(false);
+  };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
@@ -2827,7 +2863,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -3592,6 +3628,31 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   })}
                 </div>
               )}
+              {/* identify any parcel from the county GIS (no import unless you add it) */}
+              <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
+                {origin ? (
+                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); }}>
+                    {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
+                  </button>
+                ) : (
+                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5 }}>Identify needs a georeferenced plan. Bring the parcel in from the map to enable it.</div>
+                )}
+                {identifyRes && (
+                  <div style={{ marginTop: 8, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>Querying county GIS…</span>
+                      : identifyRes.error ? <span style={{ color: "#b45309" }}>{identifyRes.error}</span>
+                      : <>
+                          <div style={{ fontWeight: 700, color: PAL.ink, marginBottom: 4 }}>{identifyRes.addr || "Parcel"}</div>
+                          {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
+                            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
+                              <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
+                            </div>
+                          ))}
+                          {identifyRes.ring && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
+                        </>}
+                  </div>
+                )}
+              </div>
             </Section>
           )}
           {/* appraisal-district property data for the selected parcel */}
