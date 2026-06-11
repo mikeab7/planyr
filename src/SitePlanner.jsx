@@ -228,6 +228,12 @@ function carStalls(w, h, s) {
     bands.push({ y: used, depth: rowDepth, n: perRow, pitch, slantDx, dir: 1 });
     count += perRow;
   }
+  // flipDepth: mirror the layout across the strip's depth so the drive aisle
+  // sits on the inner (y=0) edge — used for parking that hugs a building.
+  if (s.flipDepth) {
+    bands.forEach((b) => { b.y = h - b.y - b.depth; });
+    aisles.forEach((a) => { const y0 = h - a.y1, y1 = h - a.y0; a.y0 = y0; a.y1 = y1; });
+  }
   return { count, bands, aisles, pitch, rowDepth, angle: ang };
 }
 // Trailer storage as double-loaded rows (53′ deep) separated by a maneuvering
@@ -1607,19 +1613,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const sideParkingOn = (b, name) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === name);
   // Add a single row of parking + its drive aisle flush against the OUTER face of
   // the sidewalk on side `name`, running the wall's length, growing outward.
+  // Rotation per side so the strip's +local-y (its depth axis) points OUTWARD,
+  // away from the building. That makes "inner" always local-y 0, so the drive
+  // aisle (flipDepth) lands against the building and stalls on the far side, and
+  // growing rows always extends outward.
+  const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
   const addParkingRowSide = (b, name) => {
     if (sideParkingOn(b, name)) return;
     const [nx, ny] = SIDE_N[name];
     const sw = sidewalkOnSide(b, name);
     const swDepth = sw ? (nx !== 0 ? sw.w : sw.h) : 0; // clear the sidewalk
     const parkDepth = settings.stallDepth + settings.aisle; // one stall row + drive
-    const horiz = ny !== 0;                       // top/bottom wall → stalls run along X
-    const along = horiz ? b.w : b.h;
+    const along = ny !== 0 ? b.w : b.h;
     const half = (nx !== 0 ? b.w : b.h) / 2;
     const perp = half + swDepth + parkDepth / 2;
     const off = rot2(nx * perp, ny * perp, b.rot);
     const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
     addBuildingEls([el], b.id);
   };
   const addSidewalk = (b, clickFp) => {
@@ -2268,11 +2278,36 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Grow a parking field one band deeper (keeping its near edge fixed); the
   // stall striping auto-fills the new depth. Loops, so you can stack rows/aisles.
   const growParking = (el, dir = 1) => {
-    const inc = parkBand();
-    if (dir < 0 && el.h - inc < settings.stallDepth) return; // keep at least one row
-    const off = rot2(0, dir * inc / 2, el.rot); // extend the +local-y (depth) edge
+    const cfg = cfgOf(el);
+    const inc = (cfg.stallDepth || settings.stallDepth) + (cfg.aisle ?? settings.aisle);
+    if (dir < 0 && el.h - inc < (cfg.stallDepth || settings.stallDepth)) return; // keep at least one row
+    // Grow on the edge pointing AWAY from a host building (so it never grows over
+    // it); for a free field this is just the +local-y edge.
+    let outSign = 1;
+    const host = el.attachedTo ? els.find((x) => x.id === el.attachedTo && !x.points) : null;
+    if (host) {
+      const yAxis = rot2(0, 1, el.rot); // +local-y in world
+      outSign = (yAxis.x * (el.cx - host.cx) + yAxis.y * (el.cy - host.cy)) >= 0 ? 1 : -1;
+    }
+    const off = rot2(0, outSign * dir * inc / 2, el.rot);
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: x.h + dir * inc, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+  };
+  // Per-field stall depth / drive-aisle override. Resizes the field's depth to
+  // keep its rows consistent, growing on the outward (non-host) edge.
+  const setParkCfg = (el, patch) => {
+    const cur = cfgOf(el);
+    const oldBand = (cur.stallDepth || settings.stallDepth) + (cur.aisle ?? settings.aisle);
+    const ncfg = { ...(el.cfg || {}), ...patch };
+    const newBand = (ncfg.stallDepth ?? settings.stallDepth) + (ncfg.aisle ?? settings.aisle);
+    const rows = Math.max(1, Math.round(el.h / oldBand));
+    const newH = rows * newBand;
+    let outSign = 1;
+    const host = el.attachedTo ? els.find((x) => x.id === el.attachedTo && !x.points) : null;
+    if (host) { const yAxis = rot2(0, 1, el.rot); outSign = (yAxis.x * (el.cx - host.cx) + yAxis.y * (el.cy - host.cy)) >= 0 ? 1 : -1; }
+    const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, cfg: ncfg, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
   };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
@@ -3246,6 +3281,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       <button style={{ ...chip, textAlign: "left", color: "#0e7490", width: "100%" }} onClick={() => addCourtTrailer(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (far side)</button>
                     </div>
                   )}
+                  {selEl.type === "parking" && (() => {
+                    const pc = cfgOf(selEl);
+                    return (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Parking layout</div>
+                        <Field label="Stall depth (ft)"><NumInput style={numInput} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} /></Field>
+                        <Field label="Drive aisle (ft)"><NumInput style={numInput} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} /></Field>
+                        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row + aisle</button>
+                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
+                        </div>
+                        <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
+                          <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
+                        </label>
+                      </div>
+                    );
+                  })()}
                 </>
               ) : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
