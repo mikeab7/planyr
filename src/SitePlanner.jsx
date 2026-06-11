@@ -166,37 +166,34 @@ function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
 }
 
 // Inward offset of a polygon by distance d (good for convex / mildly concave lots).
+// Winding (CW vs CCW) and a coordinate system with y pointing down make a normal
+// heuristic unreliable, so we offset each edge by the left normal × sign, build the
+// ring, and keep whichever sign SHRINKS the polygon (a true inward setback).
 function offsetPolygon(pts, d) {
   const n = pts.length;
   if (n < 3) return null;
-  const cen = centroid(pts);
-  // Determine inward direction using edge 0
-  const a0 = pts[0], b0 = pts[1];
-  let nx = -(b0.y - a0.y), ny = b0.x - a0.x;
-  const l0 = Math.hypot(nx, ny);
-  if (l0 === 0) return null;
-  nx /= l0; ny /= l0;
-  const mid = { x: (a0.x + b0.x) / 2, y: (a0.y + b0.y) / 2 };
-  const plus = { x: mid.x + nx, y: mid.y + ny };
-  const flip = dist(plus, cen) > dist(mid, cen) ? -1 : 1;
-
-  const off = [];
-  for (let i = 0; i < n; i++) {
-    const a = pts[i], b = pts[(i + 1) % n];
-    let ex = -(b.y - a.y), ey = b.x - a.x;
-    const len = Math.hypot(ex, ey);
-    if (len === 0) return null;
-    ex = (ex / len) * flip; ey = (ey / len) * flip;
-    off.push({ ax: a.x + ex * d, ay: a.y + ey * d, bx: b.x + ex * d, by: b.y + ey * d });
-  }
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const e1 = off[(i - 1 + n) % n], e2 = off[i];
-    const p = lineIntersect(e1.ax, e1.ay, e1.bx, e1.by, e2.ax, e2.ay, e2.bx, e2.by);
-    if (!p) return null;
-    out.push(p);
-  }
-  return out;
+  const build = (sign) => {
+    const off = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      let ex = -(b.y - a.y), ey = b.x - a.x; // left normal of edge a→b
+      const len = Math.hypot(ex, ey);
+      if (len === 0) return null;
+      ex = (ex / len) * sign * d; ey = (ey / len) * sign * d;
+      off.push({ ax: a.x + ex, ay: a.y + ey, bx: b.x + ex, by: b.y + ey });
+    }
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const e1 = off[(i - 1 + n) % n], e2 = off[i];
+      const p = lineIntersect(e1.ax, e1.ay, e1.bx, e1.by, e2.ax, e2.ay, e2.bx, e2.by);
+      if (!p) return null;
+      out.push(p);
+    }
+    return out;
+  };
+  const a1 = build(1);
+  if (!a1) return null;
+  return polyArea(a1) <= polyArea(pts) ? a1 : (build(-1) || a1);
 }
 
 /* --------------------------- parking math -------------------------- */
@@ -2397,7 +2394,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           <div style={{ display: "flex", alignItems: "center", gap: 2, position: "relative" }}>
             {vSep}
             <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setPlansMenu((o) => !o)} title="Switch between plans and sites">▦ Plans ▾</button>
-            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={handleNewPlan} title="New plan (layout) on this same parcel">＋ Plan</button>
             {plansMenu && (
               <>
                 <div onClick={() => setPlansMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -2492,10 +2488,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </>
             )}
           </div>
-          {vSep}
-          <button className="dbtn" style={{ ...dGhost, color: PAL.chromeMuted }} onClick={() => { pushHistory(); setMeasures([]); }}>Clear measures</button>
-          <button className="dbtn-danger" style={{ ...dGhost, color: "#f08a6e" }} onClick={() => { if (sel) deleteSel(); }}>Delete</button>
-          <button className="dbtn-danger" style={{ ...dGhost, color: "#f08a6e" }} onClick={() => { pushHistory(); setParcels([]); setEls([]); setMeasures([]); setSel(null); }}>Clear all</button>
         </div>
       </div>
 
@@ -3094,7 +3086,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
               </div>
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-                <button style={{ ...chip, flex: 1 }} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock parcel" : "🔓 Lock in place"}</button>
+                <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
