@@ -1118,6 +1118,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
+      if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       setEls((a) => refitChildren(a, d.id, nb, d.kids));
       return;
     }
@@ -1133,6 +1134,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       const half = rot2(nx * nw, ny * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
+      if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
       setEls((a) => refitChildren(a, d.id, nb, d.kids));
       return;
     }
@@ -1704,6 +1706,35 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       setEls((a) => a.map((x) => x.id === el.id ? { ...x, dockSide: side } : x));
     }
   };
+  // When a rectangular element is bonded to a (rect) building, capture which of
+  // the host's edges it hugs plus the gap, so a resize keeps that host-facing
+  // face pinned — the element then grows AWAY from the building, not over it.
+  const hostClampOf = (el) => {
+    const host = el.attachedTo ? els.find((x) => x.id === el.attachedTo && x.type === "building" && !x.points) : null;
+    if (!host || el.points) return null;
+    const hrot = host.rot || 0;
+    const l = rot2(el.cx - host.cx, el.cy - host.cy, -hrot);
+    const rel = ((((el.rot || 0) - hrot) % 360) + 360) % 360;
+    const cross = Math.abs(rel - 90) < 45 || Math.abs(rel - 270) < 45;
+    const halfX = (cross ? el.h : el.w) / 2, halfY = (cross ? el.w : el.h) / 2;
+    const outX = Math.abs(l.x) - host.w / 2 - halfX, outY = Math.abs(l.y) - host.h / 2 - halfY;
+    const axis = (Math.abs(l.x) - host.w / 2) >= (Math.abs(l.y) - host.h / 2) ? "x" : "y";
+    const sign = axis === "x" ? (l.x >= 0 ? 1 : -1) : (l.y >= 0 ? 1 : -1);
+    const gap = Math.max(0, axis === "x" ? outX : outY);
+    return { host: { cx: host.cx, cy: host.cy, w: host.w, h: host.h, rot: hrot }, axis, sign, gap };
+  };
+  // Re-pin the host-facing face of nb to the host edge (+ original gap).
+  const clampToHost = (nb, hc) => {
+    const h = hc.host;
+    const rel = ((((nb.rot || 0) - h.rot) % 360) + 360) % 360;
+    const cross = Math.abs(rel - 90) < 45 || Math.abs(rel - 270) < 45;
+    const half = hc.axis === "x" ? (cross ? nb.h : nb.w) / 2 : (cross ? nb.w : nb.h) / 2;
+    const c = rot2(nb.cx - h.cx, nb.cy - h.cy, -h.rot);
+    if (hc.axis === "x") c.x = hc.sign * (h.w / 2 + hc.gap + half);
+    else c.y = hc.sign * (h.h / 2 + hc.gap + half);
+    const back = rot2(c.x, c.y, h.rot);
+    nb.cx = h.cx + back.x; nb.cy = h.cy + back.y;
+  };
   const startResize = (e, id, sx, sy) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
@@ -1712,7 +1743,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el) };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startEdgeResize = (e, id, nx, ny) => {
@@ -1724,7 +1755,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el) };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), hostClamp: hostClampOf(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
