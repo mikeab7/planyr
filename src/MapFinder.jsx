@@ -12,7 +12,7 @@ import {
   aerialPlacement,
   humanizeError,
 } from "./lib/arcgis.js";
-import { elStyle, elRingFeet } from "./lib/planStyle.js";
+import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -230,7 +230,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
         });
         // the plan itself: every element in its real fill/stroke (same resolver
         // as the planner canvas, including per-site default colors + overrides)
-        (site.els || []).forEach((el) => {
+        [...(site.els || [])].sort(byZ).forEach((el) => {
           const ring = elRingFeet(el);
           if (!ring || ring.length < 3) return;
           const st = elStyle(el, site.settings);

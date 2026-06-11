@@ -9,7 +9,7 @@ import {
   featureToParcel,
   humanizeError,
 } from "./lib/arcgis.js";
-import { TYPE, typeStyle, elStyle, toHex6 } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 
 /* ------------------------------------------------------------------ *
  *  Industrial Site Planner — prototype (TestFit-style, industrial)
@@ -1433,6 +1433,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") pondArea += a;
   });
+  // A dog-ear bump-out sits inside its truck court footprint — that overlap is
+  // building, not paving (you can only place one there). Don't double-count it.
+  els.forEach((e) => {
+    if (!e.dogEar) return;
+    const hasCourt = els.some((c) => c.truckCourt && c.attachedTo === e.attachedTo && c.truckCourt.side === e.dogEar.side);
+    if (hasCourt) paving = Math.max(0, paving - e.w * e.h);
+  });
   const impervious = bldg + paving + parkArea + trailArea;
   const cov = siteSqft ? (bldg / siteSqft) * 100 : 0;
   const far = siteSqft ? bldg / siteSqft : 0; // single-story assumption
@@ -2135,8 +2142,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                   style={{ cursor: tool === "select" ? "move" : "crosshair" }}
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
-              {/* elements (drawn in PIXELS; coords pre-transformed by f2p) */}
-              {els.map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
+              {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
+                  Painted in ground→structure order so paving never covers a
+                  building footprint (e.g. dock dog-ears sit ON the truck court). */}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
               {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
                 const fpts = measPts(m);

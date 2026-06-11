@@ -34,6 +34,12 @@ export const toHex6 = (c) => {
   return c;
 };
 
+// Paint order: ground surfaces first, structures last, so paving/road never
+// cover a building (a dock dog-ear is a building bump-out that sits ON the court).
+const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
+export const zOrder = (el) => Z_LAYER[el.type] ?? 4;
+export const byZ = (a, b) => zOrder(a) - zOrder(b);
+
 // Outline of an element in planner feet: polygon points, or the rect's four
 // rotated corners.
 export const elRingFeet = (el) => {
