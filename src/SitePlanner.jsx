@@ -929,7 +929,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   // Resolved style for a callout (defaults + per-callout overrides).
-  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic });
+  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 8, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; pushHistory(); setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); };
   const commitEditCallout = () => {
@@ -2743,12 +2743,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const zk = view.ppf / 0.35;            // scale relative to the default zoom
                 const fontPx = st.size * zk;
                 const lines = String(c.text || "").split("\n");
-                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * 1.3, pad = Math.max(4, fontPx * 0.55);
+                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * st.lineHeight;
+                const padX = st.padX * zk, padY = st.padY * zk;
                 const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
-                const w = tw + pad * 2, h = lines.length * lineH + pad * 2;
+                const w = tw + padX * 2, h = lines.length * lineH + padY * 2;
                 const border = isSel ? PAL.accent : st.stroke;
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
-                const tx = st.align === "left" ? bp.x - w / 2 + pad : st.align === "right" ? bp.x + w / 2 - pad : bp.x;
+                const tx = st.align === "left" ? bp.x - w / 2 + padX : st.align === "right" ? bp.x + w / 2 - padX : bp.x;
                 const hasLeader = !c.noLeader && c.tip;
                 const tp = hasLeader ? f2p(c.tip) : null;
                 const ah = Math.max(7, fontPx * 0.7);
@@ -2765,8 +2766,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={tx} y={bp.y - h / 2 + pad + fontPx * 0.82 + i * lineH} textAnchor={anchor}
-                        fontSize={fontPx} fill={st.color}
+                      <text key={i} x={tx} y={bp.y - h / 2 + padY + fontPx * 0.82 + i * lineH} textAnchor={anchor}
+                        fontSize={fontPx} fill={st.color} textDecoration={st.underline ? "underline" : undefined}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
                     {isSel && hasLeader && tool === "select" && (
@@ -2801,7 +2802,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                         else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
                       }}
                       placeholder="Type, Enter to save"
-                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -3201,23 +3202,26 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             return (
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
-                <Field label="Text size"><NumInput style={numInput} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} /></Field>
-                <Field label="Align">
-                  <span style={{ display: "flex", gap: 5, width: 150 }}>
-                    {["left", "center", "right"].map((a) => (
-                      <button key={a} style={seg(cs.align === a)} title={a} onClick={() => setSelCallout({ align: a })}>{a === "left" ? "⤙" : a === "right" ? "⤚" : "≡"}</button>
-                    ))}
-                  </span>
-                </Field>
-                <Field label="Style">
-                  <span style={{ display: "flex", gap: 5, width: 150 }}>
-                    <button style={{ ...seg(cs.bold), fontWeight: 800 }} onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
-                    <button style={{ ...seg(cs.italic), fontStyle: "italic" }} onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
-                  </span>
-                </Field>
-                <Field label="Text color"><input type="color" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} /></Field>
-                <Field label="Fill color"><input type="color" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} /></Field>
-                <Field label="Line color"><input type="color" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} /></Field>
+                {/* row 1: size · text color · fill */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+                  <NumInput style={{ ...numInput, width: 52 }} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} />
+                  <input type="color" title="Text" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} />
+                  <input type="color" title="Fill" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} />
+                  <input type="color" title="Line" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} />
+                </div>
+                {/* row 2: B / I / U · align L C R */}
+                <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
+                  <button style={{ ...seg(cs.bold), fontWeight: 800 }} title="Bold" onClick={() => setSelCallout({ bold: !cs.bold })}>B</button>
+                  <button style={{ ...seg(cs.italic), fontStyle: "italic" }} title="Italic" onClick={() => setSelCallout({ italic: !cs.italic })}>I</button>
+                  <button style={{ ...seg(cs.underline), textDecoration: "underline" }} title="Underline" onClick={() => setSelCallout({ underline: !cs.underline })}>U</button>
+                  <span style={{ width: 6 }} />
+                  {["left", "center", "right"].map((a) => (
+                    <button key={a} style={seg(cs.align === a)} title={a} onClick={() => setSelCallout({ align: a })}>{a === "left" ? "⤙" : a === "right" ? "⤚" : "≡"}</button>
+                  ))}
+                </div>
+                {/* row 3: padding · line spacing */}
+                <Field label="Padding X / Y"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={cs.padX} min={0} onCommit={(n) => setSelCallout({ padX: n })} /> <NumInput style={{ ...numInput, width: 42 }} value={cs.padY} min={0} onCommit={(n) => setSelCallout({ padY: n })} /></span></Field>
+                <Field label="Line spacing"><NumInput style={numInput} value={cs.lineHeight} min={0.8} onCommit={(n) => setSelCallout({ lineHeight: n })} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
