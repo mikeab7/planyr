@@ -2350,6 +2350,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, cfg: ncfg, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
   };
+  // Split a striped parking field into N independent row elements (each one stall
+  // row + its aisle), preserving position/rotation so each can be edited / dragged.
+  const splitParkingRows = (el) => {
+    if (!el || el.points || el.type !== "parking") return;
+    const cfg = cfgOf(el), band = (cfg.stallDepth || settings.stallDepth) + (cfg.aisle ?? settings.aisle);
+    const count = Math.max(1, Math.round(el.h / band));
+    if (count < 2) return;
+    pushHistory();
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      const ly = -el.h / 2 + band * (i + 0.5);       // band centre in local depth
+      const off = rot2(0, ly, el.rot);
+      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: band, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+    }
+    setEls((a) => [...a.filter((x) => x.id !== el.id), ...rows]);
+    setSel({ kind: "el", id: rows[0].id });
+  };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
@@ -3477,6 +3494,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row + aisle</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
+                        {Math.round(selEl.h / ((cfgOf(selEl).stallDepth || settings.stallDepth) + (cfgOf(selEl).aisle ?? settings.aisle))) >= 2 &&
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split into rows</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
                         </label>
@@ -3785,6 +3804,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
                       <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
                       <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                    </>
+                  )}
+                  {t.type === "parking" && !t.points && Math.round(t.h / ((cfgOf(t).stallDepth || settings.stallDepth) + (cfgOf(t).aisle ?? settings.aisle))) >= 2 && (
+                    <>
+                      <div style={hdr(true)}>Parking</div>
+                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
                     </>
                   )}
                   {!t.points && (
