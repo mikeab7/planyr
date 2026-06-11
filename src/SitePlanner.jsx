@@ -431,6 +431,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
+  const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
@@ -832,24 +833,26 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   /* ------------ callouts (annotations) ------------ */
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  const editCalloutText = (id) => {
-    const c = callouts.find((x) => x.id === id);
-    const text = window.prompt("Callout text:", c ? c.text : "");
-    if (text == null) return;
-    pushHistory();
-    setCallout(id, { text });
+  // Inline editing: a textarea overlays the box. Empty text removes the callout.
+  const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; pushHistory(); setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); };
+  const commitEditCallout = () => {
+    if (!editCallout) return;
+    const { id, text } = editCallout;
+    if (!text.trim()) setCallouts((a) => a.filter((c) => c.id !== id)); // blank → discard
+    else setCallout(id, { text });
+    setEditCallout(null);
   };
-  // Click 1 sets the tip (what it points at); click 2 drops the box and asks for text.
+  const cancelEditCallout = () => { if (editCallout?.isNew) setCallouts((a) => a.filter((c) => c.id !== editCallout.id)); setEditCallout(null); };
+  // Click 1 sets the tip (what it points at); click 2 drops the box and starts typing.
   const placeCallout = (fp) => {
     if (!calloutDraft) { setCalloutDraft({ tip: fp }); return; }
-    const text = window.prompt("Callout text:", "Note");
-    setCalloutDraft(null);
-    if (text == null) return;
     pushHistory();
-    const c = { id: uid(), tip: calloutDraft.tip, box: fp, text: text || "Note" };
+    const c = { id: uid(), tip: calloutDraft.tip, box: fp, text: "" };
+    setCalloutDraft(null);
     setCallouts((a) => [...a, c]);
     setSel({ kind: "callout", id: c.id });
     setTool("select");
+    setEditCallout({ id: c.id, text: "", isNew: true });
   };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -2564,8 +2567,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       fill="#fffbe8" stroke={stroke} strokeWidth={isSel ? 2 : 1.4}
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
-                      onDoubleClick={(e) => { e.stopPropagation(); editCalloutText(c.id); }} />
-                    {lines.map((ln, i) => (
+                      onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
+                    {editCallout?.id !== c.id && lines.map((ln, i) => (
                       <text key={i} x={bp.x} y={bp.y - h / 2 + 16 + i * 15} textAnchor="middle" fontSize="12"
                         fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill="#1f2937" pointerEvents="none">{ln}</text>
                     ))}
@@ -2581,6 +2584,28 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 {cursor && <line x1={f2p(calloutDraft.tip).x} y1={f2p(calloutDraft.tip).y} x2={f2p(cursor).x} y2={f2p(cursor).y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
                 <circle cx={f2p(calloutDraft.tip).x} cy={f2p(calloutDraft.tip).y} r={4} fill={PAL.accent} />
               </>)}
+              {/* inline callout text editor (overlays the box) */}
+              {editCallout && (() => {
+                const c = callouts.find((x) => x.id === editCallout.id);
+                if (!c) return null;
+                const bp = f2p(c.box), W = 180, H = 60;
+                return (
+                  <foreignObject x={bp.x - W / 2} y={bp.y - H / 2} width={W} height={H} style={{ overflow: "visible" }}>
+                    <textarea autoFocus value={editCallout.text}
+                      onChange={(e) => setEditCallout((s) => ({ ...s, text: e.target.value }))}
+                      onBlur={commitEditCallout}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitEditCallout(); }
+                        else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
+                      }}
+                      placeholder="Type, Enter to save"
+                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: 12, fontFamily: "'Helvetica Neue', Helvetica, sans-serif", color: "#1f2937", background: "#fffbe8", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                  </foreignObject>
+                );
+              })()}
 
               {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
@@ -2870,7 +2895,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
                   <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-                  {[["line", "Line (two-point distance)"], ["polyline", "Polyline (path length)"], ["area", "Area (closed region)"]].map(([k, label]) => (
+                  {[["line", "Line"], ["polyline", "Polyline"], ["area", "Area"]].map(([k, label]) => (
                     <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
                   ))}
                 </div>
