@@ -1916,6 +1916,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       im.setAttribute("opacity", underlay.opacity ?? 1);
       clone.insertBefore(im, bg.nextSibling);
     }
+    // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
+    // north arrow (bottom-left), positioned in the export viewBox.
+    const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
+    const sx = x + w - sbPx - 28, sy2 = y + h - 30, na = x + 36, ny = y + h - 54;
+    const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
+    furn.innerHTML =
+      [0, 1, 2, 3].map((i) => `<rect x="${sx + seg * i}" y="${sy2 - 3}" width="${seg}" height="6" fill="${i % 2 ? "#fff" : PAL.ink}" stroke="${PAL.ink}" stroke-width="1"/>`).join("") +
+      `<text x="${sx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">0</text>` +
+      `<text x="${sx + sbPx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">${sbFt}'</text>` +
+      `<circle cx="${na}" cy="${ny}" r="17" fill="#ffffff" stroke="${PAL.panelLine}" stroke-width="1"/>` +
+      `<path d="M${na} ${ny - 13} L${na + 5} ${ny + 6} L${na} ${ny + 1.5} L${na - 5} ${ny + 6} Z" fill="${PAL.ink}"/>` +
+      `<text x="${na}" y="${ny - 19}" text-anchor="middle" font-size="12" font-weight="700" fill="${PAL.ink}">N</text>`;
+    clone.appendChild(furn);
     return { clone, w, h };
   };
   // Rasterizing/printing an SVG can't fetch remote resources, so inline every
@@ -2648,6 +2662,18 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
+            <defs>
+              <filter id="bldgShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="1.5" stdDeviation="2.5" floodColor="#2b2620" floodOpacity="0.28" />
+              </filter>
+              <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
+              </pattern>
+              <pattern id="pat-water" width="22" height="10" patternUnits="userSpaceOnUse">
+                <path d="M0 5 q5.5 -4 11 0 t11 0" fill="none" stroke="#5d8497" strokeWidth="0.8" opacity="0.45" />
+              </pattern>
+            </defs>
+
             <g data-export="skip">{gridLines()}</g>
 
             {/* scaled feet space */}
@@ -2897,12 +2923,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </g>
             </g>
 
-            {/* scale bar (sits above the status bar) */}
-            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 42})`} pointerEvents="none">
-              <line x1={0} y1={0} x2={scaleBarFt.px} y2={0} stroke={PAL.ink} strokeWidth={2} />
-              <line x1={0} y1={-4} x2={0} y2={4} stroke={PAL.ink} strokeWidth={2} />
-              <line x1={scaleBarFt.px} y1={-4} x2={scaleBarFt.px} y2={4} stroke={PAL.ink} strokeWidth={2} />
-              <text x={scaleBarFt.px / 2} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>{f0(scaleBarFt.ft)}′</text>
+            {/* graphic scale bar — alternating segments (sits above the status bar) */}
+            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 46})`} pointerEvents="none">
+              {[0, 1, 2, 3].map((i) => (
+                <rect key={i} x={(scaleBarFt.px / 4) * i} y={-3} width={scaleBarFt.px / 4} height={6}
+                  fill={i % 2 ? "#fff" : PAL.ink} stroke={PAL.ink} strokeWidth={1} />
+              ))}
+              <text x={0} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>0</text>
+              <text x={scaleBarFt.px} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>{f0(scaleBarFt.ft)}′</text>
+            </g>
+            {/* north arrow */}
+            <g data-export="skip" transform={`translate(28, ${size.h - 70})`} pointerEvents="none">
+              <circle cx="0" cy="0" r="17" fill="rgba(255,255,255,0.82)" stroke={PAL.panelLine} strokeWidth="1" />
+              <path d="M0 -13 L5 6 L0 1.5 L-5 6 Z" fill={PAL.ink} />
+              <text x="0" y="-19" textAnchor="middle" fontSize="11" fontWeight="700" fill={PAL.ink}>N</text>
             </g>
           </svg>
 
@@ -3497,14 +3531,17 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
+  const texFill = st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
-      <path key={el.id} d={dPath} fill={st.fill} fillOpacity={fillOp}
-        stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2.5 : 1.25}
-        style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+      <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
-        onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }} />
+        onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>
+        <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
+        {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
+        <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+      </g>
     );
   }
   const tl = f2p({ x: el.cx - el.w / 2, y: el.cy - el.h / 2 });
@@ -3512,8 +3549,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x); // px per foot
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
+  const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
-    stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? 2 : 1.25} rx={el.type === "pond" ? Math.min(w, h) * 0.12 : 0} />);
+    stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
+  if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, settings);
@@ -3602,7 +3641,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
     parts.push(<g key="dim">{dim}</g>);
   }
-  return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
+  return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
     onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>{parts}</g>;
 }

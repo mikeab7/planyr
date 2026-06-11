@@ -1,15 +1,19 @@
 /* Shared element styling for the planner canvas AND the map overview, so a
  * site plan looks identical wherever it's drawn. */
 
+// Architectural presentation palette — warm poché building, restrained greys for
+// paving, soft sage landscape, muted desaturated water. `weight` feeds a line
+// hierarchy (property line / building heaviest, surface edges medium, internal
+// striping hairline). Building carries a soft drop shadow in the renderer.
 export const TYPE = {
-  building: { fill: "#ffffff", stroke: "#2b2b2b", label: "Building" },
-  paving: { fill: "#555555", stroke: "#333333", label: "Paving / Drive" },
-  parking: { fill: "#555555", stroke: "#cfcfcf", label: "Car Parking" },
-  trailer: { fill: "#555555", stroke: "#d4d4d4", label: "Trailer Parking" },
-  pond: { fill: "#1ed4e1", stroke: "#0b8a96", label: "Detention Pond" },
-  sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
-  landscape: { fill: "#a9cd92", stroke: "#6f9456", label: "Landscape" },
-  road: { fill: "#4a4a4a", stroke: "#e8e8e8", label: "Road" },
+  building: { fill: "#f3ece1", stroke: "#33302b", label: "Building", weight: 2, shadow: true },
+  paving: { fill: "#dcd8d0", stroke: "#a59f93", label: "Paving / Drive", weight: 1.25 },
+  parking: { fill: "#e2ded6", stroke: "#a8a294", label: "Car Parking", weight: 1.25 },
+  trailer: { fill: "#d7d3ca", stroke: "#a29c8e", label: "Trailer Parking", weight: 1.25 },
+  pond: { fill: "#9fc4d4", stroke: "#5d8497", label: "Detention Pond", weight: 1.25, water: true },
+  sidewalk: { fill: "#e7e3da", stroke: "#b3ad9f", label: "Sidewalk", weight: 1 },
+  landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
+  road: { fill: "#cfcabf", stroke: "#8f897c", label: "Road", weight: 1.25 },
 };
 
 // Resolved style for a type = built-in default merged with any user-set default
@@ -24,6 +28,10 @@ export const elStyle = (el, settings) => {
     fill: el.fill ?? base.fill,
     stroke: el.stroke ?? base.stroke,
     fillOpacity: el.fillOpacity ?? base.fillOpacity ?? 1,
+    weight: base.weight ?? 1,
+    shadow: !!base.shadow,
+    hatch: !!base.hatch,
+    water: !!base.water,
   };
 };
 
