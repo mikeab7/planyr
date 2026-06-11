@@ -59,10 +59,13 @@ export const storage = {
 };
 
 /* -------------------------------------------------------------------------
- * Multi-site store. Every planned site is kept as its own record so opening
- * or starting another site never clobbers the one you're on. Each record is
- * the planner state plus a geographic `origin` (so the map can show it).
- *   site = { id, name, origin:{lat,lon}|null, updatedAt,
+ * Multi-site store. Every record is one PLAN (a layout). Plans that share the
+ * same physical location (parcel) are grouped into a SITE via `groupId`:
+ *   - `site`    = the location name (shared across every plan in the group)
+ *   - `name`    = the plan name (e.g. "Cross-dock + pond", "Single-load")
+ *   - `groupId` = links every plan of one site together
+ * Each record also carries a geographic `origin` (so the map can show it).
+ *   plan = { id, groupId, site, name, origin:{lat,lon}|null, updatedAt,
  *            parcels, els, measures, settings, underlay }
  * ----------------------------------------------------------------------- */
 const SITES_KEY = "planarfit:sites:v1";
@@ -99,8 +102,38 @@ export function migrateOldAutosave() {
   }
 }
 
+// One-time migration: give every legacy record a site group. A pre-grouping
+// record's `name` was the location, so it becomes the `site` and its layout is
+// re-labelled "Plan 1". Idempotent — runs harmlessly once everything's grouped.
+export function migrateSiteGroups() {
+  const sites = readSites();
+  let changed = false;
+  for (const [id, s] of Object.entries(sites)) {
+    if (!s.groupId) {
+      s.groupId = id;
+      s.site = s.site || s.name || "Untitled site";
+      s.name = "Plan 1";
+      changed = true;
+    }
+  }
+  if (changed) writeSites(sites);
+}
+
+// The site (location) a record belongs to, falling back to its own id/name for
+// any record that predates grouping.
+export const groupOf = (s) => (s && (s.groupId || s.id)) || null;
+export const siteNameOf = (s) => (s && (s.site || s.name)) || "Untitled site";
+
 export function loadSitesList() {
   return Object.values(readSites()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+// Every plan belonging to one site (group), newest first.
+export function loadPlansOfGroup(groupId) {
+  return loadSitesList().filter((s) => groupOf(s) === groupId);
+}
+// Rename a whole site (location) — updates `site` on every plan in the group.
+export function renameSiteGroup(groupId, site) {
+  loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
 }
 export function loadSite(id) { return id ? readSites()[id] || null : null; }
 export function saveSite(partial) {

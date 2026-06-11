@@ -214,7 +214,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
-      const tip = `${site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`;
+      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`;
       const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
 
       if (showPlans && site.parcels?.length) {
@@ -426,12 +426,12 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
                     style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
                     <span style={{ width: 9, height: 9, borderRadius: 2.5, flex: "none", background: s.origin ? "#22d3ee" : "#d6cfbe", border: "1px solid rgba(0,0,0,0.15)" }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled site"}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
                       <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
                     {s.origin && <button title="Show on map (zoom to the plan)" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
                       style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "2px 3px", borderRadius: 5 }}>◎</button>}
-                    <button title="Delete site" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.name || "this site"}"? This can't be undone.`)) onDeleteSite && onDeleteSite(s.id); }}
+                    <button title="Delete site and all its plans" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.site || s.name || "this site"}" and all its plans? This can't be undone.`)) onDeleteSite && onDeleteSite(s.id); }}
                       style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 4px", borderRadius: 5 }}>✕</button>
                   </div>
                 );

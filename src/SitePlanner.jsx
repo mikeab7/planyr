@@ -365,7 +365,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onDuplicateSite } = {}) {
+export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -1627,13 +1627,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     };
     fr.readAsText(file);
   };
-  const siteName = useMemo(() => loadSite(siteId)?.name || "Site plan", [siteId]);
+  // Site (location) vs Plan (layout) labels — editable from the header.
+  const groupId = restored?.groupId || siteId;
+  const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
+  const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
+  const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
+  const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
+  const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); };
   const handleNewSite = () => { setPlansMenu(false); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { setPlansMenu(false); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { setPlansMenu(false); flushSite(); onDuplicateSite?.(siteId); };
+  const handleNewPlan = () => { setPlansMenu(false); flushSite(); onNewPlanSameParcel?.(siteId); };
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ parcels, els, measures, settings, underlay }, null, 2)], { type: "application/json" });
@@ -2122,6 +2129,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // ghost buttons on the DARK top bar
   const dGhost = { padding: "6px 11px", fontSize: 12.5, borderRadius: 8, border: "1px solid transparent", background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, whiteSpace: "nowrap" };
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
+  // Editable Site/Plan labels that sit inline in the dark top bar.
+  const hdrInput = (fs, color, weight) => ({ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "3px 7px", outline: "none", minWidth: 44, cursor: "text" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 8, lineHeight: 1, border: `1px solid #ddd6c5`, borderRadius: 4, background: "#fff", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
@@ -2188,6 +2197,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Drop the selected element's per-element overrides (back to the type default).
   const clearElStyle = () => { if (!selEl) return; pushHistory(); setEls((a) => a.map((e) => { if (e.id !== selEl.id) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
 
+  /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
+  const planGroup = (s) => s.groupId || s.id;
+  const plansHere = (sites || []).filter((s) => planGroup(s) === groupId);
+  const otherSites = (() => {
+    const seen = new Set([groupId]), out = [];
+    (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
+    return out;
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 600, background: "#efeadf",
       fontFamily: "'Helvetica Neue', Helvetica, system-ui, sans-serif", color: PAL.ink, overflow: "hidden" }}>
@@ -2200,32 +2218,54 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
           </span>
           <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Planar Fit</span>
-          <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>{siteName}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>
+            <input value={siteLabel} title="Site (location) — click to rename"
+              onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+              size={Math.max(6, siteLabel.length)} style={hdrInput(12.5, "#fff", 600)} />
+            <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
+            <input value={planLabel} title="Plan (layout) — click to rename"
+              onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+              size={Math.max(5, planLabel.length)} style={hdrInput(11.5, PAL.chromeMuted, 500)} />
+          </span>
         </div>
 
         {/* multi-site switcher — open / start / duplicate site plans without leaving the planner */}
         {onNewSite && (
           <div style={{ display: "flex", alignItems: "center", gap: 2, position: "relative" }}>
             {vSep}
-            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setPlansMenu((o) => !o)} title="Switch between your site plans">▦ Plans ▾</button>
-            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={handleNewSite} title="Start a new blank site plan">＋ New</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setPlansMenu((o) => !o)} title="Switch between plans and sites">▦ Plans ▾</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={handleNewPlan} title="New plan (layout) on this same parcel">＋ Plan</button>
             {plansMenu && (
               <>
                 <div onClick={() => setPlansMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 286, maxHeight: 440, overflowY: "auto", padding: 10 }}>
-                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 7 }}>Site plans</div>
-                  {(sites || []).length === 0 && <div style={{ fontSize: 12, color: PAL.muted, padding: "4px 2px" }}>No saved plans yet.</div>}
-                  {(sites || []).map((s) => (
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 300, maxHeight: 460, overflowY: "auto", padding: 10 }}>
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 7 }}>Plans in “{siteLabel}”</div>
+                  {plansHere.map((s) => (
                     <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => handleOpenSite(s.id)}>
                       <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled site"}</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
                         {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
                       </span>
                     </button>
                   ))}
-                  <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                    <button style={{ ...chip, flex: 1 }} onClick={handleNewSite}>＋ New blank</button>
-                    <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan as a new variant to iterate on">⧉ Duplicate</button>
+                  <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                    <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
+                    <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
+                  </div>
+                  {otherSites.length > 0 && (
+                    <>
+                      <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "12px 0 6px", borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>Other sites</div>
+                      {otherSites.map((s) => (
+                        <button key={s.id} style={menuItem(false)} onClick={() => handleOpenSite(s.id)}>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                    <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
                   </div>
                 </div>
               </>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
-import { migrateOldAutosave, loadSitesList, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
+migrateSiteGroups();  // give every legacy record a site (location) group
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
@@ -26,36 +27,76 @@ export default function App() {
   // Open a saved site from the map.
   const openSite = (id) => { if (loadSite(id)) goPlan(id); };
 
-  // A fresh selection from the map → a brand-new site (current one is autosaved).
+  // A fresh selection from the map → a brand-new site, with its first plan.
   const newSiteFromMap = (payload) => {
     const id = newId();
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points }));
-    saveSite({ id, name: payload.name || "Untitled site", origin: payload.origin || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Plan 1", origin: payload.origin || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
     refreshSites();
     goPlan(id);
   };
 
-  // "Open blank planner" → a new empty (un-located) site.
+  // "Open blank planner" → a new empty (un-located) site + its first plan.
   const newBlankSite = () => {
     const id = newId();
-    saveSite({ id, name: "Untitled site", origin: null, parcels: [], els: [], measures: [], settings: {}, underlay: null });
+    saveSite({ id, groupId: id, site: "Untitled site", name: "Plan 1", origin: null, parcels: [], els: [], measures: [], settings: {}, underlay: null });
     refreshSites();
     goPlan(id);
   };
 
-  // Iteration: clone an existing site into a fresh record (its own id) so you can
-  // explore a variant without touching the original. The planner flushes its live
-  // state before calling this, so loadSite() here sees the latest edits.
-  const duplicateSite = (srcId) => {
+  // Next plan number for a site (so "Plan 1", "Plan 2", … never collide).
+  const nextPlanNo = (groupId) => loadPlansOfGroup(groupId).length + 1;
+
+  // New plan on the SAME site: keep the location (parcel, origin, aerial) but
+  // start the layout fresh. This is the iteration workflow — explore another
+  // layout without leaving the parcel.
+  const newPlanSameParcel = (srcId) => {
     const src = loadSite(srcId);
     if (!src) return;
+    const group = groupOf(src);
     const id = newId();
-    saveSite({ ...src, id, name: `${src.name || "Untitled site"} (copy)`, origin: src.origin || null });
+    saveSite({ id, groupId: group, site: src.site || src.name, name: `Plan ${nextPlanNo(group)}`,
+      origin: src.origin || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
     refreshSites();
     goPlan(id);
   };
+
+  // Duplicate this plan (layout and all) as another plan of the same site.
+  const duplicatePlan = (srcId) => {
+    const src = loadSite(srcId);
+    if (!src) return;
+    const group = groupOf(src);
+    const id = newId();
+    saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)` });
+    refreshSites();
+    goPlan(id);
+  };
+
+  const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); refreshSites(); };
+  const renamePlan = (id, name) => { saveSite({ id, name }); refreshSites(); };
+
+  // Delete a whole site (every plan in its group) — used from the map, where each
+  // entry represents a location, not an individual plan.
+  const deleteSiteGroup = (id) => {
+    const rec = loadSite(id); if (!rec) return;
+    const plans = loadPlansOfGroup(groupOf(rec));
+    const hadActive = plans.some((s) => s.id === activeSiteId);
+    plans.forEach((s) => deleteSite(s.id));
+    if (hadActive) setActiveSiteId(null);
+    refreshSites();
+  };
+
+  // The map lists SITES (locations), so collapse plans to one representative per
+  // group — preferring the active plan so its pin highlights correctly.
+  const siteGroups = (() => {
+    const byGroup = new Map();
+    sites.forEach((s) => { const g = groupOf(s); if (!byGroup.has(g)) byGroup.set(g, s); });
+    const act = activeSiteId && sites.find((s) => s.id === activeSiteId);
+    if (act) byGroup.set(groupOf(act), act);
+    return [...byGroup.values()];
+  })();
 
   // Refresh the map's site list when we land back on it (after the planner has
   // autosaved the latest edits).
@@ -70,10 +111,10 @@ export default function App() {
           visible={mode === "map"}
           county={county}
           onCounty={setCounty}
-          sites={sites}
+          sites={siteGroups}
           activeSiteId={activeSiteId}
           onOpenSite={openSite}
-          onDeleteSite={(id) => { deleteSite(id); if (id === activeSiteId) setActiveSiteId(null); refreshSites(); }}
+          onDeleteSite={deleteSiteGroup}
           onUseParcels={newSiteFromMap}
           onSkip={newBlankSite}
         />
@@ -88,7 +129,10 @@ export default function App() {
             onBackToMap={() => setMode("map")}
             onOpenSite={openSite}
             onNewSite={newBlankSite}
-            onDuplicateSite={duplicateSite}
+            onNewPlanSameParcel={newPlanSameParcel}
+            onDuplicateSite={duplicatePlan}
+            onRenameSite={renameSite}
+            onRenamePlan={renamePlan}
           />
         )}
       </div>
