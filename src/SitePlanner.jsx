@@ -1454,9 +1454,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
   const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
+  let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
     const a = e.points ? polyArea(e.points) : e.w * e.h;
-    if (e.type === "building") bldg += a;
+    if (e.type === "building") { bldg += a; if (e.dogEar) { bumpCount++; bumpArea += a; } }
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a;
     else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
     else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
@@ -2497,6 +2498,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 return (
                   <div style={{ fontSize: 12, color: PAL.muted, marginTop: 6, lineHeight: 1.6 }}>
                     {poly ? "Area" : "Footprint"}: <b style={{ color: PAL.ink }}>{f0(area)} sf</b>{poly ? ` · ${f2(area / SQFT_PER_ACRE)} ac` : ""}<br />
+                    {selEl.type === "building" && !poly && !selEl.dogEar && (() => {
+                      const bumps = els.filter((x) => x.attachedTo === selEl.id && x.dogEar);
+                      if (!bumps.length) return null;
+                      const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
+                      return <span style={{ color: "#7c3aed" }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} sf) → <b style={{ color: PAL.ink }}>{f0(area + ba)} sf</b> total<br /></span>;
+                    })()}
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
@@ -2582,7 +2589,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               ))}
             </div>
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
-            {metricRow("Building", `${f0(bldg)} sf`)}
+            {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+            {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
             {metricRow("FAR", f2(far), "(1-story)")}
             {metricRow("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
             {metricRow("Trailer stalls", f0(trailers))}
