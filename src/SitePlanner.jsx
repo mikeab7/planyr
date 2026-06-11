@@ -1296,13 +1296,54 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const have = new Set(els.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
     addBuildingEls(dockSides.filter((s) => !have.has(s)).map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id);
   };
+  // A dock-corner bump-out lengthens the building's perpendicular wall by its
+  // projection — so a sidewalk on that wall should grow to match. Which side that
+  // sidewalk is on, and the direction it extends, follow from the corner.
+  const bumpSidewalkSide = (side, sign) => {
+    const horiz = side === "top" || side === "bottom"; // wall runs along X
+    return horiz ? (sign < 0 ? "left" : "right") : (sign < 0 ? "top" : "bottom");
+  };
+  // Extend (dir +1) or shrink (dir −1) a sidewalk by one bump depth toward dockSide.
+  const adjustSidewalkForBump = (sw, dockSide, dir) => {
+    const [dnx, dny] = SIDE_N[dockSide];
+    const lengthIsX = sw.sidewalkSide === "top" || sw.sidewalkSide === "bottom";
+    const inc = dir * DOGEAR_D;
+    const off = rot2(lengthIsX ? dnx * inc / 2 : 0, lengthIsX ? 0 : dny * inc / 2, sw.rot);
+    return lengthIsX
+      ? { ...sw, w: Math.max(SIDEWALK_W, sw.w + inc), cx: sw.cx + off.x, cy: sw.cy + off.y }
+      : { ...sw, h: Math.max(SIDEWALK_W, sw.h + inc), cx: sw.cx + off.x, cy: sw.cy + off.y };
+  };
+  const isBumpSidewalk = (x, b, swSide) => x.attachedTo === b.id && x.type === "sidewalk" && x.sidewalkSide === swSide && !x.points;
+  // Add dog-ears at the given corners, growing any matching perpendicular sidewalk
+  // to the bump-out's new length.
+  const placeDogEars = (b, corners) => {
+    if (!corners.length) return;
+    pushHistory();
+    const newDe = corners.map(([side, sign]) => makeDogEar(b, side, sign));
+    setEls((a) => {
+      let next = [...a, ...newDe];
+      corners.forEach(([side, sign]) => {
+        const swSide = bumpSidewalkSide(side, sign);
+        next = next.map((x) => (isBumpSidewalk(x, b, swSide) ? adjustSidewalkForBump(x, side, 1) : x));
+      });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Remove a dog-ear, shrinking its matching sidewalk back.
+  const removeDogEar = (b, de) => {
+    const swSide = bumpSidewalkSide(de.dogEar.side, de.dogEar.sign);
+    pushHistory();
+    setEls((a) => a.filter((x) => x.id !== de.id && x.forCourt !== de.id)
+      .map((x) => (isBumpSidewalk(x, b, swSide) ? adjustSidewalkForBump(x, de.dogEar.side, -1) : x)));
+  };
   // Dog-ears at both corners of every dock side (skipping any already present).
   const addDogEars = (b) => {
     const { dockSides } = dockSidesOf(b);
     const have = new Set(els.filter((x) => x.attachedTo === b.id && x.dogEar).map((x) => `${x.dogEar.side}${x.dogEar.sign}`));
-    const list = [];
-    dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) list.push(makeDogEar(b, s, sign)); }));
-    addBuildingEls(list, b.id);
+    const corners = [];
+    dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
+    placeDogEars(b, corners);
   };
   // Trailer parking on every free side opposite the dock(s) that doesn't have it.
   const addOppTrailerAll = (b) => {
@@ -1801,7 +1842,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
             const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
             const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
-            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => addBuildingEls([makeDogEar(el, name, sign)], el.id), existing ? () => removeFeature(existing.id) : null, 8);
+            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => placeDogEars(el, [[name, sign]]), existing ? () => removeDogEar(el, existing) : null, 8);
           });
         })}
       </g>
