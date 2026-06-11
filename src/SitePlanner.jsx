@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { storage, loadSite, saveSite } from "./lib/storage.js";
+import { storage, loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { COUNTIES, detectField } from "./lib/counties.js";
 import {
@@ -446,7 +446,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan } = {}) {
+export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -539,22 +539,38 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const pastRef = useRef([]);
   const futureRef = useRef([]);
   useEffect(() => { stateRef.current = { parcels, els, measures, callouts, underlay }; });
-  // Autosave this site (debounced) so reloads, switching sites, and the map
-  // list all stay current. saveSite merges, preserving name/origin.
+  // A site with no parcels / elements / measures / callouts / aerial is "blank".
+  // We don't want unedited blank sites cluttering the list, so we never persist
+  // them, and drop their record on leave (but only un-located blank-planner
+  // sites — a map-sourced site keeps its record even if you clear it).
+  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !s?.underlay;
+  // Site/plan metadata (name etc.) lives in component state declared below; mirror
+  // it into a ref so the (earlier-defined) save effects can include it without a
+  // forward reference. The first real save then writes a fully-formed record —
+  // there's no need to pre-create an empty one.
+  const metaRef = useRef({});
+  // Autosave this site (debounced). Never writes a blank site.
   useEffect(() => {
     if (!siteId) return;
-    const t = setTimeout(() => saveSite({ id: siteId, parcels, els, measures, callouts, settings, underlay }), 400);
+    if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a blank site
+    const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
+    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, settings, underlay }); if (fresh) onSiteSaved?.(); }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, settings, underlay]);
-  // Flush immediately when this site goes inactive (back to map) or unmounts
-  // (switching sites), so nothing in the last debounce window is lost.
+  // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, settings, underlay }; });
+  const persistOrDrop = () => {
+    if (!siteId) return;
+    const s = liveRef.current;
+    if (isBlankSite(s) && !loadSite(siteId)?.origin) { deleteSite(siteId); onSiteDropped?.(siteId); }
+    else saveSite({ id: siteId, ...metaRef.current, ...s });
+  };
   useEffect(() => {
     if (active || !siteId) return;
-    saveSite({ id: siteId, ...liveRef.current });
+    persistOrDrop();
   }, [active]); // eslint-disable-line
-  useEffect(() => () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); }, []); // eslint-disable-line
+  useEffect(() => () => { persistOrDrop(); }, []); // eslint-disable-line
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
@@ -1830,9 +1846,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
   const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
+  // Keep the save metadata current (so the first non-blank save is fully formed).
+  useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, origin: restored?.origin ?? null }; });
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); };
+  const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };

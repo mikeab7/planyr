@@ -38,13 +38,10 @@ export default function App() {
     goPlan(id);
   };
 
-  // "Open blank planner" → a new empty (un-located) site + its first plan.
-  const newBlankSite = () => {
-    const id = newId();
-    saveSite({ id, groupId: id, site: "Untitled site", name: "Plan 1", origin: null, parcels: [], els: [], measures: [], settings: {}, underlay: null });
-    refreshSites();
-    goPlan(id);
-  };
+  // "Open blank planner" → a new empty (un-located) site. We do NOT write a record
+  // yet: a blank site that's never edited should never be saved. The planner saves
+  // a fully-formed record the moment you add anything.
+  const newBlankSite = () => { goPlan(newId()); };
 
   // Next plan number for a site (so "Plan 1", "Plan 2", … never collide).
   const nextPlanNo = (groupId) => loadPlansOfGroup(groupId).length + 1;
@@ -76,6 +73,9 @@ export default function App() {
 
   const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); refreshSites(); };
   const renamePlan = (id, name) => { saveSite({ id, name }); refreshSites(); };
+
+  // The planner dropped a blank, unedited site (never saved). Forget it.
+  const handleSiteDropped = (id) => { if (id === activeSiteId) setActiveSiteId(null); refreshSites(); };
 
   // Delete a whole site (every plan in its group) — used from the map, where each
   // entry represents a location, not an individual plan.
@@ -133,6 +133,8 @@ export default function App() {
             onDuplicateSite={duplicatePlan}
             onRenameSite={renameSite}
             onRenamePlan={renamePlan}
+            onSiteDropped={handleSiteDropped}
+            onSiteSaved={refreshSites}
           />
         )}
       </div>
