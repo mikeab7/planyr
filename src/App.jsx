@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
-import { migrateOldAutosave, migrateSiteGroups, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
+migrateScenarios();   // fold legacy named scenarios into Plans
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 

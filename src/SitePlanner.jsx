@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { storage, loadSite, saveSite, deleteSite } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
@@ -522,7 +522,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
-  const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -574,11 +573,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [lotW, setLotW] = useState(600);
   const [lotD, setLotD] = useState(800);
 
-  // scenarios
-  const [scenName, setScenName] = useState("");
-  const [scenList, setScenList] = useState([]);
-  const [scenPick, setScenPick] = useState("");
-
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
 
   const wrapRef = useRef(null);
@@ -601,12 +595,16 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // forward reference. The first real save then writes a fully-formed record —
   // there's no need to pre-create an empty one.
   const metaRef = useRef({});
+  const [saveStatus, setSaveStatus] = useState("saved"); // "saving" | "saved"
   // Autosave this site (debounced). Never writes a blank site.
+  const firstSave = useRef(true);
   useEffect(() => {
     if (!siteId) return;
     if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a blank site
+    if (firstSave.current) { firstSave.current = false; return; } // don't flag the initial mount
+    setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay }); if (fresh) onSiteSaved?.(); }, 400);
+    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay }); setSaveStatus("saved"); if (fresh) onSiteSaved?.(); }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
   // Persist on leave; if the site is still blank and un-located, drop it instead.
@@ -1916,45 +1914,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const ratio = bldg ? stalls / (bldg / 1000) : 0;
   const open = Math.max(0, siteSqft - impervious - pondArea);
 
-  /* ------------ scenarios (localStorage) ------------ */
-  const refreshScen = useCallback(async () => {
-    try {
-      const r = await storage.list("scenario:");
-      setScenList((r?.keys || []).map((k) => k.replace("scenario:", "")));
-    } catch (_) { setScenList([]); }
-  }, []);
-  useEffect(() => { refreshScen(); }, [refreshScen]);
-
-  const saveScen = async () => {
-    const name = scenName.trim();
-    if (!name) return;
-    try {
-      await storage.set(`scenario:${name}`, JSON.stringify({ parcels, els, measures, callouts, markups, settings, underlay }));
-      setScenName("");
-      refreshScen();
-    } catch (err) {
-      alert("Could not save — likely too large for browser storage (a big underlay image). Use Export JSON instead.");
-    }
-  };
-  const loadScen = async () => {
-    if (!scenPick) return;
-    try {
-      const r = await storage.get(`scenario:${scenPick}`);
-      if (r?.value) {
-        const d = JSON.parse(r.value);
-        ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []); setCallouts(d.callouts || []); setMarkups(d.markups || []);
-        setSettings({ ...DEFAULT_SETTINGS, ...(d.settings || {}) });
-        setUnderlay(d.underlay || null);
-        setSel(null);
-        requestFit();
-      }
-    } catch (_) {}
-  };
-  const delScen = async () => {
-    if (!scenPick) return;
-    try { await storage.delete(`scenario:${scenPick}`); setScenPick(""); refreshScen(); } catch (_) {}
-  };
   const importRef = useRef(null);
   const importJSONFile = (file) => {
     if (!file) return;
@@ -2811,46 +2770,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           Snap {settings.gridSize}′
         </button>
         {vSep}
-        {/* action cluster */}
+        {/* autosave indicator */}
+        <span style={{ fontSize: 11, color: PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : "Saved ✓"}</span>
+        {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div style={{ position: "relative" }}>
-            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setSaveMenu((o) => !o)}>Save / load ▾</button>
-            {saveMenu && (
-              <>
-                <div onClick={() => setSaveMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 268, padding: 10 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 7 }}>Scenarios</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input style={{ ...numInput, width: "100%", fontFamily: "inherit" }} placeholder="Scenario name" value={scenName} onChange={(e) => setScenName(e.target.value)} />
-                    <button style={btn(true)} onClick={saveScen}>Save</button>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
-                    <select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={scenPick} onChange={(e) => setScenPick(e.target.value)}>
-                      <option value="">— saved scenarios —</option>
-                      {scenList.map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                    <button style={chip} onClick={loadScen}>Load</button>
-                    <button style={{ ...chip, color: PAL.accent }} onClick={delScen}>✕</button>
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                    <button style={{ ...chip, flex: 1 }} onClick={() => { setSaveMenu(false); exportJSON(); }}>Export JSON</button>
-                    <button style={{ ...chip, flex: 1 }} onClick={() => importRef.current?.click()}>Import JSON</button>
-                    <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-                      onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-          <div style={{ position: "relative" }}>
-            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>Export ▾</button>
+            <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>File ▾</button>
             {exportMenu && (
               <>
                 <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 210 }}>
+                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 220 }}>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+                  <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                    onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF(); }}>Print / save as PDF…</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>PNG image</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>JSON file (re-importable)</button>
                 </div>
               </>
             )}

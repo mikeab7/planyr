@@ -119,6 +119,24 @@ export function migrateSiteGroups() {
   if (changed) writeSites(sites);
 }
 
+// One-time: fold any legacy named scenarios (scenario:NAME keys) into Plans under
+// a single "Imported scenarios" site, then clear the old keys.
+export function migrateScenarios() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("scenario:")) keys.push(k); }
+  if (!keys.length) return;
+  const group = "simport" + Date.now().toString(36);
+  keys.forEach((k, i) => {
+    let d; try { d = JSON.parse(localStorage.getItem(k)); } catch (_) { d = null; }
+    if (d) {
+      const id = "s" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 5);
+      saveSite({ id, groupId: group, site: "Imported scenarios", name: k.slice("scenario:".length) || `Scenario ${i + 1}`,
+        origin: d.origin || null, parcels: d.parcels || [], els: d.els || [], measures: d.measures || [], callouts: d.callouts || [], markups: d.markups || [], settings: d.settings || {}, underlay: d.underlay || null });
+    }
+    localStorage.removeItem(k);
+  });
+}
+
 // The site (location) a record belongs to, falling back to its own id/name for
 // any record that predates grouping.
 export const groupOf = (s) => (s && (s.groupId || s.id)) || null;
