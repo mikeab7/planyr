@@ -922,12 +922,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
-      setEls((a) => a.map((x) => {
-        if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
-        if (x.attachedTo === d.id && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
-        const k = d.kids?.find((kk) => kk.id === x.id);
-        return k ? { ...x, ...fitKid(nb, k) } : x;
-      }));
+      setEls((a) => refitChildren(a, d.id, nb, d.kids));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -942,12 +937,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       const half = rot2(nx * nw, ny * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
-      setEls((a) => a.map((x) => {
-        if (x.id === d.id) return { ...x, w: nw, h: nh, cx: newCenter.x, cy: newCenter.y };
-        if (x.attachedTo === d.id && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
-        const k = d.kids?.find((kk) => kk.id === x.id);
-        return k ? { ...x, ...fitKid(nb, k) } : x;
-      }));
+      setEls((a) => refitChildren(a, d.id, nb, d.kids));
       return;
     }
     if (d.mode === "rotate") {
@@ -1291,18 +1281,37 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // (local normal nx,ny), full wall length, bonded to the building. Keeps the
   // building selected so several can be added in a row.
   const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
-  // Striped 50′-deep, 12′-stall trailer parking on the side opposite a single-load
-  // dock. Oriented so the stalls stripe ALONG the wall (rotate +90 on a side wall).
-  const makeOppTrailer = (b, name, attachId = b.id) => {
+  // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
+  // side, full host length along that side. Rotated +90 on a side wall so the
+  // stalls always stripe ALONG the wall.
+  const oppTrailerGeom = (b, name) => {
     const [nx, ny] = SIDE_N[name];
     const horiz = ny !== 0;                 // top/bottom wall → stalls run along X
     const depth = OPP_TRAILER_D, along = horiz ? b.w : b.h;
     const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
-    return {
-      id: uid(), type: "trailer", cx: b.cx + off.x, cy: b.cy + off.y,
-      w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360,
-      attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
-    };
+    return { cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360 };
+  };
+  const makeOppTrailer = (b, name, attachId = b.id) => ({
+    id: uid(), type: "trailer", ...oppTrailerGeom(b, name),
+    attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
+  });
+  // Re-fit a wall-hugging single trailer row to a (resized) host box.
+  const fitWallTrailer = (hostBox, side) => oppTrailerGeom(hostBox, side);
+  // Re-fit every feature bonded to a resized building so the whole assembly stays
+  // stuck together: dog-ears slide to the corner, wall strips scale, the
+  // opposite-side trailer re-hugs its wall, and a court's trailer follows the
+  // (re-scaled) court's far edge.
+  const refitChildren = (a, buildingId, nb, kids) => {
+    const courtBox = {}; // court id -> { box, side } for trailers that back onto it
+    const pass1 = a.map((x) => {
+      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
+      if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
+      if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
+      const k = kids?.find((kk) => kk.id === x.id);
+      if (k) { const g = fitKid(nb, k); if (x.truckCourt) courtBox[x.id] = { box: g, side: x.truckCourt.side }; return { ...x, ...g }; }
+      return x;
+    });
+    return pass1.map((x) => (x.forCourt && courtBox[x.forCourt]) ? { ...x, ...fitWallTrailer(courtBox[x.forCourt].box, courtBox[x.forCourt].side) } : x);
   };
   const addOppTrailer = (b, name) => addBuildingEls([{ ...makeOppTrailer(b, name), oppSide: name }], b.id);
   // Trailer parking flush against the FAR (outer) edge of a truck court — where
