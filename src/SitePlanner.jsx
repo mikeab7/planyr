@@ -21,6 +21,7 @@ import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 const SQFT_PER_ACRE = 43560;
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
+const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
 const PAL = {
   paper: "#f4f1ea",
@@ -70,7 +71,7 @@ const TOOLS = [
   { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
-  { id: "road", label: "Road", hint: "Pick a width from Road ▾ (24′ / 26′ / 30′ / 36′ / 40′) and drag to set the length & direction, or Free draw for any rectangle / click points for a bent road; shows a centerline" },
+  { id: "road", label: "Road", hint: "Pick a width from Road ▾ (24′ / 26′ / 30′ / 36′ / 40′) and drag to set the length & direction, or Free draw for any rectangle. A 6″ curb is added each side (a 30′ road is 31′ wide, called out as 30′)" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
 ];
@@ -690,7 +691,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       pushHistory();
       let presetDepth = 0; // fixed cross-width for a preset strip (0 = free draw)
       if (tool === "parking" && parkingRows !== "free") presetDepth = parkingRows === "double" ? settings.stallDepth * 2 + settings.aisle : settings.stallDepth + settings.aisle;
-      else if (tool === "road" && roadWidth !== "free") presetDepth = +roadWidth;
+      else if (tool === "road" && roadWidth !== "free") presetDepth = +roadWidth + 2 * CURB; // +6" curb each side
       drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y, depth: presetDepth };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
@@ -2992,15 +2993,23 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       }
     });
   }
-  if (el.type === "road") { // dashed centerline down the long axis
-    if (el.w >= el.h) parts.push(<line key="cl" x1={tl.x} y1={tl.y + h / 2} x2={tl.x + w} y2={tl.y + h / 2} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
-    else parts.push(<line key="cl" x1={tl.x + w / 2} y1={tl.y} x2={tl.x + w / 2} y2={tl.y + h} stroke="#f5d90a" strokeWidth={1.5} strokeDasharray="11 9" />);
+  if (el.type === "road") { // curb lines 6" inside each long edge; pavement between
+    const cp = CURB * ppf;
+    if (el.w >= el.h) {
+      parts.push(<line key="cu0" x1={tl.x} y1={tl.y + cp} x2={tl.x + w} y2={tl.y + cp} stroke={st.stroke} strokeWidth={1} />);
+      parts.push(<line key="cu1" x1={tl.x} y1={tl.y + h - cp} x2={tl.x + w} y2={tl.y + h - cp} stroke={st.stroke} strokeWidth={1} />);
+    } else {
+      parts.push(<line key="cu0" x1={tl.x + cp} y1={tl.y} x2={tl.x + cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
+      parts.push(<line key="cu1" x1={tl.x + w - cp} y1={tl.y} x2={tl.x + w - cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
+    }
   }
-  if ((el.type === "building" || el.type === "paving") && !el.points && !el.noLabel) {
-    // Dimension line along the short side (depth of a building/truck court,
-    // width of a drive). Scales text down a bit when zoomed out; kept upright.
+  if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel) {
+    // Dimension line along the short side (depth of a building/truck court, width
+    // of a drive/road). A road's callout excludes its 6" curbs (true width − 1′).
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
-    const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(Math.min(el.w, el.h))}′`;
+    const fullMin = Math.min(el.w, el.h);
+    const dimW = el.type === "road" ? Math.max(0, fullMin - 2 * CURB) : fullMin;
+    const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const dim = [];
     if (horizLong) { // short side is vertical (h)
