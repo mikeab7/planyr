@@ -2610,6 +2610,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   };
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
+  // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
+  // falls back to the global default for any parcel that predates per-edge.
+  const parcelSetbacks = (pc) => {
+    const n = pc.points.length, base = +settings.setback || 0;
+    return (Array.isArray(pc.setbacks) && pc.setbacks.length === n) ? pc.setbacks : Array.from({ length: n }, () => base);
+  };
+  const setEdgeSetback = (pc, i, v) => {
+    pushHistory();
+    const arr = parcelSetbacks(pc).slice(); arr[i] = Math.max(0, v);
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
+  };
+  // "Front" = the longest edge (street frontage heuristic).
+  const frontEdge = (pc) => {
+    let best = 0, bl = -1;
+    for (let i = 0; i < pc.points.length; i++) { const d = dist(pc.points[i], pc.points[(i + 1) % pc.points.length]); if (d > bl) { bl = d; best = i; } }
+    return best;
+  };
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
   const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
@@ -2816,12 +2833,27 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   onPointerDown={startMoveUnderlay} />;
               })()}
 
-              {/* setback outlines */}
-              {settings.showSetback && settings.setback > 0 && parcels.map((pc) => {
-                const o = offsetPolygon(pc.points, settings.setback);
+              {/* setback outlines (per-edge) */}
+              {settings.showSetback && parcels.map((pc) => {
+                const sb = parcelSetbacks(pc);
+                if (!sb.some((v) => v > 0)) return null;
+                const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
-                return <polygon key={`sb${pc.id}`} points={o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" />;
+                return <polygon key={`sb${pc.id}`} points={o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />;
               })}
+              {/* per-edge setback values on the selected parcel (click to edit) */}
+              {settings.showSetback && selParcel && (() => {
+                const sb = parcelSetbacks(selParcel), pts = selParcel.points;
+                return <g data-export="skip">{pts.map((a, i) => {
+                  const b = pts[(i + 1) % pts.length], mid = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+                  return (
+                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const v = window.prompt(`Setback for edge ${i + 1} (ft):`, String(sb[i])); if (v != null && !isNaN(+v)) setEdgeSetback(selParcel, i, +v); }}>
+                      <rect x={mid.x - 13} y={mid.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
+                      <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{f0(sb[i])}′</text>
+                    </g>
+                  );
+                })}</g>;
+              })()}
               {/* parcels */}
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
@@ -3595,10 +3627,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   </Field>
                 </>
               )}
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 4px" }}>Standards</div>
-              <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 2, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
-              <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
+                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
+                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show</label>
+              </div>
+              {(() => {
+                const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {sb.map((v, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i === fe ? "Front" : `Edge ${i + 1}`}</span>
+                        <NumInput style={{ ...numInput, width: 54 }} value={Math.round(v)} min={0} onCommit={(n) => setEdgeSetback(selParcel, i, n)} />
+                      </div>
+                    ))}
+                    <button style={{ ...chip, marginTop: 4 }} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
+                  </div>
+                );
+              })()}
+              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
                 <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete parcel</button>
               </div>
             </Section>
