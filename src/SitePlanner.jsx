@@ -792,8 +792,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         : splitPolygonPath(pc.points, pts);
       if (halves) {
         pushHistory();
-        const a = { id: uid(), points: halves[0] };
-        const b = { id: uid(), points: halves[1] };
+        const a = { id: uid(), points: halves[0], locked: true };
+        const b = { id: uid(), points: halves[1], locked: true };
         setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
         setSel({ kind: "parcel", id: a.id });
         return;
@@ -820,7 +820,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     }
     if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
     pushHistory();
-    const np = { id: uid(), points: result };
+    const np = { id: uid(), points: result, locked: true };
     setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
     setCombineSel([]);
     setSel({ kind: "parcel", id: np.id });
@@ -1109,7 +1109,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
       pushHistory();
-      const pc = { id: uid(), points: draftPoly };
+      const pc = { id: uid(), points: draftPoly, locked: true };
       setParcels((a) => [...a, pc]);
       requestFit();
     }
@@ -1130,7 +1130,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
     pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }] };
+    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], locked: true };
     setParcels((a) => [...a, pc]);
     requestFit();
   };
@@ -1223,7 +1223,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const pts = featureToParcel(entry.ft);
     if (!pts || pts.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory();
-    const pc = { id: uid(), points: pts };
+    const pc = { id: uid(), points: pts, locked: true };
     setParcels((a) => [...a, pc]);
     setSel({ kind: "parcel", id: pc.id });
     setLookupRes([]);

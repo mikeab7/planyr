@@ -32,7 +32,7 @@ export default function App() {
     const id = newId();
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
-      .map((p, i) => ({ id: `p${id}_${i}`, points: p.points }));
+      .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true }));
     saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Plan 1", origin: payload.origin || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
     refreshSites();
     goPlan(id);
