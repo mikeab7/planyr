@@ -1274,7 +1274,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const aPxY = (calib.a.y - underlay.y) / sy;
     pushHistory();
     // keep point a pinned in world space so the image scales about that point
-    setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, ftPerPxY: u.ftPerPxY ? newSy : undefined, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newSy }));
+    setUnderlay((u) => ({ ...u, ftPerPx: newFtPerPx, ftPerPxY: u.ftPerPxY ? newSy : undefined, x: calib.a.x - aPxX * newFtPerPx, y: calib.a.y - aPxY * newSy, calibrated: true }));
     setCalib(null);
     setCalibInput("");
     setTool("select");
@@ -2379,6 +2379,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     return { ft, px: ft * view.ppf };
   })();
 
+  // Accuracy state — the single source of truth for measurement / acreage trust.
+  const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
+  const calibrationState =
+    underlay
+      ? (underlay.fromMap ? "georef" : underlay.calibrated ? "calibrated" : "uncalibrated")
+      : (isGeoref ? "georef" : "drawn");
+  const calibrated = calibrationState === "georef" || calibrationState === "calibrated" || calibrationState === "drawn";
+
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const leftTabs = [
@@ -2966,6 +2974,24 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               Loading aerial…
             </div>
           )}
+
+          {/* calibration / accuracy badge (bottom-left, above the status bar) */}
+          {(() => {
+            const cfg = {
+              georef: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · county GIS", sub: null },
+              calibrated: { bg: "rgba(22,101,52,0.92)", dot: "#4ade80", text: "● Scaled · calibrated", sub: underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : null },
+              drawn: { bg: "rgba(40,37,33,0.92)", dot: "#cbd5e1", text: "● True scale · drawn in feet", sub: null },
+              uncalibrated: { bg: "rgba(180,83,9,0.95)", dot: "#fbbf24", text: "▲ Not calibrated", sub: "click to calibrate" },
+            }[calibrationState];
+            const warn = calibrationState === "uncalibrated";
+            return (
+              <div onClick={warn ? () => { setShowAerial(true); setTool("calibrate"); setCalib(null); } : undefined}
+                style={{ position: "absolute", left: 12, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+                {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
+              </div>
+            );
+          })()}
 
           {/* Combine tool banner — pick parcels, then Merge */}
           {tool === "combine" && (
