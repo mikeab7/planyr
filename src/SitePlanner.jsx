@@ -3190,6 +3190,29 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             );
           })()}
 
+          {/* mini-inspector — floats above a selected rect/ellipse/building */}
+          {tool === "select" && !panning && (selEl && !selEl.points || (selMarkup && (selMarkup.kind === "rect" || selMarkup.kind === "ellipse"))) && (() => {
+            const o = selEl || selMarkup;
+            const c = f2p({ x: o.cx, y: o.cy }), top = c.y - (o.h / 2) * view.ppf - 46;
+            const isRoad = selEl && selEl.type === "road";
+            const miniInput = { width: 46, padding: "3px 6px", fontSize: 11.5, fontFamily: "ui-monospace, monospace", border: "1px solid #ddd6c5", borderRadius: 6, color: PAL.ink, background: "#fff", textAlign: "center" };
+            const fld = (lbl, node) => <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase" }}>{lbl}</span>{node}</span>;
+            return (
+              <div data-export="skip" style={{ position: "absolute", left: c.x, top: Math.max(6, top), transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 6px 18px rgba(28,25,20,0.18)", padding: "5px 9px", zIndex: 7 }}>
+                {selEl ? <>
+                  {isRoad
+                    ? <>{fld("L", <NumInput style={miniInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} />)}{fld("Tr", <NumInput style={miniInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} />)}</>
+                    : <>{fld("W", <NumInput style={miniInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} />)}{fld("D", <NumInput style={miniInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} />)}</>}
+                  {fld("∠", <NumInput style={miniInput} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />)}
+                </> : <>
+                  {fld("W", <NumInput style={miniInput} value={Math.round(selMarkup.w)} min={1} onCommit={(n) => setSelMarkup({ w: n })} />)}
+                  {fld("D", <NumInput style={miniInput} value={Math.round(selMarkup.h)} min={1} onCommit={(n) => setSelMarkup({ h: n })} />)}
+                  {fld("∠", <NumInput style={miniInput} value={Math.round(selMarkup.rot || 0)} onCommit={(n) => setSelMarkup({ rot: ((n % 360) + 360) % 360 })} />)}
+                </>}
+              </div>
+            );
+          })()}
+
           {/* Combine tool banner — pick parcels, then Merge */}
           {tool === "combine" && (
             <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
