@@ -779,6 +779,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
@@ -819,6 +820,19 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const el = src.points
       ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
       : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+    pushHistory();
+    setEls((a) => [...a, el]);
+    setSel({ kind: "el", id: el.id });
+  };
+  // Duplicate an element (offset ~10′, unattached). Used constantly from the menu.
+  const duplicateEl = (id) => {
+    const src = els.find((x) => x.id === id);
+    if (!src) return;
+    const { attachedTo, ...rest } = src;
+    const off = settings.gridSize || 10;
+    const el = rest.points
+      ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+      : { ...rest, id: uid(), cx: rest.cx + off, cy: rest.cy + off };
     pushHistory();
     setEls((a) => [...a, el]);
     setSel({ kind: "el", id: el.id });
@@ -3843,18 +3857,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
                     </>
                   )}
-                  {!t.points && (
-                    <>
-                      <div style={hdr(true)}>Align</div>
-                      <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation to an edge — then click a parcel edge</button>
-                    </>
-                  )}
-                  <div style={hdr(isBuildingRect)}>Attach</div>
+                  <div style={hdr(true)}>Edit</div>
+                  <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
+                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unlock" : "Lock"}</button>
+                  {!t.points && <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation…</button>}
                   {t.attachedTo
-                    ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach from its host</button>
-                    : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to another element — then click it</button>}
-                  <div style={hdr(true)}>Lock</div>
-                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "🔒 Unlock" : "🔒 Lock in place"}</button>
+                    ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
+                    : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to…</button>}
+                  <button style={{ ...menuItem(false), color: "#b3361b" }} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); deleteSel(); setTypeMenu(null); }}>Delete</button>
                 </>
               );
             })()}
