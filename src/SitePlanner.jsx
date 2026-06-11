@@ -450,6 +450,7 @@ const DEFAULT_SETTINGS = {
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
+  roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
@@ -3100,7 +3101,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                         <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                        {["24", "26", "30", "36", "40"].map((w) => (
+                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter(Boolean).map((w) => (
                           <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
                         ))}
                       </div>
@@ -3464,23 +3465,37 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           </Section>
           )}
 
-          {/* settings */}
+          {/* settings — grouped, collapsible */}
           {leftPanel === "standards" && (<>
-          <Section title="Standards">
+          <Section title="Site defaults">
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
-            <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 8px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.snap} onChange={(e) => setSettings((s) => ({ ...s, snap: e.target.checked }))} /> Snap to grid</label>
+            <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
+          </Section>
+
+          <Section title="Parking" collapsed>
             <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
             <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
+          </Section>
+
+          <Section title="Trailers" collapsed>
             <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
             <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
+          </Section>
+
+          <Section title="Roads" collapsed>
+            <Field label="Curb width"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
+            <Field label="Travel widths">
+              <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
+                onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
+            </Field>
           </Section>
 
           {/* element default colors — edit without selecting anything */}
-          <Section title="Element defaults" collapsed>
-            <div style={{ fontSize: 11, color: PAL.muted, marginBottom: 8, lineHeight: 1.5 }}>Default fill / line color for each element type. New elements use these; per-element overrides live in <b style={{ color: PAL.ink }}>Properties</b>.</div>
+          <Section title="Element default colors" collapsed>
             {Object.keys(TYPE).map((k) => {
               const st = typeStyle(k, settings);
               return (
