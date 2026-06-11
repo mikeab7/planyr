@@ -1981,6 +1981,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
+  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 8, lineHeight: 1, border: `1px solid #ddd6c5`, borderRadius: 4, background: "#fff", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
   const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
@@ -2003,6 +2004,32 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
   const selEl = sel?.kind === "el" ? els.find((e) => e.id === sel.id) : null;
   const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
+  // Rotate the selected element to an absolute angle, carrying its whole bonded
+  // assembly (sidewalks, truck court, trailer parking, dog-ears) around its centre.
+  const rotateSelTo = (newRot) => {
+    if (!selEl || selEl.points) return;
+    const delta = ((((newRot - (selEl.rot || 0)) % 360) + 360) % 360);
+    if (!delta) return;
+    pushHistory();
+    const pivot = { x: selEl.cx, y: selEl.cy };
+    const ids = new Set(assemblyOf(selEl.id).map((m) => m.id));
+    setEls((a) => a.map((x) => {
+      if (!ids.has(x.id)) return x;
+      if (x.points) return { ...x, points: x.points.map((p) => { const r = rot2(p.x - pivot.x, p.y - pivot.y, delta); return { x: pivot.x + r.x, y: pivot.y + r.y }; }) };
+      const r = rot2(x.cx - pivot.x, x.cy - pivot.y, delta);
+      return { ...x, cx: pivot.x + r.x, cy: pivot.y + r.y, rot: ((x.rot + delta) % 360 + 360) % 360 };
+    }));
+  };
+  const bumpRot = (d) => { if (selEl && !selEl.points) rotateSelTo((((Math.round(selEl.rot) + d) % 360) + 360) % 360); };
+  // Resize the selected element from a numeric field, keeping its centre fixed and
+  // carrying every bonded feature with it (same re-fit as dragging a grip).
+  const resizeSelEl = (patch) => {
+    if (!selEl || selEl.points) return;
+    const nb = { cx: selEl.cx, cy: selEl.cy, w: patch.w ?? selEl.w, h: patch.h ?? selEl.h, rot: selEl.rot };
+    pushHistory();
+    const kids = wallKids(selEl);
+    setEls((a) => refitChildren(a, selEl.id, nb, kids));
+  };
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
@@ -2461,9 +2488,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
-                  <Field label="Width (ft)"><input style={numInput} value={Math.round(selEl.w)} onChange={(e) => setSelEl({ w: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
-                  <Field label="Depth (ft)"><input style={numInput} value={Math.round(selEl.h)} onChange={(e) => setSelEl({ h: Math.max(settings.gridSize, +e.target.value || 0) })} /></Field>
-                  <Field label="Rotation (°)"><input style={numInput} value={Math.round(selEl.rot)} onChange={(e) => setSelEl({ rot: ((+e.target.value || 0) % 360 + 360) % 360 })} /></Field>
+                  <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={settings.gridSize} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                  <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={settings.gridSize} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                  <Field label="Rotation (°)">
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
+                      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <button style={spinBtn} onClick={() => bumpRot(1)} title="Rotate +1°">▲</button>
+                        <button style={spinBtn} onClick={() => bumpRot(-1)} title="Rotate −1°">▼</button>
+                      </span>
+                    </span>
+                  </Field>
                   {selEl.type === "building" && (
                     <Field label="Docks">
                       <select style={{ ...numInput, width: 112, fontFamily: "inherit" }} value={selEl.dock || "single"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
@@ -2570,7 +2605,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                 </span>
               </Field>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 4px" }}>Standards</div>
-              <Field label="Setback (ft)"><input style={numInput} value={settings.setback} onChange={(e) => setSettings((s) => ({ ...s, setback: Math.max(0, +e.target.value || 0) }))} /></Field>
+              <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 2, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                 <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete parcel</button>
@@ -2607,14 +2642,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
           {/* settings */}
           <Section title="Standards" collapsed>
-            <Field label="Grid (ft)"><input style={numInput} value={settings.gridSize} onChange={(e) => setSettings((s) => ({ ...s, gridSize: Math.max(1, +e.target.value || 1) }))} /></Field>
-            <Field label="Setback (ft)"><input style={numInput} value={settings.setback} onChange={(e) => setSettings((s) => ({ ...s, setback: Math.max(0, +e.target.value || 0) }))} /></Field>
+            <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
+            <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 8px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
-            <Field label="Stall W / D"><span><input style={{ ...numInput, width: 42 }} value={settings.stallW} onChange={(e) => setSettings((s) => ({ ...s, stallW: +e.target.value || 9 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.stallDepth} onChange={(e) => setSettings((s) => ({ ...s, stallDepth: +e.target.value || 18 }))} /></span></Field>
-            <Field label="Drive aisle"><input style={numInput} value={settings.aisle} onChange={(e) => setSettings((s) => ({ ...s, aisle: +e.target.value || 24 }))} /></Field>
+            <Field label="Stall W / D"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.stallW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.stallDepth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, stallDepth: n }))} /></span></Field>
+            <Field label="Drive aisle"><NumInput style={numInput} value={settings.aisle} min={1} onCommit={(n) => setSettings((s) => ({ ...s, aisle: n }))} /></Field>
             <Field label="Park angle"><select style={{ ...numInput, width: 58 }} value={settings.parkAngle} onChange={(e) => setSettings((s) => ({ ...s, parkAngle: +e.target.value }))}><option value={90}>90°</option><option value={60}>60°</option><option value={45}>45°</option></select></Field>
-            <Field label="Trailer W / L"><span><input style={{ ...numInput, width: 42 }} value={settings.trailerW} onChange={(e) => setSettings((s) => ({ ...s, trailerW: +e.target.value || 12 }))} /> <input style={{ ...numInput, width: 42 }} value={settings.trailerL} onChange={(e) => setSettings((s) => ({ ...s, trailerL: +e.target.value || 53 }))} /></span></Field>
-            <Field label="Trailer aisle"><input style={numInput} value={settings.trailerAisle} onChange={(e) => setSettings((s) => ({ ...s, trailerAisle: +e.target.value || 0 }))} /></Field>
+            <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
+            <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
@@ -2843,5 +2878,30 @@ function Field({ label, children }) {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
       <span style={{ fontSize: 12, color: "#8a8473" }}>{label}</span>{children}
     </div>
+  );
+}
+// A numeric input you can edit freely (clear it, type partial values) — it only
+// commits (parse + clamp) on Enter or blur, never live on each keystroke.
+function NumInput({ value, onCommit, min, max, style, placeholder }) {
+  const [draft, setDraft] = useState(value == null ? "" : String(value));
+  const editing = useRef(false);
+  useEffect(() => { if (!editing.current) setDraft(value == null ? "" : String(value)); }, [value]);
+  const commit = () => {
+    editing.current = false;
+    const n = parseFloat(draft);
+    if (isNaN(n)) { setDraft(value == null ? "" : String(value)); return; }
+    let v = n;
+    if (min != null) v = Math.max(min, v);
+    if (max != null) v = Math.min(max, v);
+    setDraft(String(v));
+    if (v !== value) onCommit(v);
+  };
+  return (
+    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal"
+      onFocus={() => { editing.current = true; }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); } }}
+    />
   );
 }
