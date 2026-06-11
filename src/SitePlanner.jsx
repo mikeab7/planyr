@@ -57,6 +57,7 @@ const ICON_PATHS = {
   combine: <><path d="M2.5 2.5 h7 v4 h4 v7 h-7 v-4 h-4 Z" /></>,
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
   callout: <><rect x="2.2" y="2.4" width="8.6" height="6" rx="1" /><path d="M5.2 8.4 L4 11.2 L7.2 8.4" /><path d="M11 11.5 L13.8 13.8" /></>,
+  text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -72,6 +73,7 @@ const TOOLS = [
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "combine", label: "Combine", hint: "Merge parcels: click two or more adjacent parcels (they share a boundary) to pick them, then press Enter (or the Merge button) to fuse them into one. Esc clears the pick" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
+  { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
   { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
@@ -723,6 +725,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
+      if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
@@ -784,6 +787,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       return;
     }
     if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
+    if (tool === "text") { placeText(fp); return; }       // one click → text box
     if (tool === "parcel") {
       const sp = snapPt(fp);
       if (draftPoly && draftPoly.length >= 3 && dist(f2p(sp), f2p(draftPoly[0])) < 12) { closePoly(); return; }
@@ -918,6 +922,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     pushHistory();
     const c = { id: uid(), tip: calloutDraft.tip, box: fp, text: "" };
     setCalloutDraft(null);
+    setCallouts((a) => [...a, c]);
+    setSel({ kind: "callout", id: c.id });
+    setTool("select");
+    setEditCallout({ id: c.id, text: "", isNew: true });
+  };
+  // Text box: a callout with no leader — one click drops the box, then type.
+  const placeText = (fp) => {
+    pushHistory();
+    const c = { id: uid(), box: fp, noLeader: true, text: "" };
     setCallouts((a) => [...a, c]);
     setSel({ kind: "callout", id: c.id });
     setTool("select");
@@ -1895,23 +1908,44 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
     bg.setAttribute("fill", PAL.paper);
     clone.insertBefore(bg, clone.firstChild);
+    // Always include the aerial underlay (even if it's hidden on screen), placed
+    // beneath everything but the paper, so prints/exports keep the satellite.
+    if (underlay) {
+      clone.querySelectorAll("image").forEach((n) => n.remove()); // drop any live copy
+      const tl = f2p({ x: underlay.x, y: underlay.y });
+      const sy = underlay.ftPerPxY || underlay.ftPerPx;
+      const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
+      im.setAttribute("href", underlay.src);
+      im.setAttributeNS("http://www.w3.org/1999/xlink", "href", underlay.src);
+      im.setAttribute("x", tl.x); im.setAttribute("y", tl.y);
+      im.setAttribute("width", underlay.imgW * underlay.ftPerPx * view.ppf);
+      im.setAttribute("height", underlay.imgH * sy * view.ppf);
+      im.setAttribute("preserveAspectRatio", "none");
+      im.setAttribute("opacity", underlay.opacity ?? 1);
+      clone.insertBefore(im, bg.nextSibling);
+    }
     return { clone, w, h };
+  };
+  // Rasterizing/printing an SVG can't fetch remote resources, so inline every
+  // <image> (the aerial) as a data URL first. Drops any that are CORS-blocked.
+  const inlineImages = async (root, dropOnFail = true) => {
+    const XL = "http://www.w3.org/1999/xlink";
+    for (const img of root.querySelectorAll("image")) {
+      const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
+      if (href && !href.startsWith("data:")) {
+        try {
+          const blob = await fetch(href, { mode: "cors" }).then((r) => { if (!r.ok) throw new Error(); return r.blob(); });
+          const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+          img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
+        } catch (_) { if (dropOnFail) img.remove(); } // print keeps the remote href as a fallback
+      }
+    }
   };
   const exportPNG = async () => {
     const built = buildExportSvg();
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
-    // Rasterizing an SVG can't fetch external resources, so inline the aerial.
-    for (const img of clone.querySelectorAll("image")) {
-      const href = img.getAttribute("href") || img.getAttributeNS("http://www.w3.org/1999/xlink", "href");
-      if (href && !href.startsWith("data:")) {
-        try {
-          const blob = await fetch(href, { mode: "cors" }).then((r) => { if (!r.ok) throw new Error(); return r.blob(); });
-          const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
-          img.setAttribute("href", dataUrl);
-        } catch (_) { img.remove(); } // aerial blocked → export the plan without it
-      }
-    }
+    await inlineImages(clone); // embed the aerial so the raster includes it
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
     try {
@@ -1931,9 +1965,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       }, "image/png");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = () => {
+  const printPDF = async () => {
     const built = buildExportSvg();
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
+    // Open the window synchronously (before any await) so it isn't pop-up-blocked.
+    const win = window.open("", "_blank");
+    if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
+    win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
+    await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
     const xml = new XMLSerializer().serializeToString(built.clone);
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const rows = [
@@ -1947,8 +1986,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       ["Detention", `${f0(pondArea)} sf`],
       ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
     ];
-    const win = window.open("", "_blank");
-    if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
+    win.document.open();
     win.document.write(`<!doctype html><html><head><title>${esc(siteName)}</title><style>
       @page { size: letter landscape; margin: 11mm; }
       body { font-family: "Helvetica Neue", Helvetica, system-ui, sans-serif; color: #26231e; margin: 0; }
@@ -2635,36 +2673,42 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
-              {/* callouts (Bluebeam-style annotations: leader + text box) */}
+              {/* callouts & text boxes — sized in the drawing's frame (scale with
+                  zoom) so they don't balloon when you zoom out. */}
               {callouts.map((c) => {
-                const bp = f2p(c.box), tp = f2p(c.tip);
+                const bp = f2p(c.box);
                 const isSel = sel?.kind === "callout" && sel.id === c.id;
                 const st = calloutStyle(c);
+                const zk = view.ppf / 0.35;            // scale relative to the default zoom
+                const fontPx = st.size * zk;
                 const lines = String(c.text || "").split("\n");
-                const charW = st.size * 0.56 * (st.bold ? 1.05 : 1), lineH = st.size * 1.3, pad = 8;
-                const tw = Math.max(20, ...lines.map((l) => l.length * charW));
+                const charW = fontPx * 0.56 * (st.bold ? 1.05 : 1), lineH = fontPx * 1.3, pad = Math.max(4, fontPx * 0.55);
+                const tw = Math.max(fontPx, ...lines.map((l) => l.length * charW));
                 const w = tw + pad * 2, h = lines.length * lineH + pad * 2;
-                const ang = Math.atan2(tp.y - bp.y, tp.x - bp.x), ah = 9;
-                const a1 = { x: tp.x - ah * Math.cos(ang - 0.4), y: tp.y - ah * Math.sin(ang - 0.4) };
-                const a2 = { x: tp.x - ah * Math.cos(ang + 0.4), y: tp.y - ah * Math.sin(ang + 0.4) };
                 const border = isSel ? PAL.accent : st.stroke;
                 const anchor = st.align === "left" ? "start" : st.align === "right" ? "end" : "middle";
                 const tx = st.align === "left" ? bp.x - w / 2 + pad : st.align === "right" ? bp.x + w / 2 - pad : bp.x;
+                const hasLeader = !c.noLeader && c.tip;
+                const tp = hasLeader ? f2p(c.tip) : null;
+                const ah = Math.max(7, fontPx * 0.7);
+                const ang = tp ? Math.atan2(tp.y - bp.y, tp.x - bp.x) : 0;
                 return (
                   <g key={c.id}>
-                    <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
-                    <polygon points={`${tp.x},${tp.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`} fill={border} />
+                    {hasLeader && <>
+                      <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={border} strokeWidth={1.6} />
+                      <polygon points={`${tp.x},${tp.y} ${tp.x - ah * Math.cos(ang - 0.4)},${tp.y - ah * Math.sin(ang - 0.4)} ${tp.x - ah * Math.cos(ang + 0.4)},${tp.y - ah * Math.sin(ang + 0.4)}`} fill={border} />
+                    </>}
                     <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
                       fill={st.fill} stroke={border} strokeWidth={isSel ? 2 : 1.4}
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
                     {editCallout?.id !== c.id && lines.map((ln, i) => (
-                      <text key={i} x={tx} y={bp.y - h / 2 + pad + st.size * 0.82 + i * lineH} textAnchor={anchor}
-                        fontSize={st.size} fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill={st.color}
+                      <text key={i} x={tx} y={bp.y - h / 2 + pad + fontPx * 0.82 + i * lineH} textAnchor={anchor}
+                        fontSize={fontPx} fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill={st.color}
                         fontWeight={st.bold ? 700 : 500} fontStyle={st.italic ? "italic" : "normal"} pointerEvents="none">{ln}</text>
                     ))}
-                    {isSel && tool === "select" && (
+                    {isSel && hasLeader && tool === "select" && (
                       <circle cx={tp.x} cy={tp.y} r={5} fill="#fff" stroke={PAL.accent} strokeWidth={2}
                         style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip")} />
                     )}
@@ -2681,7 +2725,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
                 const st = calloutStyle(c);
-                const bp = f2p(c.box), W = 200, H = 64;
+                const fontPx = st.size * (view.ppf / 0.35);
+                const bp = f2p(c.box), W = Math.max(200, fontPx * 12), H = Math.max(64, fontPx * 4);
                 return (
                   <foreignObject x={bp.x - W / 2} y={bp.y - H / 2} width={W} height={H} style={{ overflow: "visible" }}>
                     <textarea autoFocus value={editCallout.text}
@@ -2695,7 +2740,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                         else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
                       }}
                       placeholder="Type, Enter to save"
-                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: st.size, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", fontFamily: "'Helvetica Neue', Helvetica, sans-serif", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", fontFamily: "'Helvetica Neue', Helvetica, sans-serif", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -2998,6 +3043,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           </div>
 
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")}><ToolIcon id="callout" /> Callout <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>Q</span></button>
+          <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")}><ToolIcon id="text" /> Text <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>T</span></button>
 
           <div style={{ flex: 1 }} />
           {curHint && (
@@ -3076,7 +3122,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
             return (
-              <Section title="Callout">
+              <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
                 <Field label="Text size"><NumInput style={numInput} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} /></Field>
                 <Field label="Align">
@@ -3096,7 +3142,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 <Field label="Fill color"><input type="color" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} /></Field>
                 <Field label="Line color"><input type="color" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} /></Field>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete callout</button>
+                  <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
               </Section>
             );
