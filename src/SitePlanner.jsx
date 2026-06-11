@@ -1313,7 +1313,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       ? { ...sw, w: Math.max(SIDEWALK_W, sw.w + inc), cx: sw.cx + off.x, cy: sw.cy + off.y }
       : { ...sw, h: Math.max(SIDEWALK_W, sw.h + inc), cx: sw.cx + off.x, cy: sw.cy + off.y };
   };
-  const isBumpSidewalk = (x, b, swSide) => x.attachedTo === b.id && x.type === "sidewalk" && x.sidewalkSide === swSide && !x.points;
+  const isBumpSidewalk = (x, b, swSide) => x.attachedTo === b.id && x.type === "sidewalk" && !x.points && sideOfKid(b, x) === swSide;
   // Add dog-ears at the given corners, growing any matching perpendicular sidewalk
   // to the bump-out's new length.
   const placeDogEars = (b, corners) => {
@@ -1351,14 +1351,32 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const have = new Set(els.filter((x) => x.attachedTo === b.id && x.oppSide).map((x) => x.oppSide));
     addBuildingEls(trailerSides.filter((s) => !have.has(s)).map((s) => ({ ...makeOppTrailer(b, s), oppSide: s })), b.id);
   };
+  // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
+  // from the kid's position (so legacy / untagged strips are still recognised).
+  const sideOfKid = (b, kid) => {
+    if (kid.sidewalkSide) return kid.sidewalkSide;
+    const c = kid.points ? centroid(kid.points) : { x: kid.cx, y: kid.cy };
+    const l = rot2(c.x - b.cx, c.y - b.cy, -b.rot);
+    const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
+    return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
+  };
+  const sidewalkOnSide = (b, name) => els.find((x) => x.type === "sidewalk" && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
+  // Add a sidewalk on side `name`, pre-extended over any bump-outs already on that
+  // wall so it spans the full (bump-out-inclusive) length right away.
+  const addSidewalkSide = (b, name) => {
+    if (sidewalkOnSide(b, name)) return; // one sidewalk per side
+    let sw = makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name });
+    els.forEach((de) => {
+      if (de.attachedTo === b.id && de.dogEar && bumpSidewalkSide(de.dogEar.side, de.dogEar.sign) === name) sw = adjustSidewalkForBump(sw, de.dogEar.side, 1);
+    });
+    addBuildingEls([sw], b.id);
+  };
   const addSidewalk = (b, clickFp) => {
     const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
     let nx = 0, ny = 0;
     if (Math.abs(local.x) / (b.w / 2) >= Math.abs(local.y) / (b.h / 2)) nx = local.x >= 0 ? 1 : -1;
     else ny = local.y >= 0 ? 1 : -1;
-    const name = nx === 1 ? "right" : nx === -1 ? "left" : ny === 1 ? "bottom" : "top";
-    if (els.some((x) => x.attachedTo === b.id && x.sidewalkSide === name)) return; // one sidewalk per side
-    addStripSide(b, nx, ny, "sidewalk", SIDEWALK_W, { sidewalkSide: name });
+    addSidewalkSide(b, nx === 1 ? "right" : nx === -1 ? "left" : ny === 1 ? "bottom" : "top");
   };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -1825,9 +1843,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             color = "#0e7490"; addTitle = `Add ${OPP_TRAILER_D}′ striped trailer parking`;
             onAdd = () => addOppTrailer(el, name);
           } else {
-            existing = kids.find((x) => x.sidewalkSide === name);
+            existing = kids.find((x) => x.type === "sidewalk" && !x.points && sideOfKid(el, x) === name);
             color = "#16a34a"; addTitle = `Add ${SIDEWALK_W}′ sidewalk`;
-            onAdd = () => addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W, { sidewalkSide: name });
+            onAdd = () => addSidewalkSide(el, name);
           }
           return featNode(`add${name}`, pos, !!existing, color, addTitle, onAdd, existing ? () => removeFeature(existing.id) : null);
         })}
