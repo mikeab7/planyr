@@ -58,6 +58,11 @@ const ICON_PATHS = {
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
   callout: <><rect x="2.2" y="2.4" width="8.6" height="6" rx="1" /><path d="M5.2 8.4 L4 11.2 L7.2 8.4" /><path d="M11 11.5 L13.8 13.8" /></>,
   text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
+  mline: <path d="M3 13 L13 3" />,
+  mrect: <rect x="2.5" y="3.5" width="11" height="9" rx="0.5" />,
+  mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
+  mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
+  mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -82,8 +87,18 @@ const TOOLS = [
   { id: "road", label: "Road", hint: "Pick a width from Road ▾ (24′ / 26′ / 30′ / 36′ / 40′) and drag to set the length & direction, or Free draw for any rectangle. A 6″ curb is added each side (a 30′ road is 31′ wide, called out as 30′)" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
+  { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
+  { id: "mrect", label: "Rectangle", hint: "Markup rectangle (R): drag a box. Hold Shift for a square" },
+  { id: "mellipse", label: "Ellipse", hint: "Markup ellipse (E): drag a box. Hold Shift for a circle" },
+  { id: "mpolygon", label: "Polygon", hint: "Markup polygon (Shift+P): click points, click the first dot or double-click to close. Shift for 45° segments" },
+  { id: "mpolyline", label: "Polyline", hint: "Markup polyline (Shift+N): click points, double-click / Enter to finish. Shift for 45° segments" },
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
+const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
+const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
+// Snap an angle to the nearest 45° (for Shift-constrained drawing).
+const snap45 = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, r = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4); return { x: a.x + r * Math.cos(ang), y: a.y + r * Math.sin(ang) }; };
 
 /* ----------------------------- geometry ---------------------------- */
 const rot2 = (x, y, deg) => {
@@ -490,9 +505,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [els, setEls] = useState(() => restored?.els || []);                // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
+  const [markups, setMarkups] = useState(() => restored?.markups || []);   // neutral shapes: line/polyline/rect/ellipse/polygon
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
+  const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
+  const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
+  const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
@@ -563,10 +582,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], underlay: null });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, underlay }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay }; });
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -582,12 +601,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (!siteId) return;
     if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a blank site
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, settings, underlay }); if (fresh) onSiteSaved?.(); }, 400);
+    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay }); if (fresh) onSiteSaved?.(); }, 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, callouts, settings, underlay]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, settings, underlay }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay }; });
   const persistOrDrop = () => {
     if (!siteId) return;
     const s = liveRef.current;
@@ -600,7 +619,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   }, [active]); // eslint-disable-line
   useEffect(() => () => { persistOrDrop(); }, []); // eslint-disable-line
   const histKey = (s) =>
-    JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts }) +
+    JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
   const pushHistory = () => {
     pastRef.current.push(stateRef.current);
@@ -608,7 +627,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     futureRef.current = [];
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setUnderlay(s.underlay);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -698,7 +717,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Bluebeam-style left rail: selecting something opens its menu (element →
   // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
   useEffect(() => {
-    if (sel?.kind === "el" || sel?.kind === "callout") setLeftPanel("props");
+    if (sel?.kind === "el" || sel?.kind === "callout" || sel?.kind === "markup") setLeftPanel("props");
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
@@ -751,15 +770,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
+      // Bluebeam-matching markup shortcuts: L line, R rect, E ellipse, ⇧P polygon, ⇧N polyline
+      if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mline"); return; }
+      if ((e.key === "r" || e.key === "R") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mrect"); return; }
+      if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
+      if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
+      if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
+      if (e.key === "Enter" && tool === "mpolyline" && mkPoly?.pts?.length >= 2) { e.preventDefault(); finishMkPoly(); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly]); // eslint-disable-line
 
   const deleteSel = () => {
     if (!sel) return;
@@ -767,6 +793,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
     else if (sel.kind === "callout") setCallouts((a) => a.filter((c) => c.id !== sel.id));
+    else if (sel.kind === "markup") setMarkups((a) => a.filter((m) => m.id !== sel.id));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
   };
@@ -812,6 +839,21 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     }
     if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
     if (tool === "text") { placeText(fp); return; }       // one click → text box
+    if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // drag-draw markup
+      const a = snapPt(fp);
+      drag.current = { mode: "mkDraw", kind: tool, a };
+      setMkRect({ kind: tool, a, b: a, shift: e.shiftKey });
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (tool === "mpolygon" || tool === "mpolyline") { // click-draw markup
+      const sp = snapPt(fp);
+      if (mkPoly && mkPoly.pts.length >= (tool === "mpolygon" ? 3 : 2) && dist(f2p(sp), f2p(mkPoly.pts[0])) < 12 && tool === "mpolygon") { finishMkPoly(); return; }
+      const last = mkPoly?.pts?.[mkPoly.pts.length - 1];
+      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
+      return;
+    }
     if (tool === "parcel") {
       const sp = snapPt(fp);
       if (draftPoly && draftPoly.length >= 3 && dist(f2p(sp), f2p(draftPoly[0])) < 12) { closePoly(); return; }
@@ -960,6 +1002,36 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setTool("select");
     setEditCallout({ id: c.id, text: "", isNew: true });
   };
+  /* ------------ markup shapes ------------ */
+  const finishMkPoly = () => {
+    if (mkPoly) {
+      const pts = mkPoly.pts.filter((p, i) => i === 0 || dist(p, mkPoly.pts[i - 1]) > 0.01);
+      const min = mkPoly.kind === "mpolygon" ? 3 : 2;
+      if (pts.length >= min) {
+        const mk = { id: uid(), kind: mkPoly.kind === "mpolygon" ? "polygon" : "polyline", pts, ...mkStyle };
+        pushHistory(); setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+      }
+    }
+    setMkPoly(null); setTool("select");
+  };
+  const translateMarkup = (m, dx, dy) => {
+    if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+    if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
+    return { ...m, cx: m.cx + dx, cy: m.cy + dy };
+  };
+  const startMoveMarkup = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
+    setSel({ kind: "markup", id });
+    pushHistory();
+    const fp = p2f(e.clientX, e.clientY);
+    drag.current = { mode: "mkMove", id, fx: fp.x, fy: fp.y, orig: m };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
+  const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -1048,6 +1120,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (d.mode === "moveUnderlay") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
+      return;
+    }
+    if (d.mode === "mkDraw") {
+      let b = snapPt(fp);
+      if (e.shiftKey) {
+        if (d.kind === "mline") b = snapPt(snap45(d.a, fp));
+        else { const s = Math.max(Math.abs(b.x - d.a.x), Math.abs(b.y - d.a.y)); b = { x: d.a.x + Math.sign(b.x - d.a.x || 1) * s, y: d.a.y + Math.sign(b.y - d.a.y || 1) * s }; } // square/circle
+      }
+      setMkRect({ kind: d.kind, a: d.a, b });
+      return;
+    }
+    if (d.mode === "mkMove") {
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      setMarkups((a) => a.map((m) => m.id === d.id ? translateMarkup(d.orig, dx, dy) : m));
       return;
     }
     if (d.mode === "callout") {
@@ -1180,6 +1266,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
   const onUp = (e) => {
     const d = drag.current;
+    if (d && d.mode === "mkDraw" && mkRect) {
+      const { a, b, kind } = mkRect;
+      let mk = null;
+      if (kind === "mline") { if (dist(a, b) >= 2) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
+      else { const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+        if (w >= 2 && h >= 2) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle }; }
+      if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
+      setMkRect(null); drag.current = null; setPanning(false);
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (d && d.mode === "draw" && draftRect) {
       if (d.depth) {
         // fixed-width preset (parking rows / road width): a length×depth strip,
@@ -1236,7 +1333,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (draftElPoly) closeElPoly(); };
+  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (tool === "mpolygon" || tool === "mpolyline") finishMkPoly(); else if (draftElPoly) closeElPoly(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -1769,6 +1866,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
   };
+  const toggleMarkupLock = (id) => {
+    pushHistory();
+    setMarkups((a) => a.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m)));
+  };
 
   /* ------------ metrics ------------ */
   // Per-element striping/count config: a strip may override the global standards
@@ -1813,7 +1914,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const name = scenName.trim();
     if (!name) return;
     try {
-      await storage.set(`scenario:${name}`, JSON.stringify({ parcels, els, measures, callouts, settings, underlay }));
+      await storage.set(`scenario:${name}`, JSON.stringify({ parcels, els, measures, callouts, markups, settings, underlay }));
       setScenName("");
       refreshScen();
     } catch (err) {
@@ -1827,7 +1928,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (r?.value) {
         const d = JSON.parse(r.value);
         ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []); setCallouts(d.callouts || []);
+        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []); setCallouts(d.callouts || []); setMarkups(d.markups || []);
         setSettings({ ...DEFAULT_SETTINGS, ...(d.settings || {}) });
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -1877,7 +1978,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const handleNewPlan = () => { closeHdrMenus(); flushSite(); onNewPlanSameParcel?.(siteId); };
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ parcels, els, measures, callouts, settings, underlay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ parcels, els, measures, callouts, markups, settings, underlay }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${fileSlug()}.json`;
@@ -2401,6 +2502,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
+  const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
   const leftTabs = [
     { id: "props", glyph: "✎", label: "Element" },
     { id: "parcel", glyph: "⬡", label: "Parcel" },
@@ -2450,6 +2552,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setSplitPath([]);
     if (id !== "combine") setCombineSel([]);
     if (id !== "callout") setCalloutDraft(null);
+    if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
     if (id !== "parking") setParkingMenu(false);
@@ -2734,6 +2837,37 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
+              {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
+              {markups.map((m) => {
+                const isSel = sel?.kind === "markup" && sel.id === m.id;
+                const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
+                const stroke = isSel ? PAL.accent : m.stroke;
+                const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const fillProps = (m.fillOpacity > 0) ? { fill: m.fill, fillOpacity: m.fillOpacity } : {};
+                if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
+                if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
+                if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
+                const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
+                if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+                return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
+              })}
+              {/* markup draft */}
+              {mkRect && (() => {
+                const a = f2p(mkRect.a), b = f2p(mkRect.b), sw = mkStyle.weight;
+                const dp = { stroke: PAL.accent, strokeWidth: sw, strokeDasharray: "5 4", fill: "none", pointerEvents: "none" };
+                if (mkRect.kind === "mline") return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} />;
+                const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+                return mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
+              })()}
+              {mkPoly && (() => {
+                const live = cursor ? (mkPoly.pts.length ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
+                const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                return <>
+                  <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
+                  {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
+                </>;
+              })()}
               {/* callouts & text boxes — sized in the drawing's frame (scale with
                   zoom) so they don't balloon when you zoom out. */}
               {callouts.map((c) => {
@@ -3032,7 +3166,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
         {/* right-side tool rail — dark chrome */}
         <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "0 4px 6px" }}>Tools</div>
+          {railHdr("Tools")}
           <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
           <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")}><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>⇧V</span></button>
 
@@ -3054,7 +3188,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             )}
           </div>
 
-          <div style={{ height: 1, background: PAL.chromeLine, margin: "5px 2px" }} />
+          {railHdr("Site elements")}
 
           {DRAW_TYPES.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
@@ -3099,7 +3233,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label}</button>;
           })}
 
-          <div style={{ height: 1, background: PAL.chromeLine, margin: "5px 2px" }} />
+          {railHdr("Shapes")}
+          {MARKUP_TOOLS.map((id) => {
+            const t = TOOLS.find((x) => x.id === id);
+            const sc = { mline: "L", mrect: "R", mellipse: "E", mpolygon: "⇧P", mpolyline: "⇧N" }[id];
+            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label} <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>{sc}</span></button>;
+          })}
+
+          {railHdr("Measure")}
 
           {/* measure with line / polyline / area modes */}
           <div style={{ position: "relative" }}>
@@ -3117,6 +3258,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             )}
           </div>
 
+          {railHdr("Annotate")}
           <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")}><ToolIcon id="callout" /> Callout <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>Q</span></button>
           <button className={`rbtn${tool === "text" ? " on" : ""}`} style={rbtn(tool === "text")} onClick={() => selectTool("text")}><ToolIcon id="text" /> Text <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>T</span></button>
 
@@ -3189,11 +3331,35 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
 
           {/* Element menu — selection details + properties (or an empty hint) */}
-          {leftPanel === "props" && !selEl && !selCallout && (
+          {leftPanel === "props" && !selEl && !selCallout && !selMarkup && (
             <Section title="Element">
-              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element or callout on the canvas to edit its properties here.</div>
+              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element, markup, or callout on the canvas to edit its properties here.</div>
             </Section>
           )}
+          {/* selected markup shape — geometry + style */}
+          {leftPanel === "props" && selMarkup && (() => {
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
+            const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
+            return (
+              <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
+                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} onChange={(e) => setSelMarkup({ stroke: e.target.value })} style={swatch} /></Field>
+                <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
+                <Field label="Dash">
+                  <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
+                    <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
+                  </select>
+                </Field>
+                {closed && <>
+                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} onChange={(e) => setSelMarkup({ fill: e.target.value })} style={swatch} /></Field>
+                  <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
+                </>}
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete</button>
+                </div>
+              </Section>
+            );
+          })()}
           {/* selected callout — text styling */}
           {leftPanel === "props" && selCallout && (() => {
             const cs = calloutStyle(selCallout);
