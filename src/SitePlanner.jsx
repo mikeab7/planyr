@@ -386,6 +386,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
   const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
   const [plansMenu, setPlansMenu] = useState(false);     // Plans ▾ (multi-site switcher) dropdown open
+  const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
@@ -411,7 +412,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
   // aerial underlay + scale calibration
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
-  const [showAerial, setShowAerial] = useState(false);  // aerial underlay is hidden until you click a parcel (or toggle it on)
+  const [showAerial, setShowAerial] = useState(true);   // aerial underlay shows whenever one exists
   const [underlayErr, setUnderlayErr] = useState(false);
   const [underlayLoading, setUnderlayLoading] = useState(() => {
     const u = restored?.underlay;
@@ -562,6 +563,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (restored?.parcels?.length === 1 && !(restored?.els?.length)) setSel({ kind: "parcel", id: restored.parcels[0].id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Bluebeam-style left rail: selecting something opens its menu (element →
+  // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
+  useEffect(() => {
+    if (sel?.kind === "el") setLeftPanel("props");
+    else if (sel?.kind === "parcel") setLeftPanel("parcel");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.kind, sel?.id]);
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
@@ -1181,13 +1190,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // fixed size/position when the building is resized instead of scaling with a wall.
   const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
+    // A child may be turned 90° from the building (e.g. a parking field rotated to
+    // run ALONG a side wall). Resolve its extent on each building axis so depth,
+    // length, and its own rotation all survive the resize.
+    const rel = (((c.rot - b.rot) % 360) + 360) % 360;
+    const cross = Math.min(Math.abs(rel - 90), Math.abs(rel - 270)) < 45; // child's w runs along building Y
+    const dimBX = cross ? c.h : c.w; // child extent along the building's X axis
+    const dimBY = cross ? c.w : c.h; // child extent along the building's Y axis
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     const perpIsY = outY >= outX; // hugs a horizontal (top/bottom) wall → perpendicular axis is Y
     // perpGap = clearance between the child's near face and the building edge
     // (0 when flush; e.g. a sidewalk's width when parking sits beyond a sidewalk).
     return perpIsY
-      ? { id: c.id, perpIsY: true, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: c.h, perpGap: Math.abs(l.y) - b.h / 2 - c.h / 2, alongCenter: l.x, alongHalf: c.w / 2, oldAlongHalf: b.w / 2 }
-      : { id: c.id, perpIsY: false, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: c.w, perpGap: Math.abs(l.x) - b.w / 2 - c.w / 2, alongCenter: l.y, alongHalf: c.h / 2, oldAlongHalf: b.h / 2 };
+      ? { id: c.id, perpIsY: true, cross, rot0: c.rot, sidePerp: l.y >= 0 ? 1 : -1, perpDepth: dimBY, perpGap: Math.abs(l.y) - b.h / 2 - dimBY / 2, alongCenter: l.x, alongHalf: dimBX / 2, oldAlongHalf: b.w / 2 }
+      : { id: c.id, perpIsY: false, cross, rot0: c.rot, sidePerp: l.x >= 0 ? 1 : -1, perpDepth: dimBX, perpGap: Math.abs(l.x) - b.w / 2 - dimBX / 2, alongCenter: l.y, alongHalf: dimBY / 2, oldAlongHalf: b.h / 2 };
   });
   // ...then re-fit each child: it stays flush against the wall and keeps its
   // depth, while its length/position ALONG the wall scale with that wall.
@@ -1199,9 +1215,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const alongDim = 2 * k.alongHalf * ratio;      // length along the wall
     const perp = k.sidePerp * (newPerpHalf + k.perpDepth / 2 + Math.max(0, k.perpGap || 0)); // keep its clearance outside the wall
     const lx = k.perpIsY ? along : perp, ly = k.perpIsY ? perp : along;
-    const w = k.perpIsY ? alongDim : k.perpDepth, h = k.perpIsY ? k.perpDepth : alongDim;
+    const dimBX = k.perpIsY ? alongDim : k.perpDepth; // child extent on building X
+    const dimBY = k.perpIsY ? k.perpDepth : alongDim; // child extent on building Y
+    const w = k.cross ? dimBY : dimBX, h = k.cross ? dimBX : dimBY; // back to the child's own w/h
     const off = rot2(lx, ly, nb.rot);
-    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w, h, rot: ((nb.rot % 360) + 360) % 360 };
+    return { cx: nb.cx + off.x, cy: nb.cy + off.y, w, h, rot: k.rot0 != null ? k.rot0 : ((nb.rot % 360) + 360) % 360 };
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
@@ -1418,7 +1436,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const fp = p2f(e.clientX, e.clientY);
     if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
     setSel({ kind: "parcel", id });
-    if (underlay) setShowAerial(true); // clicking a parcel pops up the aerial underlay
     if (pc.locked) return;             // locked parcel: select only, don't move
     pushHistory();
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
@@ -2108,6 +2125,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   })();
 
   /* ----------------------------- UI ----------------------------- */
+  // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
+  const leftTabs = [
+    { id: "props", glyph: "✎", label: "Element" },
+    { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "yield", glyph: "∑", label: "Yield" },
+    { id: "aerial", glyph: "◳", label: "Aerial" },
+    { id: "standards", glyph: "⚙", label: "Setup" },
+  ];
+  const railBtn = (on) => ({
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
+    padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
+    background: on ? "rgba(232,89,12,0.14)" : "transparent", color: on ? "#fff" : PAL.chromeMuted,
+    cursor: "pointer", fontFamily: "inherit", fontSize: 9, fontWeight: 600, letterSpacing: "0.01em",
+  });
   // primary buttons (inspector actions)
   const btn = (active) => ({
     padding: "7px 13px", fontSize: 12.5, borderRadius: 9, cursor: "pointer",
@@ -2681,9 +2712,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
         </div>
 
-        {/* left properties panel */}
-        <div style={{ width: 320, flex: "none", order: 1, background: "#efe9dd", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "13px 13px 24px" }}>
+        {/* left side — Bluebeam-style icon rail + one open menu */}
+        <div style={{ display: "flex", flex: "none", order: 1, minHeight: 0 }}>
+          {/* the rail */}
+          <div style={{ width: 54, flex: "none", background: PAL.chrome, borderRight: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", paddingTop: 4 }}>
+            {leftTabs.map((tb) => (
+              <button key={tb.id} title={tb.label} className="dbtn" style={railBtn(leftPanel === tb.id)}
+                onClick={() => setLeftPanel((p) => (p === tb.id ? null : tb.id))}>
+                <span style={{ fontSize: 16, lineHeight: 1 }}>{tb.glyph}</span>{tb.label}
+              </button>
+            ))}
+          </div>
+          {/* the open menu (collapsed by default) */}
+          {leftPanel && (
+          <div style={{ width: 320, flex: "none", background: "#efe9dd", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "13px 13px 24px" }}>
           {/* aerial underlay */}
+          {leftPanel === "aerial" && (
           <Section title="Aerial underlay">
             {!underlay ? (
               <>
@@ -2722,9 +2766,16 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </>
             )}
           </Section>
+          )}
 
+          {/* Element menu — selection details + properties (or an empty hint) */}
+          {leftPanel === "props" && !selEl && (
+            <Section title="Element">
+              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element on the canvas to edit its size, rotation, dock features, and colors here.</div>
+            </Section>
+          )}
           {/* selected element */}
-          {selEl && (
+          {leftPanel === "props" && selEl && (
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
@@ -2803,7 +2854,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
 
           {/* Bluebeam-style Properties — colors for the selected element + set defaults */}
-          {selEl && curStyle && (
+          {leftPanel === "props" && selEl && curStyle && (
             <Section title="Properties">
               <Field label="Fill color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2828,8 +2879,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             </Section>
           )}
 
+          {/* Parcel menu — empty hint when no parcel is selected */}
+          {leftPanel === "parcel" && !selParcel && (
+            <Section title="Parcel">
+              <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Click a parcel boundary on the canvas to see its area, lock it in place, set a setback, or give it a fill.</div>
+            </Section>
+          )}
           {/* selected parcel — translucence + setback standards */}
-          {selParcel && (
+          {leftPanel === "parcel" && selParcel && (
             <Section title="Parcel">
               <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
                 Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
@@ -2864,6 +2921,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           )}
 
           {/* metrics */}
+          {leftPanel === "yield" && (
           <Section title="Site yield" accent={PAL.accent}>
             {/* hero stat tiles */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
@@ -2889,9 +2947,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             {metricRow("Detention %", `${f0(detPct)}%`)}
             {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
           </Section>
+          )}
 
           {/* settings */}
-          <Section title="Standards" collapsed>
+          {leftPanel === "standards" && (<>
+          <Section title="Standards">
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
             <Field label="Setback (ft)"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 8px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
@@ -2930,6 +2990,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               );
             })}
           </div>
+          </>)}
+          </div>
+          )}
         </div>
       </div>
 
