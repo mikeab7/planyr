@@ -9,6 +9,7 @@ import {
   featureToParcel,
   humanizeError,
 } from "./lib/arcgis.js";
+import { TYPE, typeStyle, elStyle, toHex6 } from "./lib/planStyle.js";
 
 /* ------------------------------------------------------------------ *
  *  Industrial Site Planner — prototype (TestFit-style, industrial)
@@ -59,37 +60,6 @@ const ToolIcon = ({ id, size = 15 }) => (
     {ICON_PATHS[id] || <circle cx="8" cy="8" r="5.5" />}
   </svg>
 );
-
-const TYPE = {
-  building: { fill: "#ffffff", stroke: "#2b2b2b", label: "Building" },
-  paving: { fill: "#555555", stroke: "#333333", label: "Paving / Drive" },
-  parking: { fill: "#555555", stroke: "#cfcfcf", label: "Car Parking" },
-  trailer: { fill: "#555555", stroke: "#d4d4d4", label: "Trailer Parking" },
-  pond: { fill: "#1ed4e1", stroke: "#0b8a96", label: "Detention Pond" },
-  sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
-  road: { fill: "#4a4a4a", stroke: "#e8e8e8", label: "Road" },
-};
-
-// Resolved style for a type = built-in default merged with any user-set default
-// (settings.typeStyles). An individual element may further override fill/stroke/
-// fillOpacity on itself (the Bluebeam-style per-element Properties).
-const typeStyle = (type, settings) => ({ ...TYPE[type], ...((settings && settings.typeStyles && settings.typeStyles[type]) || {}) });
-const elStyle = (el, settings) => {
-  const base = typeStyle(el.type, settings);
-  return {
-    label: base.label,
-    fill: el.fill ?? base.fill,
-    stroke: el.stroke ?? base.stroke,
-    fillOpacity: el.fillOpacity ?? base.fillOpacity ?? 1,
-  };
-};
-// Coerce any CSS color we store into the #rrggbb form an <input type=color> needs.
-const toHex6 = (c) => {
-  if (!c) return "#000000";
-  if (/^#[0-9a-f]{6}$/i.test(c)) return c;
-  if (/^#[0-9a-f]{3}$/i.test(c)) return "#" + c.slice(1).split("").map((h) => h + h).join("");
-  return c;
-};
 
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },

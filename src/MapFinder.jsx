@@ -12,6 +12,7 @@ import {
   aerialPlacement,
   humanizeError,
 } from "./lib/arcgis.js";
+import { elStyle, elRingFeet } from "./lib/planStyle.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -198,33 +199,72 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
     }
   }, [visible]);
 
-  /* draw saved-site footprints, redrawn whenever the list changes. Clickable to
-     open (unless we're in parcel-select mode, where clicks add parcels). */
+  /* Saved sites on the overview map. Zoomed out: a branded pin per site.
+     Zoomed in (>= PLAN_ZOOM): the actual site plan — parcel boundary plus every
+     element in its true colors — georeferenced via the site's origin. Clickable
+     to open (unless we're in parcel-select mode, where clicks add parcels). */
+  const PLAN_ZOOM = 15;
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
     const group = L.layerGroup();
+    const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
     sites.forEach((site) => {
-      if (!site.origin || !site.parcels?.length) return;
+      if (!site.origin) return; // blank-planner sites have no geo anchor
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
-      site.parcels.forEach((p) => {
-        if (!p.points?.length) return;
-        const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
-          color: active ? "#c2410c" : "#0e7490", weight: 2,
-          fillColor: active ? "#c2410c" : "#22d3ee", fillOpacity: 0.16, interactive: !selectMode,
+      const tip = `${site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`;
+      const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
+
+      if (showPlans && site.parcels?.length) {
+        // parcel boundary
+        site.parcels.forEach((p) => {
+          if (!p.points?.length) return;
+          const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
+            color: active ? "#e8590c" : "#22d3ee", weight: 2.25, dashArray: "6 5",
+            fillColor: active ? "#e8590c" : "#22d3ee", fillOpacity: 0.05, interactive: !selectMode,
+          });
+          if (!selectMode) poly.on("click", openSiteNow).bindTooltip(tip, { direction: "top", sticky: true });
+          poly.addTo(group);
         });
-        if (!selectMode) poly.on("click", () => onOpenSiteRef.current && onOpenSiteRef.current(site.id))
-          .bindTooltip(`${site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`, { direction: "top", sticky: true });
-        poly.addTo(group);
-      });
+        // the plan itself: every element in its real fill/stroke (same resolver
+        // as the planner canvas, including per-site default colors + overrides)
+        (site.els || []).forEach((el) => {
+          const ring = elRingFeet(el);
+          if (!ring || ring.length < 3) return;
+          const st = elStyle(el, site.settings);
+          const poly = L.polygon(ring.map((pt) => feetToLatLng(pt, lat, lon)), {
+            color: st.stroke, weight: 1, fillColor: st.fill,
+            fillOpacity: Math.min(0.92, st.fillOpacity ?? 1),
+            interactive: !selectMode,
+          });
+          if (!selectMode) poly.on("click", openSiteNow).bindTooltip(tip, { direction: "top", sticky: true });
+          poly.addTo(group);
+        });
+      } else {
+        // zoomed out: a branded map pin at the site origin
+        const pin = active ? "#e8590c" : "#191613";
+        const icon = L.divIcon({
+          className: "",
+          html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4));">
+            <svg width="30" height="40" viewBox="0 0 30 40">
+              <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${pin}" stroke="#ffffff" stroke-width="2"/>
+              <rect x="9.5" y="8" width="6.5" height="11" fill="#fff" opacity=".95"/>
+              <rect x="17.6" y="8" width="3" height="6.5" fill="#fff" opacity=".55"/>
+            </svg></div>`,
+          iconSize: [30, 40], iconAnchor: [15, 38], tooltipAnchor: [0, -34],
+        });
+        const marker = L.marker([lat, lon], { icon, interactive: !selectMode, keyboard: false });
+        if (!selectMode) marker.on("click", openSiteNow).bindTooltip(tip, { direction: "top" });
+        marker.addTo(group);
+      }
     });
     group.addTo(map);
     sitesLayerRef.current = group;
     return () => { try { map.removeLayer(group); } catch (_) {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode]);
+  }, [sites, activeSiteId, selectMode, zoom]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
@@ -365,7 +405,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
           <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
         </div>
         <div style={{ flex: 1 }} />
-        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Open blank planner →</button>
+        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Open site planner →</button>
       </div>
 
       {/* map */}
@@ -389,6 +429,8 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || "Untitled site"}</div>
                       <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
+                    {s.origin && <button title="Show on map (zoom to the plan)" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
+                      style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "2px 3px", borderRadius: 5 }}>◎</button>}
                     <button title="Delete site" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.name || "this site"}"? This can't be undone.`)) onDeleteSite && onDeleteSite(s.id); }}
                       style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 4px", borderRadius: 5 }}>✕</button>
                   </div>
