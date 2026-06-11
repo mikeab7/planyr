@@ -574,6 +574,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
+  const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -624,10 +625,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
+  const [, bumpHist] = useState(0);
+  const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => {
     pastRef.current.push(stateRef.current);
     if (pastRef.current.length > 80) pastRef.current.shift();
     futureRef.current = [];
+    touchHist();
   };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay);
@@ -642,12 +646,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (!prev) return;
     futureRef.current.push(stateRef.current);
     applySnapshot(prev);
+    touchHist();
   };
   const redo = () => {
     const next = futureRef.current.pop();
     if (!next) return;
     pastRef.current.push(stateRef.current);
     applySnapshot(next);
+    touchHist();
   };
 
   /* ------------ size tracking ------------ */
@@ -781,6 +787,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
+      if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
       // Bluebeam-matching markup shortcuts: L line, R rect, E ellipse, ⇧P polygon, ⇧N polyline
@@ -2774,9 +2781,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
         {/* history + view cluster */}
         <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2 }}>
-          <button className="dbtn" style={dIcon} onClick={undo} title="Undo (Ctrl+Z)">↶</button>
-          <button className="dbtn" style={dIcon} onClick={redo} title="Redo (Ctrl+Shift+Z)">↷</button>
-          <button className="dbtn" style={dIcon} onClick={fit} title="Zoom to fit">⤢</button>
+          <button className="dbtn" style={dIcon} onClick={undo} disabled={!pastRef.current.length} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
+          <button className="dbtn" style={dIcon} onClick={redo} disabled={!futureRef.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+          <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
         </div>
         <button className="dbtn" style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
           onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
@@ -2812,7 +2819,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
-          <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
+          <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
@@ -2910,8 +2917,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const live = cursor ? (mkPoly.pts.length ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
                 const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                const lp = live ? f2p(live) : null, total = pathLen(all);
                 return <>
                   <polyline points={s} fill="none" stroke={PAL.accent} strokeWidth={mkStyle.weight} strokeDasharray="5 4" pointerEvents="none" />
+                  {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
                   {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
                 </>;
               })()}
@@ -3076,9 +3085,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 </g>
               )}
               {/* draft rect */}
-              {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }); return (
-                <g pointerEvents="none"><rect x={a.x} y={a.y} width={draftRect.w * view.ppf} height={draftRect.h * view.ppf} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" /></g>
+              {draftRect && (() => { const a = f2p({ x: draftRect.x, y: draftRect.y }), pw = draftRect.w * view.ppf, ph = draftRect.h * view.ppf;
+                const curb = +settings.roadCurb || CURB, dw = draftRect.type === "road" ? Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb) : 0;
+                return (
+                <g pointerEvents="none"><rect x={a.x} y={a.y} width={pw} height={ph} fill={typeStyle(draftRect.type, settings).fill} fillOpacity={0.5} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />
+                  {(draftRect.w > 2 || draftRect.h > 2) && <text x={a.x + pw + 6} y={a.y + ph + 14} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{draftRect.type === "road" ? `${f0(dw)}′ travel` : `${f0(draftRect.w)}′ × ${f0(draftRect.h)}′`}</text>}
+                </g>
               ); })()}
+              {/* live dims for the markup rect/ellipse draft */}
+              {mkRect && mkRect.kind !== "mline" && (() => {
+                const a = f2p(mkRect.a), b = f2p(mkRect.b), w = Math.abs(mkRect.b.x - mkRect.a.x), h = Math.abs(mkRect.b.y - mkRect.a.y);
+                return <text x={Math.max(a.x, b.x) + 6} y={Math.max(a.y, b.y) + 14} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(w)}′ × {f0(h)}′</text>;
+              })()}
+              {mkRect && mkRect.kind === "mline" && (() => {
+                const b = f2p(mkRect.b);
+                return <text x={b.x + 8} y={b.y - 6} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(dist(mkRect.a, mkRect.b))}′</text>;
+              })()}
               {/* draft polygon element (clicking perimeter points) */}
               {draftElPoly && (
                 <g pointerEvents="none">
@@ -3190,6 +3212,19 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             );
           })()}
 
+          {/* zoom controls (bottom-right, above the scale bar) */}
+          {(() => {
+            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "rgba(255,255,255,0.92)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
+            const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
+            return (
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 78, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
+                <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
+                <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
+                <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
+              </div>
+            );
+          })()}
+
           {/* mini-inspector — floats above a selected rect/ellipse/building */}
           {tool === "select" && !panning && (selEl && !selEl.points || (selMarkup && (selMarkup.kind === "rect" || selMarkup.kind === "ellipse"))) && (() => {
             const o = selEl || selMarkup;
@@ -3225,12 +3260,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           {/* status bar — dark chrome */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: "rgba(25,22,19,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
-            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 82 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
+            <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 96 }}>{underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : `${Math.round(view.ppf * 100) / 100} px/ft`}</span>
             <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
             <span style={{ color: (attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {attachFor ? "Click a host to bond to · Esc cancels" : alignFor ? "Click an edge to align to · Esc cancels" : identifyMode ? "Click a parcel to identify · Esc cancels" : curHint}
             </span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
+            <button className="dbtn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setShowShortcuts(true)} style={{ marginLeft: 12, width: 20, height: 20, borderRadius: 99, border: `1px solid ${PAL.chromeLine}`, background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>?</button>
           </div>
         </div>
 
@@ -3840,6 +3876,33 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         </div>
       </div>
 
+      {showShortcuts && (
+        <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Keyboard & gestures</h2>
+              <button className="gbtn" onClick={() => setShowShortcuts(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
+              {[
+                ["Tools", ""], ["V", "Select"], ["⇧V", "Pan (hand)"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
+                ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
+                ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
+                ["Ctrl/⌘ D", "Duplicate"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
+                ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
+                ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
+                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["?", "This panel"],
+              ].map(([k, v], i) => v === "" ? (
+                <div key={i} style={{ gridColumn: "1 / -1", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.muted, marginTop: i ? 12 : 0, marginBottom: 2 }}>{k}</div>
+              ) : (
+                <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "3px 0", fontSize: 12.5 }}>
+                  <kbd style={{ flex: "none" }}>{k}</kbd><span style={{ color: PAL.ink }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {typeMenu && (() => {
         const MW = 200, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
         const left = Math.max(GAP, Math.min(typeMenu.x + 6, vw - MW - GAP));
