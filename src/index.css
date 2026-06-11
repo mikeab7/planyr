@@ -1,6 +1,7 @@
 * { box-sizing: border-box; }
 
 :root {
+  --font: "Inter", system-ui, sans-serif;  /* the one UI face — swap here only */
   --ink: #26231e;
   --muted: #8a8473;
   --line: #e7e2d6;
@@ -18,10 +19,12 @@ html, body, #root {
 
 body {
   background: #efeadf;
-  font-family: "Inter", "Helvetica Neue", Helvetica, system-ui, sans-serif;
+  font-family: var(--font);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv05", "cv11";
+  /* tabular + slashed-zero digits everywhere numbers appear */
+  font-variant-numeric: tabular-nums slashed-zero;
   color: var(--ink);
 }
 
