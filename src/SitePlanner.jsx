@@ -443,6 +443,18 @@ const apprAll = (attrs) => Object.entries(attrs || {})
   .map(([k, v]) => ({ label: prettyKey(k), value: v }));
 // Format a value, adding $ + thousands for the money fields.
 const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
+// County stated acreage from the attributes. Prefer an explicit acres field;
+// fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
+// { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
+// silently "fixing" it.
+const countyAcres = (attrs) => {
+  if (!attrs) return null;
+  const acresKey = Object.keys(attrs).find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
+  if (acresKey) return { acres: +attrs[acresKey], source: acresKey };
+  const areaKey = Object.keys(attrs).find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
+  if (areaKey) return { acres: +attrs[areaKey] / 43560, source: areaKey, fromArea: true };
+  return null;
+};
 
 let _id = 1;
 const uid = () => `e${_id++}`;
@@ -3379,6 +3391,21 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
                 Area: <b style={{ color: PAL.ink }}>{f0(polyArea(selParcel.points))} sf</b> · {f2(polyArea(selParcel.points) / SQFT_PER_ACRE)} ac · {selParcel.points.length} corners
               </div>
+              {(() => {
+                const ca = countyAcres(selParcel.attrs);
+                if (!ca || !ca.acres) return null;
+                const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
+                const diff = Math.abs(mine - ca.acres) / ca.acres;
+                const tenx = ca.fromArea && (diff > 0.6) && Math.abs(mine - ca.acres / 10.7639) / (ca.acres / 10.7639) < 0.1;
+                const [color, mark] = tenx ? ["#b45309", "▲"] : diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
+                return (
+                  <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "6px 9px" }}>
+                    <b>{mark} Geometry check</b> · county {f2(ca.acres)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
+                    {tenx && <div style={{ marginTop: 2 }}>Shape area looks like m² — verify projection.</div>}
+                    {!tenx && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                  </div>
+                );
+              })()}
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
