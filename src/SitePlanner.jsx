@@ -1066,14 +1066,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             const cands = els.filter((x) => !ids.has(x.id) && !x.points && rootIdOf(x.id) !== d.id);
             const res = alignSnap(gel, ncx, ncy, cands, Math.min(40, 24 / view.ppf));
             if (res) { ncx = res.cx; ncy = res.cy; newRot = res.rot; hint = { id: res.hostId, x: res.hintX, y: res.hintY }; }
-          } else if (settings.snap && gbox) { // ambient flush-snap along world axes
+          } else if (settings.snap && gbox) { // ambient flush-snap along world axes (does NOT bond)
             const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
-            if (d.canAttach) {
-              const hit = flushContact({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h, rot: 0 }, others, 2);
-              if (hit && rootIdOf(hit.id) !== d.id) hint = hit;
-            }
           }
           effDx = ncx - g.cx; effDy = ncy - g.cy;
         } else {
