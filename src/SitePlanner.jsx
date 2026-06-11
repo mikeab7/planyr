@@ -728,7 +728,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
-      if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
@@ -1910,7 +1909,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
-      } catch (_) { alert("That file doesn't look like a Planar Fit export."); }
+      } catch (_) { alert("That file doesn't look like a Site Planar export."); }
     };
     fr.readAsText(file);
   };
@@ -2058,7 +2057,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       td { padding: 4px 6px; border-bottom: 1px solid #eee8da; } td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
       footer { margin-top: 8px; font-size: 9.5px; color: #8a8473; }
     </style></head><body>
-      <header><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Planar Fit</span></header>
+      <header><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Site Planar</span></header>
       <div class="wrap">
         <div class="plan">${xml}</div>
         <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
@@ -2586,7 +2585,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
           </span>
-          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Planar Fit</span>
+          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Site Planar</span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>
             {/* SITE ▾ — switch / rename location */}
             <div style={{ position: "relative" }}>
@@ -3588,7 +3587,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach from its host</button>
                     : <button style={menuItem(false)} onClick={() => { setAttachFor(typeMenu.id); setTypeMenu(null); }}>Attach to another element — then click it</button>}
                   <div style={hdr(true)}>Lock</div>
-                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "🔒 Unlock" : "🔒 Lock in place"} <span style={{ color: PAL.muted }}>(L)</span></button>
+                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "🔒 Unlock" : "🔒 Lock in place"}</button>
                 </>
               );
             })()}
