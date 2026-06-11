@@ -3566,6 +3566,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           {/* appraisal-district property data for the selected parcel */}
           {leftPanel === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
+              {(() => {
+                const ok = Object.keys(selParcel.attrs).find((k) => /^(owner|own_?name|owner_?name|owner1|name)$/i.test(k) && selParcel.attrs[k]);
+                return ok ? (
+                  <div style={{ marginBottom: 9, paddingBottom: 8, borderBottom: "1px solid #ece4d4" }}>
+                    <div style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Owner</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, lineHeight: 1.3, marginTop: 2 }}>{String(selParcel.attrs[ok])}</div>
+                  </div>
+                ) : null;
+              })()}
               {apprRows(selParcel.attrs).length === 0 ? (
                 <div style={{ fontSize: 12, color: PAL.muted }}>No recognizable fields in the county record.</div>
               ) : apprRows(selParcel.attrs).map((r) => (
