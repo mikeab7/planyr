@@ -8,6 +8,7 @@ export const TYPE = {
   trailer: { fill: "#555555", stroke: "#d4d4d4", label: "Trailer Parking" },
   pond: { fill: "#1ed4e1", stroke: "#0b8a96", label: "Detention Pond" },
   sidewalk: { fill: "#c9cccd", stroke: "#9aa1a8", label: "Sidewalk" },
+  landscape: { fill: "#a9cd92", stroke: "#6f9456", label: "Landscape" },
   road: { fill: "#4a4a4a", stroke: "#e8e8e8", label: "Road" },
 };
 
@@ -36,7 +37,7 @@ export const toHex6 = (c) => {
 
 // Paint order: ground surfaces first, structures last, so paving/road never
 // cover a building (a dock dog-ear is a building bump-out that sits ON the court).
-const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
+const Z_LAYER = { road: 0, paving: 1, sidewalk: 1, landscape: 1, pond: 2, parking: 3, trailer: 3, building: 5 };
 export const zOrder = (el) => Z_LAYER[el.type] ?? 4;
 export const byZ = (a, b) => zOrder(a) - zOrder(b);
 

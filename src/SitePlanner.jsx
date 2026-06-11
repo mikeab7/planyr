@@ -1171,7 +1171,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   // they hug when the building is resized. At drag start, capture each child in
   // the building's LOCAL frame: which wall it hugs (the axis it sits outside of),
   // its fixed depth, and its position/length along the wall.
-  const WALL_KID_TYPES = ["sidewalk", "parking", "trailer", "paving"];
+  const WALL_KID_TYPES = ["sidewalk", "landscape", "parking", "trailer", "paving"];
   // noFit children (dog-ears, the rotated opposite-dock trailer strip) keep their
   // fixed size/position when the building is resized instead of scaling with a wall.
   const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
@@ -1204,18 +1204,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
-  // Resolve a building's dock side(s) and the side(s) that can take trailer parking
-  // (the side opposite a single-load dock, or the free ends of a cross-dock).
-  const ALL_SIDES = ["top", "bottom", "left", "right"];
+  // Resolve a building's dock side(s). Non-dock sides take a sidewalk; trailer
+  // parking is added off a truck court's far edge (not the building wall itself).
   const dockSidesOf = (el) => {
     const dock = el.dock || "single";
     const dside = el.dockSide || (el.w >= el.h ? "bottom" : "right");
     if (dock === "none") return { dside, dockSides: [], trailerSides: [] };
-    if (dock === "cross") {
-      const dockSides = (dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"];
-      return { dside, dockSides, trailerSides: ALL_SIDES.filter((s) => !dockSides.includes(s)) };
-    }
-    return { dside, dockSides: [dside], trailerSides: [{ top: "bottom", bottom: "top", left: "right", right: "left" }[dside]] };
+    if (dock === "cross") return { dside, dockSides: (dside === "top" || dside === "bottom") ? ["top", "bottom"] : ["left", "right"], trailerSides: [] };
+    return { dside, dockSides: [dside], trailerSides: [] };
   };
   // Build (don't commit) a full-wall strip element flush against one building side.
   const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
@@ -1315,7 +1311,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       ? { ...sw, w: Math.max(SIDEWALK_W, sw.w + inc), cx: sw.cx + off.x, cy: sw.cy + off.y }
       : { ...sw, h: Math.max(SIDEWALK_W, sw.h + inc), cx: sw.cx + off.x, cy: sw.cy + off.y };
   };
-  const isBumpSidewalk = (x, b, swSide) => x.attachedTo === b.id && x.type === "sidewalk" && !x.points && sideOfKid(b, x) === swSide;
+  const isWallStrip = (x) => x.type === "sidewalk" || x.type === "landscape"; // 5′ wall strips
+  const isBumpSidewalk = (x, b, swSide) => x.attachedTo === b.id && isWallStrip(x) && !x.points && sideOfKid(b, x) === swSide;
   // Add dog-ears at the given corners, growing any matching perpendicular sidewalk
   // to the bump-out's new length.
   const placeDogEars = (b, corners) => {
@@ -1362,7 +1359,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
   };
-  const sidewalkOnSide = (b, name) => els.find((x) => x.type === "sidewalk" && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
+  const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
   // Add a sidewalk on side `name`, pre-extended over any bump-outs already on that
   // wall so it spans the full (bump-out-inclusive) length right away.
   const addSidewalkSide = (b, name) => {
@@ -1785,9 +1782,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     seenLabels.add(dupKey);
     const c = f2p(fc);
     let lines;
-    if (el.type === "sidewalk") {
-      // e.g. "5′ Sidewalk" — width only, no sf / length
-      lines = [poly ? "Sidewalk" : `${f0(Math.min(el.w, el.h))}′ Sidewalk`];
+    if (el.type === "sidewalk" || el.type === "landscape") {
+      // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
+      const name = el.type === "landscape" ? "Landscape" : "Sidewalk";
+      lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
@@ -1892,7 +1890,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             color = "#0e7490"; addTitle = `Add ${OPP_TRAILER_D}′ striped trailer parking`;
             onAdd = () => addOppTrailer(el, name);
           } else {
-            existing = kids.find((x) => x.type === "sidewalk" && !x.points && sideOfKid(el, x) === name);
+            existing = kids.find((x) => isWallStrip(x) && !x.points && sideOfKid(el, x) === name);
             color = "#16a34a"; addTitle = `Add ${SIDEWALK_W}′ sidewalk`;
             onAdd = () => addSidewalkSide(el, name);
           }
@@ -2640,8 +2638,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <Section title={`Selected · ${TYPE[selEl.type].label}`}>
               {!selEl.points ? (
                 <>
-                  <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={settings.gridSize} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                  <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={settings.gridSize} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                  <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                  <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                   <Field label="Rotation (°)">
                     <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
@@ -2854,9 +2852,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
               const dock = t.dock || "single";
               return (
                 <>
+                  {(t.type === "sidewalk" || t.type === "landscape") && (
+                    <>
+                      <div style={hdr(false)}>Type</div>
+                      <button style={menuItem(false)} onClick={() => { pushHistory(); setEls((a) => a.map((e) => e.id === typeMenu.id ? { ...e, type: t.type === "sidewalk" ? "landscape" : "sidewalk" } : e)); setTypeMenu(null); }}>
+                        {t.type === "sidewalk" ? "Turn into landscape buffer" : "Turn into sidewalk"}
+                      </button>
+                    </>
+                  )}
                   {isBuildingRect && (
                     <>
-                      <div style={hdr(false)}>Dock layout</div>
+                      <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock layout</div>
                       {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
                         <button key={k} style={menuItem(dock === k)} onClick={() => setDockOf(typeMenu.id, k)}>{label}</button>
                       ))}
