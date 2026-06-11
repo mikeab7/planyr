@@ -439,6 +439,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
   const [plansMenu, setPlansMenu] = useState(false);     // Plans ▾ (multi-site switcher) dropdown open
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
+  const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
@@ -623,6 +624,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
+  // Remember the left menu width between sessions.
+  useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
+  // Drag the panel's right edge to resize it.
+  const startLeftResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = leftWidth;
+    const onMove = (ev) => setLeftWidth(Math.max(240, Math.min(620, startW + (ev.clientX - startX))));
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
 
   // Reframe when this view becomes active — its real size is known only once shown.
   useEffect(() => {
@@ -2917,9 +2929,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </button>
             ))}
           </div>
-          {/* the open menu (collapsed by default) */}
-          {leftPanel && (
-          <div style={{ width: 320, flex: "none", background: "#efe9dd", borderRight: `1px solid ${PAL.panelLine}`, overflowY: "auto", padding: "13px 13px 24px" }}>
+          {/* the open menu (collapsed by default) — drag its right edge to resize */}
+          {leftPanel && (<>
+          <div style={{ width: leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px" }}>
           {/* aerial underlay */}
           {leftPanel === "aerial" && (
           <Section title="Aerial underlay">
@@ -3186,7 +3198,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           </div>
           </>)}
           </div>
-          )}
+          {/* drag handle to resize the menu */}
+          <div onPointerDown={startLeftResize} title="Drag to resize"
+            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />
+          </>)}
         </div>
       </div>
 
