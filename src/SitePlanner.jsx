@@ -54,6 +54,8 @@ const ICON_PATHS = {
   pond: <path d="M8 2.6 C8 2.6 3.6 7.8 3.6 10.4 a4.4 4.4 0 0 0 8.8 0 C12.4 7.8 8 2.6 8 2.6 Z" />,
   road: <><path d="M5.2 2.5 L3.2 13.5 M10.8 2.5 L12.8 13.5" /><path d="M8 3 v2.2 M8 7 v2.2 M8 11 v2.2" /></>,
   measure: <><path d="M2.2 10.8 L10.8 2.2 L13.8 5.2 L5.2 13.8 Z" /><path d="M5.6 7.4 l1.4 1.4 M8 5 l1.4 1.4" /></>,
+  combine: <><path d="M2.5 2.5 h7 v4 h4 v7 h-7 v-4 h-4 Z" /></>,
+  callout: <><rect x="2.2" y="2.4" width="8.6" height="6" rx="1" /><path d="M5.2 8.4 L4 11.2 L7.2 8.4" /><path d="M11 11.5 L13.8 13.8" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -66,6 +68,8 @@ const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
+  { id: "combine", label: "Combine", hint: "Merge parcels: click two or more adjacent parcels (they share a boundary) to pick them, then press Enter (or the Merge button) to fuse them into one. Esc clears the pick" },
+  { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
   { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
@@ -341,6 +345,53 @@ function splitPolygon(points, A, B) {
   return [polyA, polyB];
 }
 
+/* ----------------------- polygon union (combine) ------------------- */
+// Merge two adjacent simple polygons that share a boundary. Each shared edge
+// appears in opposite directions in the two rings (consistent winding), so we
+// cancel every edge that has a reverse twin in the other ring, then stitch the
+// surviving edges back into one outer loop. Returns the merged ring or null
+// (not adjacent / couldn't form a single loop).
+function mergeRings(ringA, ringB, tol = 0.75) {
+  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
+  const edges = [];
+  const add = (ring) => { for (let i = 0; i < ring.length; i++) edges.push({ a: ring[i], b: ring[(i + 1) % ring.length], dead: false }); };
+  add(ringA); add(ringB);
+  let shared = 0;
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i].dead) continue;
+    for (let j = 0; j < edges.length; j++) {
+      if (j === i || edges[j].dead) continue;
+      if (eq(edges[i].a, edges[j].b) && eq(edges[i].b, edges[j].a)) { edges[i].dead = edges[j].dead = true; shared++; break; }
+    }
+  }
+  if (!shared) return null; // no common boundary → nothing to fuse
+  const live = edges.filter((e) => !e.dead);
+  if (live.length < 3) return null;
+  const used = new Array(live.length).fill(false);
+  const ring = [live[0].a, live[0].b]; used[0] = true;
+  for (let guard = 0; guard < live.length + 2; guard++) {
+    const end = ring[ring.length - 1];
+    let f = -1;
+    for (let k = 0; k < live.length; k++) { if (!used[k] && eq(live[k].a, end)) { f = k; break; } }
+    if (f < 0) break;
+    used[f] = true;
+    ring.push(live[f].b);
+  }
+  if (ring.length > 1 && eq(ring[0], ring[ring.length - 1])) ring.pop();
+  // drop coincident / collinear vertices left over from the cancelled edges
+  const dedup = [];
+  for (const p of ring) if (!dedup.length || !eq(dedup[dedup.length - 1], p)) dedup.push(p);
+  if (dedup.length > 1 && eq(dedup[0], dedup[dedup.length - 1])) dedup.pop();
+  const out = [];
+  for (let i = 0; i < dedup.length; i++) {
+    const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
+    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (Math.abs(cross) > 1) out.push(b); // keep only true corners
+  }
+  const final = out.length >= 3 ? out : dedup;
+  return final.length >= 3 ? final : null;
+}
+
 /* ------------------------------ format ----------------------------- */
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -377,6 +428,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [parcels, setParcels] = useState(() => restored?.parcels || []);    // {id, points:[{x,y}]}
   const [els, setEls] = useState(() => restored?.els || []);                // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
+  const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
+  const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
+  const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
@@ -448,28 +502,28 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], underlay: null });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], underlay: null });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, underlay }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, underlay }; });
   // Autosave this site (debounced) so reloads, switching sites, and the map
   // list all stay current. saveSite merges, preserving name/origin.
   useEffect(() => {
     if (!siteId) return;
-    const t = setTimeout(() => saveSite({ id: siteId, parcels, els, measures, settings, underlay }), 400);
+    const t = setTimeout(() => saveSite({ id: siteId, parcels, els, measures, callouts, settings, underlay }), 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, settings, underlay]);
+  }, [siteId, parcels, els, measures, callouts, settings, underlay]);
   // Flush immediately when this site goes inactive (back to map) or unmounts
   // (switching sites), so nothing in the last debounce window is lost.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, settings, underlay }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, settings, underlay }; });
   useEffect(() => {
     if (active || !siteId) return;
     saveSite({ id: siteId, ...liveRef.current });
   }, [active]); // eslint-disable-line
   useEffect(() => () => { if (siteId) saveSite({ id: siteId, ...liveRef.current }); }, []); // eslint-disable-line
   const histKey = (s) =>
-    JSON.stringify({ p: s.parcels, e: s.els, m: s.measures }) +
+    JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
   const pushHistory = () => {
     pastRef.current.push(stateRef.current);
@@ -477,7 +531,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     futureRef.current = [];
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setUnderlay(s.underlay);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setUnderlay(s.underlay);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -607,20 +661,23 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
+      if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
+      if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setSidewalkFor(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel]); // eslint-disable-line
 
   const deleteSel = () => {
     if (!sel) return;
     pushHistory();
     if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
+    else if (sel.kind === "callout") setCallouts((a) => a.filter((c) => c.id !== sel.id));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
   };
@@ -659,6 +716,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
+    if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
     if (tool === "parcel") {
       const sp = snapPt(fp);
       if (draftPoly && draftPoly.length >= 3 && dist(f2p(sp), f2p(draftPoly[0])) < 12) { closePoly(); return; }
@@ -745,6 +803,65 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     }
   };
 
+  /* ------------ combine parcels (Combine tool) ------------ */
+  const toggleCombine = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // Fuse the picked parcels (any that share a boundary) into one. Merges
+  // greedily so a connected group of 2+ collapses to a single boundary.
+  const combineParcels = () => {
+    const chosen = parcels.filter((p) => combineSel.includes(p.id));
+    if (chosen.length < 2) return;
+    let result = chosen[0].points;
+    let remaining = chosen.slice(1).map((p) => p.points);
+    let progress = true;
+    while (remaining.length && progress) {
+      progress = false;
+      for (let i = 0; i < remaining.length; i++) {
+        const merged = mergeRings(result, remaining[i]);
+        if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
+      }
+    }
+    if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
+    pushHistory();
+    const np = { id: uid(), points: result };
+    setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
+    setCombineSel([]);
+    setSel({ kind: "parcel", id: np.id });
+    setTool("select");
+  };
+
+  /* ------------ callouts (annotations) ------------ */
+  // Re-aim / move / retext callouts. Box & tip are stored in feet.
+  const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const editCalloutText = (id) => {
+    const c = callouts.find((x) => x.id === id);
+    const text = window.prompt("Callout text:", c ? c.text : "");
+    if (text == null) return;
+    pushHistory();
+    setCallout(id, { text });
+  };
+  // Click 1 sets the tip (what it points at); click 2 drops the box and asks for text.
+  const placeCallout = (fp) => {
+    if (!calloutDraft) { setCalloutDraft({ tip: fp }); return; }
+    const text = window.prompt("Callout text:", "Note");
+    setCalloutDraft(null);
+    if (text == null) return;
+    pushHistory();
+    const c = { id: uid(), tip: calloutDraft.tip, box: fp, text: text || "Note" };
+    setCallouts((a) => [...a, c]);
+    setSel({ kind: "callout", id: c.id });
+    setTool("select");
+  };
+  const startMoveCallout = (e, id, part) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const c = callouts.find((x) => x.id === id);
+    setSel({ kind: "callout", id });
+    pushHistory();
+    const fp = p2f(e.clientX, e.clientY);
+    drag.current = { mode: "callout", id, part, fx: fp.x, fy: fp.y, box0: { ...c.box }, tip0: { ...c.tip } };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+
   /* ------------ parcel vertex editing ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -822,6 +939,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (d.mode === "moveUnderlay") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
+      return;
+    }
+    if (d.mode === "callout") {
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      if (d.part === "tip") setCallout(d.id, { tip: { x: d.tip0.x + dx, y: d.tip0.y + dy } });
+      else setCallout(d.id, { box: { x: d.box0.x + dx, y: d.box0.y + dy } });
       return;
     }
     if (d.mode === "draw") {
@@ -1430,7 +1553,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
-    if (tool !== "select" || e.button !== 0) return;
+    if (e.button !== 0) return;
+    if (tool === "combine") { e.stopPropagation(); toggleCombine(id); return; } // Combine tool: pick parcels to fuse
+    if (tool !== "select") return;
     e.stopPropagation();
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
@@ -1599,7 +1724,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const name = scenName.trim();
     if (!name) return;
     try {
-      await storage.set(`scenario:${name}`, JSON.stringify({ parcels, els, measures, settings, underlay }));
+      await storage.set(`scenario:${name}`, JSON.stringify({ parcels, els, measures, callouts, settings, underlay }));
       setScenName("");
       refreshScen();
     } catch (err) {
@@ -1613,7 +1738,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (r?.value) {
         const d = JSON.parse(r.value);
         ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
-        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
+        setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []); setCallouts(d.callouts || []);
         setSettings({ ...DEFAULT_SETTINGS, ...(d.settings || {}) });
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -1660,7 +1785,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const handleNewPlan = () => { setPlansMenu(false); flushSite(); onNewPlanSameParcel?.(siteId); };
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ parcels, els, measures, settings, underlay }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ parcels, els, measures, callouts, settings, underlay }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `${fileSlug()}.json`;
@@ -2172,6 +2297,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const selectTool = (id) => {
     setTool(id);
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setSplitPath([]);
+    if (id !== "combine") setCombineSel([]);
+    if (id !== "callout") setCalloutDraft(null);
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
     if (id !== "building") setBuildingMenu(false);
@@ -2406,10 +2533,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               {/* parcels */}
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
+                const picked = combineSel.includes(pc.id);
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
-                  fill={pc.fill || "none"} fillOpacity={pc.fill ? (pc.fillOpacity ?? 0.12) : 1}
-                  stroke={isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={isSel ? 3 : 2}
-                  style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                  fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
+                  stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                  style={{ cursor: tool === "combine" ? "pointer" : tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                   pointerEvents="all"
                   onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
               })}
@@ -2417,6 +2545,43 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
               {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
+              {/* callouts (Bluebeam-style annotations: leader + text box) */}
+              {callouts.map((c) => {
+                const bp = f2p(c.box), tp = f2p(c.tip);
+                const isSel = sel?.kind === "callout" && sel.id === c.id;
+                const lines = String(c.text || "").split("\n");
+                const tw = Math.max(24, ...lines.map((l) => l.length * 6.6));
+                const w = tw + 16, h = lines.length * 15 + 10;
+                const ang = Math.atan2(tp.y - bp.y, tp.x - bp.x), ah = 9;
+                const a1 = { x: tp.x - ah * Math.cos(ang - 0.4), y: tp.y - ah * Math.sin(ang - 0.4) };
+                const a2 = { x: tp.x - ah * Math.cos(ang + 0.4), y: tp.y - ah * Math.sin(ang + 0.4) };
+                const stroke = isSel ? PAL.accent : "#1f2937";
+                return (
+                  <g key={c.id}>
+                    <line x1={bp.x} y1={bp.y} x2={tp.x} y2={tp.y} stroke={stroke} strokeWidth={1.6} />
+                    <polygon points={`${tp.x},${tp.y} ${a1.x},${a1.y} ${a2.x},${a2.y}`} fill={stroke} />
+                    <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
+                      fill="#fffbe8" stroke={stroke} strokeWidth={isSel ? 2 : 1.4}
+                      style={{ cursor: tool === "select" ? "move" : "default" }}
+                      onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
+                      onDoubleClick={(e) => { e.stopPropagation(); editCalloutText(c.id); }} />
+                    {lines.map((ln, i) => (
+                      <text key={i} x={bp.x} y={bp.y - h / 2 + 16 + i * 15} textAnchor="middle" fontSize="12"
+                        fontFamily="'Helvetica Neue', Helvetica, sans-serif" fill="#1f2937" pointerEvents="none">{ln}</text>
+                    ))}
+                    {isSel && tool === "select" && (
+                      <circle cx={tp.x} cy={tp.y} r={5} fill="#fff" stroke={PAL.accent} strokeWidth={2}
+                        style={{ cursor: "move" }} onPointerDown={(e) => startMoveCallout(e, c.id, "tip")} />
+                    )}
+                  </g>
+                );
+              })}
+              {/* callout draft: tip placed, waiting for the box click */}
+              {tool === "callout" && calloutDraft && (<>
+                {cursor && <line x1={f2p(calloutDraft.tip).x} y1={f2p(calloutDraft.tip).y} x2={f2p(cursor).x} y2={f2p(cursor).y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" />}
+                <circle cx={f2p(calloutDraft.tip).x} cy={f2p(calloutDraft.tip).y} r={4} fill={PAL.accent} />
+              </>)}
+
               {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
                 const fpts = measPts(m);
@@ -2590,6 +2755,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             </div>
           )}
 
+          {/* Combine tool banner — pick parcels, then Merge */}
+          {tool === "combine" && (
+            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              {combineSel.length < 2 ? `Click adjacent parcels to combine — ${combineSel.length} picked` : `${combineSel.length} parcels picked`}
+              <button className="dbtn" style={{ ...btn(combineSel.length >= 2), padding: "5px 12px", opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }}
+                disabled={combineSel.length < 2} onClick={combineParcels}>Merge ⏎</button>
+            </div>
+          )}
+
           {/* status bar — dark chrome */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: "rgba(25,22,19,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
@@ -2609,13 +2783,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div style={{ position: "relative" }}>
-            <button className={`rbtn${tool === "parcel" || tool === "split" ? " on" : ""}`} style={rbtn(tool === "parcel" || tool === "split")} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split", "combine"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split", "combine"].includes(tool))} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             {toolMenu && (
               <>
                 <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
                   <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
                   <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
+                  <button style={menuItem(tool === "combine")} onClick={() => selectTool("combine")}>Combine parcels</button>
                   <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                     <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
                   </div>
@@ -2702,6 +2877,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </>
             )}
           </div>
+
+          <button className={`rbtn${tool === "callout" ? " on" : ""}`} style={rbtn(tool === "callout")} onClick={() => selectTool("callout")}><ToolIcon id="callout" /> Callout <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>Q</span></button>
 
           <div style={{ flex: 1 }} />
           {curHint && (
