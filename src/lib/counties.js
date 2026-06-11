@@ -56,6 +56,27 @@ const ID_RE =
 const ADDR_RE =
   /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
 
+/* Taxing-jurisdiction + rate resolver — ONE place to wire each county's tax-unit /
+ * rate source as endpoints are confirmed. No public per-parcel rate endpoint is
+ * wired for any county yet, so this mines the parcel attributes for any taxing-
+ * unit codes the CAD already returns and otherwise degrades gracefully. It NEVER
+ * fabricates a rate. Returns { units:[{name,value}], rates|null, total|null,
+ * connected:boolean, note }. When a rate endpoint is added for a county, fill in
+ * rates/total and set connected:true. */
+export const TAX_RATE_SOURCES = { harris: null, fortbend: null, chambers: null };
+export async function resolveTaxRates(county, attrs) {
+  const units = [];
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === "") continue;
+    if (/(tax_?unit|jurisd|taxing|school|_isd$|^isd|\bmud\b|\besd\b|college|^city$|^cnty|county_?nm)/i.test(k))
+      units.push({ name: k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()), value: String(v) });
+  }
+  const src = TAX_RATE_SOURCES[county];
+  if (!src) return { units, rates: null, total: null, connected: false, note: `Rate source not connected for ${county || "this county"}.` };
+  // (future) fetch per-unit rates from `src`, sum to total, set connected:true.
+  return { units, rates: null, total: null, connected: false, note: "Rate source returned no data." };
+}
+
 // Find the first field whose name looks like an id or address field.
 export function detectField(fields, kind) {
   const re = kind === "id" ? ID_RE : ADDR_RE;

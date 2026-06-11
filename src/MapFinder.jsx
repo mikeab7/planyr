@@ -372,7 +372,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   // boundary aligns to either source, so the planner aerial stays reliable.
   const planSelected = () => {
     const asm = computeAssembly(selected, BASEMAPS.esri.export);
-    if (asm) onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site" });
+    if (asm) onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site", county });
   };
 
   const asm = selected.length ? computeAssembly(selected, BASEMAPS.esri.export) : null;

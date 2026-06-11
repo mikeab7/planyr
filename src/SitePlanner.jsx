@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { storage, loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { COUNTIES, detectField } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
   getLayerInfo,
   resolveLayerUrl,
@@ -719,6 +719,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   useEffect(() => {
     if (sel?.kind === "el" || sel?.kind === "callout" || sel?.kind === "markup") setLeftPanel("props");
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.kind, sel?.id]);
+  // Resolve taxing jurisdictions for the selected parcel (async, graceful).
+  useEffect(() => {
+    const pc = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+    if (!pc || !pc.attrs) { setTaxInfo(null); return; }
+    let live = true;
+    resolveTaxRates(siteCounty, pc.attrs).then((r) => { if (live) setTaxInfo(r); }).catch(() => { if (live) setTaxInfo(null); });
+    return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
   // Remember the left menu width between sessions.
@@ -1961,6 +1970,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   };
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
+  const siteCounty = restored?.county || null;
+  // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
+  const [taxInfo, setTaxInfo] = useState(null);
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
@@ -3613,6 +3625,28 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   ))}
                 </div>
               </details>
+            </Section>
+          )}
+          {/* taxing jurisdictions + combined rate (graceful-degrade until wired) */}
+          {leftPanel === "parcel" && selParcel && selParcel.attrs && (
+            <Section title="Taxes" collapsed>
+              {!taxInfo ? (
+                <div style={{ fontSize: 11.5, color: PAL.muted }}>Looking up taxing units…</div>
+              ) : (
+                <>
+                  {taxInfo.units.length > 0 ? taxInfo.units.map((u, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
+                      <span style={{ fontSize: 11.5, color: PAL.ink }}>{u.name}</span>
+                      <span style={{ fontSize: 11.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{u.value}</span>
+                    </div>
+                  )) : <div style={{ fontSize: 11.5, color: PAL.muted }}>No taxing-unit fields in the county record.</div>}
+                  {taxInfo.connected && taxInfo.total != null ? (
+                    <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 11, color: "#b45309", lineHeight: 1.5 }}>▲ {taxInfo.note} Combined rate isn't shown until a rate source is wired for this county.</div>
+                  )}
+                </>
+              )}
             </Section>
           )}
           {/* selected parcel — translucence + setback standards */}
