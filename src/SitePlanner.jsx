@@ -70,7 +70,7 @@ const TOOLS = [
   { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
   { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
-  { id: "road", label: "Road", hint: "Drag for a straight road, or click points for a bent road (double-click to close); shows a centerline" },
+  { id: "road", label: "Road", hint: "Pick a width from Road ▾ (24′ / 26′ / 30′ / 36′ / 40′) and drag to set the length & direction, or Free draw for any rectangle / click points for a bent road; shows a centerline" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
 ];
@@ -381,9 +381,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-type dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
+  const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
   const [saveMenu, setSaveMenu] = useState(false);       // Save / load ▾ dropdown open
   const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
+  const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
@@ -684,10 +686,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
         return;
       }
       pushHistory();
-      const parkDepth = tool === "parking" && parkingRows !== "free"
-        ? (parkingRows === "double" ? settings.stallDepth * 2 + settings.aisle : settings.stallDepth + settings.aisle)
-        : 0;
-      drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y, depth: parkDepth };
+      let presetDepth = 0; // fixed cross-width for a preset strip (0 = free draw)
+      if (tool === "parking" && parkingRows !== "free") presetDepth = parkingRows === "double" ? settings.stallDepth * 2 + settings.aisle : settings.stallDepth + settings.aisle;
+      else if (tool === "road" && roadWidth !== "free") presetDepth = +roadWidth;
+      drag.current = { mode: "draw", type: tool, ox: sp.x, oy: sp.y, depth: presetDepth };
       setDraftRect({ type: tool, x: sp.x, y: sp.y, w: 0, h: 0 });
       svgRef.current.setPointerCapture(e.pointerId);
     }
@@ -934,9 +936,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     const d = drag.current;
     if (d && d.mode === "draw" && draftRect) {
       if (d.depth) {
-        // parking preset: build as a length×depth strip, rotated for a vertical drag
+        // fixed-width preset (parking rows / road width): a length×depth strip,
+        // rotated for a vertical drag.
         if (draftRect.parkLen >= 4) {
-          const el = { id: uid(), type: "parking", cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.parkLen, h: draftRect.parkDepth, rot: draftRect.parkRot };
+          const el = { id: uid(), type: d.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.parkLen, h: draftRect.parkDepth, rot: draftRect.parkRot };
           setEls((a) => [...a, el]);
           setSel({ kind: "el", id: el.id });
           setTool("select");
@@ -1970,6 +1973,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     setToolMenu(false);
     if (id !== "building") setBuildingMenu(false);
     if (id !== "parking") setParkingMenu(false);
+    if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
   };
   const metricRow = (label, value, sub) => (
@@ -2384,6 +2388,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                         <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
                         {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
                           <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
+            if (id === "road") {
+              return (
+                <div key={id} style={{ position: "relative" }}>
+                  <button className={`rbtn${tool === "road" ? " on" : ""}`} style={rbtn(tool === "road")} onClick={() => setRoadMenu((o) => !o)}><ToolIcon id="road" /> Road <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+                  {roadMenu && (
+                    <>
+                      <div onClick={() => setRoadMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
+                        <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
+                        <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
+                        {["24", "26", "30", "36", "40"].map((w) => (
+                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
                         ))}
                       </div>
                     </>
