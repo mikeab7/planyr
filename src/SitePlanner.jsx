@@ -1285,6 +1285,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const fitDogEar = (nb, de) => dogEarGeom(nb, de.side, de.sign);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
+  // Remove a building feature (and anything that hangs off it, e.g. a court's trailer).
+  const removeFeature = (id) => { pushHistory(); setEls((a) => a.filter((e) => e.id !== id && e.forCourt !== id)); };
   // Add a strip element of `type`/`depth` flush against one side of the building
   // (local normal nx,ny), full wall length, bonded to the building. Keeps the
   // building selected so several can be added in a row.
@@ -1302,21 +1304,30 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
     };
   };
-  const addOppTrailer = (b, name) => addBuildingEls([makeOppTrailer(b, name)], b.id);
+  const addOppTrailer = (b, name) => addBuildingEls([{ ...makeOppTrailer(b, name), oppSide: name }], b.id);
   // Trailer parking flush against the FAR (outer) edge of a truck court — where
   // trailers actually back in. Bonded to the court's building so it moves as one.
-  const addCourtTrailer = (tc) => { const root = rootIdOf(tc.id); addBuildingEls([makeOppTrailer(tc, tc.truckCourt.side, root)], root); };
-  // 135′ truck court on every dock side (tagged so it can sprout trailer parking).
-  const addTruckCourt = (b) => { const { dockSides } = dockSidesOf(b); addBuildingEls(dockSides.map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id); };
-  // Dog-ears at both corners of every dock side.
+  const addCourtTrailer = (tc) => { if (els.some((x) => x.forCourt === tc.id)) return; const root = rootIdOf(tc.id); addBuildingEls([{ ...makeOppTrailer(tc, tc.truckCourt.side, root), forCourt: tc.id }], root); };
+  // 135′ truck court on every dock side that doesn't already have one (tagged so it can sprout trailer parking).
+  const addTruckCourt = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
+    addBuildingEls(dockSides.filter((s) => !have.has(s)).map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id);
+  };
+  // Dog-ears at both corners of every dock side (skipping any already present).
   const addDogEars = (b) => {
     const { dockSides } = dockSidesOf(b);
+    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.dogEar).map((x) => `${x.dogEar.side}${x.dogEar.sign}`));
     const list = [];
-    dockSides.forEach((s) => list.push(makeDogEar(b, s, 1), makeDogEar(b, s, -1)));
+    dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) list.push(makeDogEar(b, s, sign)); }));
     addBuildingEls(list, b.id);
   };
-  // Trailer parking on every free side opposite the dock(s).
-  const addOppTrailerAll = (b) => { const { trailerSides } = dockSidesOf(b); addBuildingEls(trailerSides.map((s) => makeOppTrailer(b, s)), b.id); };
+  // Trailer parking on every free side opposite the dock(s) that doesn't have it.
+  const addOppTrailerAll = (b) => {
+    const { trailerSides } = dockSidesOf(b);
+    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.oppSide).map((x) => x.oppSide));
+    addBuildingEls(trailerSides.filter((s) => !have.has(s)).map((s) => ({ ...makeOppTrailer(b, s), oppSide: s })), b.id);
+  };
   const addSidewalk = (b, clickFp) => {
     const local = rot2(clickFp.x - b.cx, clickFp.y - b.cy, -b.rot);
     let nx = 0, ny = 0;
@@ -1732,20 +1743,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   //  • side opposite a single-load dock: 50′ striped trailer parking (teal)
   //  • other sides: a 5′ sidewalk (green)
   //  • each dock-side corner: a 55′×60′ dog-ear / bump-out (purple)
-  const plusNode = (key, pos, fill, title, onAdd, r = 9) => (
-    <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onAdd(); }}>
-      <title>{title}</title>
-      <circle cx={pos.x} cy={pos.y} r={r} fill={fill} stroke="#ffffff" strokeWidth={1.75} />
+  // A side/corner handle: a coloured "+" to add a feature, or a red "−" to
+  // remove the one already there (so a feature can't be stacked twice).
+  const featNode = (key, pos, exists, color, addTitle, onAdd, onRemove, r = 9) => (
+    <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); exists ? onRemove() : onAdd(); }}>
+      <title>{exists ? "Remove this — click to subtract" : addTitle}</title>
+      <circle cx={pos.x} cy={pos.y} r={r} fill={exists ? "#b91c1c" : color} stroke="#ffffff" strokeWidth={1.75} />
       <line x1={pos.x - r * 0.5} y1={pos.y} x2={pos.x + r * 0.5} y2={pos.y} stroke="#ffffff" strokeWidth={1.75} />
-      <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+      {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
   const sideAddNodes = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
     if (el && el.locked) return null;
-    if (!el || el.type !== "building" || el.points) return null;
+    // dog-ears / bump-outs are building elements but are NOT standalone buildings —
+    // they don't get their own dock / sidewalk / trailer handles.
+    if (!el || el.type !== "building" || el.points || el.dogEar) return null;
     const { dockSides, trailerSides } = dockSidesOf(el);
+    const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     return (
@@ -1756,12 +1772,21 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
           const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
           const isDock = dockSides.includes(name), isTrailer = trailerSides.includes(name);
-          const fill = isDock ? "#b45309" : isTrailer ? "#0e7490" : "#16a34a";
-          const title = isDock ? `Add ${TRUCK_COURT_D}′ truck dock + drive` : isTrailer ? `Add ${OPP_TRAILER_D}′ striped trailer parking` : `Add ${SIDEWALK_W}′ sidewalk`;
-          const onAdd = isDock ? () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } })
-            : isTrailer ? () => addOppTrailer(el, name)
-            : () => addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W);
-          return plusNode(`add${name}`, pos, fill, title, onAdd);
+          let existing, color, addTitle, onAdd;
+          if (isDock) {
+            existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
+            color = "#b45309"; addTitle = `Add ${TRUCK_COURT_D}′ truck dock + drive`;
+            onAdd = () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } });
+          } else if (isTrailer) {
+            existing = kids.find((x) => x.oppSide === name);
+            color = "#0e7490"; addTitle = `Add ${OPP_TRAILER_D}′ striped trailer parking`;
+            onAdd = () => addOppTrailer(el, name);
+          } else {
+            existing = kids.find((x) => x.sidewalkSide === name);
+            color = "#16a34a"; addTitle = `Add ${SIDEWALK_W}′ sidewalk`;
+            onAdd = () => addStripSide(el, nx, ny, "sidewalk", SIDEWALK_W, { sidewalkSide: name });
+          }
+          return featNode(`add${name}`, pos, !!existing, color, addTitle, onAdd, existing ? () => removeFeature(existing.id) : null);
         })}
         {/* dog-ear bump-outs at each corner of every dock side */}
         {dockSides.flatMap((name) => {
@@ -1773,26 +1798,28 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             const cs = f2p({ x: el.cx + co.x, y: el.cy + co.y });
             let dx = cs.x - cpx.x, dy = cs.y - cpx.y; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
             const pos = { x: cs.x - dx * 20, y: cs.y - dy * 20 }; // just inside the corner (in the footprint)
-            return plusNode(`dog${name}${sign}`, pos, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => addBuildingEls([makeDogEar(el, name, sign)], el.id), 8);
+            const existing = kids.find((x) => x.dogEar && x.dogEar.side === name && x.dogEar.sign === sign);
+            return featNode(`dog${name}${sign}`, pos, !!existing, "#7c3aed", `Add ${DOGEAR_W}′×${DOGEAR_D}′ dock dog-ear (building bump-out)`, () => addBuildingEls([makeDogEar(el, name, sign)], el.id), existing ? () => removeFeature(existing.id) : null, 8);
           });
         })}
       </g>
     );
   })();
 
-  // "+" on a selected TRUCK COURT, on its far (outer) edge — where trailer
-  // parking backs in. Adds 50′ striped trailer parking there.
+  // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
+  // parking backs in. Adds 50′ striped trailer parking, or removes it if present.
   const courtAddNodes = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.locked || el.points || !el.truckCourt) return null;
+    const existing = els.find((x) => x.forCourt === el.id);
     const [nx, ny] = SIDE_N[el.truckCourt.side];
     const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });        // outer-edge midpoint
     const cpx = f2p({ x: el.cx, y: el.cy });
     let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
     const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
-    return <g>{plusNode("courtTrailer", pos, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el))}</g>;
+    return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
   })();
 
   const handleNodes = (() => {
