@@ -388,6 +388,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
   const [sidewalkFor, setSidewalkFor] = useState(null); // building id awaiting a "click a side" to add a sidewalk
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
+  const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
@@ -596,7 +597,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       if ((e.key === "l" || e.key === "L") && !e.ctrlKey && !e.metaKey && sel?.kind === "el") { e.preventDefault(); toggleLock(sel.id); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setSidewalkFor(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
@@ -638,6 +639,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
 
     if (sidewalkFor) { setSidewalkFor(null); return; } // clicked off the building → cancel
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
+    if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (tool === "select") {
       setSel(null);
       setPanning(true);
@@ -1393,6 +1395,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       setAttachFor(null);
       return;
     }
+    if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
     if (el && el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     pushHistory();
@@ -1411,10 +1414,56 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
     e.stopPropagation();
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
+    if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
     setSel({ kind: "parcel", id });
     pushHistory();
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
     svgRef.current.setPointerCapture(e.pointerId);
+  };
+
+  /* ------------ align rotation to a target (parcel edge / element) ------------ */
+  const segDist = (p, a, b) => {
+    const vx = b.x - a.x, vy = b.y - a.y, wx = p.x - a.x, wy = p.y - a.y;
+    const L2 = vx * vx + vy * vy || 1;
+    let t = (wx * vx + wy * vy) / L2; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
+  };
+  // Snap an element from curRot to be parallel to a line at `ang°`, choosing the
+  // nearest of the four 90°-equivalent orientations (least rotation).
+  const snapParallel = (curRot, ang) => {
+    let best = ang, bestD = 1e9;
+    for (let k = 0; k < 4; k++) {
+      const t = ((ang + k * 90) % 360 + 360) % 360;
+      const d = Math.abs(((t - curRot + 540) % 360) - 180);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
+  };
+  // Align the alignFor element's rotation to the nearest edge of a parcel (the one
+  // closest to the click), carrying its whole assembly.
+  const alignToParcelEdge = (fp, onlyParcel) => {
+    const el = els.find((x) => x.id === alignFor);
+    setAlignFor(null);
+    if (!el || el.points) return;
+    const list = onlyParcel ? [onlyParcel] : parcels;
+    let best = null;
+    list.forEach((pc) => pc.points.forEach((a, i) => {
+      const b = pc.points[(i + 1) % pc.points.length];
+      const d = segDist(fp, a, b);
+      if (!best || d < best.d) best = { d, a, b };
+    }));
+    if (!best) return;
+    const ang = Math.atan2(best.b.y - best.a.y, best.b.x - best.a.x) * 180 / Math.PI;
+    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
+  };
+  // Align to another element's rotation (its edges).
+  const alignToElement = (target) => {
+    const el = els.find((x) => x.id === alignFor);
+    setAlignFor(null);
+    if (!el || el.points || !target || target.id === el.id) return;
+    const ang = target.points ? null : (target.rot || 0);
+    if (ang == null) return; // polygon target has no single rotation
+    rotateAssemblyTo(el, snapParallel(el.rot || 0, ang));
   };
   // Pin a building's dock to its current side before a resize, so growing the
   // long axis can't flip the loading dock to a different face.
@@ -2086,13 +2135,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
   const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
   // Rotate the selected element to an absolute angle, carrying its whole bonded
   // assembly (sidewalks, truck court, trailer parking, dog-ears) around its centre.
-  const rotateSelTo = (newRot) => {
-    if (!selEl || selEl.points) return;
-    const delta = ((((newRot - (selEl.rot || 0)) % 360) + 360) % 360);
+  const rotateAssemblyTo = (el, newRot) => {
+    if (!el || el.points) return;
+    const delta = ((((newRot - (el.rot || 0)) % 360) + 360) % 360);
     if (!delta) return;
     pushHistory();
-    const pivot = { x: selEl.cx, y: selEl.cy };
-    const ids = new Set(assemblyOf(selEl.id).map((m) => m.id));
+    const pivot = { x: el.cx, y: el.cy };
+    const ids = new Set(assemblyOf(el.id).map((m) => m.id));
     setEls((a) => a.map((x) => {
       if (!ids.has(x.id)) return x;
       if (x.points) return { ...x, points: x.points.map((p) => { const r = rot2(p.x - pivot.x, p.y - pivot.y, delta); return { x: pivot.x + r.x, y: pivot.y + r.y }; }) };
@@ -2100,6 +2149,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
       return { ...x, cx: pivot.x + r.x, cy: pivot.y + r.y, rot: ((x.rot + delta) % 360 + 360) % 360 };
     }));
   };
+  const rotateSelTo = (newRot) => { if (selEl) rotateAssemblyTo(selEl, newRot); };
   const bumpRot = (d) => { if (selEl && !selEl.points) rotateSelTo((((Math.round(selEl.rot) + d) % 360) + 360) % 360); };
   // Resize the selected element from a numeric field, keeping its centre fixed and
   // carrying every bonded feature with it (same re-fit as dragging a grip).
@@ -2208,7 +2258,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`}
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor) ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (sidewalkFor || attachFor || alignFor) ? "crosshair" : tool === "select" ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -2427,8 +2477,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 82 }}>{Math.round(view.ppf * 100) / 100} px/ft</span>
             <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
-            <span style={{ color: (sidewalkFor || attachFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (sidewalkFor || attachFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : curHint}
+            <span style={{ color: (sidewalkFor || attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (sidewalkFor || attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {sidewalkFor ? "Click the side of the building where you want the sidewalk · Esc cancels" : attachFor ? "Click the element to attach the selected one to — they'll move together · Esc cancels" : alignFor ? "Click a parcel edge (or another element) to align this element's rotation to it · Esc cancels" : curHint}
             </span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
           </div>
@@ -2834,6 +2884,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap 
                           {dockSidesOf(t).trailerSides.length > 0 && <button style={menuItem(false)} onClick={() => { addOppTrailerAll(t); setTypeMenu(null); }}>Add {OPP_TRAILER_D}′ trailer parking (opposite docks)</button>}
                         </>
                       )}
+                    </>
+                  )}
+                  {!t.points && (
+                    <>
+                      <div style={hdr(true)}>Align</div>
+                      <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation to an edge — then click a parcel edge</button>
                     </>
                   )}
                   <div style={hdr(isBuildingRect)}>Attach</div>
