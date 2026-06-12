@@ -1382,7 +1382,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
-      setEls((a) => refitChildren(a, d.id, nb, d.kids));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids), d.swShift, nb));
       return;
     }
     if (d.mode === "edgeResize") {
@@ -1398,7 +1398,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
       const nb = { cx: newCenter.x, cy: newCenter.y, w: nw, h: nh, rot: el.rot };
       if (d.hostClamp) clampToHost(nb, d.hostClamp); // grow away from the host building
-      setEls((a) => refitChildren(a, d.id, nb, d.kids));
+      setEls((a) => applySwShift(refitChildren(a, d.id, nb, d.kids), d.swShift, nb));
       return;
     }
     if (d.mode === "rotate") {
@@ -1800,10 +1800,17 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
   const sideParkingOn = (b, name) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === name);
   const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
-  // Add a 5′ sidewalk flush against a building side, full wall length.
+  // Add a 5′ sidewalk flush against a building side, full wall length. If pads
+  // (paving/parking) already sit on that side, push them out by the sidewalk's
+  // thickness so they stay flush beyond it.
   const addSidewalkSide = (b, name) => {
     if (sidewalkOnSide(b, name)) return;
-    addBuildingEls([makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name })], b.id);
+    const sw = makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name });
+    const out = outwardUnit(b, name);
+    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
+    pushHistory();
+    setEls((a) => [...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw]);
+    setSel({ kind: "el", id: b.id });
   };
   const addParkingRowSide = (b, name) => {
     if (sideParkingOn(b, name)) return;
@@ -1917,6 +1924,58 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const l = rot2(c.x - b.cx, c.y - b.cy, -b.rot);
     const outX = Math.abs(l.x) - b.w / 2, outY = Math.abs(l.y) - b.h / 2;
     return outY >= outX ? (l.y >= 0 ? "bottom" : "top") : (l.x >= 0 ? "right" : "left");
+  };
+  /* ---- wall-strip (sidewalk/landscape) geometry & flushness ---- */
+  const buildingOf = (el) => els.find((x) => x.id === el.attachedTo);
+  // Which building side a strip hugs, and whether its thickness is on the h axis.
+  const swSide = (el) => { if (el.sidewalkSide) return el.sidewalkSide; const b = buildingOf(el); return b ? sideOfKid(b, el) : (el.w >= el.h ? "bottom" : "right"); };
+  const swThickIsH = (el) => SIDE_N[swSide(el)][1] !== 0; // top/bottom → thickness is h
+  const swThick = (el) => (swThickIsH(el) ? el.h : el.w);
+  const swRun = (el) => (swThickIsH(el) ? el.w : el.h);
+  // Strips/pads on the same building wall that sit beyond `ref` strip's centre
+  // (farther out) — these must slide when `ref`'s outer face moves.
+  const stripsBeyond = (b, side, refOutPerp, exceptId) => {
+    const [nx, ny] = SIDE_N[side], isH = ny !== 0, s = isH ? ny : nx;
+    return els.filter((x) => {
+      if (x.attachedTo !== b.id || x.points || x.id === exceptId || x.dogEar) return false;
+      const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
+      return sideOfKid(b, x) === side && s * (isH ? l.y : l.x) > refOutPerp + 1;
+    });
+  };
+  const outwardUnit = (b, side) => { const [nx, ny] = SIDE_N[side]; return rot2(nx, ny, b.rot); };
+  // Edit a sidewalk's Width (thickness): grow OUTWARD (inner face stays flush to
+  // the building) and slide any pads beyond it out by the same delta.
+  const setSidewalkWidth = (el, newT) => {
+    const b = buildingOf(el); if (!b) return;
+    const side = swSide(el), isH = swThickIsH(el), oldT = isH ? el.h : el.w, dT = Math.max(1, newT) - oldT;
+    if (!dT) return;
+    const out = outwardUnit(b, side);
+    const l = rot2(el.cx - b.cx, el.cy - b.cy, -b.rot), s = SIDE_N[side][isH ? 1 : 0];
+    const refOutPerp = s * (isH ? l.y : l.x);
+    const beyond = new Set(stripsBeyond(b, side, refOutPerp, el.id).map((x) => x.id));
+    pushHistory();
+    setEls((a) => a.map((x) => {
+      if (x.id === el.id) return { ...x, ...(isH ? { h: newT } : { w: newT }), cx: x.cx + out.x * dT / 2, cy: x.cy + out.y * dT / 2 };
+      if (beyond.has(x.id)) return { ...x, cx: x.cx + out.x * dT, cy: x.cy + out.y * dT };
+      return x;
+    }));
+  };
+  const setSidewalkLength = (el, newRun) => {
+    const isH = swThickIsH(el);
+    pushHistory();
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(isH ? { w: Math.max(1, newRun) } : { h: Math.max(1, newRun) }) } : x));
+  };
+  // Capture (at resize start) the strips beyond a wall strip so the live drag can
+  // keep them flush as its outer face moves.
+  const swShiftSnapshot = (el) => {
+    if (!isWallStrip(el)) return null;
+    const b = buildingOf(el); if (!b) return null;
+    const side = swSide(el), isH = swThickIsH(el);
+    const out = outwardUnit(b, side);
+    const l = rot2(el.cx - b.cx, el.cy - b.cy, -b.rot), s = SIDE_N[side][isH ? 1 : 0];
+    const refOutPerp = s * (isH ? l.y : l.x);
+    const siblings = stripsBeyond(b, side, refOutPerp, el.id).map((x) => ({ id: x.id, cx0: x.cx, cy0: x.cy }));
+    return { out, isH, thick0: isH ? el.h : el.w, siblings };
   };
   const startMoveEl = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -2037,6 +2096,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const back = rot2(c.x, c.y, h.rot);
     nb.cx = h.cx + back.x; nb.cy = h.cy + back.y;
   };
+  // During a wall-strip resize, slide the captured pads beyond it by the change
+  // in the strip's outer-face position (its thickness delta), keeping them flush.
+  const applySwShift = (arr, sw, nb) => {
+    if (!sw || !sw.siblings.length) return arr;
+    const delta = (sw.isH ? nb.h : nb.w) - sw.thick0;
+    if (!delta) return arr;
+    const m = new Map(sw.siblings.map((s) => [s.id, s]));
+    return arr.map((x) => m.has(x.id) ? { ...x, cx: m.get(x.id).cx0 + sw.out.x * delta, cy: m.get(x.id).cy0 + sw.out.y * delta } : x);
+  };
   const startResize = (e, id, sx, sy) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
@@ -2044,7 +2112,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const oppLocal = rot2(-sx * el.w / 2, -sy * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el) };
+    drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startEdgeResize = (e, id, nx, ny) => {
@@ -2055,7 +2123,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const oppLocal = rot2(-nx * el.w / 2, -ny * el.h / 2, el.rot);
     const opp = { x: el.cx + oppLocal.x, y: el.cy + oppLocal.y };
     pushHistory();
-    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), hostClamp: hostClampOf(el) };
+    drag.current = { mode: "edgeResize", id, nx, ny, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el) };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startRotate = (e, id) => {
@@ -3869,6 +3937,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     <>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
+                    </>
+                  ) : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
+                    <>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(swThick(selEl))} min={1} onCommit={(n) => setSidewalkWidth(selEl, n)} /></Field>
+                      <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
                   ) : (
                     <>
