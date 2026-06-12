@@ -743,6 +743,18 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.kind, sel?.id]);
+  // The left menu opening/closing resizes the canvas; pan to compensate so the
+  // drawing doesn't jump sideways (e.g. on the first element click of a session).
+  const prevPanelOpen = useRef(!!leftPanel);
+  useEffect(() => {
+    const open = !!leftPanel;
+    if (open !== prevPanelOpen.current) {
+      const delta = leftWidth + 6; // panel width + drag handle
+      setView((v) => ({ ...v, offX: v.offX + (open ? -delta : delta) }));
+      prevPanelOpen.current = open;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leftPanel]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); } catch (_) {} }, [parkingRows, roadWidth, measureMode]);
@@ -1730,6 +1742,21 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // (local normal nx,ny), full wall length, bonded to the building. Keeps the
   // building selected so several can be added in a row.
   const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
+  // Add a single row of parking + drive aisle flush against a building side, the
+  // wall's full length, oriented so it grows OUTWARD (drive on the building side).
+  const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
+  const sideParkingOn = (b, name) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === name);
+  const addParkingRowSide = (b, name) => {
+    if (sideParkingOn(b, name)) return;
+    const [nx, ny] = SIDE_N[name];
+    const parkDepth = settings.stallDepth + settings.aisle;
+    const along = ny !== 0 ? b.w : b.h;
+    const half = (nx !== 0 ? b.w : b.h) / 2;
+    const off = rot2(nx * (half + parkDepth / 2), ny * (half + parkDepth / 2), b.rot);
+    const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
+    addBuildingEls([el], b.id);
+  };
   // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
   // side, full host length along that side. Rotated +90 on a side wall so the
   // stalls always stripe ALONG the wall.
@@ -2395,7 +2422,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
-    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]].filter(([name]) => dockSides.includes(name));
+    const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
@@ -2403,10 +2430,16 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
           const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
-          return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${TRUCK_COURT_D}′ truck dock + drive`,
-            () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } }),
-            existing ? () => removeFeature(existing.id) : null);
+          if (dockSides.includes(name)) { // long side → truck dock + drive
+            const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
+            return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${TRUCK_COURT_D}′ truck dock + drive`,
+              () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } }),
+              existing ? () => removeFeature(existing.id) : null);
+          }
+          // short (non-dock) side → a single parking row + drive aisle
+          const existing = kids.find((x) => x.sideParkSide === name);
+          return featNode(`add${name}`, pos, !!existing, "#2563eb", "Add a parking row + drive aisle",
+            () => addParkingRowSide(el, name), existing ? () => removeFeature(existing.id) : null);
         })}
         {/* dog-ear bump-outs at each corner of every dock side */}
         {dockSides.flatMap((name) => {
