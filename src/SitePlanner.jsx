@@ -2218,6 +2218,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
     clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    clone.setAttribute("preserveAspectRatio", "xMidYMid meet"); // scale to fill the box, centered
     clone.setAttribute("width", Math.round(w));
     clone.setAttribute("height", Math.round(h));
     clone.removeAttribute("style");
@@ -2326,11 +2327,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       html,body{height:100%}
       body{font-family:"Inter",system-ui,sans-serif;color:#26231e;margin:0}
       .sheet{box-sizing:border-box;height:100vh;display:flex;flex-direction:column;border:1.5px solid #26231e;padding:8px}
-      .title{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #b8b1a0;padding-bottom:5px}
-      .title h1{font-size:15px;margin:0;font-weight:600} .title .sub{font-size:10.5px;color:#6b6557}
-      .plan{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 0}
-      .plan svg{max-width:100%;max-height:100%;width:auto;height:auto}
-      .block{border-top:1px solid #b8b1a0;padding-top:5px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:10px}
+      .title{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #b8b1a0;padding-bottom:3px}
+      .title h1{font-size:13px;margin:0;font-weight:600;line-height:1.2} .title .sub{font-size:9.5px;color:#6b6557}
+      .plan{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px 0}
+      .plan svg{width:100%;height:100%;display:block}
+      .block{border-top:1px solid #b8b1a0;padding-top:3px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:9.5px;line-height:1.2}
       .metrics{display:flex;flex-wrap:wrap;gap:2px 16px} .metrics b{font-variant-numeric:tabular-nums} .note{color:#8a8473;font-size:9px}
     </style></head><body>
       <div class="sheet">
