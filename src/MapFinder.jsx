@@ -133,6 +133,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
@@ -405,7 +406,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
           <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
         </div>
         <div style={{ flex: 1 }} />
-        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Open site planner →</button>
+        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Skip — blank canvas</button>
       </div>
 
       {/* map */}
@@ -429,10 +430,14 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
                       <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
-                    {s.origin && <button title="Show on map (zoom to the plan)" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
-                      style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "2px 3px", borderRadius: 5 }}>◎</button>}
-                    <button title="Delete site and all its plans" onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.site || s.name || "this site"}" and all its plans? This can't be undone.`)) onDeleteSite && onDeleteSite(s.id); }}
-                      style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 4px", borderRadius: 5 }}>✕</button>
+                    {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
+                      className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
+                    </button>}
+                    <button title="Delete site and all its plans" aria-label="Delete site" onClick={(e) => { e.stopPropagation(); setConfirmDel(s); }}
+                      className="gbtn-danger" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                    </button>
                   </div>
                 );
               })}
@@ -442,10 +447,6 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
 
         {/* imagery + labels control */}
         <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px", display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
-          <button onClick={() => setSelectMode((m) => !m)} style={{
-            padding: "6px 11px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", fontWeight: 600, fontFamily: "inherit",
-            border: `1px solid ${PAL.accent}`, background: selectMode ? "#fff" : PAL.accent, color: selectMode ? PAL.accent : "#fff",
-          }}>{selectMode ? "✓ Selecting — click lots" : "+ Select parcels"}</button>
           <span style={{ color: PAL.muted }}>Imagery</span>
           <select style={{ ...field, padding: "4px 6px", fontSize: 12 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
             {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
@@ -482,7 +483,27 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
             </div>
           </div>
         )}
+        {selected.length === 0 && (
+          <button onClick={() => setSelectMode((m) => !m)} style={{
+            position: "absolute", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 1000,
+            padding: "12px 22px", fontSize: 14, fontWeight: 700, borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
+            border: `1px solid ${PAL.accent}`, background: selectMode ? "#fff" : PAL.accent, color: selectMode ? PAL.accent : "#fff",
+            boxShadow: "0 6px 22px rgba(194,65,12,0.35)",
+          }}>{selectMode ? "✓ Selecting — click lots" : "＋ Select parcels"}</button>
+        )}
       </div>
+      {confirmDel && (
+        <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink, marginBottom: 6 }}>Delete this site?</div>
+            <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 16 }}>“{confirmDel.site || confirmDel.name || "this site"}” and all of its plans will be removed. This can't be undone.</div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
+              <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
