@@ -522,6 +522,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
+  const [printMode, setPrintMode] = useState(false);     // print-frame placement mode
+  const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
+  const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
+  const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -819,7 +823,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -901,6 +905,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (e.button !== 0) return;
     const fp = p2f(e.clientX, e.clientY);
 
+    if (printMode) { // in print-placement: background drag pans only (frame has its own handles)
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
@@ -1226,6 +1236,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (d.mode === "moveUnderlay") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
+      return;
+    }
+    if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
+    if (d.mode === "printResize") {
+      const aspect = printAspect();
+      const wFt = Math.max(Math.abs(fp.x - d.opp.x), Math.abs(fp.y - d.opp.y) * aspect, 40);
+      const hFt = wFt / aspect;
+      setPrintFrame({ cx: d.opp.x + d.sx * wFt / 2, cy: d.opp.y + d.sy * hFt / 2, wFt, hFt });
       return;
     }
     if (d.mode === "marquee") { setMarquee({ a: d.a, b: fp }); return; }
@@ -2154,20 +2172,39 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   /* ------------ export (PNG / print-to-PDF) ------------ */
   // Snapshot the live SVG cropped to the site, with editor chrome (grid,
   // handles, scale bar) stripped via data-export="skip" tags.
-  const buildExportSvg = () => {
-    let pts = [];
-    parcels.forEach((p) => pts.push(...p.points));
-    els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e))));
-    if (!pts.length && underlay) {
-      const sy = underlay.ftPerPxY || underlay.ftPerPx;
-      pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
+  // Bounding box (feet) of the development — the placed elements, not bare parcels.
+  const DEV_TYPES = ["building", "paving", "parking", "trailer", "pond", "road"];
+  const devExtent = () => {
+    const pts = [];
+    els.forEach((e) => { if (!DEV_TYPES.includes(e.type)) return; e.points ? pts.push(...e.points) : pts.push(...elCorners(e)); });
+    if (!pts.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+    return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+  };
+  const buildExportSvg = (frame) => {
+    if (!svgRef.current) return null;
+    let x, y, w, h;
+    if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
+      const a = f2p({ x: frame.cx - frame.wFt / 2, y: frame.cy - frame.hFt / 2 });
+      const b = f2p({ x: frame.cx + frame.wFt / 2, y: frame.cy + frame.hFt / 2 });
+      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
+    } else {
+      let pts = [];
+      const dev = devExtent();
+      if (dev) pts = [{ x: dev.cx - dev.w / 2, y: dev.cy - dev.h / 2 }, { x: dev.cx + dev.w / 2, y: dev.cy + dev.h / 2 }];
+      else { parcels.forEach((p) => pts.push(...p.points)); els.forEach((e) => (e.points ? pts.push(...e.points) : pts.push(...elCorners(e)))); }
+      if (!pts.length && underlay) {
+        const sy = underlay.ftPerPxY || underlay.ftPerPx;
+        pts = [{ x: underlay.x, y: underlay.y }, { x: underlay.x + underlay.imgW * underlay.ftPerPx, y: underlay.y + underlay.imgH * sy }];
+      }
+      if (!pts.length) return null;
+      const PAD = 60; // ft of margin around the site
+      const minX = Math.min(...pts.map((p) => p.x)) - PAD, maxX = Math.max(...pts.map((p) => p.x)) + PAD;
+      const minY = Math.min(...pts.map((p) => p.y)) - PAD, maxY = Math.max(...pts.map((p) => p.y)) + PAD;
+      const a = f2p({ x: minX, y: minY }), b = f2p({ x: maxX, y: maxY });
+      x = Math.min(a.x, b.x); y = Math.min(a.y, b.y); w = Math.abs(b.x - a.x); h = Math.abs(b.y - a.y);
     }
-    if (!pts.length || !svgRef.current) return null;
-    const PAD = 60; // ft of margin around the site
-    const minX = Math.min(...pts.map((p) => p.x)) - PAD, maxX = Math.max(...pts.map((p) => p.x)) + PAD;
-    const minY = Math.min(...pts.map((p) => p.y)) - PAD, maxY = Math.max(...pts.map((p) => p.y)) + PAD;
-    const a = f2p({ x: minX, y: minY }), b = f2p({ x: maxX, y: maxY });
-    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
     const clone = svgRef.current.cloneNode(true);
     clone.querySelectorAll('[data-export="skip"]').forEach((n) => n.remove());
     clone.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
@@ -2226,7 +2263,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     }
   };
   const exportPNG = async () => {
-    const built = buildExportSvg();
+    const built = buildExportSvg(printFrame); // use the print crop if one's set, else dev extent
     if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
     const { clone, w, h } = built;
     await inlineImages(clone); // embed the aerial so the raster includes it
@@ -2249,8 +2286,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       }, "image/png");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async (paper = "letter") => {
-    const built = buildExportSvg();
+  const printPDF = async (paper = "letter", orient = "landscape") => {
+    const built = buildExportSvg(printFrame);
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
     // Open the window synchronously (before any await) so it isn't pop-up-blocked.
     const win = window.open("", "_blank");
@@ -2259,7 +2296,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
     const xml = new XMLSerializer().serializeToString(built.clone);
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-    const pageCss = paper === "tabloid" ? "17in 11in" : "letter landscape";
+    const pageCss = paper === "tabloid"
+      ? (orient === "portrait" ? "11in 17in" : "17in 11in")
+      : (orient === "portrait" ? "letter portrait" : "letter landscape");
     const rows = [
       ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
       ["Building", `${f0(bldg)} sf`],
@@ -2297,6 +2336,44 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     // Print once the aerial has loaded (or after a beat if it's cached/absent).
     const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
     if (win.document.readyState === "complete") go(); else win.onload = go;
+  };
+
+  /* ------------ print-frame placement ------------ */
+  // [wIn, hIn] of the chosen paper + orientation; aspect = w / h.
+  const paperDims = (paper, orient) => { const [lng, sht] = paper === "tabloid" ? [17, 11] : [11, 8.5]; return orient === "portrait" ? [sht, lng] : [lng, sht]; };
+  const printAspect = () => { const [w, h] = paperDims(printPaper, printOrient); return w / h; };
+  // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
+  const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
+  const enterPrintMode = () => {
+    const aspect = printAspect(), dev = devExtent();
+    let base;
+    if (dev) base = { cx: dev.cx, cy: dev.cy, w: dev.w + 80, h: dev.h + 80 };
+    else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
+    setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
+    setPrintMode(true); setExportMenu(false); setSel(null);
+  };
+  // Re-fit the frame's aspect when paper/orientation changes (keep it around the
+  // same coverage). Skip the initial render.
+  const printAspectKey = `${printPaper}:${printOrient}`;
+  const prevAspectKey = useRef(printAspectKey);
+  useEffect(() => {
+    if (prevAspectKey.current === printAspectKey) return;
+    prevAspectKey.current = printAspectKey;
+    if (printMode) setPrintFrame((f) => f ? fitFrame(f.cx, f.cy, f.wFt, f.hFt, printAspect()) : f);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printAspectKey]);
+  const doPrint = () => { const p = printPaper, o = printOrient; setPrintMode(false); setTimeout(() => printPDF(p, o), 60); };
+  const startPrintMove = (e) => {
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    drag.current = { mode: "printMove", fx: fp.x, fy: fp.y, cx: printFrame.cx, cy: printFrame.cy };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const startPrintResize = (e, sx, sy) => {
+    e.stopPropagation();
+    const opp = { x: printFrame.cx - sx * printFrame.wFt / 2, y: printFrame.cy - sy * printFrame.hFt / 2 };
+    drag.current = { mode: "printResize", sx, sy, opp };
+    svgRef.current.setPointerCapture(e.pointerId);
   };
 
   /* ------------ grid lines ------------ */
@@ -2959,8 +3036,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF("letter"); }}>Print — Letter (8.5×11)</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF("tabloid"); }}>Print — Tabloid (11×17)</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
                 </div>
               </>
             )}
@@ -2973,7 +3049,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan") ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}>
 
@@ -3326,6 +3402,31 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               <path d="M0 -13 L5 6 L0 1.5 L-5 6 Z" fill={PAL.ink} />
               <text x="0" y="-19" textAnchor="middle" fontSize="11" fontWeight="700" fill={PAL.ink}>N</text>
             </g>
+
+            {/* print-frame crop overlay (screen space) */}
+            {printMode && printFrame && (() => {
+              const a = f2p({ x: printFrame.cx - printFrame.wFt / 2, y: printFrame.cy - printFrame.hFt / 2 });
+              const b = f2p({ x: printFrame.cx + printFrame.wFt / 2, y: printFrame.cy + printFrame.hFt / 2 });
+              const fx = Math.min(a.x, b.x), fy = Math.min(a.y, b.y), fw = Math.abs(b.x - a.x), fh = Math.abs(b.y - a.y);
+              const HS = 9;
+              const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+              return (
+                <g data-export="skip">
+                  {/* dim mask outside the frame (4 rects) */}
+                  <rect x={0} y={0} width={size.w} height={fy} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
+                  <rect x={0} y={fy + fh} width={size.w} height={Math.max(0, size.h - fy - fh)} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
+                  <rect x={0} y={fy} width={fx} height={fh} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
+                  <rect x={fx + fw} y={fy} width={Math.max(0, size.w - fx - fw)} height={fh} fill="rgba(20,18,15,0.46)" pointerEvents="none" />
+                  <rect x={fx} y={fy} width={fw} height={fh} fill="none" stroke={PAL.accent} strokeWidth={2}
+                    pointerEvents="all" style={{ cursor: "move" }} onPointerDown={startPrintMove} />
+                  {corners.map(([sx, sy], i) => (
+                    <rect key={i} x={(sx < 0 ? fx : fx + fw) - HS / 2} y={(sy < 0 ? fy : fy + fh) - HS / 2} width={HS} height={HS} rx={2}
+                      fill="#fff" stroke={PAL.accent} strokeWidth={2} style={{ cursor: (sx * sy > 0 ? "nwse-resize" : "nesw-resize") }}
+                      onPointerDown={(e) => startPrintResize(e, sx, sy)} />
+                  ))}
+                </g>
+              );
+            })()}
           </svg>
 
           {/* empty state */}
@@ -3382,6 +3483,27 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
+              </div>
+            );
+          })()}
+
+          {/* print-frame toolbar */}
+          {printMode && (() => {
+            const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+            return (
+              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
+                <span style={{ display: "flex", gap: 4 }}>
+                  <button style={seg(printPaper === "letter")} onClick={() => setPrintPaper("letter")}>Letter</button>
+                  <button style={seg(printPaper === "tabloid")} onClick={() => setPrintPaper("tabloid")}>Tabloid</button>
+                </span>
+                <span style={{ display: "flex", gap: 4 }}>
+                  <button style={seg(printOrient === "landscape")} onClick={() => setPrintOrient("landscape")}>Landscape</button>
+                  <button style={seg(printOrient === "portrait")} onClick={() => setPrintOrient("portrait")}>Portrait</button>
+                </span>
+                <span style={{ width: 1, height: 18, background: PAL.panelLine }} />
+                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
+                <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
               </div>
             );
           })()}
