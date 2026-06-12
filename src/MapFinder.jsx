@@ -41,6 +41,25 @@ const BASEMAPS = {
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
+/* Toggleable environmental overlay layers — free public ArcGIS REST services,
+ * no API key. Rendered server-side (export) so we get each agency's standard
+ * symbology and labels (FEMA zone fills + AE/A/X/floodway labels; NWI wetland
+ * polygons + type labels). Drawn above imagery, below parcel lines. */
+const OVERLAYS = {
+  fema: {
+    label: "FEMA flood zones",
+    url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
+    layers: [27, 28], // flood hazard boundaries + zones (standard NFHL symbology)
+    note: null,
+  },
+  wetlands: {
+    label: "Wetlands (NWI)",
+    url: "https://www.fws.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
+    layers: [0],
+    note: "NWI is for screening only — not a jurisdictional determination.",
+  },
+};
+
 // Parcel boundaries are drawn as styleable vector lines (same query path that
 // powers click-to-select), not a server image — so they render reliably. They
 // load once zoomed in past this level (too many to draw across a whole county).
@@ -134,6 +153,8 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
+  const [overlays, setOverlays] = useState({ fema: { on: false, opacity: 0.55 }, wetlands: { on: false, opacity: 0.55 } });
+  const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
@@ -191,6 +212,28 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
     return () => { try { map.removeLayer(layer); } catch (_) {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
+
+  /* environmental overlays (FEMA flood zones, NWI wetlands) — toggle + opacity */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // dedicated pane: above imagery tiles (200), below the vector overlay pane
+    // (400) so parcel lines / site plans stay on top.
+    if (!map.getPane("envpane")) map.createPane("envpane").style.zIndex = 350;
+    Object.entries(OVERLAYS).forEach(([k, cfg]) => {
+      const st = overlays[k], cur = overlayRefs.current[k];
+      if (st.on && !cur) {
+        const lyr = EL.dynamicMapLayer({ url: cfg.url, layers: cfg.layers, opacity: st.opacity, pane: "envpane", f: "image" });
+        lyr.addTo(map);
+        overlayRefs.current[k] = lyr;
+      } else if (!st.on && cur) {
+        try { map.removeLayer(cur); } catch (_) {}
+        overlayRefs.current[k] = null;
+      } else if (cur) {
+        cur.setOpacity(st.opacity);
+      }
+    });
+  }, [overlays]);
 
   /* keep the map sized correctly when shown after being hidden */
   useEffect(() => {
@@ -445,15 +488,37 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
           </div>
         )}
 
-        {/* imagery + labels control */}
-        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px", display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
-          <span style={{ color: PAL.muted }}>Imagery</span>
-          <select style={{ ...field, padding: "4px 6px", fontSize: 12 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
-            {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
-          </select>
-          <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-            <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
-          </label>
+        {/* imagery + labels + overlay layers control */}
+        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ color: PAL.muted }}>Imagery</span>
+            <select style={{ ...field, padding: "4px 6px", fontSize: 12, flex: 1 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
+              {Object.entries(BASEMAPS).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
+            </select>
+            <label style={{ display: "flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
+              <input type="checkbox" checked={labels} onChange={(e) => setLabels(e.target.checked)} /> Labels
+            </label>
+          </div>
+          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
+          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
+          {Object.entries(OVERLAYS).map(([k, cfg]) => (
+            <div key={k} style={{ marginBottom: 5 }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={overlays[k].on}
+                  onChange={(e) => setOverlays((o) => ({ ...o, [k]: { ...o[k], on: e.target.checked } }))} />
+                <span style={{ flex: 1 }}>{cfg.label}</span>
+              </label>
+              {overlays[k].on && (
+                <input type="range" min={0.1} max={1} step={0.05} value={overlays[k].opacity}
+                  title="Layer opacity" aria-label={`${cfg.label} opacity`}
+                  onChange={(e) => setOverlays((o) => ({ ...o, [k]: { ...o[k], opacity: +e.target.value } }))}
+                  style={{ width: "100%", marginTop: 2 }} />
+              )}
+              {overlays[k].on && cfg.note && (
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>{cfg.note}</div>
+              )}
+            </div>
+          ))}
         </div>
 
         {/* instruction / error */}
