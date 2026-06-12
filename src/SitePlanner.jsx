@@ -526,8 +526,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
-  const [parkingRows, setParkingRows] = useState("free"); // "free" | "single" | "double" — drawn-parking depth preset
-  const [roadWidth, setRoadWidth] = useState("free");    // "free" | "24" | "26" | "30" | "36" | "40" — drawn-road width
+  const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
+  const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
+  const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
@@ -544,7 +545,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [draftRect, setDraftRect] = useState(null);  // {type, x,y,w,h} feet
   const [draftElPoly, setDraftElPoly] = useState(null); // {type, pts:[{x,y}]} polygon element being drawn
   const [measDraft, setMeasDraft] = useState([]);    // in-progress measure vertices
-  const [measureMode, setMeasureMode] = useState("line"); // "line" | "polyline" | "area"
+  const [measureMode, setMeasureMode] = useState(() => lsGet("measureMode", "line"));
   const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
   const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
 
@@ -741,6 +742,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   }, [sel?.kind, sel?.id]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); } catch (_) {} }, [parkingRows, roadWidth, measureMode]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -3302,7 +3304,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
                 <div key={id} style={{ position: "relative" }}>
-                  <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={rbtn(tool === "parking")} onClick={() => setParkingMenu((o) => !o)}><ToolIcon id="parking" /> Parking <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Parking</span>
+                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
+                    </button>
+                    <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
+                  </div>
                   {parkingMenu && (
                     <>
                       <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -3320,7 +3328,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             if (id === "road") {
               return (
                 <div key={id} style={{ position: "relative" }}>
-                  <button className={`rbtn${tool === "road" ? " on" : ""}`} style={rbtn(tool === "road")} onClick={() => setRoadMenu((o) => !o)}><ToolIcon id="road" /> Road <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="road" /> Road</span>
+                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
+                    </button>
+                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
+                  </div>
                   {roadMenu && (
                     <>
                       <div onClick={() => setRoadMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -3350,7 +3364,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
           {/* measure with line / polyline / area modes */}
           <div style={{ position: "relative" }}>
-            <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={rbtn(tool === "measure")} onClick={() => setMeasureMenu((o) => !o)}><ToolIcon id="measure" /> Measure <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="measure" /> Measure</span>
+                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureMode}</span>
+              </button>
+              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
+            </div>
             {measureMenu && (
               <>
                 <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
