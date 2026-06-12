@@ -775,11 +775,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
   /* ------------ wheel zoom (non-passive) ------------ */
   useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
+    // Attach to the canvas WRAPPER (which holds the SVG + the HTML overlays), so
+    // scrolling over a badge / zoom button / selected element still zooms.
+    const wrap = wrapRef.current;
+    if (!wrap) return;
     const onWheel = (e) => {
       e.preventDefault();
-      const r = svg.getBoundingClientRect();
+      const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       setView((v) => {
         const fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf;
@@ -788,8 +790,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
         return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf };
       });
     };
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    return () => wrap.removeEventListener("wheel", onWheel);
   }, []);
 
   /* ------------ keyboard ------------ */
@@ -2247,7 +2249,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       }, "image/png");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async () => {
+  const printPDF = async (paper = "letter") => {
     const built = buildExportSvg();
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
     // Open the window synchronously (before any await) so it isn't pop-up-blocked.
@@ -2257,6 +2259,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
     const xml = new XMLSerializer().serializeToString(built.clone);
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const pageCss = paper === "tabloid" ? "17in 11in" : "letter landscape";
     const rows = [
       ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
       ["Building", `${f0(bldg)} sf`],
@@ -2270,22 +2273,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     ];
     win.document.open();
     win.document.write(`<!doctype html><html><head><title>${esc(siteName)}</title><style>
-      @page { size: letter landscape; margin: 11mm; }
-      body { font-family: "Inter", system-ui, sans-serif; color: #26231e; margin: 0; }
-      header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #26231e; padding-bottom: 6px; margin-bottom: 10px; }
-      h1 { font-size: 17px; margin: 0; } .sub { font-size: 11px; color: #6b6557; }
-      .wrap { display: flex; gap: 14px; align-items: flex-start; }
-      .plan { flex: 1; min-width: 0; } .plan svg { width: 100%; height: auto; border: 1px solid #d8d2c2; }
-      table { border-collapse: collapse; font-size: 11px; width: 200px; }
-      td { padding: 4px 6px; border-bottom: 1px solid #eee8da; } td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-      footer { margin-top: 8px; font-size: 9.5px; color: #8a8473; }
+      @page { size: ${pageCss}; margin: 8mm; }
+      html,body{height:100%}
+      body{font-family:"Inter",system-ui,sans-serif;color:#26231e;margin:0}
+      .sheet{box-sizing:border-box;height:100vh;display:flex;flex-direction:column;border:1.5px solid #26231e;padding:8px}
+      .title{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #b8b1a0;padding-bottom:5px}
+      .title h1{font-size:15px;margin:0;font-weight:600} .title .sub{font-size:10.5px;color:#6b6557}
+      .plan{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px 0}
+      .plan svg{max-width:100%;max-height:100%;width:auto;height:auto}
+      .block{border-top:1px solid #b8b1a0;padding-top:5px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:10px}
+      .metrics{display:flex;flex-wrap:wrap;gap:2px 16px} .metrics b{font-variant-numeric:tabular-nums} .note{color:#8a8473;font-size:9px}
     </style></head><body>
-      <header><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Site Planar</span></header>
-      <div class="wrap">
+      <div class="sheet">
+        <div class="title"><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Site Planar</span></div>
         <div class="plan">${xml}</div>
-        <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
+        <div class="block">
+          <div class="metrics">${rows.map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
+          <span class="note">Concept site plan — planning-level estimates, not a survey.</span>
+        </div>
       </div>
-      <footer>Concept site plan — areas and counts are planning-level estimates, not a survey.</footer>
     </body></html>`);
     win.document.close();
     // Print once the aerial has loaded (or after a beat if it's cached/absent).
@@ -2953,7 +2959,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF(); }}>Print / save as PDF…</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF("letter"); }}>Print — Letter (8.5×11)</button>
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); printPDF("tabloid"); }}>Print — Tabloid (11×17)</button>
                 </div>
               </>
             )}
@@ -3375,29 +3382,6 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
-              </div>
-            );
-          })()}
-
-          {/* mini-inspector — floats above a selected rect/ellipse/building */}
-          {tool === "select" && !panning && (selEl && !selEl.points || (selMarkup && (selMarkup.kind === "rect" || selMarkup.kind === "ellipse"))) && (() => {
-            const o = selEl || selMarkup;
-            const c = f2p({ x: o.cx, y: o.cy }), top = c.y - (o.h / 2) * view.ppf - 46;
-            const isRoad = selEl && selEl.type === "road";
-            const miniInput = { width: 46, padding: "3px 6px", fontSize: 11.5, fontFamily: "ui-monospace, monospace", border: "1px solid #ddd6c5", borderRadius: 6, color: PAL.ink, background: "#fff", textAlign: "center" };
-            const fld = (lbl, node) => <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ fontSize: 9.5, color: PAL.muted, textTransform: "uppercase" }}>{lbl}</span>{node}</span>;
-            return (
-              <div data-export="skip" style={{ position: "absolute", left: c.x, top: Math.max(6, top), transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 8, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 6px 18px rgba(28,25,20,0.18)", padding: "5px 9px", zIndex: 7 }}>
-                {selEl ? <>
-                  {isRoad
-                    ? <>{fld("L", <NumInput style={miniInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} />)}{fld("Tr", <NumInput style={miniInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} />)}</>
-                    : <>{fld("W", <NumInput style={miniInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} />)}{fld("D", <NumInput style={miniInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} />)}</>}
-                  {fld("∠", <NumInput style={miniInput} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />)}
-                </> : <>
-                  {fld("W", <NumInput style={miniInput} value={Math.round(selMarkup.w)} min={1} onCommit={(n) => setSelMarkup({ w: n })} />)}
-                  {fld("D", <NumInput style={miniInput} value={Math.round(selMarkup.h)} min={1} onCommit={(n) => setSelMarkup({ h: n })} />)}
-                  {fld("∠", <NumInput style={miniInput} value={Math.round(selMarkup.rot || 0)} onCommit={(n) => setSelMarkup({ rot: ((n % 360) + 360) % 360 })} />)}
-                </>}
               </div>
             );
           })()}
