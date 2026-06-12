@@ -2305,6 +2305,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
     win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
     await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
+    // Print clone is purely viewBox-driven (no px width/height that fight the CSS/zoom).
+    built.clone.removeAttribute("width"); built.clone.removeAttribute("height");
+    const ar = (built.w / built.h).toFixed(4); // plan box aspect = the framed crop
     const xml = new XMLSerializer().serializeToString(built.clone);
     const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const pageCss = paper === "tabloid"
@@ -2324,12 +2327,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     win.document.open();
     win.document.write(`<!doctype html><html><head><title>${esc(siteName)}</title><style>
       @page { size: ${pageCss}; margin: 8mm; }
-      html,body{height:100%}
       body{font-family:"Inter",system-ui,sans-serif;color:#26231e;margin:0}
-      .sheet{box-sizing:border-box;height:100vh;display:flex;flex-direction:column;border:1.5px solid #26231e;padding:8px}
+      .sheet{box-sizing:border-box;border:1.5px solid #26231e;padding:8px}
       .title{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #b8b1a0;padding-bottom:3px}
       .title h1{font-size:13px;margin:0;font-weight:600;line-height:1.2} .title .sub{font-size:9.5px;color:#6b6557}
-      .plan{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px 0}
+      .plan{width:100%;aspect-ratio:${ar};margin:6px auto}
       .plan svg{width:100%;height:100%;display:block}
       .block{border-top:1px solid #b8b1a0;padding-top:3px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:9.5px;line-height:1.2}
       .metrics{display:flex;flex-wrap:wrap;gap:2px 16px} .metrics b{font-variant-numeric:tabular-nums} .note{color:#8a8473;font-size:9px}
@@ -2352,7 +2354,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   /* ------------ print-frame placement ------------ */
   // [wIn, hIn] of the chosen paper + orientation; aspect = w / h.
   const paperDims = (paper, orient) => { const [lng, sht] = paper === "tabloid" ? [17, 11] : [11, 8.5]; return orient === "portrait" ? [sht, lng] : [lng, sht]; };
-  const printAspect = () => { const [w, h] = paperDims(printPaper, printOrient); return w / h; };
+  // The frame matches the PRINTABLE area (paper minus @page margins and the
+  // title/metrics chrome), so the plan fills both dimensions with no slack.
+  const PRINT_MARGIN_IN = 0.315, PRINT_PAD_W_IN = 0.18, PRINT_CHROME_H_IN = 0.85;
+  const printableDims = (paper, orient) => { const [pw, ph] = paperDims(paper, orient); return [pw - 2 * PRINT_MARGIN_IN - PRINT_PAD_W_IN, ph - 2 * PRINT_MARGIN_IN - PRINT_CHROME_H_IN]; };
+  const printAspect = () => { const [w, h] = printableDims(printPaper, printOrient); return w / h; };
   // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = () => {
