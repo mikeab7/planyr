@@ -534,6 +534,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
+  const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
+  const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
+  const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
@@ -787,7 +790,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
@@ -802,14 +805,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
-      if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); deleteSel(); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi]); // eslint-disable-line
 
   const deleteSel = () => {
+    if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
+      pushHistory();
+      const elIds = new Set();
+      multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
+      const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
+      setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
+      setMulti([]); setSel(null);
+      return;
+    }
     if (!sel) return;
     pushHistory();
     if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
@@ -818,6 +832,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     else if (sel.kind === "markup") setMarkups((a) => a.filter((m) => m.id !== sel.id));
     else setParcels((a) => a.filter((p) => p.id !== sel.id));
     setSel(null);
+  };
+  // Arrow-nudge the selection (1′, or 10′ with Shift) — group when multi-selected.
+  const nudgeSel = (key, step) => {
+    const dx = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : 0;
+    const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
+    if (!dx && !dy) return;
+    pushHistory();
+    if (multi.length > 1) {
+      const elIds = new Set(); multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
+      const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      setEls((a) => a.map((el) => elIds.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
+      setMarkups((a) => a.map((m) => mkIds.has(m.id) ? translateMarkup(m, dx, dy) : m));
+    } else if (sel?.kind === "el") {
+      const ids = new Set(assemblyOf(sel.id).map((x) => x.id));
+      setEls((a) => a.map((el) => ids.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
+    }
   };
   // Copy / cut / paste the selected element (rectangles or polygons).
   const copySel = () => { if (sel?.kind === "el") clip.current = els.find((x) => x.id === sel.id) || clip.current; };
@@ -867,7 +897,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       return;
     }
     if (tool === "select") {
-      setSel(null);
+      if (e.shiftKey) { // Shift-drag empty canvas → marquee select
+        drag.current = { mode: "marquee", a: fp };
+        setMarquee({ a: fp, b: fp });
+        svgRef.current.setPointerCapture(e.pointerId);
+        return;
+      }
+      setSel(null); setMulti([]);
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       svgRef.current.setPointerCapture(e.pointerId);
@@ -1058,12 +1094,32 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const startMoveMarkup = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    if (e.shiftKey) {
+      setMulti((s) => inMulti("markup", id) ? s.filter((m) => !(m.kind === "markup" && m.id === id)) : [...s, { kind: "markup", id }]);
+      setSel({ kind: "markup", id });
+      return;
+    }
+    if (multi.length > 1 && inMulti("markup", id)) { startGroupMove(e); return; }
+    if (multi.length) setMulti([]);
     const m = markups.find((x) => x.id === id);
     if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
     setSel({ kind: "markup", id });
     pushHistory();
     const fp = p2f(e.clientX, e.clientY);
     drag.current = { mode: "mkMove", id, fx: fp.x, fy: fp.y, orig: m };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // Start moving every member of the multi-selection together (respecting assemblies).
+  const startGroupMove = (e) => {
+    pushHistory();
+    const fp = p2f(e.clientX, e.clientY);
+    const elIds = new Set();
+    multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
+    const orig = {
+      els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
+      markups: markups.filter((m) => inMulti("markup", m.id)).map((m) => ({ ...m })),
+    };
+    drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
@@ -1156,6 +1212,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (d.mode === "moveUnderlay") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
+      return;
+    }
+    if (d.mode === "marquee") { setMarquee({ a: d.a, b: fp }); return; }
+    if (d.mode === "groupMove") {
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
+      setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
+      setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
       return;
     }
     if (d.mode === "mkDraw") {
@@ -1300,8 +1364,35 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     }
   };
 
+  // Feet-space bbox of any element / markup (for marquee hit-testing).
+  const featBBox = (o) => {
+    let pts = null;
+    if (o.points) pts = o.points;
+    else if (o.a && o.b) pts = [o.a, o.b];
+    else if (o.pts) pts = o.pts;
+    else if (o.w != null) { const hw = o.w / 2, hh = o.h / 2; pts = [{ x: o.cx - hw, y: o.cy - hh }, { x: o.cx + hw, y: o.cy + hh }]; }
+    if (!pts || !pts.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
+    return { x0, y0, x1, y1 };
+  };
   const onUp = (e) => {
     const d = drag.current;
+    if (d && d.mode === "marquee") {
+      const mx0 = Math.min(d.a.x, marquee?.b.x ?? d.a.x), mx1 = Math.max(d.a.x, marquee?.b.x ?? d.a.x);
+      const my0 = Math.min(d.a.y, marquee?.b.y ?? d.a.y), my1 = Math.max(d.a.y, marquee?.b.y ?? d.a.y);
+      const hit = (o) => { const b = featBBox(o); return b && b.x0 <= mx1 && b.x1 >= mx0 && b.y0 <= my1 && b.y1 >= my0; };
+      const picked = [
+        ...els.filter((el) => !el.attachedTo && !el.dogEar && hit(el)).map((el) => ({ kind: "el", id: el.id })),
+        ...markups.filter((m) => hit(m)).map((m) => ({ kind: "markup", id: m.id })),
+      ];
+      setMulti(picked);
+      setSel(picked.length === 1 ? picked[0] : null);
+      setMarquee(null); drag.current = null;
+      try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
       let mk = null;
@@ -1744,6 +1835,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
+    if (e.shiftKey) { // Shift-click toggles into the multi-selection
+      setMulti((s) => inMulti("el", id) ? s.filter((m) => !(m.kind === "el" && m.id === id)) : [...s, { kind: "el", id }]);
+      setSel({ kind: "el", id });
+      return;
+    }
+    if (multi.length > 1 && inMulti("el", id)) { startGroupMove(e); return; } // drag a member → move the group
+    if (multi.length) setMulti([]);
     if (attachFor) { // bonding: this click picks the host to attach to
       if (el) attachTo(attachFor, el.id);
       setAttachFor(null);
@@ -2596,7 +2694,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
     setTool(id);
-    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setSplitPath([]);
+    setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
+    if (id !== "select") setMulti([]);
     if (id !== "combine") setCombineSel([]);
     if (id !== "callout") setCalloutDraft(null);
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
@@ -2907,6 +3006,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
                 return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
               })}
+              {/* multi-select outlines + marquee */}
+              {multi.length > 1 && multi.map((m) => {
+                const o = m.kind === "el" ? els.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
+                const bb = o && featBBox(o); if (!bb) return null;
+                const p0 = f2p({ x: bb.x0, y: bb.y0 }), p1 = f2p({ x: bb.x1, y: bb.y1 });
+                return <rect key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} width={Math.abs(p1.x - p0.x) + 4} height={Math.abs(p1.y - p0.y) + 4} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />;
+              })}
+              {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill={PAL.accent} fillOpacity={0.08} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />; })()}
               {/* markup draft */}
               {mkRect && (() => {
                 const a = f2p(mkRect.a), b = f2p(mkRect.b), sw = mkStyle.weight;
