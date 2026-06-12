@@ -520,6 +520,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
+  const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-layout dropdown open
+  const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
   const [roadMenu, setRoadMenu] = useState(false);       // Road ▾ width-preset dropdown open
   const [exportMenu, setExportMenu] = useState(false);   // Export ▾ dropdown open
   const [printMode, setPrintMode] = useState(false);     // print-frame placement mode
@@ -1451,7 +1453,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       } else if (draftRect.w >= 4 && draftRect.h >= 4) {
         const curb = +settings.roadCurb || CURB;
         const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra };
+        const buildingExtra = draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {};
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra, ...buildingExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -1717,11 +1720,18 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
-  // A building's dock-capable sides are simply its TWO LONG sides; truck courts,
-  // trailer parking (off a court) and bump-outs attach there.
+  // Dock-capable sides run along a building's TWO LONG sides. The dock preset
+  // chooses how many: cross-dock = both, single-load = one, none = neither.
+  // Existing buildings (no `dock` field) keep both long sides for back-compat.
   const dockSidesOf = (el) => {
-    const dockSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
-    return { dside: dockSides[1], dockSides, trailerSides: [] };
+    const longSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
+    const dock = el.dock || "cross";
+    if (dock === "none") return { dside: longSides[1], dockSides: [], trailerSides: [] };
+    if (dock === "single") {
+      const dside = longSides.includes(el.dockSide) ? el.dockSide : longSides[1];
+      return { dside, dockSides: [dside], trailerSides: [] };
+    }
+    return { dside: longSides[1], dockSides: longSides, trailerSides: [] };
   };
   // Build (don't commit) a full-wall strip element flush against one building side.
   const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
@@ -2829,6 +2839,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
     if (id !== "calibrate") setCalib(null);
     setToolMenu(false);
+    if (id !== "building") setBuildingMenu(false);
     if (id !== "parking") setParkingMenu(false);
     if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
@@ -3558,6 +3569,31 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
           {DRAW_TYPES.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
+            if (id === "building") {
+              const dockLabel = { single: "single-load", cross: "cross-dock", none: "no docks" }[buildingDock];
+              return (
+                <div key={id} style={{ position: "relative" }}>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("building")}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="building" /> Building</span>
+                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{dockLabel}</span>
+                    </button>
+                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
+                  </div>
+                  {buildingMenu && (
+                    <>
+                      <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 200 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
+                        {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                          <button key={k} style={menuItem(buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            }
             if (id === "parking") {
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
@@ -3803,6 +3839,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       </span>
                     </span>
                   </Field>
+                  {selEl.type === "building" && (
+                    <Field label="Docks">
+                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
+                        <option value="single">Single-load</option>
+                        <option value="cross">Cross-dock</option>
+                        <option value="none">No docks</option>
+                      </select>
+                    </Field>
+                  )}
                   {selEl.type === "building" && (
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
