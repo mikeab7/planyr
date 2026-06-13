@@ -276,6 +276,51 @@ function detentionStorage(ring, depth, freeboard, slope) {
   return { aTop, aWater, aBottom, dw, vol };
 }
 
+/* ------------------- utility service routing (elec/water) ------------------ */
+const _hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function nearestOnSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+function nearestOnPolylines(p, polys) {
+  let best = null, bd = Infinity;
+  polys.forEach((pl) => { for (let i = 0; i < pl.length - 1; i++) { const q = nearestOnSeg(p, pl[i], pl[i + 1]); const d = _hyp(p, q); if (d < bd) { bd = d; best = q; } } });
+  return best ? { pt: best, d: bd } : null;
+}
+function ringHas(p, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].y, xi = ring[i].x, yj = ring[j].y, xj = ring[j].x;
+    if (((yi > p.y) !== (yj > p.y)) && (p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+const rectRing = (c, w, h) => { const hw = w / 2, hh = h / 2; return [{ x: c.x - hw, y: c.y - hh }, { x: c.x + hw, y: c.y - hh }, { x: c.x + hw, y: c.y + hh }, { x: c.x - hw, y: c.y + hh }]; };
+const ringOf = (e) => (e.points ? e.points : elCorners(e));
+// A building's walls (with midpoints + lengths), its centre and area.
+function buildingWalls(b) {
+  const corners = ringOf(b), ctr = centroid(corners), n = corners.length, walls = [];
+  for (let i = 0; i < n; i++) { const a = corners[i], d = corners[(i + 1) % n]; walls.push({ a, b: d, mid: { x: (a.x + d.x) / 2, y: (a.y + d.y) / 2 }, len: Math.hypot(d.x - a.x, d.y - a.y) }); }
+  return { walls, ctr, area: polyArea(corners) };
+}
+const LARGE_BLDG_SF = 100000; // ≥ this → snap service to the (long) dock wall
+// Build a service route from `source` (a point) to a building: pick the entry
+// wall (nearest; for big buildings restrict to the long/dock walls), a fitting
+// pad just outside it, and a buffered easement corridor along the route.
+function buildUtilRoute(source, b, opts, uid) {
+  const { walls, ctr, area } = buildingWalls(b);
+  let cands = walls;
+  if (area >= LARGE_BLDG_SF) { const mx = Math.max(...walls.map((w) => w.len)); cands = walls.filter((w) => w.len >= mx - 1); }
+  let ew = cands[0]; cands.forEach((w) => { if (_hyp(source, w.mid) < _hyp(source, ew.mid)) ew = w; });
+  const entry = ew.mid;
+  let nx = entry.x - ctr.x, ny = entry.y - ctr.y; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+  const padC = { x: entry.x + nx * (opts.padSize / 2 + 3), y: entry.y + ny * (opts.padSize / 2 + 3) };
+  const pts = [source, entry];
+  return { id: uid(), kind: "utilRoute", util: opts.util, pts, corridor: bufferPolyline(pts, opts.width), pad: rectRing(padC, opts.padSize, opts.padSize), width: opts.width, fitting: opts.fitting, label: opts.label, stroke: opts.color };
+}
+
 /* --------------------------- parking math -------------------------- */
 // Double-loaded modules (two stall rows + a drive aisle) filling a rectangle.
 // Supports 90/60/45° stalls: angling narrows the row depth and the aisle the
@@ -664,6 +709,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -960,7 +1006,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -1053,6 +1099,24 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (traceMode) { setTracePts((a) => [...a, snapPt(fp)]); return; } // power-line quick-trace point
+    if (routeMode) { // utility service routing: pick source, then a building
+      if (routeMode.stage === "source") {
+        let src = snapPt(fp);
+        if (routeMode.snapTo === "traced") {
+          const near = nearestOnPolylines(fp, markups.filter((m) => m.kind === "traced").map((m) => m.pts));
+          if (!near || near.d > 90) { setOverlapWarn("Click closer to a traced power line."); return; }
+          src = near.pt;
+        }
+        setRouteMode({ ...routeMode, stage: "building", source: src });
+        setOverlapWarn("Now click the building to serve.");
+        return;
+      }
+      let b = els.find((e) => e.type === "building" && ringHas(fp, ringOf(e)));
+      if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
+      if (!b) { setOverlapWarn("No building to serve — draw a building first."); return; }
+      commitUtilRoute(routeMode, b);
+      return;
+    }
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
@@ -1267,6 +1331,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setMkPoly(null); setTool("select");
   };
   const translateMarkup = (m, dx, dy) => {
+    const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    if (m.kind === "utilRoute") return { ...m, pts: shift(m.pts), corridor: shift(m.corridor), pad: shift(m.pad) };
     if (m.kind === "encumbrance") return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), centerline: (m.centerline || []).map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
@@ -3171,6 +3237,29 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     } finally { setEvidenceBusy(false); }
   };
 
+  // --- utility service routing (electric / water) ---
+  const startRoute = (util, extra = {}) => {
+    if (util === "elec" && !markups.some((m) => m.kind === "traced")) {
+      setOverlapWarn("Trace an overhead pole line first (✏ Trace overhead electric), then route from it.");
+      setTimeout(() => setOverlapWarn(""), 6000); return;
+    }
+    setSel(null); setTool("select"); setTraceMode(false);
+    setRouteMode({ util, snapTo: util === "elec" ? "traced" : "free", stage: "source", ...extra });
+    setOverlapWarn(util === "elec" ? "Click the connection point on a traced power line." : "Click the tap point on the water main (turn on the water layer to see it).");
+  };
+  const commitUtilRoute = (mode, b) => {
+    const opts = mode.util === "elec"
+      ? { util: "elec", width: 10, color: "#b45309", padSize: 10, fitting: "XFMR", label: "Electric service · 10′ easement" }
+      : { util: "water", width: mode.width || 15, color: "#0891b2", padSize: 6, fitting: "TAP", label: `Water service · ${mode.width || 15}′ easement${mode.ruleNote ? ` — ${mode.ruleNote}` : ""}` };
+    const mk = buildUtilRoute(mode.source, b, opts, uid);
+    pushHistory(); setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+    setRouteMode(null);
+    const hits = els.filter((e) => e.id !== b.id && ["building", "paving", "parking", "trailer", "pond"].includes(e.type) && ringsOverlap(mk.corridor, ringOf(e)));
+    const what = mode.util === "elec" ? "Electric" : "Water";
+    setOverlapWarn(hits.length ? `⚠ ${what} easement overlaps ${hits.length} element${hits.length > 1 ? "s" : ""} — reroute or relocate.` : `${what} service routed to the ${(b.w * b.h >= LARGE_BLDG_SF) ? "dock/long wall" : "nearest wall"} — no conflicts.`);
+    setTimeout(() => setOverlapWarn(""), 8000);
+  };
+
   // Upload + extract a title-commitment PDF via the Claude API.
   const runTitleExtract = async (file) => {
     if (!file) return;
@@ -3410,7 +3499,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: "transparent", pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3492,6 +3581,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const stroke = isSel ? PAL.accent : m.stroke;
                 const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 const fillProps = (m.fillOpacity > 0) ? { fill: m.fill, fillOpacity: m.fillOpacity } : {};
+                if (m.kind === "utilRoute") {
+                  const col = isSel ? PAL.accent : m.stroke;
+                  const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const pad = m.pad.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cl = m.pts.map((p) => f2p(p));
+                  const padC = f2p(centroid(m.pad)), mid = { x: (cl[0].x + cl[cl.length - 1].x) / 2, y: (cl[0].y + cl[cl.length - 1].y) / 2 };
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                      <polygon points={cor} fill={col} fillOpacity={0.12} stroke={col} strokeWidth={1.2} strokeDasharray={m.util === "water" ? "5 4" : undefined} />
+                      <polyline points={cl.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col} strokeWidth={2.2} />
+                      <polygon points={pad} fill={col} fillOpacity={0.88} stroke="#fff" strokeWidth={1} />
+                      <text x={padC.x} y={padC.y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#fff" pointerEvents="none">{m.fitting}</text>
+                      <text x={mid.x} y={mid.y - 5} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                    </g>
+                  );
+                }
                 if (m.kind === "traced" || m.kind === "infwater") {
                   const pp = m.pts.map((p) => f2p(p));
                   const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
@@ -3531,6 +3636,14 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
                 return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
               })}
+              {/* in-progress utility route (source → cursor) */}
+              {routeMode?.stage === "building" && routeMode.source && cursor && (() => {
+                const a = f2p(routeMode.source), b = f2p(cursor);
+                return <g data-export="skip" pointerEvents="none">
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={routeMode.util === "elec" ? "#b45309" : "#0891b2"} strokeWidth={2} strokeDasharray="6 4" />
+                  <circle cx={a.x} cy={a.y} r={4} fill={routeMode.util === "elec" ? "#b45309" : "#0891b2"} stroke="#fff" strokeWidth={1.2} />
+                </g>;
+              })()}
               {/* in-progress power-line trace */}
               {traceMode && tracePts.length > 0 && (() => {
                 const pp = tracePts.map((p) => f2p(p));
@@ -3869,6 +3982,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "#fff", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
+                    </button>
+                    <button onClick={() => startRoute("elec")} title="Route electric service from a traced pole line to a building (10′ easement + transformer pad)"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "#fff", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      ⚡ Route electric service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
@@ -4812,12 +4929,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       })()}
 
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
-      {(pobMode || overlapWarn) && (
+      {(pobMode || routeMode || overlapWarn) && (
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
-          background: overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode ? PAL.accent : "#15803d"),
+          background: overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
           color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
           <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : overlapWarn}</span>
-          {pobMode && <button onClick={() => { setPobMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+          {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
         </div>
       )}
 
