@@ -37,29 +37,23 @@ export const supabase = supabaseConfigured()
   ? createClient(SUPABASE_URL, SUPABASE_ANON)
   : null;
 
-/* Phase-1 connection test: confirms the app can REACH Supabase with a valid anon
- * key, without touching any table or site data. Step 1 hits the auth health
- * endpoint (no key, CORS-open) to validate the URL; step 2 hits the PostgREST root
- * with the key to validate the key (200 ok / 401 bad key). */
+/* Phase-1 connection test: confirms the app can REACH Supabase AND that the anon/
+ * publishable key is accepted — without touching any table or site data. Uses the
+ * auth health endpoint WITH the apikey header (200 = reachable + key accepted).
+ * Note: we deliberately do NOT probe the PostgREST root `/rest/v1/` — under
+ * Supabase's new API-key model that endpoint is secret-key-only and (correctly)
+ * 401s a publishable/anon key, which is the only key that belongs in a browser. */
 export async function testConnection() {
   if (!supabaseConfigured())
     return { ok: false, state: "not-configured", message: "Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY at build." };
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL))
     return { ok: false, state: "error", message: `URL looks off: "${SUPABASE_URL}". Expected https://<ref>.supabase.co (no path/slash/spaces).` };
-  // 1) reachability — validates the Project URL
   try {
-    const h = await fetch(`${SUPABASE_URL}/auth/v1/health`);
-    if (!h.ok) return { ok: false, state: "error", message: `Reached host but health = HTTP ${h.status}; check VITE_SUPABASE_URL.` };
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: SUPABASE_ANON } });
+    if (r.ok) return { ok: true, state: "connected", message: `Reached Supabase, key accepted (HTTP ${r.status}).` };
+    if (r.status === 401) return { ok: false, state: "bad-key", message: "Supabase rejected the key (401) — check VITE_SUPABASE_ANON_KEY (use the anon/publishable key)." };
+    return { ok: false, state: "error", message: `Supabase health responded HTTP ${r.status}.` };
   } catch (e) {
     return { ok: false, state: "error", message: `Can't reach ${SUPABASE_URL} — check VITE_SUPABASE_URL (${(e && e.message) || "network error"}).` };
-  }
-  // 2) key validity — REST root with the anon key
-  try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/`, { headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` } });
-    if (r.ok) return { ok: true, state: "connected", message: `Reached Supabase (HTTP ${r.status}).` };
-    if (r.status === 401) return { ok: false, state: "bad-key", message: "Reached Supabase but the anon key was rejected (401) — check VITE_SUPABASE_ANON_KEY." };
-    return { ok: false, state: "error", message: `Supabase REST responded HTTP ${r.status}.` };
-  } catch (e) {
-    return { ok: false, state: "error", message: `Reached host but the REST check failed: ${(e && e.message) || "network error"}.` };
   }
 }
