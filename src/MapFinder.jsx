@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
-import { COUNTIES, COUNTIES_MAP, JURISDICTION_LAYERS } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP } from "./lib/counties.js";
+import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
+import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
   queryAtPoint,
@@ -40,59 +42,6 @@ const BASEMAPS = {
 };
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
-
-/* Toggleable overlay layers — free public ArcGIS REST services, no API key.
- * Rendered server-side (export image) so we get each agency's standard symbology
- * and labels (FEMA zone fills + zone labels; NWI wetland polygons; TxRRC pipeline
- * lines; TxRRC well symbols that themselves encode status — oil/gas/plugged/dry).
- * These STATEWIDE layers apply anywhere; local utility layers come from the
- * jurisdiction registry (JURISDICTION_LAYERS). Drawn above imagery, below parcels. */
-const OVERLAYS = {
-  fema: {
-    label: "FEMA flood zones",
-    url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
-    layers: [27, 28], // flood hazard boundaries + zones (standard NFHL symbology)
-    note: null,
-    opacity: 0.55,
-  },
-  wetlands: {
-    label: "Wetlands (NWI)",
-    url: "https://www.fws.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
-    layers: [0],
-    note: "NWI is for screening only — not a jurisdictional determination.",
-    opacity: 0.55,
-  },
-  txrrc_pipe: {
-    label: "Pipelines (TxRRC)",
-    // Texas Railroad Commission T-4 pipelines, mirrored on the Harris County GIS
-    // server the app already uses (reliable, keyless). Verify live — RRC moves services.
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Pipelines/MapServer",
-    layers: null,
-    note: "RRC T-4 permit routes — schematic, not surveyed locations.",
-    opacity: 0.9,
-  },
-  txrrc_wells: {
-    label: "Oil & gas wells (TxRRC)",
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer",
-    layers: null, // surface + bottom-hole + connectors; RRC symbology shows status
-    note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
-    opacity: 0.9,
-  },
-};
-
-// Flatten the per-jurisdiction registry into a single id→config map (tagging each
-// with its county) and merge with the statewide overlays. The layer-management
-// effect manages every layer by id, so a layer keeps its toggle state across
-// county switches; the sidebar only LISTS the ones for the current jurisdiction.
-const JLAYERS = {};
-Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
-  Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
-const ALL_LAYERS = { ...OVERLAYS, ...JLAYERS };
-const defaultOverlayState = () => {
-  const o = {};
-  Object.entries(ALL_LAYERS).forEach(([k, cfg]) => { o[k] = { on: false, opacity: cfg.opacity ?? 0.8 }; });
-  return o;
-};
 
 // Parcel boundaries are drawn as styleable vector lines (same query path that
 // powers click-to-select), not a server image — so they render reliably. They
@@ -247,29 +196,13 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
 
-  /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity */
+  /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
+     The add/remove/opacity logic is shared with the planner (one source). The
+     pane sits above imagery tiles (200), below the vector pane (400) so parcel
+     lines / site plans stay on top. */
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    // dedicated pane: above imagery tiles (200), below the vector overlay pane
-    // (400) so parcel lines / site plans stay on top.
-    if (!map.getPane("envpane")) map.createPane("envpane").style.zIndex = 350;
-    Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
-      const st = overlays[k], cur = overlayRefs.current[k];
-      if (!st) return;
-      if (st.on && !cur) {
-        const opts = { url: cfg.url, opacity: st.opacity, pane: "envpane", f: "image" };
-        if (cfg.layers) opts.layers = cfg.layers; // omit → server shows all sub-layers
-        const lyr = EL.dynamicMapLayer(opts);
-        lyr.on("requesterror", () => setErr(`“${cfg.label}” didn't load — that GIS service may be down or moved.`));
-        lyr.addTo(map);
-        overlayRefs.current[k] = lyr;
-      } else if (!st.on && cur) {
-        try { map.removeLayer(cur); } catch (_) {}
-        overlayRefs.current[k] = null;
-      } else if (cur) {
-        cur.setOpacity(st.opacity);
-      }
+    syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
+      onError: (cfg) => setErr(`“${cfg.label}” didn't load — that GIS service may be down or moved.`),
     });
   }, [overlays]);
 
@@ -467,30 +400,6 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   });
   const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
 
-  // One toggle row (checkbox + opacity slider + note) for any overlay/jurisdiction layer.
-  const layerRow = (k, cfg) => {
-    const st = overlays[k]; if (!st) return null;
-    return (
-      <div key={k} style={{ marginBottom: 5 }}>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-          <input type="checkbox" checked={st.on}
-            onChange={(e) => setOverlays((o) => ({ ...o, [k]: { ...o[k], on: e.target.checked } }))} />
-          <span style={{ flex: 1 }}>{cfg.label}</span>
-        </label>
-        {st.on && (
-          <input type="range" min={0.1} max={1} step={0.05} value={st.opacity}
-            title="Layer opacity" aria-label={`${cfg.label} opacity`}
-            onChange={(e) => setOverlays((o) => ({ ...o, [k]: { ...o[k], opacity: +e.target.value } }))}
-            style={{ width: "100%", marginTop: 2 }} />
-        )}
-        {st.on && cfg.note && (
-          <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>{cfg.note}</div>
-        )}
-      </div>
-    );
-  };
-  const jur = JURISDICTION_LAYERS[county];
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#efeadf" }}>
       {/* top bar — dark graphite chrome */}
@@ -564,16 +473,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
           <div style={{ maxHeight: 260, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
-            {Object.entries(OVERLAYS).map(([k, cfg]) => layerRow(k, cfg))}
-            {/* Jurisdiction-aware section: local utility/district layers for the
-                county in view (or a "no public GIS" note where none is published). */}
-            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "6px 0 5px" }} />
-            <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, marginBottom: 4, lineHeight: 1.3 }}>
-              {jur ? jur.label : "This jurisdiction"}
-            </div>
-            {jur && Object.keys(jur.layers || {}).length > 0
-              ? Object.entries(jur.layers).map(([k, cfg]) => layerRow(k, cfg))
-              : <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>}
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={county} />
           </div>
         </div>
 
