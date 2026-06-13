@@ -4,7 +4,11 @@
  * sandbox API (async list/get/set/delete). This shim keeps the exact same
  * surface so the component code is unchanged, but persists to the browser's
  * localStorage instead — so scenarios survive reloads on your own machine.
+ *
+ * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
+ * loadSite migrates on read, saveSite normalizes on write.
  */
+import { createSiteModel, migrate } from "./siteModel.js";
 // Single-slot autosave of the live working canvas (separate from named scenarios).
 export const AUTOSAVE_KEY = "planarfit:autosave:v1";
 
@@ -153,11 +157,15 @@ export function loadPlansOfGroup(groupId) {
 export function renameSiteGroup(groupId, site) {
   loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
 }
-export function loadSite(id) { return id ? readSites()[id] || null : null; }
+// loadSite returns the canonical Site Model (migrated/normalized); saveSite merges
+// the partial onto the existing record and normalizes it back through the schema,
+// so storage is a thin persistence layer over the model.
+export function loadSite(id) { const rec = id ? readSites()[id] : null; return rec ? migrate(rec) : null; }
 export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
-  sites[partial.id] = { ...(sites[partial.id] || {}), ...partial, updatedAt: Date.now() };
+  const merged = { ...(sites[partial.id] || {}), ...partial };
+  sites[partial.id] = { ...createSiteModel(merged), updatedAt: Date.now() };
   return writeSites(sites);
 }
 export function deleteSite(id) {
