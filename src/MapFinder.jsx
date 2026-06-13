@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP } from "./lib/counties.js";
-import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
+import { syncOverlayLayers } from "./lib/layers.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
@@ -117,7 +117,7 @@ function siteAcres(site) {
   return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
 }
 
-export default function MapFinder({ visible, county, onCounty, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, county, onCounty, overlays, setOverlays, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displayRef = useRef(null);   // visible parcel-line layer
@@ -139,8 +139,8 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
-  const [overlays, setOverlays] = useState(defaultOverlayState);
-  const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer
+  // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
+  const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
   const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 

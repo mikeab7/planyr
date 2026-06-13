@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
+import { defaultOverlayState } from "./lib/layers.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -14,6 +15,10 @@ const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).s
  * starting/opening another never loses the one you were on. */
 export default function App() {
   const [county, setCounty] = useState("harris");
+  // Shared map-layer overlay state — ONE source of truth for both pages, so a
+  // layer toggled on the map finder is reflected in the planner and vice-versa
+  // (global app preference; per-site memory is reserved in the site model, TBD).
+  const [overlays, setOverlays] = useState(defaultOverlayState);
   const [sites, setSites] = useState(() => loadSitesList());
   const [activeSiteId, setActiveSiteId] = useState(() => {
     const cur = getCurrentSiteId();
@@ -112,6 +117,8 @@ export default function App() {
           visible={mode === "map"}
           county={county}
           onCounty={setCounty}
+          overlays={overlays}
+          setOverlays={setOverlays}
           sites={siteGroups}
           activeSiteId={activeSiteId}
           onOpenSite={openSite}
@@ -126,6 +133,8 @@ export default function App() {
             key={activeSiteId}
             active={mode === "plan"}
             siteId={activeSiteId}
+            overlays={overlays}
+            setOverlays={setOverlays}
             sites={sites}
             onBackToMap={() => setMode("map")}
             onOpenSite={openSite}

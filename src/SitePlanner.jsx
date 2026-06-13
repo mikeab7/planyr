@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
+import { syncOverlayLayers } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -592,7 +592,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -700,7 +700,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
   // meaningful for a located site (one with a real-world origin).
   const origin = restored?.origin || null;
-  const [overlays, setOverlays] = useState(defaultOverlayState);
+  // overlays / setOverlays are app-shared (props from App) — one source of truth across pages.
   const [basemapOn, setBasemapOn] = useState(!!origin);
   const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
   const geoWrapRef = useRef(null);
