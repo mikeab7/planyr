@@ -26,6 +26,10 @@ export default function App() {
   });
   // Resume into the planner if there's an active site to pick up.
   const [mode, setMode] = useState(() => (getCurrentSiteId() && loadSite(getCurrentSiteId()) ? "plan" : "map"));
+  // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
+  // the fix) so it doesn't linger in storage. The finder fallback already handles
+  // the routing; this just tidies the stale pointer.
+  useEffect(() => { const cur = getCurrentSiteId(); if (cur && !loadSite(cur)) setCurrentSiteId(null); }, []);
 
   const refreshSites = () => setSites(loadSitesList());
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };

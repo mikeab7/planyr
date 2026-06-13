@@ -794,16 +794,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // forward reference. The first real save then writes a fully-formed record —
   // there's no need to pre-create an empty one.
   const metaRef = useRef({});
-  const [saveStatus, setSaveStatus] = useState("saved"); // "saving" | "saved"
-  // Autosave this site (debounced). Never writes a blank site.
+  // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
+  // isn't in storage yet is "unsaved", an opened existing site is "saved".
+  const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
+  // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
+  // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
   useEffect(() => {
     if (!siteId) return;
-    if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a blank site
-    if (firstSave.current) { firstSave.current = false; return; } // don't flag the initial mount
+    // Skip only the initial mount (whatever the state) — must run BEFORE the blank
+    // check, or a fresh blank site keeps the flag and swallows its first real edit.
+    if (firstSave.current) { firstSave.current = false; return; }
+    if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a still-blank site
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
-    const t = setTimeout(() => { saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay }); setSaveStatus("saved"); if (fresh) onSiteSaved?.(); }, 400);
+    const t = setTimeout(() => {
+      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay });
+      setSaveStatus(ok ? "saved" : "unsaved"); // badge tracks the real write, not in-memory state
+      if (ok && fresh) onSiteSaved?.();
+    }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
   // Persist on leave; if the site is still blank and un-located, drop it instead.
@@ -820,6 +829,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     persistOrDrop();
   }, [active]); // eslint-disable-line
   useEffect(() => () => { persistOrDrop(); }, []); // eslint-disable-line
+  // Synchronously flush an in-flight (debounced) edit if the tab is hidden or the
+  // page is closing/navigating, so a change made just before leaving isn't lost.
+  useEffect(() => {
+    if (!siteId) return;
+    const flush = () => { const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const onVis = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); };
+  }, [siteId]); // eslint-disable-line
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
@@ -3507,7 +3526,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </button>
         {vSep}
         {/* autosave indicator */}
-        <span style={{ fontSize: 11, color: PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : "Saved ✓"}</span>
+        <span style={{ fontSize: 11, color: saveStatus === "unsaved" ? "#fbbf24" : PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : saveStatus === "unsaved" ? "Unsaved" : "Saved ✓"}</span>
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div style={{ position: "relative" }}>
