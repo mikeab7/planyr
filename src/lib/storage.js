@@ -147,7 +147,9 @@ export const groupOf = (s) => (s && (s.groupId || s.id)) || null;
 export const siteNameOf = (s) => (s && (s.site || s.name)) || "Untitled site";
 
 export function loadSitesList() {
-  return Object.values(readSites()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // Normalize every record to the Site Model so the whole app (site list, map
+  // markers, plan switcher) reads consistent model objects from one source.
+  return Object.values(readSites()).map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 // Every plan belonging to one site (group), newest first.
 export function loadPlansOfGroup(groupId) {
