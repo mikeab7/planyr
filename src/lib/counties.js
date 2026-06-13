@@ -104,34 +104,34 @@ export const JURISDICTION_LAYERS = {
         note: "Flood-control channel right-of-way (HCFCD).",
         opacity: 0.8,
       },
-      // City of Houston water/wastewater/storm. Re-pointed from the stale/secondary
-      // mycity2.houstontx.gov/pubgis02 host (intermittent "service not started") to
-      // the current production GIMS host that backs the City's public viewer
-      // (geogimsprod.houstontx.gov). Service names (HW/Water_gx, HW/WasteWater_gx,
-      // TDO/UN_Stormwater) confirmed live on the City's ArcGIS server; the exact PROD
-      // REST path is VERIFY (couldn't be hit at build). If a probe reports failed,
-      // capture the real URL from the geogimsprod viewer's Network tab and swap it in.
-      // Alternates seen: geogimstest.houstontx.gov/arcgis/rest/services/HW/... and
-      // geohwp.houstontx.gov/arcgis/rest/services/...
+      // City of Houston water/wastewater/storm. The mycity2/pubgis02 HPW host was
+      // stale (intermittent "service not started"); geogimsprod runs only the
+      // Geocortex viewer (no /arcgis/rest — 404). The real source the City's public
+      // viewer pulls from is geogimstest.houstontx.gov/arcgis/rest — CONFIRMED live,
+      // 200 + metadata, and CORS-open to https://mikeab7.github.io (probe + export
+      // both work). Folders HW (Water_gx, WasteWater_gx) and TDO (UN_Stormwater).
+      // Caveat: it's the *test* environment (the only host serving these utility-
+      // network services with CORS). Swap to a prod host later if the City exposes
+      // one — low-risk now that layers fail loudly with a reason.
       coh_ww: {
         label: "Houston wastewater",
-        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
+        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
         layers: null,
-        note: "City of Houston sanitary sewer (geogimsprod). Endpoint provisional — VERIFY live.",
+        note: "City of Houston sanitary sewer (geogimstest — City's published source).",
         opacity: 0.85,
       },
       coh_storm: {
         label: "Houston storm sewer",
-        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
+        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
         layers: null,
-        note: "City of Houston storm drainage (geogimsprod). Endpoint provisional — VERIFY live.",
+        note: "City of Houston storm drainage (geogimstest — City's published source).",
         opacity: 0.85,
       },
       coh_water: {
         label: "Houston water lines",
-        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
+        url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
         layers: null,
-        note: "City of Houston potable water (geogimsprod). Endpoint provisional — VERIFY live.",
+        note: "City of Houston potable water (geogimstest — City's published source).",
         opacity: 0.85,
       },
     },

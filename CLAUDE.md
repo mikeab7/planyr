@@ -174,7 +174,7 @@ items between buckets as they ship. Don't infer scope creep — build only what'
 - **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
 
 ### ⛔ Known issues / blocked on external services
-- **Houston water/wastewater/storm** — re-pointed to `geogimsprod` (VERIFY); City HPW services were stopped server-side and couldn't be enumerated. Storm needs its exact service path confirmed. Should self-heal via re-probe when the City restarts them; capture real URLs from the viewer's Network tab if probes report failed.
+- **Houston water/wastewater/storm** — RESOLVED: pointed at `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`), the source the City's public viewer pulls from. Confirmed live + CORS-open to our origin. Caveat: it's the *test* host (only confirmed source with CORS); `geogimsprod` runs only the Geocortex viewer (no `/arcgis/rest`), `geohwp` has a different catalog. Swap to a prod host later if the City exposes one.
 - General: county/city GIS hosts move and stop often — rely on the probe + honest error surfacing, never hardcode-and-assume.
 
 ### Tier 1 — site-killers (binary go/no-go; highest priority; NOT built)
