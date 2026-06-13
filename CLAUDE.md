@@ -72,8 +72,10 @@ npm run preview
   LayerPanel.jsx` (toggle/opacity UI). **Both** MapFinder and SitePlanner consume
   these, so a layer added once appears on both surfaces.
 - Layer `kind`s: `dynamic` (esri `dynamicMapLayer` image overlay — FEMA, NWI,
-  TxRRC, jurisdiction utilities, HIFLD, COH), `overpass` and `mapillary` (live,
-  view-driven vector layers in `src/lib/evidenceLayers.js`).
+  TxRRC, jurisdiction utilities, COH hydrants), `esriFeature` (vector
+  `featureLayer` — HIFLD transmission from US DOE/NETL, crisp + attribute-rich,
+  non-interactive so it never steals parcel clicks), `overpass` and `mapillary`
+  (live, view-driven vector layers in `src/lib/evidenceLayers.js`).
 - **Planner is geographic** (Phase 1): a non-interactive Leaflet Web-Mercator
   basemap + the shared overlays sit *behind* the (transparent) feet-based SVG,
   anchored to the site `origin`. Geometry/metrics stay in feet (projection-

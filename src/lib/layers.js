@@ -71,10 +71,12 @@ export const EVIDENCE = {
     note: "Crowdsourced pole/hydrant detections — needs a free Mapillary token (set below). Loads at zoom ≥ 16.",
   },
   hifld_tx: {
-    kind: "dynamic", label: "Transmission lines (HIFLD)",
-    url: "https://oceandata.rad.rutgers.edu/arcgis/rest/services/RenewableEnergy/HIFLD_Electric_SubstationsTransmissionLines/MapServer",
-    layers: null, opacity: 0.85,
-    note: "HIFLD ≥69 kV transmission + substations — regional/schematic. Endpoint provisional (research mirror); verify live.",
+    kind: "esriFeature", label: "Transmission lines (HIFLD)",
+    // US DOE / NETL hosted HIFLD transmission lines (layer 18) — vector, crisp at
+    // any zoom, on a federal-government server. Loads zoomed in (national dataset).
+    url: "https://arcgis.netl.doe.gov/server/rest/services/Hosted/Energy_Transition_Atlas_493d6/FeatureServer/18",
+    minZoom: 10, color: "#b91c1c", weight: 2.4, opacity: 0.9,
+    note: "HIFLD ≥69 kV electric transmission (US DOE/NETL). Loads at zoom ≥ 10; verify live.",
   },
   coh_hydrants: {
     kind: "dynamic", label: "Fire hydrants (City of Houston)",
@@ -116,7 +118,14 @@ export function syncOverlayLayers(map, overlays, refs, { pane = "envpane", paneZ
       let lyr;
       if (cfg.kind === "overpass") lyr = overpassLayer(cfg.query);
       else if (cfg.kind === "mapillary") lyr = mapillaryLayer();
-      else { // image overlay (esri dynamic MapServer)
+      else if (cfg.kind === "esriFeature") { // vector feature service (crisp, attribute-rich)
+        lyr = EL.featureLayer({
+          url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false,
+          style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity: st.opacity, fillOpacity: 0 }),
+        });
+        lyr.setOpacity = (o) => { try { lyr.setStyle({ opacity: o }); } catch (_) {} };
+        if (onError) lyr.on("requesterror", () => onError(cfg));
+      } else { // image overlay (esri dynamic MapServer)
         const opts = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
         if (cfg.layers) opts.layers = cfg.layers; // omit → server shows all sub-layers
         lyr = EL.dynamicMapLayer(opts);
