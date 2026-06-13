@@ -98,6 +98,48 @@ npm run preview
   basemap/overlay tiles (cross-origin canvas). With the basemap off, the captured
   screenshot underlay still prints.
 
+## Site Model — the ONE source of truth (`src/lib/siteModel.js`)
+Every site/plan is the canonical **Site Model**. All site data lives here; read it
+via the selectors, persist it via storage — never invent a parallel store.
+
+**Schema** (`createSiteModel`, `SITE_MODEL_VERSION = 2`). Persisted fields stay
+flat + back-compatible (Option A — no field renames), with additive buckets:
+```
+{ schemaVersion,
+  id, groupId, site, name, updatedAt,        // identity
+  origin:{lat,lon}|null, county,             // geo anchor + jurisdiction
+  parcels[], underlay, settings,             // inputs
+  els[],                                      // drawn layout elements
+  markups[],                                  // flat: neutral annotations + semantic shapes
+  measures[], callouts[],                     // annotations
+  elevation:{ crossSections[] },             // elevation references (newly persisted)
+  constraints:{ liveLayers[] } }             // RESERVED: per-site layer memory (not yet wired)
+```
+`els` and `markups` stay flat (splitting them physically is a deferred canvas
+rewrite); **selectors classify them by meaning** instead:
+- `constraintsOf(m)` → `{ easements (markup kind `encumbrance`), setbacks (derived
+  from parcels), liveLayers }`
+- `utilitiesOf(m)` → markup kinds `utilRoute | traced | infwater`
+- `annotationsOf(m)` → `{ markups (line/rect/ellipse/polygon/polyline), measures, callouts }`
+- `crossSectionsOf(m)`, `setbacksOf(m)`, `parcelsOf`, `elementsOf`
+- `developableArea(m)` — **stub**; the future buildable-area/cost synthesis reads
+  the whole model from here.
+
+**Persistence** (`storage.js` is a thin layer over the model): `loadSite` /
+`loadSitesList` migrate on read; `saveSite` merges the partial onto the existing
+record and re-normalizes through `createSiteModel`. Migration is **additive,
+lossless, idempotent** — old saved sites upgrade automatically.
+
+**Layer/overlay state is app-shared, NOT per-site** (yet): one `overlays` object
+lives in `App.jsx` and is passed to both pages, so a toggle on one page shows on
+the other. `constraints.liveLayers` is the reserved slot for future per-site memory.
+
+**Conformance rule for future sessions:** add new site data as new model fields
+(additive), bump `SITE_MODEL_VERSION`, extend `migrate`, and expose it via a
+selector. The planner still keeps in-component `useState` for live editing and
+serializes to the model at the save boundary (collapsing that into a single
+reducer is a deferred, separate task).
+
 ## 5. Known limitations / roadmap
 - **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
   draw a ≤2 sq-mi box, fetch public-domain NAIP aerial tiles for it, send tiles to
