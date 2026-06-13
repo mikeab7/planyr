@@ -9,6 +9,22 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate } from "./siteModel.js";
+import { cloudUpsert, cloudDelete } from "./cloudSync.js";
+
+/* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id
+ * and writes are mirrored to Supabase (RLS-scoped to them). Logged out, activeUser
+ * is null and everything stays 100% localStorage (unchanged). */
+let activeUser = null;
+export function setActiveUser(uid) { activeUser = uid || null; }
+export const isCloudActive = () => !!activeUser;
+// Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
+// out, so the save badge can await it unconditionally.
+export async function pushSiteToCloud(id) {
+  if (!activeUser) return { ok: true, skipped: true };
+  const m = loadSite(id);
+  if (!m) return { ok: false, error: "missing" };
+  return cloudUpsert(activeUser, m);
+}
 // Single-slot autosave of the live working canvas (separate from named scenarios).
 export const AUTOSAVE_KEY = "planarfit:autosave:v1";
 
@@ -175,6 +191,7 @@ export function deleteSite(id) {
   delete sites[id];
   writeSites(sites);
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
+  if (activeUser) cloudDelete(activeUser, id); // fire-and-forget cloud removal
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }

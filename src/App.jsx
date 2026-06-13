@@ -5,7 +5,7 @@ import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { getUser, onAuthChange } from "./lib/auth.js";
 import AuthPanel from "./components/AuthPanel.jsx";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -57,9 +57,10 @@ export default function App() {
   const [recovery, setRecovery] = useState(false);
   useEffect(() => {
     if (!supabaseConfigured()) return;
-    getUser().then(setUser);
+    getUser().then((u) => { setUser(u); setActiveUser(u && u.id); });
     return onAuthChange((event, u) => {
       setUser(u);
+      setActiveUser(u && u.id); // logged in → cloud is the home for saves; logged out → localStorage
       if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
     });
   }, []);
@@ -77,6 +78,7 @@ export default function App() {
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
     saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Plan 1", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    pushSiteToCloud(id).catch(() => {}); // mirror to cloud when logged in (no-op otherwise)
     refreshSites();
     goPlan(id);
   };
@@ -99,6 +101,7 @@ export default function App() {
     const id = newId();
     saveSite({ id, groupId: group, site: src.site || src.name, name: `Plan ${nextPlanNo(group)}`,
       origin: src.origin || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
+    pushSiteToCloud(id).catch(() => {});
     refreshSites();
     goPlan(id);
   };
@@ -110,12 +113,13 @@ export default function App() {
     const group = groupOf(src);
     const id = newId();
     saveSite({ ...src, id, groupId: group, name: `${src.name || "Plan"} (copy)` });
+    pushSiteToCloud(id).catch(() => {});
     refreshSites();
     goPlan(id);
   };
 
-  const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); refreshSites(); };
-  const renamePlan = (id, name) => { saveSite({ id, name }); refreshSites(); };
+  const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
+  const renamePlan = (id, name) => { saveSite({ id, name }); pushSiteToCloud(id).catch(() => {}); refreshSites(); };
 
   // The planner dropped a blank, unedited site (never saved). Forget it.
   const handleSiteDropped = (id) => { if (id === activeSiteId) setActiveSiteId(null); refreshSites(); };

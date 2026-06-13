@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
@@ -814,8 +814,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
       const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay });
-      setSaveStatus(ok ? "saved" : "unsaved"); // badge tracks the real write, not in-memory state
-      if (ok && fresh) onSiteSaved?.();
+      if (!ok) { setSaveStatus("unsaved"); return; }
+      if (fresh) onSiteSaved?.();
+      // Badge tracks the REAL write: local write done; when logged in, stay
+      // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved"));
+      else setSaveStatus("saved");
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
