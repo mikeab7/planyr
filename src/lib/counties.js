@@ -77,6 +77,87 @@ export async function resolveTaxRates(county, attrs) {
   return { units, rates: null, total: null, connected: false, note: "Rate source returned no data." };
 }
 
+/* ------------------------------------------------------------------------
+ * Jurisdiction-aware layer registry.
+ *
+ * Statewide overlays (FEMA, NWI, TxRRC) live in MapFinder; this registry adds
+ * the LOCAL utility / district layers that only exist inside one jurisdiction.
+ * Keyed by the same county keys as COUNTIES_MAP. When a county is in view (or an
+ * active parcel sits in it), MapFinder lists that jurisdiction's layers in the
+ * sidebar. Where a jurisdiction publishes no public GIS, `layers` is empty and
+ * `note` explains why (we never fabricate an endpoint).
+ *
+ * Each layer: { label, url (MapServer root, rendered server-side as an image
+ * overlay — no CORS needed), layers (visible sub-layer ids, or null = all),
+ * note, opacity }. Endpoints are public ArcGIS REST services found from each
+ * agency's GIS site; county servers move occasionally, so a layer that 404s can
+ * be re-pointed here. Several are flagged provisional where not live-verified.
+ * ----------------------------------------------------------------------- */
+export const JURISDICTION_LAYERS = {
+  harris: {
+    label: "Harris County · City of Houston",
+    layers: {
+      hcfcd_row: {
+        label: "HCFCD channels & ROW",
+        url: "https://www.gis.hctx.net/arcgishcpid/rest/services/HCFCD/ROW_FC/MapServer",
+        layers: null,
+        note: "Flood-control channel right-of-way (HCFCD).",
+        opacity: 0.8,
+      },
+      coh_ww: {
+        label: "Houston wastewater",
+        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Waste_Water/MapServer",
+        layers: null,
+        note: "City of Houston Public Works sanitary sewer.",
+        opacity: 0.85,
+      },
+      coh_storm: {
+        label: "Houston storm sewer",
+        url: "https://mycity2.houstontx.gov/geocloud02/rest/services/hpw/houston_stormwater/MapServer",
+        layers: null,
+        note: "City of Houston Public Works storm drainage.",
+        opacity: 0.85,
+      },
+      coh_water: {
+        label: "Houston water lines",
+        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Water/MapServer",
+        layers: null,
+        note: "City of Houston potable water (endpoint provisional — verify live).",
+        opacity: 0.85,
+      },
+    },
+  },
+  fortbend: {
+    label: "Fort Bend County",
+    layers: {
+      fb_water: {
+        label: "Water / MUD districts",
+        url: "https://gisweb.fortbendcountytx.gov/arcgis/rest/services/General/Water_Districts/MapServer",
+        layers: null,
+        note: "MUD / WCID / drainage district boundaries (Fort Bend County GIS).",
+        opacity: 0.7,
+      },
+      fb_contours: {
+        label: "1-ft contours (drainage)",
+        url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
+        layers: null,
+        note: "Fort Bend Drainage District 1-foot contours.",
+        opacity: 0.7,
+      },
+    },
+  },
+  chambers: {
+    label: "Chambers County",
+    layers: {},
+    note: "No public utility/infrastructure GIS is published for Chambers County — parcels only. FEMA, wetlands and TxRRC layers above still apply.",
+  },
+  waller: {
+    label: "Waller County",
+    layers: {},
+    note: "No public GIS is published for Waller County. FEMA, wetlands and TxRRC layers above still apply.",
+  },
+};
+
 // Find the first field whose name looks like an id or address field.
 export function detectField(fields, kind) {
   const re = kind === "id" ? ID_RE : ADDR_RE;
