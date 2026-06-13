@@ -28,7 +28,9 @@ export const STATEWIDE = {
   },
   wetlands: {
     label: "Wetlands (NWI)",
-    url: "https://www.fws.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
+    // Canonical USFWS endpoint. The old www.fws.gov host redirects here, which
+    // caused a double request every refresh — point straight at the real host.
+    url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
     layers: [0],
     note: "NWI is for screening only — not a jurisdictional determination.",
     opacity: 0.55,

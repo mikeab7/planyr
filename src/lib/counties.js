@@ -113,9 +113,14 @@ export const JURISDICTION_LAYERS = {
       },
       coh_storm: {
         label: "Houston storm sewer",
-        url: "https://mycity2.houstontx.gov/geocloud02/rest/services/hpw/houston_stormwater/MapServer",
+        // The old geocloud02/hpw host is retired (404 folder-not-found). Re-pointed
+        // to the pubgis02 HPW folder, parallel to the confirmed Houston_Waste_Water /
+        // Houston_Water services. TODO/VERIFY: confirm the exact service name once the
+        // City's services are reachable — couldn't be positively confirmed at build
+        // (HPW utility services were intermittently down / "not started").
+        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Storm_Water/MapServer",
         layers: null,
-        note: "City of Houston Public Works storm drainage.",
+        note: "City of Houston Public Works storm drainage. Endpoint provisional — VERIFY live.",
         opacity: 0.85,
       },
       coh_water: {
