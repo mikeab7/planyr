@@ -104,30 +104,34 @@ export const JURISDICTION_LAYERS = {
         note: "Flood-control channel right-of-way (HCFCD).",
         opacity: 0.8,
       },
+      // City of Houston water/wastewater/storm. Re-pointed from the stale/secondary
+      // mycity2.houstontx.gov/pubgis02 host (intermittent "service not started") to
+      // the current production GIMS host that backs the City's public viewer
+      // (geogimsprod.houstontx.gov). Service names (HW/Water_gx, HW/WasteWater_gx,
+      // TDO/UN_Stormwater) confirmed live on the City's ArcGIS server; the exact PROD
+      // REST path is VERIFY (couldn't be hit at build). If a probe reports failed,
+      // capture the real URL from the geogimsprod viewer's Network tab and swap it in.
+      // Alternates seen: geogimstest.houstontx.gov/arcgis/rest/services/HW/... and
+      // geohwp.houstontx.gov/arcgis/rest/services/...
       coh_ww: {
         label: "Houston wastewater",
-        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Waste_Water/MapServer",
+        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
         layers: null,
-        note: "City of Houston Public Works sanitary sewer.",
+        note: "City of Houston sanitary sewer (geogimsprod). Endpoint provisional — VERIFY live.",
         opacity: 0.85,
       },
       coh_storm: {
         label: "Houston storm sewer",
-        // The old geocloud02/hpw host is retired (404 folder-not-found). Re-pointed
-        // to the pubgis02 HPW folder, parallel to the confirmed Houston_Waste_Water /
-        // Houston_Water services. TODO/VERIFY: confirm the exact service name once the
-        // City's services are reachable — couldn't be positively confirmed at build
-        // (HPW utility services were intermittently down / "not started").
-        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Storm_Water/MapServer",
+        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
         layers: null,
-        note: "City of Houston Public Works storm drainage. Endpoint provisional — VERIFY live.",
+        note: "City of Houston storm drainage (geogimsprod). Endpoint provisional — VERIFY live.",
         opacity: 0.85,
       },
       coh_water: {
         label: "Houston water lines",
-        url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HPW/Houston_Water/MapServer",
+        url: "https://geogimsprod.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
         layers: null,
-        note: "City of Houston potable water (endpoint provisional — verify live).",
+        note: "City of Houston potable water (geogimsprod). Endpoint provisional — VERIFY live.",
         opacity: 0.85,
       },
     },
