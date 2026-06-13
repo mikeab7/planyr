@@ -157,6 +157,17 @@ not skip ahead:**
   still 100% localStorage. Uses the same anon/publishable key + URL (no new secrets).
 - **Phase 3 — row-level security.** RLS so each user only sees their own rows.
   (The anon key is public-safe by design; RLS is the real protection.)
+- **Phase 3 — row-level security (DONE).** RLS enabled on `public.sites` with
+  **private-by-default** policies: an `authenticated` user may SELECT/INSERT/UPDATE/
+  DELETE **only their own rows** (`(select auth.uid()) = user_id`); `user_id`
+  defaults to `auth.uid()` so rows are always owned by their creator. The anon role
+  has **no** policy (no access). **Deliberately NOT built (deferred pending product
+  direction):** sharing, workspaces, team features, and ANY admin/cross-user
+  visibility — there is intentionally no superuser/cross-user policy. (`service_role`
+  bypasses RLS by Postgres design, but it's server-only and never shipped to the
+  browser; all client access is the public anon key + a user JWT, which RLS gates.)
+  Policy SQL lives in the dashboard; mirrored below for the record. **No app change
+  — persistence is still localStorage.**
 - **Phase 4 — wire save/load + migrate.** Route `storage.js` reads/writes through
   Supabase (localStorage becomes offline cache), and **one-time upload of every
   existing browser-stored site** to the user's account. **Migration MUST preserve
@@ -174,7 +185,21 @@ create table public.sites (
   primary key (user_id, id)
 );
 ```
-RLS policies + the migrate-on-login flow are Phase 3/4 (not built yet).
+**RLS policies (Phase 3 — applied in the dashboard; private-by-default):**
+```sql
+alter table public.sites alter column user_id set default auth.uid();
+alter table public.sites alter column user_id set not null;
+alter table public.sites enable row level security;
+create policy "Users select own sites" on public.sites
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own sites" on public.sites
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users update own sites" on public.sites
+  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "Users delete own sites" on public.sites
+  for delete to authenticated using ((select auth.uid()) = user_id);
+```
+The migrate-on-login + save/load wiring is Phase 4 (not built yet).
 
 ## 5. Known limitations / roadmap
 - **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
@@ -208,7 +233,7 @@ items between buckets as they ship. Don't infer scope creep — build only what'
 - **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
 - **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
 - **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
-- **Supabase backend — Phase 1 (connect) + Phase 2 (login)** — client + connection chip; email/password auth (sign up/in/out, reset) via the account pill; **additive — storage still localStorage**. (See "## Backend (Supabase)"; Phases 3 RLS → 4 wire save/load + migrate ahead.)
+- **Supabase backend — Phase 1 (connect) + 2 (login) + 3 (RLS)** — connection chip; email/password auth via the account pill; `sites` table locked private-by-default (own-rows-only; no sharing/admin — deferred). **Still additive — storage is localStorage.** (See "## Backend (Supabase)"; Phase 4 = wire save/load + migrate, next.)
 
 ### ⛔ Known issues / blocked on external services
 - **Houston water/wastewater/storm** — on the City's **TEST** host `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`) — the only CORS-clean host serving these; `geogimsprod` is viewer-only (no `/arcgis/rest`), `geohwp` has a different catalog. It works but is a **test environment that could change without notice** — replace with a production COH equivalent if one becomes available; the probe + ~45s self-heal already cover it failing gracefully. Sublayers are pinned (`layers=show:` — water 0,1; wastewater 2,6; storm 22,23,24,904) because defaults render meters, not mains/pipes. **Expected, not bugs:** trunk lines (Gravity Main, Pipe) are scale-gated to ~≥1:40k (zoom in to see them); coverage is City-of-Houston-only (transparent outside the city).

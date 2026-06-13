@@ -37,6 +37,12 @@ export const supabase = supabaseConfigured()
   ? createClient(SUPABASE_URL, SUPABASE_ANON)
   : null;
 
+// Diagnostic handle for the Phase-3 RLS two-account isolation test (run from the
+// live console). Uses the public anon key + the signed-in user's JWT, so it
+// exercises Row-Level Security exactly as a real client would. No effect on the
+// app's localStorage save/load.
+try { if (typeof window !== "undefined") window.pfSupabase = supabase; } catch (_) {}
+
 /* Phase-1 connection test: confirms the app can REACH Supabase AND that the anon/
  * publishable key is accepted — without touching any table or site data. Uses the
  * auth health endpoint WITH the apikey header (200 = reachable + key accepted).
