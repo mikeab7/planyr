@@ -255,6 +255,27 @@ function offsetPolygon(pts, d) {
   return polyArea(a1) <= polyArea(pts) ? a1 : (build(-1) || a1);
 }
 
+/* Detention storage for a pond whose drawn footprint is TOP-OF-BANK, with
+ * `slope`:1 (H:V) interior side slopes — so the basin tapers inward with depth
+ * (not a vertical-wall box). Water surface sits `freeboard` below top of bank.
+ * Stored volume uses the prismoidal (Simpson) rule over the water column, which
+ * is exact for linear side slopes. Areas come from inward polygon offsets:
+ * offset = slope × (depth below top of bank). Returns areas (sf) + volume. */
+function detentionStorage(ring, depth, freeboard, slope) {
+  const areaAt = (down) => { // wetted/section area at `down` ft below top of bank
+    if (down <= 0) return polyArea(ring);
+    const r = offsetPolygon(ring, slope * down);
+    return r ? polyArea(r) : 0; // collapsed (basin comes to a point) → 0
+  };
+  const aTop = polyArea(ring);
+  const dw = Math.max(0, depth - freeboard);       // water depth
+  const aWater = areaAt(freeboard);                 // water surface
+  const aBottom = areaAt(depth);                    // basin bottom
+  const aMid = areaAt(freeboard + dw / 2);
+  const vol = dw > 0 ? (dw / 6) * (aBottom + 4 * aMid + aWater) : 0; // cu ft
+  return { aTop, aWater, aBottom, dw, vol };
+}
+
 /* --------------------------- parking math -------------------------- */
 // Double-loaded modules (two stall rows + a drive aisle) filling a rectangle.
 // Supports 90/60/45° stalls: angling narrows the row depth and the aisle the
@@ -456,6 +477,7 @@ function mergeRings(ringA, ringB, tol = 0.75) {
 
 /* ------------------------------ format ----------------------------- */
 const f0 = (n) => Math.round(n).toLocaleString();
+const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* --------------- county appraisal-district attribute view --------------- */
@@ -4341,6 +4363,43 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 <button style={chip} onClick={() => toggleLock(selEl.id)}>{selEl.locked ? "🔒 Unlock" : "Lock"}</button>
                 <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete element</button>
               </div>
+              {selEl.type === "pond" && (() => {
+                const det = selEl.det || {};
+                const depth = det.depth ?? 8, fb = det.freeboard ?? 1, slope = det.slope ?? 3;
+                const ring = selEl.points ? selEl.points : elCorners(selEl);
+                const r = detentionStorage(ring, depth, fb, slope);
+                const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
+                const pondRow = (label, val) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                    <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
+                    <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5, color: PAL.ink, fontWeight: 650 }}>{val}</span>
+                  </div>
+                );
+                return (
+                  <div style={{ marginTop: 12, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 7 }}>Detention storage</div>
+                    <Field label="Total depth (ft)"><NumInput style={numInput} value={depth} min={1} onCommit={(n) => setDet({ depth: n })} /></Field>
+                    <Field label="Freeboard (ft)"><NumInput style={numInput} value={fb} min={0} onCommit={(n) => setDet({ freeboard: n })} /></Field>
+                    <Field label="Side slope (n:1 H:V)"><NumInput style={numInput} value={slope} min={1} onCommit={(n) => setDet({ slope: n })} /></Field>
+                    {det.availDepth != null && (
+                      <div style={{ fontSize: 10.5, color: "#0e7490", marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′ (screening only).</div>
+                    )}
+                    <div style={{ marginTop: 7, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                      {pondRow("Top-of-bank area", `${f0(r.aTop)} sf`)}
+                      {pondRow("Water-surface area", `${f0(r.aWater)} sf`)}
+                      {pondRow("Bottom area", `${f0(r.aBottom)} sf`)}
+                      {pondRow("Water depth", `${f1(r.dw)} ft`)}
+                      <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                      {pondRow("Stored volume", `${f0(r.vol)} cf`)}
+                      {pondRow("", `${f2(r.vol / 43560)} ac-ft`)}
+                    </div>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
+                      Footprint is top-of-bank; basin tapers at {slope}:1 to the bottom. Prismoidal volume — screening only.
+                      {r.aBottom === 0 && " Basin tapers to a point before full depth — reduce depth or slope."}
+                    </div>
+                  </div>
+                );
+              })()}
             </Section>
           )}
 
