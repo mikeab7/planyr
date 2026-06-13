@@ -3,6 +3,8 @@ import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
+import { getUser, onAuthChange } from "./lib/auth.js";
+import AuthPanel from "./components/AuthPanel.jsx";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -46,6 +48,20 @@ export default function App() {
     window.pfCloudInfo = connectionInfo(); // what the build baked in (url + key prefix/len)
     run();
     return () => { live = false; };
+  }, []);
+
+  // PHASE 2: Supabase auth state (login only — does NOT change save/load). Tracks
+  // the signed-in user and opens the password form on a recovery-link return.
+  const [user, setUser] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [recovery, setRecovery] = useState(false);
+  useEffect(() => {
+    if (!supabaseConfigured()) return;
+    getUser().then(setUser);
+    return onAuthChange((event, u) => {
+      setUser(u);
+      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+    });
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
@@ -173,6 +189,18 @@ export default function App() {
           />
         )}
       </div>
+      {/* PHASE 2 account control (login only; storage unchanged) */}
+      {supabaseConfigured() && (
+        <button onClick={() => { setRecovery(false); setAuthOpen(true); }}
+          title={user ? `Signed in as ${user.email}` : "Sign in / create account"}
+          style={{ position: "fixed", right: 6, bottom: 46, zIndex: 4000, display: "flex", alignItems: "center", gap: 6, maxWidth: 200,
+            background: "rgba(25,22,19,0.82)", color: "#ece7db", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 99, padding: "3px 10px", fontSize: 10.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: user ? "#15803d" : "#9b9482" }} />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user ? user.email : "Sign in"}</span>
+        </button>
+      )}
+      {authOpen && <AuthPanel user={user} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />}
+
       {/* PHASE 1 Supabase connection indicator (diagnostic; no data read/written) */}
       {(() => {
         const meta = {

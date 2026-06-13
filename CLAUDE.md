@@ -149,7 +149,12 @@ not skip ahead:**
   pfCloudTest()`. Config from build-time env **only** (`VITE_SUPABASE_URL`,
   `VITE_SUPABASE_ANON_KEY`; gitignored, set as Actions secrets — see deploy.yml).
   **No site data is read or written; persistence is still 100% localStorage.**
-- **Phase 2 — login.** Supabase Auth (email/OAuth); gate cloud sync behind a user.
+- **Phase 2 — login (DONE).** Supabase Auth **email+password** (built-in only — no
+  custom auth) via `src/lib/auth.js` + `src/components/AuthPanel.jsx`: sign up / in /
+  out, password reset (+ recovery-link "set new password"). Auth state lives in
+  `App`; an account pill (bottom-right, above the Cloud chip) opens the modal.
+  **Additive only** — login does NOT gate any feature or change save/load; sites are
+  still 100% localStorage. Uses the same anon/publishable key + URL (no new secrets).
 - **Phase 3 — row-level security.** RLS so each user only sees their own rows.
   (The anon key is public-safe by design; RLS is the real protection.)
 - **Phase 4 — wire save/load + migrate.** Route `storage.js` reads/writes through
@@ -203,7 +208,7 @@ items between buckets as they ship. Don't infer scope creep — build only what'
 - **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
 - **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
 - **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
-- **Supabase backend — Phase 1 (connect)** — client + connection test + "Cloud" status chip; no data synced yet. (See "## Backend (Supabase)"; Phases 2 login → 3 RLS → 4 wire save/load + migrate ahead.)
+- **Supabase backend — Phase 1 (connect) + Phase 2 (login)** — client + connection chip; email/password auth (sign up/in/out, reset) via the account pill; **additive — storage still localStorage**. (See "## Backend (Supabase)"; Phases 3 RLS → 4 wire save/load + migrate ahead.)
 
 ### ⛔ Known issues / blocked on external services
 - **Houston water/wastewater/storm** — on the City's **TEST** host `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`) — the only CORS-clean host serving these; `geogimsprod` is viewer-only (no `/arcgis/rest`), `geohwp` has a different catalog. It works but is a **test environment that could change without notice** — replace with a production COH equivalent if one becomes available; the probe + ~45s self-heal already cover it failing gracefully. Sublayers are pinned (`layers=show:` — water 0,1; wastewater 2,6; storm 22,23,24,904) because defaults render meters, not mains/pipes. **Expected, not bugs:** trunk lines (Gravity Main, Pipe) are scale-gated to ~≥1:40k (zoom in to see them); coverage is City-of-Houston-only (transparent outside the city).
