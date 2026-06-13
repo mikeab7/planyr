@@ -5,6 +5,7 @@ import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
+import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
@@ -710,6 +711,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [tracePts, setTracePts] = useState([]);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
+  const [easeRules, setEaseRules] = useState(loadEasementRules);
+  const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county || "harris"));
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -3260,6 +3264,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setTimeout(() => setOverlapWarn(""), 8000);
   };
 
+  const setRule = (key, patch) => setEaseRules((r) => { const next = { ...r, [key]: { ...r[key], ...patch } }; saveEasementRules(next); return next; });
+  const startWaterRoute = () => {
+    const rule = easeRules[jurKey] || easeRules.generic;
+    startRoute("water", { width: rule.waterWidth || 15, ruleNote: `${rule.label}${rule.verified ? "" : " · VERIFY"}` });
+  };
+
   // Upload + extract a title-commitment PDF via the Claude API.
   const runTitleExtract = async (file) => {
     if (!file) return;
@@ -3987,10 +3997,40 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "elec" ? "#b45309" : PAL.panelLine}`, background: routeMode?.util === "elec" ? "#b45309" : "#fff", color: routeMode?.util === "elec" ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       ⚡ Route electric service
                     </button>
+                    <button onClick={startWaterRoute} title="Route water service from a main to a building, easement width from the jurisdiction rule below"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${routeMode?.util === "water" ? "#0891b2" : PAL.panelLine}`, background: routeMode?.util === "water" ? "#0891b2" : "#fff", color: routeMode?.util === "water" ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      🚰 Route water service
+                    </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
                     </button>
+                    {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
+                    <button onClick={() => setRulesOpen((o) => !o)} style={{ display: "flex", width: "100%", alignItems: "center", gap: 6, padding: "5px 2px", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                      Easement rules <span style={{ flex: 1 }} /> <span>{rulesOpen ? "▾" : "▸"}</span>
+                    </button>
+                    {rulesOpen && (() => {
+                      const rule = easeRules[jurKey] || easeRules.generic;
+                      return (
+                        <div style={{ background: "#faf8f3", borderRadius: 8, padding: "7px 9px", marginBottom: 2 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ fontSize: 11, color: PAL.muted }}>Jurisdiction</span>
+                            <select value={jurKey} onChange={(e) => setJurKey(e.target.value)} style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 11.5 }}>
+                              {Object.entries(easeRules).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+                            </select>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontSize: 11, color: PAL.muted }}>Water easement</span>
+                            <NumInput style={{ ...numInput, width: 52 }} value={rule.waterWidth} min={1} onCommit={(n) => setRule(jurKey, { waterWidth: n })} /> <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                            <span style={{ flex: 1 }} />
+                            <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 10.5, color: rule.verified ? "#15803d" : "#b45309", cursor: "pointer", fontWeight: 600 }}>
+                              <input type="checkbox" checked={rule.verified} onChange={(e) => setRule(jurKey, { verified: e.target.checked })} /> {rule.verified ? "verified" : "VERIFY"}
+                            </label>
+                          </div>
+                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.4, marginTop: 5 }}>{rule.note}</div>
+                        </div>
+                      );
+                    })()}
                     <button disabled title="Roadmap — not yet available"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "#faf8f3", color: PAL.muted, fontWeight: 600 }}>
                       🛰 AI corridor scan — coming soon
