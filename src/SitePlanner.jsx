@@ -14,6 +14,8 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
+import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 
 /* ------------------------------------------------------------------ *
  *  Industrial Site Planner — prototype (TestFit-style, industrial)
@@ -588,6 +590,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
+  // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
+  // description → drawn encumbrance). All in one modal.
+  const [titleOpen, setTitleOpen] = useState(false);
+  const [apiKey, setApiKey] = useState(() => getKey());
+  const [titleBusy, setTitleBusy] = useState(false);
+  const [titleErr, setTitleErr] = useState("");
+  const [titleDoc, setTitleDoc] = useState(null);   // { legalDescription, exceptions:[...] }
+  const [excChecked, setExcChecked] = useState({});  // exception index → ticked
+  const [mbText, setMbText] = useState("");          // legal description to plot
+  const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
+  const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
+  const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
+  const titlePdfRef = useRef(null);
+
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
@@ -827,7 +843,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -918,6 +934,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
+    if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
@@ -1132,6 +1149,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setMkPoly(null); setTool("select");
   };
   const translateMarkup = (m, dx, dy) => {
+    if (m.kind === "encumbrance") return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), centerline: (m.centerline || []).map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
     return { ...m, cx: m.cx + dx, cy: m.cy + dy };
@@ -2942,6 +2960,71 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
   };
+  // --- Title reader + metes-and-bounds plotting ---
+  const elRingOf = (el) => (el.points ? el.points : elCorners(el));
+
+  // Parse the legal description and arm POB placement (the user then clicks the
+  // canvas to anchor the point of beginning).
+  const startPlotMetes = () => {
+    const calls = parseCalls(mbText);
+    if (!calls.length) { setTitleErr("No bearing/distance calls found. Paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
+    setTitleErr("");
+    setPobMode({ calls });
+    setTitleOpen(false);
+    setSel(null); setTool("select");
+    setOverlapWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready.`);
+  };
+
+  // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
+  const anchorEncumbrance = (pob) => {
+    const { calls } = pobMode;
+    const path = callsToPath(calls, pob);
+    const closed = pathCloses(path);
+    const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
+    if (!ring || ring.length < 3) { setPobMode(null); setOverlapWarn(""); return; }
+    const gap = misclosure(path);
+    const mk = {
+      id: uid(), kind: "encumbrance",
+      pts: ring, centerline: path, closed,
+      calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
+      label: closed ? "Tract / easement" : "Easement corridor",
+      stroke: "#7c3aed", fill: "#7c3aed", fillOpacity: 0.14, weight: 2, dash: "solid",
+    };
+    pushHistory();
+    setMarkups((a) => [...a, mk]);
+    setSel({ kind: "markup", id: mk.id });
+    setPobMode(null);
+    // overlap check against buildings + paving
+    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(ring, elRingOf(e)));
+    const closeNote = closed && gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "";
+    if (hits.length) {
+      const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
+      const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
+      setOverlapWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`);
+    } else {
+      setOverlapWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`);
+    }
+    setTimeout(() => setOverlapWarn(""), 9000);
+  };
+
+  // Upload + extract a title-commitment PDF via the Claude API.
+  const runTitleExtract = async (file) => {
+    if (!file) return;
+    if (!apiKey) { setTitleErr("Paste your Anthropic API key first."); return; }
+    setTitleBusy(true); setTitleErr("");
+    try {
+      const b64 = await fileToBase64(file);
+      const doc = await readTitlePDF(b64, { apiKey });
+      setTitleDoc(doc);
+      setExcChecked({});
+      if (doc.legalDescription) setMbText(doc.legalDescription);
+    } catch (e) {
+      setTitleErr(/api key|authentication|401/i.test(String(e?.message)) ? "That API key was rejected — check it and try again." : (e?.message || "Extraction failed."));
+    } finally {
+      setTitleBusy(false);
+    }
+  };
+
   const metricRow = (label, value, sub) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5.5px 0", borderBottom: "1px solid #f3efe5" }}>
       <span style={{ fontSize: 12, color: PAL.muted }}>{label}</span>
@@ -3146,6 +3229,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
                   <button style={menuItem(false)} onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
                 </div>
               </>
             )}
@@ -3172,6 +3257,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </pattern>
               <pattern id="pat-water" width="22" height="10" patternUnits="userSpaceOnUse">
                 <path d="M0 5 q5.5 -4 11 0 t11 0" fill="none" stroke="#5d8497" strokeWidth="0.8" opacity="0.45" />
+              </pattern>
+              <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
               </pattern>
             </defs>
 
@@ -3237,6 +3325,24 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const stroke = isSel ? PAL.accent : m.stroke;
                 const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 const fillProps = (m.fillOpacity > 0) ? { fill: m.fill, fillOpacity: m.fillOpacity } : {};
+                if (m.kind === "encumbrance") {
+                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cen = (m.centerline || []).map(f2p);
+                  const ctr = centroid(m.pts), cp = f2p(ctr);
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                      <polygon points={ring} fill="url(#pat-encumber)" stroke={stroke} strokeWidth={sw} strokeDasharray={da} />
+                      {/* centerline + per-call bearing/distance labels */}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={0.8} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {view.ppf > 0.12 && (m.calls || []).map((c, i) => {
+                        const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
+                        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+                        return <text key={i} x={mx} y={my - 3} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
+                      })}
+                      <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="11" fontWeight="700" fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>
+                    </g>
+                  );
+                }
                 if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
                 if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
                 if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
@@ -4345,6 +4451,114 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
           </div>
         </div>
       )}
+      {/* Title reader + metes-and-bounds modal */}
+      {titleOpen && (() => {
+        const calls = parseCalls(mbText);
+        const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
+        const closes = pathCloses(path);
+        return (
+        <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Title reader &amp; metes-and-bounds plotter</h2>
+              <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 14 }}>
+              Upload a title commitment to pull its Schedule B exceptions into a checklist, then plot any metes-and-bounds easement on the plan.
+            </div>
+
+            {/* API key */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: PAL.muted, marginBottom: 5 }}>Anthropic API key</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="password" value={apiKey} placeholder="sk-ant-…" autoComplete="off"
+                  onChange={(e) => { setApiKey(e.target.value); setKey(e.target.value.trim()); }}
+                  style={{ ...numInput, width: "auto", flex: 1, fontFamily: "ui-monospace, monospace" }} />
+                {apiKey && <button className="gbtn" style={chip} onClick={() => { setApiKey(""); setKey(""); }}>Clear</button>}
+              </div>
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 5 }}>
+                Stored only in this browser (localStorage) and sent directly to Anthropic. The PDF reader needs it; the plotter below does not.
+              </div>
+            </div>
+
+            {/* PDF upload + Schedule B */}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14, marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>1 · Schedule B exceptions</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input ref={titlePdfRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }}
+                    onChange={(e) => { runTitleExtract(e.target.files?.[0]); e.target.value = ""; }} />
+                  <button style={{ ...btn(true), padding: "7px 13px", opacity: titleBusy ? 0.6 : 1 }} disabled={titleBusy}
+                    onClick={() => titlePdfRef.current?.click()}>{titleBusy ? "Reading…" : "Upload title PDF"}</button>
+                </div>
+              </div>
+              {titleErr && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 8, lineHeight: 1.45 }}>{titleErr}</div>}
+              {titleDoc && (
+                titleDoc.exceptions.length ? (
+                  <div style={{ border: `1px solid ${PAL.panelLine}`, borderRadius: 10, overflow: "hidden" }}>
+                    {titleDoc.exceptions.map((x, i) => (
+                      <label key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "8px 11px", borderBottom: i < titleDoc.exceptions.length - 1 ? `1px solid ${PAL.panelLine}` : "none", cursor: "pointer", background: excChecked[i] ? "#f6fdf6" : "#fff" }}>
+                        <input type="checkbox" checked={!!excChecked[i]} onChange={(e) => setExcChecked((s) => ({ ...s, [i]: e.target.checked }))} style={{ marginTop: 2 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", gap: 7, alignItems: "baseline", flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, fontWeight: 700, color: PAL.ink }}>{x.number ? `#${x.number}` : `#${i + 1}`}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#fff", background: x.plottable ? "#7c3aed" : PAL.muted, borderRadius: 5, padding: "1px 6px" }}>{x.type}</span>
+                            {x.plottable && <span style={{ fontSize: 10, color: "#7c3aed", fontWeight: 600 }}>plottable</span>}
+                          </div>
+                          <div style={{ fontSize: 12.5, color: PAL.ink, marginTop: 2, lineHeight: 1.4 }}>{x.description}</div>
+                          {x.recordingReference && <div style={{ fontSize: 11, color: PAL.muted, fontFamily: "ui-monospace, monospace", marginTop: 1 }}>{x.recordingReference}</div>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ) : <div style={{ fontSize: 12, color: PAL.muted }}>No Schedule B exceptions were found in that document.</div>
+              )}
+            </div>
+
+            {/* metes-and-bounds plotter */}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
+              <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
+                placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
+                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
+                  {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
+                </div>
+                {calls.length > 0 && !closes && (
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
+                    Corridor width
+                    <input type="number" min={1} value={mbWidth} onChange={(e) => setMbWidth(Math.max(1, +e.target.value || 1))} style={{ ...numInput, width: 56 }} /> ft
+                  </label>
+                )}
+                <div style={{ flex: 1 }} />
+                <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={startPlotMetes}>Plot on canvas →</button>
+              </div>
+              {calls.length > 0 && (
+                <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
+                  {calls.map((c, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
+                      <span>{i + 1}. {c.bearing}</span><span>{c.distFt.toFixed(2)}′</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
+      {(pobMode || overlapWarn) && (
+        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
+          background: overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode ? PAL.accent : "#15803d"),
+          color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : overlapWarn}</span>
+          {pobMode && <button onClick={() => { setPobMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+        </div>
+      )}
+
       {typeMenu && (() => {
         const MW = 200, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
         const left = Math.max(GAP, Math.min(typeMenu.x + 6, vw - MW - GAP));
