@@ -14,6 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
+import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -50,6 +51,39 @@ export const STATEWIDE = {
   },
 };
 
+/* Utility-evidence layers — power & hydrant evidence from crowd/agency sources,
+ * for siting around overhead electric and fire protection. LIVE, view-driven
+ * (OSM/Mapillary refetch as you pan); HIFLD/COH are agency image services. Each
+ * declares a `kind` the sync helper dispatches on. Shown on both pages. */
+export const EVIDENCE = {
+  osm_power: {
+    kind: "overpass", label: "Power lines & poles (OSM)", opacity: 0.9,
+    query: { lines: true, poles: true, substations: true },
+    note: "OpenStreetMap — transmission solid, distribution dashed; poles/towers as dots. Loads at zoom ≥ 14.",
+  },
+  osm_hydrants: {
+    kind: "overpass", label: "Fire hydrants (OSM)", opacity: 0.9,
+    query: { hydrants: true },
+    note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
+  },
+  mapillary: {
+    kind: "mapillary", label: "Street-level detections (Mapillary)", opacity: 0.95,
+    note: "Crowdsourced pole/hydrant detections — needs a free Mapillary token (set below). Loads at zoom ≥ 16.",
+  },
+  hifld_tx: {
+    kind: "dynamic", label: "Transmission lines (HIFLD)",
+    url: "https://oceandata.rad.rutgers.edu/arcgis/rest/services/RenewableEnergy/HIFLD_Electric_SubstationsTransmissionLines/MapServer",
+    layers: null, opacity: 0.85,
+    note: "HIFLD ≥69 kV transmission + substations — regional/schematic. Endpoint provisional (research mirror); verify live.",
+  },
+  coh_hydrants: {
+    kind: "dynamic", label: "Fire hydrants (City of Houston)",
+    url: "https://mycity2.houstontx.gov/pubgis02/rest/services/HoustonMap/Public_safety/MapServer",
+    layers: [9], opacity: 0.95, county: "harris",
+    note: "City of Houston Public Works fire hydrants.",
+  },
+};
+
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
 // then merge with the statewide overlays. The sync helper manages every layer by
 // id, so a layer keeps its toggle state across county switches; the sidebar only
@@ -58,7 +92,7 @@ export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...EVIDENCE, ...JLAYERS };
 
 // Fresh per-layer UI state (all off, each at its default opacity).
 export const defaultOverlayState = () => {
@@ -79,16 +113,22 @@ export function syncOverlayLayers(map, overlays, refs, { pane = "envpane", paneZ
     const st = overlays[k], cur = refs[k];
     if (!st) return;
     if (st.on && !cur) {
-      const opts = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
-      if (cfg.layers) opts.layers = cfg.layers; // omit → server shows all sub-layers
-      const lyr = EL.dynamicMapLayer(opts);
-      if (onError) lyr.on("requesterror", () => onError(cfg));
+      let lyr;
+      if (cfg.kind === "overpass") lyr = overpassLayer(cfg.query);
+      else if (cfg.kind === "mapillary") lyr = mapillaryLayer();
+      else { // image overlay (esri dynamic MapServer)
+        const opts = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
+        if (cfg.layers) opts.layers = cfg.layers; // omit → server shows all sub-layers
+        lyr = EL.dynamicMapLayer(opts);
+        if (onError) lyr.on("requesterror", () => onError(cfg));
+      }
+      if (lyr.setOpacity) lyr.setOpacity(st.opacity);
       lyr.addTo(map);
       refs[k] = lyr;
     } else if (!st.on && cur) {
       try { map.removeLayer(cur); } catch (_) {}
       refs[k] = null;
-    } else if (cur) {
+    } else if (cur && cur.setOpacity) {
       cur.setOpacity(st.opacity);
     }
   });

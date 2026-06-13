@@ -66,7 +66,36 @@ npm run preview
   `{points,…}`. Rectangles get exact stall striping; polygons get area-based
   estimates.
 
+## 4b. Map-layer system (shared by both pages)
+- One source of truth: `src/lib/layers.js` (`STATEWIDE`, `EVIDENCE`, jurisdiction
+  flattening, `defaultOverlayState`, `syncOverlayLayers`) + `src/components/
+  LayerPanel.jsx` (toggle/opacity UI). **Both** MapFinder and SitePlanner consume
+  these, so a layer added once appears on both surfaces.
+- Layer `kind`s: `dynamic` (esri `dynamicMapLayer` image overlay — FEMA, NWI,
+  TxRRC, jurisdiction utilities, HIFLD, COH), `overpass` and `mapillary` (live,
+  view-driven vector layers in `src/lib/evidenceLayers.js`).
+- **Planner is geographic** (Phase 1): a non-interactive Leaflet Web-Mercator
+  basemap + the shared overlays sit *behind* the (transparent) feet-based SVG,
+  anchored to the site `origin`. Geometry/metrics stay in feet (projection-
+  independent); `ppfToZoom` + canvas-centre→latlng lock the basemap to the view.
+  Feet↔deg uses the Mercator sphere base (≈365223 ft/deg, both axes) so drawn
+  geometry overlays the aerial with sub-pixel error.
+- **Mapillary token is a secret** — read from `import.meta.env.VITE_MAPILLARY_TOKEN`
+  (set as a GitHub Actions/CI secret at build) or a user-entered localStorage
+  value. **Never commit a token.** Same rule as the title-reader Anthropic key.
+- Known caveat: Print/PNG export clones the SVG and can't capture the live Leaflet
+  basemap/overlay tiles (cross-origin canvas). With the basemap off, the captured
+  screenshot underlay still prints.
+
 ## 5. Known limitations / roadmap
+- **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
+  draw a ≤2 sq-mi box, fetch public-domain NAIP aerial tiles for it, send tiles to
+  the Claude API vision model to flag pole/hydrant candidates, then georeference
+  hits back onto the plan as confirm/reject pins. **Requirements when built:** show
+  the tile count + estimated API cost *before* running (explicit confirm), and read
+  the Claude API key from env/secrets or user input — never commit it (same rule as
+  the title reader). There is a disabled, labeled "🛰 AI corridor scan — coming
+  soon" button in the planner Layers control; wire it here.
 - Polygon elements: vertex editing **is** supported (drag a dot, ＋ on an edge
   adds a corner, Shift-click deletes — same as parcels), but striping is **not
   clipped** to the polygon (counts are area-based estimates).

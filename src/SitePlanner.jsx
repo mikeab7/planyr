@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
+import { fetchOverpass } from "./lib/evidenceLayers.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
@@ -637,6 +638,10 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const overlayRefs = useRef({});
+  // Utility-evidence drawing: manual power-line trace + inferred water main.
+  const [traceMode, setTraceMode] = useState(false);
+  const [tracePts, setTracePts] = useState([]);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -928,11 +933,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
+      if (e.key === "Enter" && traceMode && tracePts.length >= 2) { e.preventDefault(); commitTrace(); return; }
       if (e.key === "Enter" && tool === "mpolyline" && mkPoly?.pts?.length >= 2) { e.preventDefault(); finishMkPoly(); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -1024,6 +1030,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
+    if (traceMode) { setTracePts((a) => [...a, snapPt(fp)]); return; } // power-line quick-trace point
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
@@ -1625,7 +1632,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (tool === "mpolygon" || tool === "mpolyline") finishMkPoly(); else if (draftElPoly) closeElPoly(); };
+  const onBgDouble = () => { if (traceMode) commitTrace(); else if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (tool === "mpolygon" || tool === "mpolyline") finishMkPoly(); else if (draftElPoly) closeElPoly(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -3096,6 +3103,52 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setTimeout(() => setOverlapWarn(""), 9000);
   };
 
+  // Manual quick-trace of an overhead power line on the aerial: click points,
+  // double-click / Enter to finish. Commits a labeled polyline markup.
+  const commitTrace = () => {
+    if (tracePts.length >= 2) {
+      pushHistory();
+      const mk = { id: uid(), kind: "traced", pts: tracePts, label: "Overhead electric (traced)", stroke: "#b45309", weight: 2.6, dash: "solid" };
+      setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+    }
+    setTracePts([]); setTraceMode(false);
+  };
+
+  // Inferred water main: connect the fire hydrants currently in view (OSM) into a
+  // nearest-neighbour path, drawn dashed and labeled screening-only.
+  const inferWaterMain = async () => {
+    if (!origin || evidenceBusy) return;
+    setEvidenceBusy(true); setOverlapWarn("Fetching hydrants in view…");
+    try {
+      const corners = [[0, 0], [size.w, 0], [0, size.h], [size.w, size.h]].map(([px, py]) =>
+        feetToLatLng({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf }, origin.lat, origin.lon));
+      const lats = corners.map((c) => c[0]), lngs = corners.map((c) => c[1]);
+      const bb = { s: Math.min(...lats), n: Math.max(...lats), w: Math.min(...lngs), e: Math.max(...lngs) };
+      const els = await fetchOverpass(bb, { hydrants: true });
+      const feet = els.filter((e) => e.type === "node" && e.lat != null)
+        .map((e) => lngLatRingToFeet([[e.lon, e.lat]], origin.lon, origin.lat)[0]);
+      if (feet.length < 2) { setOverlapWarn(`Only ${feet.length} hydrant${feet.length === 1 ? "" : "s"} in view — need ≥ 2 to infer a main. Zoom/pan to include a run of hydrants.`); setTimeout(() => setOverlapWarn(""), 7000); return; }
+      // nearest-neighbour order starting from the westmost hydrant
+      const remaining = feet.slice();
+      let cur = remaining.reduce((a, b) => (b.x < a.x ? b : a), remaining[0]);
+      remaining.splice(remaining.indexOf(cur), 1);
+      const ordered = [cur];
+      while (remaining.length) {
+        let bi = 0, bd = Infinity;
+        remaining.forEach((p, i) => { const d = Math.hypot(p.x - cur.x, p.y - cur.y); if (d < bd) { bd = d; bi = i; } });
+        cur = remaining.splice(bi, 1)[0]; ordered.push(cur);
+      }
+      pushHistory();
+      const mk = { id: uid(), kind: "infwater", pts: ordered, label: "Inferred water main (screening only)", stroke: "#0891b2", weight: 2, dash: "dashed" };
+      setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
+      setOverlapWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`);
+      setTimeout(() => setOverlapWarn(""), 8000);
+    } catch (_) {
+      setOverlapWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.");
+      setTimeout(() => setOverlapWarn(""), 6000);
+    } finally { setEvidenceBusy(false); }
+  };
+
   // Upload + extract a title-commitment PDF via the Claude API.
   const runTitleExtract = async (file) => {
     if (!file) return;
@@ -3335,7 +3388,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: "transparent", pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3417,6 +3470,20 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 const stroke = isSel ? PAL.accent : m.stroke;
                 const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 const fillProps = (m.fillOpacity > 0) ? { fill: m.fill, fillOpacity: m.fillOpacity } : {};
+                if (m.kind === "traced" || m.kind === "infwater") {
+                  const pp = m.pts.map((p) => f2p(p));
+                  const s = pp.map((q) => `${q.x},${q.y}`).join(" ");
+                  const mid = pp[Math.floor((pp.length - 1) / 2)];
+                  const col = isSel ? PAL.accent : m.stroke;
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                      <polyline points={s} fill="none" stroke={col} strokeWidth={m.weight ?? 2.4} strokeDasharray={dashArray(m.dash, m.weight ?? 2.4)} strokeLinejoin="round" />
+                      {m.kind === "infwater" && pp.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill="#dc2626" stroke="#fff" strokeWidth={1} />)}
+                      {m.kind === "traced" && pp.map((q, i) => <rect key={i} x={q.x - 2} y={q.y - 2} width={4} height={4} fill={col} stroke="#fff" strokeWidth={0.8} />)}
+                      {mid && <text x={mid.x} y={mid.y - 6} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={col} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{m.label}</text>}
+                    </g>
+                  );
+                }
                 if (m.kind === "encumbrance") {
                   const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline || []).map(f2p);
@@ -3442,6 +3509,15 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
                 return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
               })}
+              {/* in-progress power-line trace */}
+              {traceMode && tracePts.length > 0 && (() => {
+                const pp = tracePts.map((p) => f2p(p));
+                const s = [...pp, cursor ? f2p(cursor) : pp[pp.length - 1]].map((q) => `${q.x},${q.y}`).join(" ");
+                return <g data-export="skip" pointerEvents="none">
+                  <polyline points={s} fill="none" stroke="#b45309" strokeWidth={2.4} strokeDasharray="6 4" />
+                  {pp.map((q, i) => <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} fill="#b45309" stroke="#fff" strokeWidth={1} />)}
+                </g>;
+              })()}
               {/* multi-select outlines + marquee */}
               {multi.length > 1 && multi.map((m) => {
                 const o = m.kind === "el" ? els.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
@@ -3765,6 +3841,22 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     <span style={{ flex: 1 }}>Aerial basemap</span>
                   </label>
                   <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} />
+                  {/* utility-evidence drawing tools */}
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
+                    <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
+                    <button onClick={() => { setTracePts([]); setTraceMode((m) => !m); }} title="Click along a visible pole line on the aerial; double-click or Enter to finish"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${traceMode ? "#b45309" : PAL.panelLine}`, background: traceMode ? "#b45309" : "#fff", color: traceMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      {traceMode ? "✏ Tracing… (Esc / dbl-click to finish)" : "✏ Trace overhead electric"}
+                    </button>
+                    <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
+                      {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
+                    </button>
+                    <button disabled title="Roadmap — not yet available"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "not-allowed", border: `1px dashed ${PAL.panelLine}`, background: "#faf8f3", color: PAL.muted, fontWeight: 600 }}>
+                      🛰 AI corridor scan — coming soon
+                    </button>
+                  </div>
                   <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 6 }}>Layers sit beneath your drawing and stay locked to the plan as you pan and zoom.</div>
                 </div>
               )}
