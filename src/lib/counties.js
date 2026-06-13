@@ -110,28 +110,32 @@ export const JURISDICTION_LAYERS = {
       // viewer pulls from is geogimstest.houstontx.gov/arcgis/rest — CONFIRMED live,
       // 200 + metadata, and CORS-open to https://mikeab7.github.io (probe + export
       // both work). Folders HW (Water_gx, WasteWater_gx) and TDO (UN_Stormwater).
-      // Caveat: it's the *test* environment (the only host serving these utility-
-      // network services with CORS). Swap to a prod host later if the City exposes
-      // one — low-risk now that layers fail loudly with a reason.
+      // The network sublayers are default-OFF and/or scale-gated, so we pin the
+      // pipe/main sublayer IDs via `layers` (→ export `layers=show:…`) or the export
+      // paints blank. IDs verified from each service's /MapServer/layers. Coverage is
+      // CITY OF HOUSTON ONLY (transparent outside the city — a real boundary, not a
+      // bug). Trunk lines (Gravity Main 2, Pipe 22) are minScale ~1:40k → only at
+      // site-plan zoom. Caveat: it's the *test* host (only confirmed CORS source);
+      // swap to a prod host later if the City exposes one.
       coh_ww: {
         label: "Houston wastewater",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
-        layers: null,
-        note: "City of Houston sanitary sewer (geogimstest — City's published source).",
+        layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
+        note: "City of Houston sanitary sewer (geogimstest). COH only; trunk mains show at site-plan zoom.",
         opacity: 0.85,
       },
       coh_storm: {
         label: "Houston storm sewer",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
-        layers: null,
-        note: "City of Houston storm drainage (geogimstest — City's published source).",
+        layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
+        note: "City of Houston storm drainage (geogimstest). COH only; pipes show at site-plan zoom.",
         opacity: 0.85,
       },
       coh_water: {
         label: "Houston water lines",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
-        layers: null,
-        note: "City of Houston potable water (geogimstest — City's published source).",
+        layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
+        note: "City of Houston potable water (geogimstest). COH only.",
         opacity: 0.85,
       },
     },
