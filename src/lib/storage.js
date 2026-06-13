@@ -9,14 +9,26 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate } from "./siteModel.js";
-import { cloudUpsert, cloudDelete } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList } from "./cloudSync.js";
 
-/* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id
- * and writes are mirrored to Supabase (RLS-scoped to them). Logged out, activeUser
- * is null and everything stays 100% localStorage (unchanged). */
+/* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
+ * the working store switches to a per-user local cache (pulled from Supabase on
+ * login) and writes mirror to Supabase (RLS-scoped to them). Logged out,
+ * activeUser is null and everything stays 100% localStorage (the legacy store). */
 let activeUser = null;
 export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
+const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
+// Pull the signed-in user's sites from the cloud into their local cache (replaces
+// it, so a stale cache can't linger). Returns the count.
+export async function pullCloud(uid) {
+  const models = await cloudList(uid);
+  const map = {};
+  for (const m of models) { const norm = createSiteModel(m); if (norm.id) map[norm.id] = norm; }
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  return models.length;
+}
+export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {
@@ -88,14 +100,16 @@ export const storage = {
  *   plan = { id, groupId, site, name, origin:{lat,lon}|null, updatedAt,
  *            parcels, els, measures, settings, underlay }
  * ----------------------------------------------------------------------- */
-const SITES_KEY = "planarfit:sites:v1";
+const SITES_KEY = "planarfit:sites:v1"; // legacy / logged-out store
 const CURRENT_KEY = "planarfit:currentSite:v1";
+// Active store key: the per-user cloud cache when signed in, else the legacy store.
+const sitesKey = () => (activeUser ? cloudKey(activeUser) : SITES_KEY);
 
 function readSites() {
-  try { return JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) { return {}; }
+  try { return JSON.parse(localStorage.getItem(sitesKey())) || {}; } catch (_) { return {}; }
 }
 function writeSites(obj) {
-  try { localStorage.setItem(SITES_KEY, JSON.stringify(obj)); return true; }
+  try { localStorage.setItem(sitesKey(), JSON.stringify(obj)); return true; }
   catch (_) {
     // Over quota — usually a pasted screenshot dataURL. Drop those and retry so
     // the (much smaller) geometry of every site still persists.
@@ -105,7 +119,7 @@ function writeSites(obj) {
         const u = s.underlay;
         slim[id] = u && String(u.src || "").startsWith("data:") ? { ...s, underlay: null } : s;
       }
-      localStorage.setItem(SITES_KEY, JSON.stringify(slim));
+      localStorage.setItem(sitesKey(), JSON.stringify(slim));
       return true;
     } catch (_2) { return false; }
   }

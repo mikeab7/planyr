@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
-import { getUser, onAuthChange } from "./lib/auth.js";
+import { onAuthChange } from "./lib/auth.js";
 import AuthPanel from "./components/AuthPanel.jsx";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, clearCloudCache } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -55,14 +55,41 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const prevUid = useRef(null);
+
+  // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
+  // sites into their local cache and make that the active store (cloud is home);
+  // logged out → back to the legacy localStorage store. Reset the view on a real
+  // switch so we never show one account's pointer against another's data.
+  const applyUser = async (u, event) => {
+    const uid = (u && u.id) || null;
+    setUser(u);
+    setActiveUser(uid);
+    if (uid) {
+      setCloudLoading(true);
+      try { await pullCloud(uid); } catch (_) {}
+      setCloudLoading(false);
+      const cur = getCurrentSiteId();
+      if (cur && loadSite(cur)) { setActiveSiteId(cur); setMode("plan"); } // resume if it's one of theirs
+      else { setActiveSiteId(null); setMode("map"); }
+      refreshSites();
+    } else {
+      if (prevUid.current) clearCloudCache(prevUid.current); // don't leave cloud data cached after logout
+      if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
+      refreshSites();
+    }
+    prevUid.current = uid;
+  };
+
   useEffect(() => {
     if (!supabaseConfigured()) return;
-    getUser().then((u) => { setUser(u); setActiveUser(u && u.id); });
     return onAuthChange((event, u) => {
-      setUser(u);
-      setActiveUser(u && u.id); // logged in → cloud is the home for saves; logged out → localStorage
-      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+      if (event === "PASSWORD_RECOVERY") { setUser(u); setRecovery(true); setAuthOpen(true); return; }
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") { setUser(u); return; } // keep session; don't re-switch
+      applyUser(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
@@ -204,6 +231,11 @@ export default function App() {
         </button>
       )}
       {authOpen && <AuthPanel user={user} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />}
+      {cloudLoading && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
+          <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
+        </div>
+      )}
 
       {/* PHASE 1 Supabase connection indicator (diagnostic; no data read/written) */}
       {(() => {

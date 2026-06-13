@@ -168,10 +168,18 @@ not skip ahead:**
   browser; all client access is the public anon key + a user JWT, which RLS gates.)
   Policy SQL lives in the dashboard; mirrored below for the record. **No app change
   — persistence is still localStorage.**
-- **Phase 4 — wire save/load + migrate.** Route `storage.js` reads/writes through
-  Supabase (localStorage becomes offline cache), and **one-time upload of every
-  existing browser-stored site** to the user's account. **Migration MUST preserve
-  all existing localStorage sites — no data loss.**
+- **Phase 4 — cloud save/load, NO migration (DONE).** Storage behavior is
+  auth-driven: **logged in → the cloud is the home for data** — `storage.js` switches
+  its working store to a per-user local cache (`planarfit:sites:cloud:<uid>`) pulled
+  from Supabase on login (`pullCloud`), writes mirror to the `sites` table
+  (`pushSiteToCloud` / `cloudSync.js`), and the save badge stays "Saving…" until the
+  cloud upsert resolves (only "Saved ✓" on real success). **Logged out → legacy
+  localStorage** (`planarfit:sites:v1`), unchanged. On logout the cloud cache is
+  cleared; auth switches reset the view (resume only if the current id is one of
+  theirs). Embedded screenshot dataURLs are stripped from cloud rows (kept locally).
+  **Deliberately NO migration of existing localStorage sites** (user has few; will
+  recreate) — legacy sites remain in the logged-out store, reachable by signing out.
+  TOKEN_REFRESHED/USER_UPDATED don't re-switch (no yanking mid-edit).
 
 **Table schema** (matches the Site Model — one row per plan, keyed by owner + id):
 ```sql
@@ -199,7 +207,9 @@ create policy "Users update own sites" on public.sites
 create policy "Users delete own sites" on public.sites
   for delete to authenticated using ((select auth.uid()) = user_id);
 ```
-The migrate-on-login + save/load wiring is Phase 4 (not built yet).
+Phase 4 (cloud save/load) is wired; **migration was deliberately skipped** (recreate
+the few existing sites manually). Cloud rows: `data` holds the serialized model;
+`group_id/site/name/county/updated_at` are duplicated for querying.
 
 ## 5. Known limitations / roadmap
 - **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
@@ -233,7 +243,7 @@ items between buckets as they ship. Don't infer scope creep — build only what'
 - **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
 - **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
 - **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
-- **Supabase backend — Phase 1 (connect) + 2 (login) + 3 (RLS)** — connection chip; email/password auth via the account pill; `sites` table locked private-by-default (own-rows-only; no sharing/admin — deferred). **Still additive — storage is localStorage.** (See "## Backend (Supabase)"; Phase 4 = wire save/load + migrate, next.)
+- **Supabase backend — Phases 1–4 DONE** — connect (chip) → login (account pill) → RLS (private-by-default) → **cloud save/load** (logged in = cloud is home, per-user RLS-scoped; logged out = legacy localStorage). **No data migration** (recreate few legacy sites manually). Save badge reflects the real cloud write. (See "## Backend (Supabase)".) Deferred: sharing/workspaces/admin; offline write queue.
 
 ### ⛔ Known issues / blocked on external services
 - **Houston water/wastewater/storm** — on the City's **TEST** host `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`) — the only CORS-clean host serving these; `geogimsprod` is viewer-only (no `/arcgis/rest`), `geohwp` has a different catalog. It works but is a **test environment that could change without notice** — replace with a production COH equivalent if one becomes available; the probe + ~45s self-heal already cover it failing gracefully. Sublayers are pinned (`layers=show:` — water 0,1; wastewater 2,6; storm 22,23,24,904) because defaults render meters, not mains/pipes. **Expected, not bugs:** trunk lines (Gravity Main, Pipe) are scale-gated to ~≥1:40k (zoom in to see them); coverage is City-of-Houston-only (transparent outside the city).
