@@ -162,6 +162,47 @@ reducer is a deferred, separate task).
 - Nice-to-haves: polygon vertex edit, true striping in polygons, more counties,
   DXF/PDF export.
 
+## Roadmap (by status)
+Living plan so nothing planned is lost between sessions. Keep entries terse; move
+items between buckets as they ship. Don't infer scope creep — build only what's asked.
+
+### ✅ Done (verified on the live site)
+- **Geographic basemap refactor** — planner renders on a real Web-Mercator basemap anchored to the site origin; geometry/metrics stay in feet.
+- **Shared layer state** — one `overlays` object in `App`, used by both pages (toggle on one shows on the other).
+- **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
+- **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
+- **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
+
+### ⛔ Known issues / blocked on external services
+- **Houston water/wastewater/storm** — re-pointed to `geogimsprod` (VERIFY); City HPW services were stopped server-side and couldn't be enumerated. Storm needs its exact service path confirmed. Should self-heal via re-probe when the City restarts them; capture real URLs from the viewer's Network tab if probes report failed.
+- General: county/city GIS hosts move and stop often — rely on the probe + honest error surfacing, never hardcode-and-assume.
+
+### Tier 1 — site-killers (binary go/no-go; highest priority; NOT built)
+- **Storm outfall + discharge rate** — where can the site legally discharge, at what allowable rate (HCFCD criteria / NOAA Atlas 14 rainfall). Drives detention sizing and whether the site works at all.
+- **Sanitary sewer** — gravity vs lift-station required, septic feasibility, downstream capacity. A forced lift station / no-capacity finding can kill a deal.
+- **Fire flow** — required gpm for sprinklered industrial buildings; needs a utility "will-serve" input. Inadequate fire flow blocks occupancy.
+- **Finished-floor vs base-flood-elevation** — FFE must clear BFE+freeboard; ties to the FEMA layer + elevation data.
+- **Environmental screen** — TCEQ LPST (leaking petroleum tanks) + EPA databases near/under the site; flags contamination risk early.
+- **Entitlement envelope** — zoning/jurisdiction status: Houston (no zoning) vs unincorporated county ETJ vs incorporated city (real zoning). Determines what's even allowed.
+
+### Tier 2 — cost-swingers (need elevation data; 3DEP layer is in)
+- **Earthwork / cut-fill balance** — from 3DEP, estimate import/export dirt volume and balance; a major, swingy cost line.
+- **NRCS soils layer** — bearing/expansive clay/hydric soils → foundation + detention + earthwork cost.
+
+### Tier 3 — layout validators
+- **Truck + fire swept-path** — WB-67 turning templates and fire-apparatus access; validates the drawn layout actually functions.
+- **Driveway / access permitting** — TxDOT (state road) vs county driveway rules; affects access feasibility.
+
+### Tier 4 — the payoff (synthesis / verdict engine)
+- **Net buildable area** after all constraints (setbacks, easements, floodplain, wetlands, utilities, slopes) — reads the whole Site Model via `developableArea()` (currently a stub).
+- **Rough site-cost estimate** — earthwork + detention + offsite utilities.
+- **Yield-on-cost** and a **punch-list of what public data can't answer** (boundary survey, geotech, title commitment, will-serve letters).
+
+### Feature ideas (not yet scheduled)
+- **Stale-while-revalidate GIS caching** — instant paint from last-known-good copy, refresh in background, show "data age" + screening-only caveat; pairs with the probe/self-heal.
+- **AI corridor scan** — roadmap-only (disabled placeholder exists); NAIP imagery + Claude vision to flag poles/hydrants; MUST show tile count + estimated API cost before running; paid API key from env/secrets, never committed. (Full spec above in §5.)
+- **Planner single-reducer rewrite** — collapse the planner's in-component `useState` into one `useReducer(SiteModel)` and physically split `els`/`markups` into typed buckets (Option B, deferred from the site-model refactor).
+
 ## 6. Conventions for future sessions
 - **Develop on `main` and push to deploy** — the user authorized straight-to-live.
   A stale branch `claude/clever-babbage-vj59nr` exists; ignore it — `main` is the
