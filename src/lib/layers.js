@@ -84,6 +84,12 @@ export const EVIDENCE = {
     layers: [9], opacity: 0.95, county: "harris",
     note: "City of Houston Public Works fire hydrants.",
   },
+  elevation: {
+    kind: "esriImage", label: "Elevation / hillshade (USGS 3DEP)",
+    url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
+    rendering: "Elevation Tinted Hillshade", opacity: 0.55,
+    note: "USGS 3DEP LiDAR bare-earth DEM — screening only, verify with survey. The cross-section tool samples it.",
+  },
 };
 
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
@@ -118,6 +124,12 @@ export function syncOverlayLayers(map, overlays, refs, { pane = "envpane", paneZ
       let lyr;
       if (cfg.kind === "overpass") lyr = overpassLayer(cfg.query);
       else if (cfg.kind === "mapillary") lyr = mapillaryLayer();
+      else if (cfg.kind === "esriImage") { // esri ImageServer (e.g. 3DEP elevation, hillshade)
+        const opts = { url: cfg.url, opacity: st.opacity, pane };
+        if (cfg.rendering) opts.renderingRule = { rasterFunction: cfg.rendering };
+        lyr = EL.imageMapLayer(opts);
+        if (onError) lyr.on("requesterror", () => onError(cfg));
+      }
       else if (cfg.kind === "esriFeature") { // vector feature service (crisp, attribute-rich)
         lyr = EL.featureLayer({
           url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false,

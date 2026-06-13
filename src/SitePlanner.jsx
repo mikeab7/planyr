@@ -6,6 +6,7 @@ import { loadAndDownscaleImage } from "./lib/image.js";
 import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
+import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
@@ -714,6 +715,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [easeRules, setEaseRules] = useState(loadEasementRules);
   const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county || "harris"));
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [xsecMode, setXsecMode] = useState(false);   // ditch cross-section: click two points
+  const [xsecPts, setXsecPts] = useState([]);
+  const [xsec, setXsec] = useState(null);            // { p0, p1, lenFt, busy, stats } result
 
   /* Create the (non-interactive) Leaflet basemap once for a located site. The
      SVG above owns all interaction; this map is a pure backdrop, driven by the
@@ -1010,7 +1014,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -1102,6 +1106,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
+    if (xsecMode) { // ditch cross-section: two clicks → sample elevations
+      const sp = snapPt(fp);
+      if (xsecPts.length === 0) { setXsecPts([sp]); setOverlapWarn("Click the far side of the ditch."); }
+      else { runXSection(xsecPts[0], sp); }
+      return;
+    }
     if (traceMode) { setTracePts((a) => [...a, snapPt(fp)]); return; } // power-line quick-trace point
     if (routeMode) { // utility service routing: pick source, then a building
       if (routeMode.stage === "source") {
@@ -3264,6 +3274,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     setTimeout(() => setOverlapWarn(""), 8000);
   };
 
+  // Ditch cross-section: sample the 3DEP DEM along the drawn line (screening only).
+  const runXSection = async (p0, p1) => {
+    if (!origin) { setOverlapWarn("Cross-section needs a located site (a real-world origin)."); setTimeout(() => setOverlapWarn(""), 6000); return; }
+    const lenFt = _hyp(p0, p1);
+    setXsec({ p0, p1, lenFt, busy: true, stats: null });
+    setXsecMode(false); setXsecPts([]);
+    try {
+      const a = feetToLatLng(p0, origin.lat, origin.lon), b = feetToLatLng(p1, origin.lat, origin.lon);
+      const elev = await sampleProfile([[a[1], a[0]], [b[1], b[0]]], 48); // [lng,lat]
+      const stats = ditchStats(elev, lenFt);
+      if (!stats) throw new Error("no samples");
+      setXsec({ p0, p1, lenFt, busy: false, stats });
+    } catch (_) {
+      setXsec(null);
+      setOverlapWarn("Couldn't sample USGS 3DEP elevation there (service/coverage). Try again or a different line.");
+      setTimeout(() => setOverlapWarn(""), 7000);
+    }
+  };
+
   const setRule = (key, patch) => setEaseRules((r) => { const next = { ...r, [key]: { ...r[key], ...patch } }; saveEasementRules(next); return next; });
   const startWaterRoute = () => {
     const rule = easeRules[jurKey] || easeRules.generic;
@@ -3509,7 +3538,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: "transparent", pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3646,6 +3675,9 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
                 return <rect key={m.id} x={c.x - w / 2} y={c.y - h / 2} width={w} height={h} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
               })}
+              {/* ditch cross-section line (in-progress + last result) */}
+              {(xsecMode && xsecPts.length === 1 && cursor) && (() => { const a = f2p(xsecPts[0]), b = f2p(cursor); return <line data-export="skip" x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2} strokeDasharray="6 4" pointerEvents="none" />; })()}
+              {xsec && (() => { const a = f2p(xsec.p0), b = f2p(xsec.p1); return <g data-export="skip" pointerEvents="none"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={2.4} /><circle cx={a.x} cy={a.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /><circle cx={b.x} cy={b.y} r={3.5} fill="#0e7490" stroke="#fff" strokeWidth={1} /></g>; })()}
               {/* in-progress utility route (source → cursor) */}
               {routeMode?.stage === "building" && routeMode.source && cursor && (() => {
                 const a = f2p(routeMode.source), b = f2p(cursor);
@@ -4004,6 +4036,11 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
+                    </button>
+                    <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); setOverlapWarn("Click one bank of the ditch, then the other side."); } else setOverlapWarn(""); }}
+                      title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "#fff", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
+                      {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
                     </button>
                     {/* per-jurisdiction easement-rule table (editable; placeholders marked VERIFY) */}
                     <button onClick={() => setRulesOpen((o) => !o)} style={{ display: "flex", width: "100%", alignItems: "center", gap: 6, padding: "5px 2px", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>
@@ -4969,6 +5006,39 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       })()}
 
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
+      {/* ditch cross-section result */}
+      {xsec && (
+        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
+            <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
+          </div>
+          {xsec.busy ? (
+            <div style={{ fontSize: 12, color: PAL.muted, padding: "10px 0" }}>Sampling USGS 3DEP elevation…</div>
+          ) : xsec.stats && (() => {
+            const s = xsec.stats, W = 258, H = 64, span = Math.max(0.5, s.maxFt - s.minFt);
+            const pts = s.profile.map((p) => `${(p.d / xsec.lenFt) * W},${H - ((p.el - s.minFt) / span) * (H - 6) - 3}`).join(" ");
+            return (
+              <div>
+                <svg width={W} height={H} style={{ display: "block", background: "#f8f6f0", borderRadius: 6 }}>
+                  <polyline points={pts} fill="none" stroke="#0e7490" strokeWidth={1.6} />
+                </svg>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: PAL.ink, marginTop: 7, fontFamily: "ui-monospace, monospace" }}>
+                  <span>Depth ≈ <b>{f1(s.depthFt)}′</b></span>
+                  <span>Invert {f1(s.invertFt)}′</span>
+                  <span>Bank {f1(s.bankFt)}′</span>
+                </div>
+                <div style={{ fontSize: 9.5, color: "#b45309", lineHeight: 1.4, margin: "6px 0 8px" }}>Screening only — LiDAR bare-earth, verify with survey.</div>
+                <button onClick={() => {
+                  if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); setOverlapWarn("Available depth applied to the selected pond."); setTimeout(() => setOverlapWarn(""), 4000); }
+                  else { setOverlapWarn("Select a pond first, then apply the available depth."); setTimeout(() => setOverlapWarn(""), 5000); }
+                }} style={{ ...chip, width: "100%", fontWeight: 600 }}>→ Use as detention available depth{selEl?.type === "pond" ? "" : " (select a pond)"}</button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {(pobMode || routeMode || overlapWarn) && (
         <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
           background: overlapWarn.startsWith("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d"),
