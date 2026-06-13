@@ -117,7 +117,7 @@ function siteAcres(site) {
   return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
 }
 
-export default function MapFinder({ visible, county, onCounty, overlays, setOverlays, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, county, onCounty, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displayRef = useRef(null);   // visible parcel-line layer
@@ -204,10 +204,15 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
      pane sits above imagery tiles (200), below the vector pane (400) so parcel
      lines / site plans stay on top. */
   useEffect(() => {
-    syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
-      onError: (cfg) => setErr(`“${cfg.label}” didn't load — that GIS service may be down or moved.`),
+    const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
+      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
     });
-  }, [overlays]);
+    sync();
+    // periodic re-probe so stopped services self-heal when the City/County restart
+    const iv = setInterval(sync, 45000);
+    return () => clearInterval(iv);
+  }, [overlays]); // eslint-disable-line
 
   /* keep the map sized correctly when shown after being hidden */
   useEffect(() => {
@@ -476,7 +481,7 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
           <div style={{ maxHeight: 260, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={county} />
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={county} layerStatus={layerStatus} />
           </div>
         </div>
 

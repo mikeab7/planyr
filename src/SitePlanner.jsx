@@ -592,7 +592,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -769,10 +769,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
     if (!origin) return;
-    syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
-      onError: (cfg) => { setOverlapWarn(`“${cfg.label}” layer didn't load — service may be down or moved.`); setTimeout(() => setOverlapWarn(""), 6000); },
+    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onError: (cfg, msg) => { setOverlapWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`); setTimeout(() => setOverlapWarn(""), 6000); },
     });
-  }, [overlays, origin, basemapOn]);
+    sync();
+    const iv = setInterval(sync, 45000); // re-probe so stopped services self-heal
+    return () => clearInterval(iv);
+  }, [overlays, origin, basemapOn]); // eslint-disable-line
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -4038,7 +4042,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
                     <span style={{ flex: 1 }}>Aerial basemap</span>
                   </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} />
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} />
                   {/* utility-evidence drawing tools */}
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>

@@ -14,7 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -113,45 +113,117 @@ export const defaultOverlayState = () => {
 
 export const jurisdictionFor = (county) => JURISDICTION_LAYERS[county] || null;
 
-/* Reconcile the live esri layers on `map` with the `overlays` state. `refs` is a
- * plain object (id→layer) the caller owns across renders. Creates a dedicated
- * pane above the imagery tiles but below vector/SVG content. */
-export function syncOverlayLayers(map, overlays, refs, { pane = "envpane", paneZ = 350, onError } = {}) {
+const trimUrl = (u) => String(u || "").replace(/\/+$/, "");
+
+// fetch with exponential backoff on transient failures (429/5xx + network errors).
+export async function fetchWithRetry(url, opts = {}, tries = 3) {
+  let delay = 400;
+  for (let i = 0; ; i++) {
+    try {
+      const r = await fetch(url, opts);
+      if (r.ok || ![429, 500, 502, 503, 504].includes(r.status) || i >= tries - 1) return r;
+    } catch (e) {
+      if (i >= tries - 1) throw e;
+    }
+    await new Promise((res) => setTimeout(res, delay));
+    delay *= 2;
+  }
+}
+
+/* Probe an ArcGIS service root for health. ArcGIS returns HTTP 200 with a JSON
+ * error body when a service is missing/stopped, so we parse and treat a present
+ * `.error` as a failure (surfacing the server's message). Cached with a short TTL
+ * so re-probing is cheap and stopped services self-heal on the next probe. */
+const PROBE_TTL = 40000;
+const _probeCache = new Map(); // url -> { ok, error, ts }
+export async function probeService(url) {
+  const key = trimUrl(url);
+  const hit = _probeCache.get(key);
+  if (hit && Date.now() - hit.ts < PROBE_TTL) return hit;
+  let result;
+  try {
+    const r = await fetchWithRetry(`${key}?f=json`, {}, 3);
+    if (!r.ok) result = { ok: false, error: `HTTP ${r.status}` };
+    else {
+      const j = await r.json().catch(() => ({}));
+      result = j && j.error
+        ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
+        : { ok: true, error: null };
+    }
+  } catch (e) {
+    result = { ok: false, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
+  }
+  result.ts = Date.now();
+  _probeCache.set(key, result);
+  return result;
+}
+
+/* Reconcile the live esri/vector layers on `map` with the `overlays` state. `refs`
+ * is a plain object (id→layer) the caller owns across renders.
+ *   onStatus(id, state, msg): "loading" | "loaded" | "empty" | "failed" | null(off)
+ *   onError(cfg, msg): user-facing toast on any failure.
+ * Image/feature layers are health-PROBED first (catches 200-with-error-body), and
+ * nothing is added until the map has a real, non-zero size (kills the degenerate
+ * zero-area export esri-leaflet fires before the map is ready). */
+export function syncOverlayLayers(map, overlays, refs, opts = {}) {
+  const { pane = "envpane", paneZ = 350, onError, onStatus } = opts;
   if (!map) return;
+  // wait for a ready, non-zero-size map before adding raster layers
+  if (!map._loaded) { map.whenReady(() => syncOverlayLayers(map, overlays, refs, opts)); return; }
+  const sz = map.getSize ? map.getSize() : { x: 1, y: 1 };
+  if (!sz.x || !sz.y) {
+    if (!map.__overlayWait) {
+      map.__overlayWait = true;
+      const retry = () => { map.__overlayWait = false; map.off("resize", retry); syncOverlayLayers(map, overlays, refs, opts); };
+      map.on("resize", retry);
+    }
+    return;
+  }
   if (!map.getPane(pane)) map.createPane(pane).style.zIndex = paneZ;
+  const fail = (k, cfg, msg) => { refs[k] = null; onStatus && onStatus(k, "failed", msg); onError && onError(cfg, msg); };
+
   Object.entries(ALL_LAYERS).forEach(([k, cfg]) => {
     const st = overlays[k], cur = refs[k];
     if (!st) return;
     if (st.on && !cur) {
-      let lyr;
-      if (cfg.kind === "overpass") lyr = overpassLayer(cfg.query);
-      else if (cfg.kind === "mapillary") lyr = mapillaryLayer();
-      else if (cfg.kind === "esriImage") { // esri ImageServer (e.g. 3DEP elevation, hillshade)
-        const opts = { url: cfg.url, opacity: st.opacity, pane };
-        if (cfg.rendering) opts.renderingRule = { rasterFunction: cfg.rendering };
-        lyr = EL.imageMapLayer(opts);
-        if (onError) lyr.on("requesterror", () => onError(cfg));
-      }
-      else if (cfg.kind === "esriFeature") { // vector feature service (crisp, attribute-rich)
-        lyr = EL.featureLayer({
-          url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false,
-          style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity: st.opacity, fillOpacity: 0 }),
+      refs[k] = "pending";
+      onStatus && onStatus(k, "loading");
+      const report = (s, msg) => onStatus && onStatus(k, s, msg);
+      if (cfg.kind === "overpass") {
+        const lyr = overpassLayer(cfg.query, report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "mapillary") {
+        if (!mapillaryToken()) { fail(k, cfg, "Add a Mapillary token to enable this layer."); return; }
+        const lyr = mapillaryLayer(report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else {
+        // image / feature service — probe health first
+        probeService(cfg.url).then(({ ok, error }) => {
+          if (refs[k] !== "pending") return; // toggled off while probing
+          if (!ok) return fail(k, cfg, `${cfg.label}: ${error}`);
+          let lyr;
+          if (cfg.kind === "esriImage") {
+            const o = { url: cfg.url, opacity: st.opacity, pane };
+            if (cfg.rendering) o.renderingRule = { rasterFunction: cfg.rendering };
+            lyr = EL.imageMapLayer(o);
+          } else if (cfg.kind === "esriFeature") {
+            lyr = EL.featureLayer({ url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false, style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity: st.opacity, fillOpacity: 0 }) });
+            lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
+          } else {
+            const o = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
+            if (cfg.layers) o.layers = cfg.layers;
+            lyr = EL.dynamicMapLayer(o);
+          }
+          lyr.on("requesterror", (e) => fail(k, cfg, `${cfg.label}: ${e && e.message ? e.message : "request error"}`));
+          lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+          if (lyr.setOpacity) lyr.setOpacity(st.opacity);
+          lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
         });
-        lyr.setOpacity = (o) => { try { lyr.setStyle({ opacity: o }); } catch (_) {} };
-        if (onError) lyr.on("requesterror", () => onError(cfg));
-      } else { // image overlay (esri dynamic MapServer)
-        const opts = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
-        if (cfg.layers) opts.layers = cfg.layers; // omit → server shows all sub-layers
-        lyr = EL.dynamicMapLayer(opts);
-        if (onError) lyr.on("requesterror", () => onError(cfg));
       }
-      if (lyr.setOpacity) lyr.setOpacity(st.opacity);
-      lyr.addTo(map);
-      refs[k] = lyr;
     } else if (!st.on && cur) {
-      try { map.removeLayer(cur); } catch (_) {}
-      refs[k] = null;
-    } else if (cur && cur.setOpacity) {
+      if (cur !== "pending") { try { map.removeLayer(cur); } catch (_) {} }
+      refs[k] = null; onStatus && onStatus(k, null);
+    } else if (cur && cur !== "pending" && cur.setOpacity) {
       cur.setOpacity(st.opacity);
     }
   });

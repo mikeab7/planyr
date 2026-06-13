@@ -69,23 +69,30 @@ function renderOverpass(els, group, opacity) {
   });
 }
 
-/* A view-driven Overpass overlay. `want` selects feature kinds. */
-export function overpassLayer(want) {
+/* A view-driven Overpass overlay. `want` selects feature kinds. `onStatus(state,
+ * msg)` reports loading | loaded | empty | failed for the Layers panel. */
+export function overpassLayer(want, onStatus) {
   const group = L.layerGroup();
   let map = null, lastKey = null, opacity = 0.9, busy = false;
   group.setOpacity = (o) => { opacity = o; group.eachLayer((l) => l.setStyle && l.setStyle({ opacity: o, fillOpacity: o * 0.4 })); };
   const refresh = async () => {
     if (!map || busy) return;
-    if (map.getZoom() < MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; return; }
+    if (map.getZoom() < MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
     const bb = { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() };
     const key = bboxKey(bb) + JSON.stringify(want);
     if (key === lastKey) return;
     lastKey = key;
     let els = _cache.get(key);
-    if (!els) { busy = true; try { els = await fetchOverpass(bb, want); _cache.set(key, els); } catch (_) { lastKey = null; return; } finally { busy = false; } }
+    if (!els) {
+      busy = true; onStatus && onStatus("loading");
+      try { els = await fetchOverpass(bb, want); _cache.set(key, els); }
+      catch (e) { lastKey = null; onStatus && onStatus("failed", `OSM Overpass: ${e.message || "request failed"}`); return; }
+      finally { busy = false; }
+    }
     group.clearLayers();
     renderOverpass(els, group, opacity);
+    onStatus && onStatus(els.length ? "loaded" : "empty", els.length ? null : "No OSM features in view");
   };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
   group.onRemove = function (m) { m.off("moveend", refresh); map = null; lastKey = null; L.LayerGroup.prototype.onRemove.call(this, m); };
@@ -109,14 +116,15 @@ async function fetchMapillary(bounds, token) {
   return (j.data || []).filter((d) => /pole|fire.?hydrant/i.test(d.object_value || ""));
 }
 
-export function mapillaryLayer() {
+export function mapillaryLayer(onStatus) {
   const group = L.layerGroup();
   let map = null, lastKey = null, opacity = 0.95, busy = false;
   group.setOpacity = (o) => { opacity = o; group.eachLayer((l) => l.setStyle && l.setStyle({ opacity: o, fillOpacity: o })); };
   const refresh = async () => {
     if (!map || busy) return;
     const token = mapillaryToken();
-    if (!token || map.getZoom() < MLY_MIN_ZOOM) { group.clearLayers(); lastKey = token ? "zoomed-out" : "no-token"; return; }
+    if (!token) { group.clearLayers(); lastKey = "no-token"; onStatus && onStatus("failed", "Add a Mapillary token to enable this layer."); return; }
+    if (map.getZoom() < MLY_MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MLY_MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
     // clamp to < 0.01° per side (Mapillary bbox limit) around the view centre
     const c = b.getCenter(), h = 0.0045;
@@ -124,9 +132,12 @@ export function mapillaryLayer() {
     const key = bboxKey(bb);
     if (key === lastKey) return;
     lastKey = key;
-    let feats; busy = true;
-    try { feats = await fetchMapillary(bb, token); } catch (_) { lastKey = null; return; } finally { busy = false; }
+    let feats; busy = true; onStatus && onStatus("loading");
+    try { feats = await fetchMapillary(bb, token); }
+    catch (e) { lastKey = null; onStatus && onStatus("failed", `Mapillary: ${e.message || "request failed"}`); return; }
+    finally { busy = false; }
     group.clearLayers();
+    onStatus && onStatus(feats.length ? "loaded" : "empty", feats.length ? null : "No detections in view");
     feats.forEach((f) => {
       const g = f.geometry; if (!g || !g.coordinates) return;
       const [lon, lat] = g.coordinates;
