@@ -115,6 +115,18 @@ export const jurisdictionFor = (county) => JURISDICTION_LAYERS[county] || null;
 
 const trimUrl = (u) => String(u || "").replace(/\/+$/, "");
 
+// Retry failed basemap tiles (429/5xx/transient) up to `max` times with backoff,
+// by re-assigning the tile's src. Attach to any L.tileLayer.
+export function withTileRetry(layer, max = 2) {
+  layer.on("tileerror", (e) => {
+    const t = e && e.tile; if (!t) return;
+    const n = t._pfTries || 0; if (n >= max) return;
+    t._pfTries = n + 1;
+    setTimeout(() => { const s = t.src; t.src = ""; t.src = s; }, 500 * (n + 1));
+  });
+  return layer;
+}
+
 // fetch with exponential backoff on transient failures (429/5xx + network errors).
 export async function fetchWithRetry(url, opts = {}, tries = 3) {
   let delay = 400;

@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { syncOverlayLayers } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -739,7 +739,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
-      const t = L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr });
+      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr }));
       t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}

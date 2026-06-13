@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP } from "./lib/counties.js";
-import { syncOverlayLayers } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
@@ -179,7 +179,7 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
     const map = mapRef.current;
     if (!map) return;
     const bm = BASEMAPS[basemap] || BASEMAPS.esri;
-    const layer = L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, attribution: bm.attr });
+    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, attribution: bm.attr }));
     layer.setZIndex(1);
     layer.addTo(map);
     imageryRef.current = layer;
