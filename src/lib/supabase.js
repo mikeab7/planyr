@@ -14,7 +14,11 @@
  */
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = (((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim()).replace(/\/+$/, "");
+const RAW_URL = ((import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "").trim();
+// Normalize to the bare origin so a pasted "/rest/v1" suffix or trailing slash
+// (a common copy-the-wrong-field mistake) doesn't double up the path.
+let SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
+try { if (RAW_URL) SUPABASE_URL = new URL(RAW_URL).origin; } catch (_) {}
 const SUPABASE_ANON = ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
 
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
