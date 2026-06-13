@@ -974,6 +974,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
     const wrap = wrapRef.current;
     if (!wrap) return;
     const onWheel = (e) => {
+      // Let scrollable overlay panels (Layers control, etc.) scroll instead of zooming the canvas.
+      if (e.target.closest && e.target.closest("[data-wheelscroll]")) return;
       e.preventDefault();
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
@@ -4007,7 +4009,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
           {origin && (
-            <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "rgba(255,255,255,0.95)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+            <div data-export="skip" data-wheelscroll="1" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "rgba(255,255,255,0.95)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
@@ -4098,8 +4100,8 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
             </div>
           )}
 
-          {/* aerial loading indicator */}
-          {showAerial && underlayLoading && (
+          {/* aerial loading indicator (not while the live basemap stands in for the captured underlay) */}
+          {showAerial && underlayLoading && !(origin && basemapOn) && (
             <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, pointerEvents: "none", display: "flex", alignItems: "center", gap: 9, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: PAL.ember, display: "inline-block", animation: "pf-pulse 1.1s ease-in-out infinite" }} />
               Loading aerial…
