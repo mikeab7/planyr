@@ -121,21 +121,21 @@ export const JURISDICTION_LAYERS = {
         label: "Houston wastewater",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/WasteWater_gx/MapServer",
         layers: [2, 6], // 2 Gravity Main (≥~1:40k), 6 Force Main
-        note: "City of Houston sanitary sewer (geogimstest). COH only; trunk mains show at site-plan zoom.",
+        note: "City of Houston sanitary sewer (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see gravity mains.",
         opacity: 0.85,
       },
       coh_storm: {
         label: "Houston storm sewer",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/TDO/UN_Stormwater/MapServer",
         layers: [22, 23, 24, 904], // Pipe (≥~1:40k), Open Channel, Culvert, Linear Drain
-        note: "City of Houston storm drainage (geogimstest). COH only; pipes show at site-plan zoom.",
+        note: "City of Houston storm drainage (geogimstest). COH only — blank outside the city. Zoom in (~1:40k) to see pipes.",
         opacity: 0.85,
       },
       coh_water: {
         label: "Houston water lines",
         url: "https://geogimstest.houstontx.gov/arcgis/rest/services/HW/Water_gx/MapServer",
         layers: [0, 1], // 0 Water Lines, 1 Water Main (both draw at any zoom)
-        note: "City of Houston potable water (geogimstest). COH only.",
+        note: "City of Houston potable water (geogimstest). COH only — blank outside the city.",
         opacity: 0.85,
       },
     },
