@@ -46,7 +46,10 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
 // Parcel boundaries are drawn as styleable vector lines (same query path that
 // powers click-to-select), not a server image — so they render reliably. They
 // load once zoomed in past this level (too many to draw across a whole county).
-const PARCEL_MINZOOM = 16;
+// Clicking to select works at ANY zoom (it's a point query); this only gates the
+// VISIBLE outlines. Kept low enough to outline big rural/industrial tracts from
+// further out, while still avoiding drawing a whole dense-urban county at once.
+const PARCEL_MINZOOM = 14;
 function makeParcelLayer(url) {
   return EL.featureLayer({
     url,
@@ -484,7 +487,7 @@ export default function MapFinder({ visible, county, onCounty, sites = [], activ
             : !selectMode
               ? "Drag to move the map. Hit “+ Select parcels” (top-right) to start adding lots."
               : zoom != null && zoom < PARCEL_MINZOOM
-                ? "Zoom in until the purple lot lines show, then click a lot to add it (＋). Click an added lot to remove it (−)."
+                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
                 : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
         </div>
 
