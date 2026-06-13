@@ -34,6 +34,12 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+        env:
+          # Supabase connection (Phase 1). Set these as repository secrets:
+          # Settings → Secrets and variables → Actions. Safe to be absent — the app
+          # runs fine un-configured (the cloud chip just shows "Cloud off").
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:

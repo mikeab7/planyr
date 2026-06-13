@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
+import { testConnection, supabaseConfigured } from "./lib/supabase.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -33,6 +34,18 @@ export default function App() {
   // the fix) so it doesn't linger in storage. The finder fallback already handles
   // the routing; this just tidies the stale pointer.
   useEffect(() => { const cur = getCurrentSiteId(); if (cur && !loadSite(cur)) setCurrentSiteId(null); }, []);
+
+  // PHASE 1 ONLY: test the Supabase connection (no data read/written). Drives a
+  // tiny status chip + a console line + a window.pfCloudTest() helper. Persistence
+  // is unchanged — still localStorage.
+  const [cloud, setCloud] = useState({ state: supabaseConfigured() ? "checking" : "not-configured", message: "" });
+  useEffect(() => {
+    let live = true;
+    const run = async () => { const r = await testConnection(); if (live) setCloud(r); console.log(`[Supabase] ${r.state}: ${r.message}`); return r; };
+    window.pfCloudTest = run; // on-demand re-test from the console
+    run();
+    return () => { live = false; };
+  }, []);
 
   const refreshSites = () => setSites(loadSitesList());
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
@@ -159,6 +172,24 @@ export default function App() {
           />
         )}
       </div>
+      {/* PHASE 1 Supabase connection indicator (diagnostic; no data read/written) */}
+      {(() => {
+        const meta = {
+          checking: { dot: "#f59e0b", label: "Cloud…" },
+          connected: { dot: "#15803d", label: "Cloud ✓" },
+          "not-configured": { dot: "#9b9482", label: "Cloud off" },
+          "bad-key": { dot: "#b91c1c", label: "Cloud key" },
+          error: { dot: "#b91c1c", label: "Cloud err" },
+        }[cloud.state] || { dot: "#9b9482", label: "Cloud" };
+        return (
+          <div title={cloud.message || "Supabase connection (Phase 1 — no data synced yet)"}
+            style={{ position: "fixed", right: 6, bottom: 22, zIndex: 4000, display: "flex", alignItems: "center", gap: 5,
+              background: "rgba(25,22,19,0.82)", color: "#ece7db", borderRadius: 99, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 2px 8px rgba(0,0,0,0.25)", pointerEvents: "auto" }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, background: meta.dot, animation: cloud.state === "checking" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+            {meta.label}
+          </div>
+        );
+      })()}
     </>
   );
 }

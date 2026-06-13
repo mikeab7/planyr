@@ -140,6 +140,37 @@ selector. The planner still keeps in-component `useState` for live editing and
 serializes to the model at the save boundary (collapsing that into a single
 reducer is a deferred, separate task).
 
+## Backend (Supabase) — phased migration off localStorage
+We're moving persistence to **Supabase** (Postgres) so sites survive beyond one
+browser, sync across devices, and are backed up. **Done carefully in phases — do
+not skip ahead:**
+- **Phase 1 — connect (DONE).** `@supabase/supabase-js` + `src/lib/supabase.js`
+  (client + `testConnection()`), a diagnostic "Cloud" status chip + `window.
+  pfCloudTest()`. Config from build-time env **only** (`VITE_SUPABASE_URL`,
+  `VITE_SUPABASE_ANON_KEY`; gitignored, set as Actions secrets — see deploy.yml).
+  **No site data is read or written; persistence is still 100% localStorage.**
+- **Phase 2 — login.** Supabase Auth (email/OAuth); gate cloud sync behind a user.
+- **Phase 3 — row-level security.** RLS so each user only sees their own rows.
+  (The anon key is public-safe by design; RLS is the real protection.)
+- **Phase 4 — wire save/load + migrate.** Route `storage.js` reads/writes through
+  Supabase (localStorage becomes offline cache), and **one-time upload of every
+  existing browser-stored site** to the user's account. **Migration MUST preserve
+  all existing localStorage sites — no data loss.**
+
+**Table schema** (matches the Site Model — one row per plan, keyed by owner + id):
+```sql
+create table public.sites (
+  id         text not null,          -- our site/plan id (newId)
+  user_id    uuid not null default auth.uid() references auth.users(id),
+  group_id   text,                   -- site (location) group
+  site       text, name text, county text,   -- queryable metadata
+  updated_at timestamptz not null default now(),
+  data       jsonb not null,         -- the serialized Site Model (createSiteModel output)
+  primary key (user_id, id)
+);
+```
+RLS policies + the migrate-on-login flow are Phase 3/4 (not built yet).
+
 ## 5. Known limitations / roadmap
 - **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
   draw a ≤2 sq-mi box, fetch public-domain NAIP aerial tiles for it, send tiles to
@@ -172,6 +203,7 @@ items between buckets as they ship. Don't infer scope creep — build only what'
 - **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
 - **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
 - **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
+- **Supabase backend — Phase 1 (connect)** — client + connection test + "Cloud" status chip; no data synced yet. (See "## Backend (Supabase)"; Phases 2 login → 3 RLS → 4 wire save/load + migrate ahead.)
 
 ### ⛔ Known issues / blocked on external services
 - **Houston water/wastewater/storm** — on the City's **TEST** host `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`) — the only CORS-clean host serving these; `geogimsprod` is viewer-only (no `/arcgis/rest`), `geohwp` has a different catalog. It works but is a **test environment that could change without notice** — replace with a production COH equivalent if one becomes available; the probe + ~45s self-heal already cover it failing gracefully. Sublayers are pinned (`layers=show:` — water 0,1; wastewater 2,6; storm 22,23,24,904) because defaults render meters, not mains/pipes. **Expected, not bugs:** trunk lines (Gravity Main, Pipe) are scale-gated to ~≥1:40k (zoom in to see them); coverage is City-of-Houston-only (transparent outside the city).
