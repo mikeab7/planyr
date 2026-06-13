@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
-import { testConnection, supabaseConfigured } from "./lib/supabase.js";
+import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -43,6 +43,7 @@ export default function App() {
     let live = true;
     const run = async () => { const r = await testConnection(); if (live) setCloud(r); console.log(`[Supabase] ${r.state}: ${r.message}`); return r; };
     window.pfCloudTest = run; // on-demand re-test from the console
+    window.pfCloudInfo = connectionInfo(); // what the build baked in (url + key prefix/len)
     run();
     return () => { live = false; };
   }, []);

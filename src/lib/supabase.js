@@ -23,6 +23,15 @@ const SUPABASE_ANON = ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KE
 
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
 
+// Diagnostic snapshot of what the build actually baked in (no full key dump).
+export const connectionInfo = () => ({
+  configured: supabaseConfigured(),
+  url: SUPABASE_URL || "(unset)",
+  rawUrl: RAW_URL || "(unset)",
+  keyLen: SUPABASE_ANON.length,
+  keyPrefix: SUPABASE_ANON ? SUPABASE_ANON.slice(0, 8) + "…" : "(unset)",
+});
+
 // Only build a client when configured, so an un-configured app still runs fine.
 export const supabase = supabaseConfigured()
   ? createClient(SUPABASE_URL, SUPABASE_ANON)
