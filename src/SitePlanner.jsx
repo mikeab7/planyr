@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
+import { defaultOverlayState, syncOverlayLayers } from "./lib/layers.js";
+import LayerPanel from "./components/LayerPanel.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
   getLayerInfo,
@@ -16,6 +20,25 @@ import {
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
+
+/* Geographic basemap under the planner canvas. The planner stays a feet-based
+ * SVG (so every metric, setback and stall count is computed from true feet and
+ * is unaffected by display projection); we just place a Leaflet Web-Mercator
+ * basemap + the shared overlay layers beneath it, anchored to the site origin.
+ * Mercator is conformal, so a uniform pixels-per-foot aligns to it with no x/y
+ * distortion over a site — only the basemap's zoom/center are derived from the
+ * planner view. */
+const GEO_BASEMAP = {
+  tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  maxNative: 19,
+  attr: "Imagery &copy; Esri, Maxar",
+};
+const M_PER_FT = 0.3048;
+const EARTH_M = 40075016.686; // Web-Mercator world circumference (m) at the equator
+// Leaflet (fractional) zoom whose pixels-per-foot equals the planner's `ppf` at
+// the given latitude — so the basemap scale matches the SVG exactly.
+const ppfToZoom = (ppf, lat) =>
+  Math.log2((ppf / M_PER_FT) * EARTH_M * Math.cos((lat * Math.PI) / 180) / 256);
 
 /* ------------------------------------------------------------------ *
  *  Industrial Site Planner — prototype (TestFit-style, industrial)
@@ -603,6 +626,72 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   const titlePdfRef = useRef(null);
+
+  // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
+  // meaningful for a located site (one with a real-world origin).
+  const origin = restored?.origin || null;
+  const [overlays, setOverlays] = useState(defaultOverlayState);
+  const [basemapOn, setBasemapOn] = useState(!!origin);
+  const [layersOpen, setLayersOpen] = useState(false); // planner Layers control expanded
+  const geoWrapRef = useRef(null);
+  const geoMapRef = useRef(null);
+  const geoBaseRef = useRef(null);
+  const overlayRefs = useRef({});
+
+  /* Create the (non-interactive) Leaflet basemap once for a located site. The
+     SVG above owns all interaction; this map is a pure backdrop, driven by the
+     planner view. */
+  useEffect(() => {
+    if (!origin || geoMapRef.current || !geoWrapRef.current) return;
+    const map = L.map(geoWrapRef.current, {
+      zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false,
+      doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false, tap: false,
+      zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
+    }).setView([origin.lat, origin.lon], 17);
+    geoMapRef.current = map;
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin]);
+
+  /* aerial basemap tile layer (toggle) */
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map) return;
+    if (basemapOn && !geoBaseRef.current) {
+      const t = L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr });
+      t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
+    } else if (!basemapOn && geoBaseRef.current) {
+      try { map.removeLayer(geoBaseRef.current); } catch (_) {}
+      geoBaseRef.current = null;
+    }
+  }, [basemapOn, origin]);
+
+  /* keep the basemap sized when the canvas resizes or the planner is shown */
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (map && active) { const t = setTimeout(() => { try { map.invalidateSize(false); } catch (_) {} }, 60); return () => clearTimeout(t); }
+  }, [active, size, origin]);
+
+  /* drive the basemap zoom/center from the planner view so it stays locked to
+     the SVG. ppf→zoom keeps the scale identical; the canvas-center feet point
+     projects to the map center. */
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !origin) return;
+    const fx = (size.w / 2 - view.offX) / view.ppf;
+    const fy = (size.h / 2 - view.offY) / view.ppf;
+    const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
+    const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
+    try { map.setView(center, z, { animate: false }); } catch (_) {}
+  }, [view, size, origin]);
+
+  /* shared overlay layers (same source as the map finder) */
+  useEffect(() => {
+    if (!origin) return;
+    syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+      onError: (cfg) => { setOverlapWarn(`“${cfg.label}” layer didn't load — service may be down or moved.`); setTimeout(() => setOverlapWarn(""), 6000); },
+    });
+  }, [overlays, origin, basemapOn]);
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -2231,7 +2320,7 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
-  const origin = restored?.origin || null;
+  // `origin` is declared once near the top (geographic basemap state).
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
   const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify (click any spot → county record without importing).
@@ -3241,9 +3330,12 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
       {/* body */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2 }}>
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}>
+          {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
+              backdrop (pointer-events off) — the SVG above handles interaction. */}
+          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: "transparent", pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ background: PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3263,13 +3355,13 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               </pattern>
             </defs>
 
-            <g data-export="skip">{gridLines()}</g>
+            {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
 
             {/* scaled feet space */}
             <g>
               {/* aerial underlay (drawn beneath everything) — hidden until you
                   click a parcel or toggle it on, so it doesn't fill the canvas by default */}
-              {showAerial && underlay && (() => {
+              {showAerial && underlay && !(origin && basemapOn) && (() => {
                 const tl = f2p({ x: underlay.x, y: underlay.y });
                 const sy = underlay.ftPerPxY || underlay.ftPerPx;
                 const w = underlay.imgW * underlay.ftPerPx * view.ppf;
@@ -3659,6 +3751,25 @@ export default function SitePlanner({ active = true, siteId = null, onBackToMap,
               );
             })()}
           </svg>
+
+          {/* Layers control (located sites) — same shared layers as the map finder */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "rgba(255,255,255,0.95)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+              <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
+                <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
+              </button>
+              {layersOpen && (
+                <div style={{ padding: "2px 11px 10px", maxHeight: "62vh", overflowY: "auto" }}>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", fontSize: 12.5, color: PAL.ink, paddingBottom: 6, marginBottom: 6, borderBottom: `1px solid ${PAL.panelLine}` }}>
+                    <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
+                    <span style={{ flex: 1 }}>Aerial basemap</span>
+                  </label>
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} />
+                  <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 6 }}>Layers sit beneath your drawing and stay locked to the plan as you pan and zoom.</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (

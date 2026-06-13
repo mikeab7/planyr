@@ -163,7 +163,7 @@ export function lngLatFeatureToParcel(feature) {
     best[0][0] === best[best.length - 1][0] &&
     best[0][1] === best[best.length - 1][1];
   const ring = closed ? best.slice(0, -1) : best;
-  const FT_PER_DEG_LAT = 362776; // ~ feet per degree of latitude
+  const FT_PER_DEG_LAT = 365223; // feet per degree latitude (Web-Mercator sphere base)
   const FT_PER_DEG_LON = 365223 * Math.cos((lat0 * Math.PI) / 180);
   const points = ring.map(([lon, lat]) => ({
     x: (lon - lon0) * FT_PER_DEG_LON,
@@ -190,7 +190,11 @@ export function largestRingLngLat(feature) {
   return closed ? best.slice(0, -1) : best;
 }
 
-const FT_PER_DEG_LAT = 362776; // feet per degree of latitude (≈ constant)
+// Feet per degree using the Web-Mercator sphere base (2πR/360 ≈ 365223 ft) for
+// BOTH axes — so the local equirectangular feet model is a linearization of
+// spherical Mercator and overlays a Web-Mercator aerial basemap with no axis
+// distortion (the planner/map both render on such a basemap).
+const FT_PER_DEG_LAT = 365223;
 const ftPerDegLon = (lat) => 365223 * Math.cos((lat * Math.PI) / 180);
 
 // Project a lon/lat ring to local feet about a shared origin (north up).
