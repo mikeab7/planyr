@@ -105,6 +105,24 @@ server/                   # placeholder README only — NOT built or deployed; b
   Site Planner moved in and functioning exactly as before, no behavior change. Build
   passes; the workspace split is real (separate lazy chunks).
 
+### Document Review — cloud persistence (new)
+- Review state now persists to the **existing Supabase backend** (no new project,
+  client, or keys — reuses the app's anon client + auth session), so nothing is lost
+  on refresh. Covers **both** a single sheet and a stitched multi-sheet set.
+- **Postgres `public.doc_reviews`** holds the small work layer (markups, measurements,
+  calibration, stitch transforms, takeoff, source-file refs) in a `data` jsonb column;
+  RLS is private-by-default, identical in shape to `public.sites`. **Source PDFs** live
+  in a private Storage bucket `doc-review-files` at `<uid>/<reviewId>/<srcId>.pdf`, RLS-
+  scoped so each user only sees their own files. Migration: `src/workspaces/doc-review/
+  db/doc_reviews.sql` (run once in the Supabase SQL editor; idempotent).
+- Persistence copies the Site Planner data-loss pattern: persist on first edit, an
+  honest save badge (true cloud state), a synchronous localStorage mirror + a
+  beforeunload/visibility/unmount flush, and resume-the-last-review on reopen.
+- **50 MB free-tier per-file limit handled gracefully:** an oversize PDF still saves
+  the work layer and is flagged "re-drop on load" (a banner in single mode; a dashed
+  placeholder + drop-to-rebind in the stitcher) rather than failing the save.
+- All changes are inside the doc-review workspace; the lazy chunk split still holds.
+
 ## KEY DECISIONS (must persist)
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
@@ -160,6 +178,10 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   into the yield panel) → semi-automatic match-line stitching → metes-and-bounds →
   polygon (parse calls incl. curves; flag unreadable calls; require one tie to the
   ground for the Point of Beginning).
+- **Cloud persistence (DONE):** the browser-only tranche now saves/loads its reviews
+  (single sheet + stitched sets, with their PDFs) to the **existing Supabase** backend
+  — see DONE & VERIFIED. This reuses the user-data backend (Supabase), NOT the
+  `/server` CAD/filing backend below; keep the two distinct.
 - **Backend tranche** (needs `/server`; distinct from the existing Supabase backend):
   auto-filing + index → DWG conversion pipeline (LibreDWG → APS) → overlay & version
   compare → markup-list and flattened marked-up PDF export.
@@ -192,8 +214,9 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
 
 ## Two backends — don't conflate
 1. **Supabase** (built, managed BaaS): user accounts, auth, row-level security, and
-   cloud save/load of site data. The client talks to Supabase directly (anon key +
-   RLS); little custom server code.
+   cloud save/load of site data **and now Document Review state** (the `doc_reviews`
+   table + the `doc-review-files` Storage bucket, same anon client + private-by-default
+   RLS). The client talks to Supabase directly (anon key + RLS); little custom server code.
 2. **`/server`** (not built; coming with Document Review): custom backend for CAD
    conversion (APS), Google Drive auto-filing, and the file index database. This
    holds the third-party secrets that must stay isolated from the public Pages deploy.
@@ -297,6 +320,28 @@ create policy "Users update own sites" on public.sites for update to authenticat
 create policy "Users delete own sites" on public.sites for delete to authenticated using ((select auth.uid()) = user_id);
 ```
 No anon policy, no admin/cross-user policy (deferred by decision).
+
+## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
+Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +
+`auth.js`); no second client/keys. A "review" is `kind:'single'|'stitch'`; the work
+layer (markups, calibration, stitch transforms, measures, takeoff, source-file refs)
+is the `data` jsonb, with source PDFs in the private `doc-review-files` bucket at
+`<uid>/<reviewId>/<srcId>.pdf`. `reviewStore.js` = I/O (upsert/load/list/delete +
+upload/download + the localStorage mirror); `usePersistence.js` = the data-loss hook
+(debounced first-edit save, honest badge, synchronous mirror + beforeunload/visibility/
+unmount flush). 50 MB+ files skip Storage (`oversize`), flagged "re-drop on load"; the
+work layer still saves. Reload re-fetches PDFs and re-applies transforms/markups. Full
+migration (table + RLS + bucket + Storage policies) in `doc-review/db/doc_reviews.sql`.
+```sql
+create table public.doc_reviews (
+  id text not null, user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  title text, kind text, project text, discipline text,
+  updated_at timestamptz not null default now(), data jsonb not null,
+  primary key (user_id, id) );
+-- RLS: same 4 own-rows policies as public.sites (private by default).
+-- Storage bucket 'doc-review-files' (private, 50 MB cap): 4 own-folder policies on
+-- storage.objects keyed by (storage.foldername(name))[1] = auth.uid()::text.
+```
 
 ## Counties / GIS plumbing
 `lib/counties.js` — county presets (Harris/Fort Bend/Chambers) + `JURISDICTION_LAYERS`

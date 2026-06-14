@@ -8,6 +8,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
 import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
+import ReviewsBar from "./components/ReviewsBar.jsx";
+import { useReviewPersistence } from "./lib/usePersistence.js";
+import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady } from "./lib/reviewStore.js";
+import { onAuthChange } from "../site-planner/lib/auth.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
@@ -59,10 +63,22 @@ export default function DocReview() {
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
 
+  // --- cloud persistence (single-sheet review) ---
+  const [reviewId, setReviewId] = useState(() => newReviewId());
+  const [title, setTitle] = useState("");
+  const [project, setProject] = useState("");
+  const [discipline, setDiscipline] = useState("");
+  const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
+  const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
+  const [signedIn, setSignedIn] = useState(false);
+  const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
+  const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
+
   const ftPerUnit = calByPage[page] || 0;
   const pageMarks = markups.filter((m) => m.page === page);
 
   /* ---- load ---- */
+  const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
   const openFile = async (file) => {
     if (!file) return;
     setBusy(true); setErr("");
@@ -73,6 +89,17 @@ export default function DocReview() {
       setNumPages(pdf.numPages);
       setPage(1);
       setScale(0); // 0 = fit-to-width on next render
+      setRedrop("");
+      // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
+      // known file (so its markups stay bound); otherwise mint one and upload once.
+      const keepId = sourceRef.current && sameName(sourceRef.current.name, file.name) ? sourceRef.current.srcId : null;
+      const srcId = keepId || newSourceId();
+      const base = { srcId, name: file.name || "document.pdf", size: file.size };
+      sourceRef.current = base;
+      setSource({ ...base, storageKey: null, oversize: false });
+      uploadSource(reviewId, srcId, file).then((r) => {
+        setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
+      });
     } catch (e) {
       setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
     } finally { setBusy(false); }
@@ -98,6 +125,96 @@ export default function DocReview() {
   }, [page, scale]);
 
   useEffect(() => { render(); }, [render, numPages]);
+
+  /* ---- cloud persistence: badge, autosave, resume, load, new ---- */
+  useEffect(() => {
+    let live = true;
+    const r = () => cloudReady().then((v) => live && setSignedIn(v));
+    r();
+    const off = onAuthChange(r);
+    return () => { live = false; off && off(); };
+  }, []);
+  const onMeta = (k, v) => { if (k === "title") setTitle(v); else if (k === "project") setProject(v); else if (k === "discipline") setDiscipline(v); };
+
+  const buildSnapshot = useCallback(() => ({
+    id: reviewId, kind: "single", title, project, discipline,
+    sources: source ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, oversize: !!source.oversize }] : [],
+    single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage },
+  }), [reviewId, title, project, discipline, source, fileName, numPages, page, markups, calByPage]);
+  const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
+  // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
+  // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
+  const { status } = useReviewPersistence({
+    buildSnapshot, isEmpty, enabled: mode === "review",
+    deps: [reviewId, title, project, discipline, source, markups, calByPage],
+  });
+
+  // Remember the active review so a refresh resumes it (cloud reconciled with the
+  // synchronous local mirror, so an edit made just before reload isn't lost).
+  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {} }, [reviewId]);
+  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {} }, [mode]);
+
+  const fetchSourceBytes = async (src) => {
+    if (!src) return;
+    if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
+    const buf = src.storageKey ? await downloadSource(src.storageKey) : null;
+    if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
+    const pdf = await loadPdf(buf);
+    pdfRef.current = pdf;
+    setNumPages(pdf.numPages); setScale(0);
+  };
+  const loadSingleReview = async (rec) => {
+    const s = rec.single || {};
+    const src = (rec.sources || [])[0] || null;
+    pdfRef.current = null;
+    sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
+    setReviewId(rec.id);
+    setTitle(rec.title || ""); setProject(rec.project || ""); setDiscipline(rec.discipline || "");
+    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
+    setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
+    setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
+    setDraft(null); setSel(null); setTool("select"); setRedrop("");
+    await fetchSourceBytes(src);
+  };
+  const resetSingle = () => {
+    pdfRef.current = null; sourceRef.current = null;
+    setReviewId(newReviewId());
+    setTitle(""); setProject(""); setDiscipline("");
+    setSource(null); setRedrop("");
+    setFileName(""); setNumPages(0); setPage(1); setScale(0);
+    setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
+  };
+  // Open a saved review from either toolbar; route single vs. stitch by kind.
+  const openReview = async (row) => {
+    const rec = await loadReview(row.id);
+    if (!rec) return;
+    if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
+    else { setMode("review"); await loadSingleReview(rec); }
+  };
+  // Resume the last review (and its mode) on mount, once. Stitch reviews are handed
+  // to <Stitcher> via pendingStitch; single reviews load here.
+  const booted = useRef(false);
+  useEffect(() => {
+    if (booted.current) return; booted.current = true;
+    (async () => {
+      let lastMode = "review", lastSingle = null, lastStitch = null;
+      try {
+        lastMode = localStorage.getItem("planyr:docreview:lastMode") || "review";
+        lastSingle = localStorage.getItem("planyr:docreview:lastSingleId");
+        lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
+      } catch (_) {}
+      const uid = await currentUid();
+      if (lastMode === "stitch" && lastStitch) {
+        const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
+        if (rec && rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+      }
+      if (lastSingle) {
+        const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
+        if (rec && rec.kind === "single") await loadSingleReview(rec);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ---- pointer → page units ---- */
   const toPage = (e) => {
@@ -185,7 +302,15 @@ export default function DocReview() {
   const btn = (on) => ({ padding: "6px 10px", fontSize: 12, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
   const curTool = TOOLS.find((t) => t.id === tool);
 
-  if (mode === "stitch") return <Stitcher onReview={() => setMode("review")} />;
+  if (mode === "stitch") return (
+    <Stitcher
+      onReview={() => setMode("review")}
+      loadReq={pendingStitch}
+      onConsumeLoad={() => setPendingStitch(null)}
+      onOpenReview={openReview}
+      signedIn={signedIn}
+    />
+  );
 
   // SVG element for one markup (coords ×scale)
   const draw = (m, selected) => {
@@ -255,14 +380,22 @@ export default function DocReview() {
         {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
         {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} onClick={() => { setTool(t.id); setDraft(null); }}>{t.label}</button>)}
-        <div style={{ flex: 1 }} />
         {pdfRef.current && <>
           <button style={{ ...btn(false) }} onClick={() => zoom(1 / 1.2)}>−</button>
           <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(scale * 100)}%</span>
           <button style={{ ...btn(false) }} onClick={() => zoom(1.2)}>+</button>
           <button style={{ ...btn(false) }} onClick={() => setScale(0)} title="Fit width">Fit</button>
         </>}
+        <div style={{ flex: 1 }} />
+        <ReviewsBar status={status} signedIn={signedIn} title={title} project={project} discipline={discipline} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
       </div>
+
+      {redrop && (
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
+          <span>⚠ {redrop}</span>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+        </div>
+      )}
 
       {!pdfRef.current ? (
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
