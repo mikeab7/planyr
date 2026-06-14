@@ -180,7 +180,7 @@ export default function App() {
 
   return (
     <>
-      <div style={{ display: mode === "map" ? "block" : "none", height: "100vh" }}>
+      <div style={{ display: mode === "map" ? "block" : "none", height: "100%" }}>
         <MapFinder
           visible={mode === "map"}
           county={county}
@@ -197,7 +197,7 @@ export default function App() {
           onSkip={newBlankSite}
         />
       </div>
-      <div style={{ display: mode === "plan" ? "block" : "none", height: "100vh" }}>
+      <div style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && (
           <SitePlanner
             key={activeSiteId}

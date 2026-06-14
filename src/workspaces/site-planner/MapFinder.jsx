@@ -409,7 +409,7 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
   const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#efeadf" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#efeadf" }}>
       {/* top bar — dark graphite chrome */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", zIndex: 1000 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

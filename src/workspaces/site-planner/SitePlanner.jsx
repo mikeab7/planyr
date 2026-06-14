@@ -3443,7 +3443,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", minHeight: 600, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       {/* top bar — dark graphite chrome */}
