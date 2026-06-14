@@ -169,6 +169,20 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   facts per file (project, discipline, sheet, revision, date) so files are queryable
   without re-reading them.
 
+### Document Review — roadmap additions
+- Drag-and-drop to open: drop PDF/drawing files onto the screen to load them for
+  viewing (browser-only, low effort). NOTE: distinct from the auto-filing system
+  (drop → read title block → file into Drive), which is the backend feature already
+  on the roadmap. Two different things, two timelines.
+- Multi-sheet stitcher: assisted alignment (built — `Stitcher.jsx`, 2-point pairwise
+  align); automatic match-line detection later; near-automatic once DWG conversion lands.
+- Revision compare: add a revision to a discipline set and compare the two
+  (overlay/diff) — confirm against the existing overlay/version-compare item.
+- ★ North-star: "map → drawings → latest set" — from the Site Planner map, click a
+  project → Drawings → pick a discipline (e.g., Landscaping) → see the latest
+  revision's full set, already stitched. Depends on the filing system + file index,
+  the stitcher, and project nav on the map. The convergence point; build once those exist.
+
 ## KNOWN ISSUES
 - Houston utilities ride on the City's `geogimstest` **TEST** host — works, but could
   change without notice.
