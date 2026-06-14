@@ -1,292 +1,292 @@
-# CLAUDE.md — handoff note
+# CLAUDE.md — Planar_Fit Project Handoff
 
-Concise orientation for a fresh session. Skim this first.
+Complete handoff for any future session. Read top to bottom to orient. This merges
+two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
+backend) and the newly-started **Document Review** module (foundation just
+scaffolded). Last updated mid-2026.
 
-## 1. What this is
-**Planar_Fit** — a browser-based, TestFit-style **industrial site planner** for the
-Houston metro (Harris, Fort Bend, Chambers counties). Two surfaces:
-- **Map finder** — aerial map; find/select parcel(s) from county GIS, then "Plan".
-- **Planner** — a feet-based SVG canvas to lay out buildings, car parking,
-  trailer storage, paving, and detention ponds, with live site-yield metrics
-  (coverage, FAR, impervious %, stall counts, etc.). Plans on the real aerial.
+## What Planar_Fit is
+A proprietary, TestFit-style web app for industrial real estate site work, built by
+Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
+suite: the existing **Site Planner** (site yield analysis and layout) plus a new
+Bluebeam-style **Document Review** workspace for reviewing construction drawings and
+surveys.
 
-Live site (GitHub Pages, builds from `main`): https://mikeab7.github.io/Planar_Fit/
+The two workspaces are **one product, not two apps.** They share a single
+real-world coordinate system, so work flows between them (a parsed deed lands on the
+planner's map; an engineer's drawing overlays the planner's layout).
 
-## 2. Stack & structure
-Vite + React 18, plain JS/JSX, inline styles. No backend — 100% client-side.
-Map = Leaflet + esri-leaflet. Planner canvas = hand-rolled SVG. Persistence =
-localStorage.
+## Architecture
+- **One product, multiple workspaces.** Each workspace is its own folder/module. The
+  app shell switches between them; you do not run two separate apps.
+- **Lazy-loaded workspaces.** A workspace's code loads only when opened, so Document
+  Review never slows the Site Planner. (Verified: `SitePlannerApp` and `DocReview`
+  are separate lazy chunks.)
+- **Shared coordinate spine.** One real-world coordinate system underpins everything:
+  **EPSG:2278 — NAD83 / Texas State Plane, South Central zone, US survey feet**
+  (correct for the Houston/Katy area). This is what lets a deed polygon, an overlay,
+  and the site layout all live in the same space. Currently a stub in
+  `src/shared/coordinates/`, not yet wired in.
+- **Document Review layer model.** The imported drawing is an **immutable backdrop**
+  (a fixed background, never altered). The user's measurements, markups, test-fit
+  massing, and parsed polygons live on **editable layers stacked over it.** "Editing
+  CAD" here means building your own analysis layer over the engineer's drawing —
+  never altering or writing back their geometry.
+- **Heavy work off the main thread.** CAD/PDF parsing and large geometry ops belong
+  in **Web Workers** (background threads) so the UI never freezes.
+- **Monorepo.** One repository (`Planar_Fit`), a folder per workspace, plus a
+  walled-off `/server`. Repo count buys nothing on performance; isolation comes from
+  module boundaries + lazy-loading inside the one repo.
 
-- `src/main.jsx` → `src/App.jsx` — toggles MapFinder ↔ SitePlanner, holds the
-  parcel hand-off, resumes into the planner if autosave has work.
-- `src/MapFinder.jsx` — Leaflet map: Esri/USGS aerial basemaps, faint labels
-  toggle, "Select parcels" mode (＋/− cursors), click a lot (arcgis query),
-  assemble several, capture the aerial export, hand a payload to the planner.
-- `src/SitePlanner.jsx` — the big one (~1500 lines). FEET-based SVG canvas,
-  tools, rect/polygon elements, parcels, aerial underlay + scale calibration,
-  metrics, undo/redo, autosave, named scenarios.
-- `src/lib/arcgis.js` — minimal ArcGIS REST client: layer metadata, queries,
-  point-intersect query, geometry→feet, aerial-export placement.
-- `src/lib/counties.js` — county endpoint presets (lookup + map) + field
-  auto-detect. State Plane EPSG:2278 (TX South Central, US ft).
-- `src/lib/storage.js` — scenarios + `loadAutosave`/`saveAutosave`.
-- `src/lib/image.js` — screenshot loader/downscale (for the underlay path).
-- `.github/workflows/deploy.yml` — build + deploy to Pages (deploy gated to `main`).
-
-## 3. Run & build
-```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # -> dist/
-npm run preview
+## Repository layout (after the foundation restructure)
 ```
-
-## 4. Key decisions & non-obvious workarounds
-- **Everything internal is FEET.** Map lat/long → local feet via an
-  equirectangular projection about a shared origin (`FT_PER_DEG_LAT` constant,
-  `ftPerDegLon(lat)=…*cos(lat)`). Conversions live in `arcgis.js`.
-- **Aerial underlay** is exported from Esri `World_Imagery/MapServer/export` in
-  **EPSG:4326, sized to the *degree* aspect** (so the server returns exactly the
-  requested bbox), then stretched into the true-feet rectangle with **separate
-  `ftPerPx` (x) and `ftPerPxY` (y)**. This fixed a vertical-stretch misalignment.
-  The planner **always captures from Esri** even if the map shows USGS — USGS
-  tiles render but its `export` op returns no image.
-- **Parcel outlines** use an esri-leaflet **`featureLayer`** (vector, the working
-  query path), not `dynamicMapLayer` (server image — it silently failed to
-  render). Outlines are `interactive:false` so the map receives the click;
-  selection uses `queryAtPoint` (point-intersect), which works at any zoom.
-  Visible outlines need ~zoom 16 (too many parcels otherwise).
-- **GitHub Pages:** vite `base: "./"` (relative) so it works under the
-  `/Planar_Fit/` subpath; deploy is gated to `main` (the `github-pages`
-  environment rejects non-default branches); repo is **public** (free-plan Pages
-  needs it). Pages deploys occasionally fail transiently — just re-run the job.
-- **Undo/redo** = snapshot-by-reference history kept in refs; the dedupe key
-  excludes the underlay `src` (a screenshot dataURL can be huge).
-- **Elements are either rectangles** `{cx,cy,w,h,rot}` **or polygons**
-  `{points,…}`. Rectangles get exact stall striping; polygons get area-based
-  estimates.
-
-## 4b. Map-layer system (shared by both pages)
-- One source of truth: `src/lib/layers.js` (`STATEWIDE`, `EVIDENCE`, jurisdiction
-  flattening, `defaultOverlayState`, `syncOverlayLayers`) + `src/components/
-  LayerPanel.jsx` (toggle/opacity UI). **Both** MapFinder and SitePlanner consume
-  these, so a layer added once appears on both surfaces.
-- Layer `kind`s: `dynamic` (esri `dynamicMapLayer` image overlay — FEMA, NWI,
-  TxRRC, jurisdiction utilities, COH hydrants), `esriImage` (esri `imageMapLayer`
-  ImageServer — USGS 3DEP elevation/hillshade), `esriFeature` (vector
-  `featureLayer` — HIFLD transmission from US DOE/NETL, crisp + attribute-rich,
-  non-interactive so it never steals parcel clicks), `overpass` and `mapillary`
-  (live, view-driven vector layers in `src/lib/evidenceLayers.js`).
-- **Site-engineering toolset (planner Layers control → Evidence tools):** electric
-  & water service routing (shared engine: `buildUtilRoute` → `utilRoute` markup
-  with easement corridor + fitting pad + overlap constraint), pond **detention
-  calculator** (`detentionStorage`, 3:1 taper, prismoidal volume) in the pond
-  inspector, **easement-rule table** (`lib/easementRules.js`, editable, VERIFY
-  placeholders), and the **ditch cross-section** tool (`lib/elevation.js` samples
-  3DEP `getSamples`) which can feed `el.det.availDepth` into detention. All
-  elevation output is labeled "screening only — verify with survey."
-- **Planner is geographic** (Phase 1): a non-interactive Leaflet Web-Mercator
-  basemap + the shared overlays sit *behind* the (transparent) feet-based SVG,
-  anchored to the site `origin`. Geometry/metrics stay in feet (projection-
-  independent); `ppfToZoom` + canvas-centre→latlng lock the basemap to the view.
-  Feet↔deg uses the Mercator sphere base (≈365223 ft/deg, both axes) so drawn
-  geometry overlays the aerial with sub-pixel error.
-- **Mapillary token is a secret** — read from `import.meta.env.VITE_MAPILLARY_TOKEN`
-  (set as a GitHub Actions/CI secret at build) or a user-entered localStorage
-  value. **Never commit a token.** Same rule as the title-reader Anthropic key.
-- Known caveat: Print/PNG export clones the SVG and can't capture the live Leaflet
-  basemap/overlay tiles (cross-origin canvas). With the basemap off, the captured
-  screenshot underlay still prints.
-
-## Site Model — the ONE source of truth (`src/lib/siteModel.js`)
-Every site/plan is the canonical **Site Model**. All site data lives here; read it
-via the selectors, persist it via storage — never invent a parallel store.
-
-**Schema** (`createSiteModel`, `SITE_MODEL_VERSION = 2`). Persisted fields stay
-flat + back-compatible (Option A — no field renames), with additive buckets:
+src/
+  main.jsx                # renders the shell
+  index.css               # global styles
+  app/
+    Shell.jsx             # shell: lazy-loading workspace registry + header switcher
+  workspaces/
+    site-planner/         # all existing Site Planner code (moved here, history preserved)
+      SitePlannerApp.jsx  # was App.jsx
+      MapFinder.jsx, SitePlanner.jsx, components/, lib/
+    doc-review/
+      DocReview.jsx       # "Document Review (coming soon)" placeholder
+  shared/
+    coordinates/          # project-grid stub (EPSG:2278); minimal interface; not yet wired
+server/                   # placeholder README only — NOT built or deployed; backend + secrets later
 ```
-{ schemaVersion,
-  id, groupId, site, name, updatedAt,        // identity
-  origin:{lat,lon}|null, county,             // geo anchor + jurisdiction
-  parcels[], underlay, settings,             // inputs
-  els[],                                      // drawn layout elements
-  markups[],                                  // flat: neutral annotations + semantic shapes
-  measures[], callouts[],                     // annotations
-  elevation:{ crossSections[] },             // elevation references (newly persisted)
-  constraints:{ liveLayers[] } }             // RESERVED: per-site layer memory (not yet wired)
+- Build command: `npm run build` → output `dist/`. Dev: `npm run dev`.
+- `vite.config` has `base: "./"` (for the GitHub Pages subpath); works unchanged at a
+  domain root too.
+
+## Workflow & deploy
+- **Branch per workstream; `main` is the protected, always-working, deployed line.
+  No direct commits to `main` from here on.**
+- Branch naming: `doc-review/<feature>`, `site-planner/<feature>`. Branch from the
+  latest `main`; merge the latest `main` back into long-lived branches as you go.
+- **Merge often** — the longer a branch drifts, the larger the eventual merge
+  conflict. Per-workspace work in separate folders rarely conflicts; keep edits to
+  genuinely shared files (the coordinate module, the shell) small.
+- **Land work via pull requests; require a passing build check to merge.** The GitHub
+  Actions workflow runs the build on every PR (a green "it builds" check) and on
+  pushes to `main`; the deploy job is gated to `main` only.
+- **Deploy = GitHub Pages (production).** Because the suite is one app with an in-app
+  workspace switcher, "seeing both live" is one URL — you switch tabs inside it.
+- **Cloudflare Pages is optional and deferred.** Its only job is per-branch preview
+  URLs (seeing an unmerged branch live without merging to `main`). Not required to
+  build or to see both workspaces. (Don't conflate this with PR status checks, which
+  are a separate GitHub Actions concern.)
+- End commit messages with the session link the harness provides. Don't include the
+  model identifier in commits/PRs/code.
+
+## DONE & VERIFIED
+### Site Planner (mature)
+- Geographic basemap refactor.
+- Shared layer state across the planner.
+- Site-model schema, migration, and selectors.
+- New-site data-loss fix: first-edit persistence, an honest save badge, and a
+  `beforeunload` flush so in-progress work isn't lost on tab close.
+- Layer-status fixes: error-body parsing, per-layer status dots, no zero-size
+  exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
+- Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
+  `layers=show:<sublayer IDs>` to paint the mains/pipes.
+
+### Supabase backend (built, Phases 1–4)
+- Phase 1 — connection to a cloud Postgres database.
+- Phase 2 — email/password auth.
+- Phase 3 — row-level security: each user's sites are private by default.
+- Phase 4 — cloud save/load: logged-in users' data lives in the cloud and syncs
+  across devices. No migration of old browser-stored sites (few enough to recreate
+  by hand — intentional).
+
+### Multi-workspace foundation (new)
+- Monorepo restructure landed via **PR #3** (the new clean `main`): the shell, the
+  workspace folders, the coordinate stub, and the `/server` placeholder, with the
+  Site Planner moved in and functioning exactly as before, no behavior change. Build
+  passes; the workspace split is real (separate lazy chunks).
+
+## KEY DECISIONS (must persist)
+- **Private by default.** Any future sharing or shared workspaces default to private;
+  sharing is always a deliberate, explicit act — never automatic.
+- **No admin / cross-user data access.** Deliberately omitted, for customer trust and
+  liability. Do not add a "god-mode" admin view.
+- **Secrets stay in env/secrets, never committed.** Covers Supabase keys, the Autodesk
+  APS key, and Google Drive credentials. The Supabase **anon key is RLS-protected and
+  safe to ship in the client**; the Supabase **service_role key and all third-party
+  API keys must stay server-side only** and never reach the browser.
+- **Logged-in users' data lives in the cloud.**
+- **Monorepo, one repo, folder per workspace.** The `/server` folder's secrets and
+  deploy pipeline are walled off from the public GitHub Pages deploy, so no
+  credential can ride along to a live URL.
+- **DWG handling (Document Review):** Michael normally receives DWG (and PDF) and will
+  not ask consultants for DXF. The tool auto-converts DWG → DXF on the backend. Start
+  with free **LibreDWG** + a hard-failure fallback to **Autodesk APS Model Derivative**
+  (~$0.30/file, pay-as-you-go). Optional later verification layer (proxy-object
+  pre-screen, header/extents sanity checks, embedded-preview diff) decides when to
+  pay. Reserve **ODA** (~$6k first yr / $3.6k/yr) or **Apryse** (~$10k+/yr) only for
+  high volume or to keep files off third-party clouds. (Pricing mid-2026 — re-verify.)
+- **Auto-filing never auto-guesses.** Files matched confidently to one of the 4 named
+  projects (via title block + aliases) are auto-routed and auto-named; no-match /
+  multi-match / low-confidence files go to a "needs filing" holding area with
+  one-click confirm. A misfiled drawing is worse than an unfiled one.
+
+## DEFERRED (with reasons — waiting creates no rework debt)
+- Per-site sharing, shared team workspaces, and a possible commercial/SaaS direction.
+  The selling question reshapes the sharing/workspace model, so design these together
+  if/when selling becomes real.
+- Planner single-reducer rewrite (state-management refactor) — deliberately deferred.
+- AI corridor scan — parked.
+
+## ROADMAP / NOT YET BUILT
+Two parallel tracks now.
+
+### Track 1 — Site Planner (continue maturing)
+1. **GIS layer caching** — next immediate item. Stale-while-revalidate: load
+   last-known-good copy instantly, refresh in background, always show data age,
+   screening-only. Makes layers fast and resilient.
+2. Tier 1 "site-killer" features: storm outfall, then sanitary sewer, fire flow,
+   finished-floor-vs-base-flood, environmental screen (TCEQ LPST / EPA),
+   entitlement/zoning status.
+3. Tier 2: earthwork / cut-fill, soils.
+4. Tier 3: swept-path, driveway access.
+5. Tier 4: the buildable-area / cost verdict engine (reads the whole Site Model via
+   `developableArea()`, currently a stub).
+
+### Track 2 — Document Review (new module)
+Build the **browser-only** tranche first (no backend, no credentials), then the
+**backend** tranche.
+- **Browser-only:** PDF review core (PDF.js viewer, multi-sheet nav, calibrate-to-
+  scale, measure tools — distance/area/perimeter/count, basic redline, takeoff rollup
+  into the yield panel) → semi-automatic match-line stitching → metes-and-bounds →
+  polygon (parse calls incl. curves; flag unreadable calls; require one tie to the
+  ground for the Point of Beginning).
+- **Backend tranche** (needs `/server`; distinct from the existing Supabase backend):
+  auto-filing + index → DWG conversion pipeline (LibreDWG → APS) → overlay & version
+  compare → markup-list and flattened marked-up PDF export.
+- **Auto-filing detail:** drop a file → read its title block → match against the 4
+  named projects (+ aliases: address, parcel, job number) → auto-route and auto-name
+  into a central drive (likely Google Drive). A lightweight index/database stores
+  facts per file (project, discipline, sheet, revision, date) so files are queryable
+  without re-reading them.
+
+## KNOWN ISSUES
+- Houston utilities ride on the City's `geogimstest` **TEST** host — works, but could
+  change without notice.
+- Storm-sewer service name still needs confirming once the COH services are up.
+- GIS layer status: honest per-layer status + ~45s self-heal re-probe; at last note
+  roughly 10 of 14 layers were live.
+
+## Two backends — don't conflate
+1. **Supabase** (built, managed BaaS): user accounts, auth, row-level security, and
+   cloud save/load of site data. The client talks to Supabase directly (anon key +
+   RLS); little custom server code.
+2. **`/server`** (not built; coming with Document Review): custom backend for CAD
+   conversion (APS), Google Drive auto-filing, and the file index database. This
+   holds the third-party secrets that must stay isolated from the public Pages deploy.
+
+So "the backend" is built for user data (Supabase) but not yet for CAD conversion and
+filing (`/server`). Keep these separate when reasoning about what exists.
+
+---
+
+# Technical reference (preserved implementation detail)
+Deeper specifics behind the summaries above. Paths reflect the monorepo layout
+(`src/workspaces/site-planner/…`).
+
+## Stack
+Vite + React 18, plain JS/JSX, inline styles, the `PAL` drafting palette, terse
+comments. Map = Leaflet + esri-leaflet. Planner canvas = hand-rolled SVG. **Units:
+feet everywhere internal; convert only at the map boundary.**
+
+## Site Model (`src/workspaces/site-planner/lib/siteModel.js`)
+Canonical per-plan schema; read via selectors, persist via storage — never a parallel
+store. `createSiteModel`, `SITE_MODEL_VERSION = 2`. Persisted fields stay flat +
+back-compatible (no field renames), additive buckets:
 ```
-`els` and `markups` stay flat (splitting them physically is a deferred canvas
-rewrite); **selectors classify them by meaning** instead:
-- `constraintsOf(m)` → `{ easements (markup kind `encumbrance`), setbacks (derived
-  from parcels), liveLayers }`
-- `utilitiesOf(m)` → markup kinds `utilRoute | traced | infwater`
-- `annotationsOf(m)` → `{ markups (line/rect/ellipse/polygon/polyline), measures, callouts }`
-- `crossSectionsOf(m)`, `setbacksOf(m)`, `parcelsOf`, `elementsOf`
-- `developableArea(m)` — **stub**; the future buildable-area/cost synthesis reads
-  the whole model from here.
+{ schemaVersion, id, groupId, site, name, updatedAt,
+  origin:{lat,lon}|null, county,
+  parcels[], underlay, settings,
+  els[],                         // drawn layout elements
+  markups[],                     // flat: neutral annotations + semantic shapes
+  measures[], callouts[],
+  elevation:{ crossSections[] },
+  constraints:{ liveLayers[] } } // RESERVED: per-site layer memory (not yet wired)
+```
+`els`/`markups` stay flat; **selectors classify by meaning:** `constraintsOf`
+(easements = markup kind `encumbrance`; setbacks derived from parcels; liveLayers),
+`utilitiesOf` (`utilRoute|traced|infwater`), `annotationsOf`
+(line/rect/ellipse/polygon/polyline + measures + callouts), `crossSectionsOf`,
+`setbacksOf`, `parcelsOf`, `elementsOf`, `developableArea` (**stub** for the future
+synthesis). **Conformance:** add data as new model fields (additive), bump
+`SITE_MODEL_VERSION`, extend `migrate`, expose via a selector.
 
-**Persistence** (`storage.js` is a thin layer over the model): `loadSite` /
-`loadSitesList` migrate on read; `saveSite` merges the partial onto the existing
-record and re-normalizes through `createSiteModel`. Migration is **additive,
-lossless, idempotent** — old saved sites upgrade automatically.
+`storage.js` is a thin layer over the model: `loadSite`/`loadSitesList` migrate on
+read; `saveSite` merges the partial and re-normalizes via `createSiteModel` (additive,
+lossless, idempotent).
 
-**Layer/overlay state is app-shared, NOT per-site** (yet): one `overlays` object
-lives in `App.jsx` and is passed to both pages, so a toggle on one page shows on
-the other. `constraints.liveLayers` is the reserved slot for future per-site memory.
+## Map-layer system (`src/workspaces/site-planner/lib/layers.js` + `components/LayerPanel.jsx`)
+One source of truth used across the planner. Layer `kind`s: `dynamic` (esri
+`dynamicMapLayer` image — FEMA, NWI, TxRRC, jurisdiction utilities, COH hydrants),
+`esriImage` (esri `imageMapLayer` — USGS 3DEP elevation/hillshade), `esriFeature`
+(vector `featureLayer` — HIFLD transmission, non-interactive), `overpass` and
+`mapillary` (live, view-driven vectors in `lib/evidenceLayers.js`).
+- **Geographic planner:** a non-interactive Leaflet Web-Mercator basemap + shared
+  overlays sit behind the transparent feet-based SVG, anchored to the site `origin`.
+  Geometry/metrics stay in feet; `ppfToZoom` + canvas-centre→latlng lock the basemap.
+  Feet↔deg uses the Mercator sphere base (**≈365223 ft/deg, both axes**) so drawn
+  geometry overlays the aerial sub-pixel.
+- **Health/diagnostics:** `probeService` parses the service JSON (HTTP 200 + `.error`
+  = failed) and surfaces the server message; per-layer status dots
+  (loading/loaded/empty/failed); no zero-size export; `fetchWithRetry` + tile retry
+  with backoff; ~45s self-heal re-probe.
+- **Houston COH utilities** (`counties.js` JURISDICTION_LAYERS.harris): host
+  `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`,
+  `TDO/UN_Stormwater`) — the only CORS-clean host. Sublayers pinned via `layers:`
+  (water `0,1`; wastewater `2,6`; storm `22,23,24,904`) or defaults render meters,
+  not mains. Trunk lines scale-gated to ~≥1:40k; coverage is City-of-Houston-only.
+- **Site-engineering tools** (planner Layers control → Evidence tools): electric &
+  water service routing (`buildUtilRoute`), pond detention calculator
+  (`detentionStorage`, 3:1 taper, prismoidal volume), editable easement-rule table
+  (`lib/easementRules.js`, VERIFY placeholders), ditch cross-section
+  (`lib/elevation.js`, 3DEP `getSamples`) feeding `el.det.availDepth`. All elevation
+  output labeled "screening only — verify with survey."
+- **Mapillary token is a secret** — `import.meta.env.VITE_MAPILLARY_TOKEN` (CI secret)
+  or a user-entered localStorage value. Never commit it.
+- **Print/PNG caveat:** the SVG clone can't capture live Leaflet basemap/overlay
+  tiles (cross-origin canvas). With the basemap off, the captured screenshot underlay
+  still prints.
 
-**Conformance rule for future sessions:** add new site data as new model fields
-(additive), bump `SITE_MODEL_VERSION`, extend `migrate`, and expose it via a
-selector. The planner still keeps in-component `useState` for live editing and
-serializes to the model at the save boundary (collapsing that into a single
-reducer is a deferred, separate task).
+## Supabase (`src/workspaces/site-planner/lib/supabase.js`, `auth.js`, `cloudSync.js`)
+Config from build-time env only (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`;
+gitignored, Actions secrets — see deploy.yml). Connection test hits `/auth/v1/health`
+with the apikey (the PostgREST root is secret-key-only under the new key model — a
+publishable/anon key correctly 401s there). Auth = email+password via `auth.js` +
+`components/AuthPanel.jsx`. Phase 4: logged in → per-user local cache
+(`planarfit:sites:cloud:<uid>`) pulled on login + writes mirror to the `sites` table;
+logged out → legacy `planarfit:sites:v1`. Save badge reflects the real cloud write.
+No migration of legacy sites (recreate manually).
 
-## Backend (Supabase) — phased migration off localStorage
-We're moving persistence to **Supabase** (Postgres) so sites survive beyond one
-browser, sync across devices, and are backed up. **Done carefully in phases — do
-not skip ahead:**
-- **Phase 1 — connect (DONE).** `@supabase/supabase-js` + `src/lib/supabase.js`
-  (client + `testConnection()`), a diagnostic "Cloud" status chip + `window.
-  pfCloudTest()`. Config from build-time env **only** (`VITE_SUPABASE_URL`,
-  `VITE_SUPABASE_ANON_KEY`; gitignored, set as Actions secrets — see deploy.yml).
-  **No site data is read or written; persistence is still 100% localStorage.**
-- **Phase 2 — login (DONE).** Supabase Auth **email+password** (built-in only — no
-  custom auth) via `src/lib/auth.js` + `src/components/AuthPanel.jsx`: sign up / in /
-  out, password reset (+ recovery-link "set new password"). Auth state lives in
-  `App`; an account pill (bottom-right, above the Cloud chip) opens the modal.
-  **Additive only** — login does NOT gate any feature or change save/load; sites are
-  still 100% localStorage. Uses the same anon/publishable key + URL (no new secrets).
-- **Phase 3 — row-level security.** RLS so each user only sees their own rows.
-  (The anon key is public-safe by design; RLS is the real protection.)
-- **Phase 3 — row-level security (DONE).** RLS enabled on `public.sites` with
-  **private-by-default** policies: an `authenticated` user may SELECT/INSERT/UPDATE/
-  DELETE **only their own rows** (`(select auth.uid()) = user_id`); `user_id`
-  defaults to `auth.uid()` so rows are always owned by their creator. The anon role
-  has **no** policy (no access). **Deliberately NOT built (deferred pending product
-  direction):** sharing, workspaces, team features, and ANY admin/cross-user
-  visibility — there is intentionally no superuser/cross-user policy. (`service_role`
-  bypasses RLS by Postgres design, but it's server-only and never shipped to the
-  browser; all client access is the public anon key + a user JWT, which RLS gates.)
-  Policy SQL lives in the dashboard; mirrored below for the record. **No app change
-  — persistence is still localStorage.**
-- **Phase 4 — cloud save/load, NO migration (DONE).** Storage behavior is
-  auth-driven: **logged in → the cloud is the home for data** — `storage.js` switches
-  its working store to a per-user local cache (`planarfit:sites:cloud:<uid>`) pulled
-  from Supabase on login (`pullCloud`), writes mirror to the `sites` table
-  (`pushSiteToCloud` / `cloudSync.js`), and the save badge stays "Saving…" until the
-  cloud upsert resolves (only "Saved ✓" on real success). **Logged out → legacy
-  localStorage** (`planarfit:sites:v1`), unchanged. On logout the cloud cache is
-  cleared; auth switches reset the view (resume only if the current id is one of
-  theirs). Embedded screenshot dataURLs are stripped from cloud rows (kept locally).
-  **Deliberately NO migration of existing localStorage sites** (user has few; will
-  recreate) — legacy sites remain in the logged-out store, reachable by signing out.
-  TOKEN_REFRESHED/USER_UPDATED don't re-switch (no yanking mid-edit).
-
-**Table schema** (matches the Site Model — one row per plan, keyed by owner + id):
+**Table schema** (one row per plan; `data` jsonb = serialized Site Model):
 ```sql
 create table public.sites (
-  id         text not null,          -- our site/plan id (newId)
-  user_id    uuid not null default auth.uid() references auth.users(id),
-  group_id   text,                   -- site (location) group
-  site       text, name text, county text,   -- queryable metadata
-  updated_at timestamptz not null default now(),
-  data       jsonb not null,         -- the serialized Site Model (createSiteModel output)
-  primary key (user_id, id)
-);
+  id text not null, user_id uuid not null default auth.uid() references auth.users(id),
+  group_id text, site text, name text, county text,
+  updated_at timestamptz not null default now(), data jsonb not null,
+  primary key (user_id, id) );
 ```
-**RLS policies (Phase 3 — applied in the dashboard; private-by-default):**
+**RLS (private-by-default; applied in the dashboard):**
 ```sql
-alter table public.sites alter column user_id set default auth.uid();
-alter table public.sites alter column user_id set not null;
 alter table public.sites enable row level security;
-create policy "Users select own sites" on public.sites
-  for select to authenticated using ((select auth.uid()) = user_id);
-create policy "Users insert own sites" on public.sites
-  for insert to authenticated with check ((select auth.uid()) = user_id);
-create policy "Users update own sites" on public.sites
-  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
-create policy "Users delete own sites" on public.sites
-  for delete to authenticated using ((select auth.uid()) = user_id);
+create policy "Users select own sites" on public.sites for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own sites" on public.sites for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users update own sites" on public.sites for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "Users delete own sites" on public.sites for delete to authenticated using ((select auth.uid()) = user_id);
 ```
-Phase 4 (cloud save/load) is wired; **migration was deliberately skipped** (recreate
-the few existing sites manually). Cloud rows: `data` holds the serialized model;
-`group_id/site/name/county/updated_at` are duplicated for querying.
+No anon policy, no admin/cross-user policy (deferred by decision).
 
-## 5. Known limitations / roadmap
-- **AI corridor scan (roadmap — NOT built; disabled placeholder only).** Intended:
-  draw a ≤2 sq-mi box, fetch public-domain NAIP aerial tiles for it, send tiles to
-  the Claude API vision model to flag pole/hydrant candidates, then georeference
-  hits back onto the plan as confirm/reject pins. **Requirements when built:** show
-  the tile count + estimated API cost *before* running (explicit confirm), and read
-  the Claude API key from env/secrets or user input — never commit it (same rule as
-  the title reader). There is a disabled, labeled "🛰 AI corridor scan — coming
-  soon" button in the planner Layers control; wire it here.
-- Polygon elements: vertex editing **is** supported (drag a dot, ＋ on an edge
-  adds a corner, Shift-click deletes — same as parcels), but striping is **not
-  clipped** to the polygon (counts are area-based estimates).
-- Parcel setback is a simple inward offset (good for convex/mildly-concave lots).
-- Single-story FAR assumption.
-- Counties limited to Harris / Fort Bend / **Chambers (endpoint is provisional)**.
-- Imagery is free **keyless** only (Esri/USGS); a paid source (Nearmap/Vexcel/
-  Google) could be added as a 3rd "Imagery" option — would need an API key.
-- Autosave is **per-browser/device**; no cloud sync (named scenarios + Export
-  JSON are the portable options).
-- Nice-to-haves: polygon vertex edit, true striping in polygons, more counties,
-  DXF/PDF export.
-
-## Roadmap (by status)
-Living plan so nothing planned is lost between sessions. Keep entries terse; move
-items between buckets as they ship. Don't infer scope creep — build only what's asked.
-
-### ✅ Done (verified on the live site)
-- **Geographic basemap refactor** — planner renders on a real Web-Mercator basemap anchored to the site origin; geometry/metrics stay in feet.
-- **Shared layer state** — one `overlays` object in `App`, used by both pages (toggle on one shows on the other).
-- **Site Model** — single schema + `migrate` + selectors (`lib/siteModel.js`); storage is a thin layer over it. (See "Site Model" section.)
-- **New-site data-loss fix** — first-edit persistence, honest Saved/Saving/Unsaved badge, `beforeunload`/`visibilitychange` flush, dangling-pointer cleanup.
-- **Layer-status / health** — error-body parsing (200+`.error` = failed), per-layer status dots + reasons, no zero-size export, wetlands single canonical host, ~45s self-heal re-probe, fetch + tile retry-with-backoff.
-- **Supabase backend — Phases 1–4 DONE** — connect (chip) → login (account pill) → RLS (private-by-default) → **cloud save/load** (logged in = cloud is home, per-user RLS-scoped; logged out = legacy localStorage). **No data migration** (recreate few legacy sites manually). Save badge reflects the real cloud write. (See "## Backend (Supabase)".) Deferred: sharing/workspaces/admin; offline write queue.
-
-### ⛔ Known issues / blocked on external services
-- **Houston water/wastewater/storm** — on the City's **TEST** host `geogimstest.houstontx.gov/arcgis/rest` (folders `HW/Water_gx`, `HW/WasteWater_gx`, `TDO/UN_Stormwater`) — the only CORS-clean host serving these; `geogimsprod` is viewer-only (no `/arcgis/rest`), `geohwp` has a different catalog. It works but is a **test environment that could change without notice** — replace with a production COH equivalent if one becomes available; the probe + ~45s self-heal already cover it failing gracefully. Sublayers are pinned (`layers=show:` — water 0,1; wastewater 2,6; storm 22,23,24,904) because defaults render meters, not mains/pipes. **Expected, not bugs:** trunk lines (Gravity Main, Pipe) are scale-gated to ~≥1:40k (zoom in to see them); coverage is City-of-Houston-only (transparent outside the city).
-- General: county/city GIS hosts move and stop often — rely on the probe + honest error surfacing, never hardcode-and-assume.
-
-### Tier 1 — site-killers (binary go/no-go; highest priority; NOT built)
-- **Storm outfall + discharge rate** — where can the site legally discharge, at what allowable rate (HCFCD criteria / NOAA Atlas 14 rainfall). Drives detention sizing and whether the site works at all.
-- **Sanitary sewer** — gravity vs lift-station required, septic feasibility, downstream capacity. A forced lift station / no-capacity finding can kill a deal.
-- **Fire flow** — required gpm for sprinklered industrial buildings; needs a utility "will-serve" input. Inadequate fire flow blocks occupancy.
-- **Finished-floor vs base-flood-elevation** — FFE must clear BFE+freeboard; ties to the FEMA layer + elevation data.
-- **Environmental screen** — TCEQ LPST (leaking petroleum tanks) + EPA databases near/under the site; flags contamination risk early.
-- **Entitlement envelope** — zoning/jurisdiction status: Houston (no zoning) vs unincorporated county ETJ vs incorporated city (real zoning). Determines what's even allowed.
-
-### Tier 2 — cost-swingers (need elevation data; 3DEP layer is in)
-- **Earthwork / cut-fill balance** — from 3DEP, estimate import/export dirt volume and balance; a major, swingy cost line.
-- **NRCS soils layer** — bearing/expansive clay/hydric soils → foundation + detention + earthwork cost.
-
-### Tier 3 — layout validators
-- **Truck + fire swept-path** — WB-67 turning templates and fire-apparatus access; validates the drawn layout actually functions.
-- **Driveway / access permitting** — TxDOT (state road) vs county driveway rules; affects access feasibility.
-
-### Tier 4 — the payoff (synthesis / verdict engine)
-- **Net buildable area** after all constraints (setbacks, easements, floodplain, wetlands, utilities, slopes) — reads the whole Site Model via `developableArea()` (currently a stub).
-- **Rough site-cost estimate** — earthwork + detention + offsite utilities.
-- **Yield-on-cost** and a **punch-list of what public data can't answer** (boundary survey, geotech, title commitment, will-serve letters).
-
-### Feature ideas (not yet scheduled)
-- **Stale-while-revalidate GIS caching** — instant paint from last-known-good copy, refresh in background, show "data age" + screening-only caveat; pairs with the probe/self-heal.
-- **AI corridor scan** — roadmap-only (disabled placeholder exists); NAIP imagery + Claude vision to flag poles/hydrants; MUST show tile count + estimated API cost before running; paid API key from env/secrets, never committed. (Full spec above in §5.)
-- **Planner single-reducer rewrite** — collapse the planner's in-component `useState` into one `useReducer(SiteModel)` and physically split `els`/`markups` into typed buckets (Option B, deferred from the site-model refactor).
-
-## 6. Conventions for future sessions
-- **Develop on `main` and push to deploy** — the user authorized straight-to-live.
-  A stale branch `claude/clever-babbage-vj59nr` exists; ignore it — `main` is the
-  source of truth.
-- Always `npm run build` before pushing; after each push, the Pages deploy runs
-  (gated to `main`). If a deploy fails transiently, re-run it.
-- **Units:** feet everywhere internal; convert only at the map boundary.
-- Match the existing style: compact code, inline styles, the `PAL` drafting
-  palette, terse comments.
-- **Secrets: never commit API keys or secrets to the repo.** They belong in
-  environment variables or a secrets store. Keep `.env*` in `.gitignore`. The app
-  currently uses only keyless public endpoints; if a paid imagery/geocoding key
-  is ever added, read it from an env var / runtime config — do not hardcode or
-  commit it.
-- End commit messages with the session link the harness provides.
+## Counties / GIS plumbing
+`lib/counties.js` — county presets (Harris/Fort Bend/Chambers) + `JURISDICTION_LAYERS`
++ State Plane EPSG:2278. `lib/arcgis.js` — ArcGIS REST client, `feetToLatLng` /
+`lngLatRingToFeet` (FT_PER_DEG_LAT = 365223, Mercator-sphere base), aerial export.
+County/city GIS hosts move and stop often — rely on the probe + honest error
+surfacing, never hardcode-and-assume.
