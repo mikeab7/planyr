@@ -2451,7 +2451,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
-      } catch (_) { alert("That file doesn't look like a Planyr export."); }
+      } catch (_) { alert("That file doesn't look like a Site Planyr export."); }
     };
     fr.readAsText(file);
   };
@@ -2673,7 +2673,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .metrics{display:flex;flex-wrap:wrap;gap:2px 16px} .metrics b{font-variant-numeric:tabular-nums} .note{color:#8a8473;font-size:9px}
     </style></head><body>
       <div class="sheet">
-        <div class="title"><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Planyr</span></div>
+        <div class="title"><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Site Planyr</span></div>
         <div class="plan">${xml}</div>
         <div class="block">
           <div class="metrics">${rows.map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
@@ -3453,7 +3453,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
           </span>
-          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Planyr</span>
+          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Site Planyr</span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>
             {/* SITE ▾ — switch / rename location */}
             <div style={{ position: "relative" }}>
