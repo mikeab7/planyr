@@ -5,6 +5,12 @@ two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
 backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
+> **📋 `BACKLOG.md` is the single source of truth for open bugs & feature requests.**
+> On every run, check `BACKLOG.md`: work the items under **🔲 Open**, skip those under
+> **✅ Done**. (This is the product bug/feature backlog — distinct from the
+> "Deferred / maintenance backlog" section near the end of this file, which tracks
+> ops/infra cleanup.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
