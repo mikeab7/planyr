@@ -9,7 +9,7 @@ The build environment can't exercise browser `localStorage` + the React
 lifecycle, so this runs **in the browser on the deployed app**. It reads ground
 truth from `localStorage` (not the UI) and prints PASS/FAIL.
 
-**App:** https://mikeab7.github.io/planyr/
+**App:** https://planyr.io/
 
 ## How to run
 1. Open the app, open DevTools → **Console**, paste the whole harness below.
