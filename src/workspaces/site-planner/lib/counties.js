@@ -15,7 +15,9 @@
  * servers move occasionally):
  *   Harris   — HCAD Parcels layer 0 on the Harris County GIS server
  *   Fort Bend— FBCAD public map service (parcels layer auto-detected)
- *   Chambers — CCAD hosted parcels feature service (marked experimental)
+ *   Chambers — TxGIO (Texas Geographic Information Office) statewide parcels. The
+ *              old CCAD-only hosted test layer went private (499 Token Required), so
+ *              we use the public all-Texas service and scope searches to Chambers.
  */
 
 // NAD83 / Texas South Central (US survey feet) — the State Plane zone covering
@@ -42,12 +44,16 @@ export const COUNTIES = {
   },
   chambers: {
     label: "Chambers County · CCAD",
+    // TxGIO statewide parcel service — one public, CORS-open layer covering all 254
+    // Texas counties. The old CCAD-only hosted layer went private (499 Token Required).
+    // Because this layer is statewide, ID/address searches are confined to Chambers via
+    // `scopeWhere`; click-to-select is a point query so it can only ever hit one parcel.
     layerUrl:
-      "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Hosted_Parcels_Test_WebMer_20201016/FeatureServer/0",
-    idField: null,
-    addrField: null,
-    experimental: true,
-    help: "Chambers CAD hosted parcels (endpoint is provisional — edit below if it 404s).",
+      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
+    idField: "prop_id",
+    addrField: "situs_addr",
+    scopeWhere: "county='CHAMBERS'",
+    help: "Texas statewide parcels (TxGIO) — searches are limited to Chambers County.",
   },
 };
 
@@ -202,7 +208,9 @@ export const COUNTIES_MAP = {
     center: [29.7, -94.66],
     zoom: 11,
     mapServer: null,
+    // TxGIO statewide parcels (see COUNTIES.chambers). Used for identify only; a map
+    // click is a point query, so the statewide extent is irrelevant for select.
     layerUrl:
-      "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Hosted_Parcels_Test_WebMer_20201016/FeatureServer/0",
+      "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
   },
 };
