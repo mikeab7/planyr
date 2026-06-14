@@ -184,25 +184,48 @@ export function detectField(fields, kind) {
  *     parcel lines across the view, scales to the whole county). Preferred.
  *   - layerUrl:  a specific feature layer, used both to render (when there's no
  *     MapServer) and to query the parcel under a click.
+ *   - bbox:      approximate county extent [latMin, lonMin, latMax, lonMax] (WGS84),
+ *     padded a touch so clicks near a shared border still include the neighbour.
+ *     Used only to PRE-FILTER which CAD service(s) to identify against for a click —
+ *     it is a coarse screen, never authoritative; the parcel service that actually
+ *     returns a lot is the source of truth. Overlap at borders is intentional so a
+ *     straddle click queries both counties. (No precise boundary polygons bundled.)
  * If layerUrl is null it's resolved from mapServer at runtime. */
 export const COUNTIES_MAP = {
   harris: {
     center: [29.76, -95.37],
     zoom: 11,
+    bbox: [29.49, -95.96, 30.17, -94.90],
     mapServer: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer",
     layerUrl: "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/0",
   },
   fortbend: {
     center: [29.53, -95.77],
     zoom: 11,
+    bbox: [29.25, -96.13, 29.85, -95.51],
     mapServer: "https://gis.fbcad.org/serverarcgis2/rest/services/Public/MapServer",
     layerUrl: null,
   },
   chambers: {
     center: [29.7, -94.66],
     zoom: 11,
+    bbox: [29.36, -94.92, 29.92, -94.39],
     mapServer: null,
     layerUrl:
       "https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Hosted_Parcels_Test_WebMer_20201016/FeatureServer/0",
   },
 };
+
+// Which configured CAD county/counties could contain a clicked point — used to
+// route a parcel identify WITHOUT making the user pre-pick a county. Returns the
+// county keys whose padded bbox contains the point (border overlaps mean a
+// straddle click yields both, so the caller can query both and merge). Falls back
+// to ALL configured counties if the point is outside every bbox (a coarse screen
+// should never be the reason a real parcel goes unfound — better to try them all).
+export function candidateCountiesForPoint(lat, lng) {
+  const within = Object.entries(COUNTIES_MAP).filter(([, c]) => {
+    const b = c.bbox;
+    return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3];
+  });
+  return (within.length ? within : Object.entries(COUNTIES_MAP)).map(([k]) => k);
+}

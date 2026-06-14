@@ -133,6 +133,26 @@ export async function queryAtPoint(layerUrl, lng, lat) {
   return (j.features || [])[0] || null;
 }
 
+/* Identify the parcel under a clicked point across several candidate counties at
+ * once — so the user never has to pre-pick a county. Each candidate is
+ * { county, url } (the county's resolved parcel-layer URL). Queries them in
+ * parallel and returns EVERY hit as { county, feature } (a click that straddles a
+ * county line can legitimately hit two — the caller merges). A candidate whose
+ * service is down/unreachable is skipped (its rejection swallowed) rather than
+ * failing the whole identify, so a sibling county can still answer. Returns [] when
+ * nothing matched anywhere. */
+export async function identifyParcelAcross(candidates, lng, lat) {
+  const results = await Promise.allSettled(
+    (candidates || []).map(async ({ county, url }) => {
+      const feature = await queryAtPoint(url, lng, lat);
+      return feature ? { county, feature } : null;
+    })
+  );
+  return results
+    .filter((r) => r.status === "fulfilled" && r.value)
+    .map((r) => r.value);
+}
+
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
  * [lat,lng] ring for drawing a highlight on the Leaflet map. Uses a local
  * equirectangular projection about the parcel centroid — exact enough for a
