@@ -1,4 +1,4 @@
-# Planar_Fit — Industrial Site Planner
+# Planyr — Industrial Site Planner
 
 A TestFit-style site-planning sketch tool aimed at **industrial** deals
 (buildings, truck courts, trailer storage, car parking, detention) for the
