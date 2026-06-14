@@ -16,7 +16,8 @@ const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).s
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
 export default function App() {
-  const [county, setCounty] = useState("harris");
+  // (County is no longer a top-level pick — the map auto-resolves a clicked
+  // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
   // layer toggled on the map finder is reflected in the planner and vice-versa
   // (global app preference; per-site memory is reserved in the site model, TBD).
@@ -157,6 +158,15 @@ export default function App() {
     refreshSites();
   };
 
+  // Set a site's project status (B7/B8). The map shows one marker per SITE group,
+  // so apply the status to every plan in the group to keep it consistent however
+  // the group is represented. Persists + mirrors to cloud, then refreshes.
+  const setSiteStatus = (id, status) => {
+    const rec = loadSite(id); if (!rec) return;
+    loadPlansOfGroup(groupOf(rec)).forEach((s) => { saveSite({ id: s.id, status }); pushSiteToCloud(s.id).catch(() => {}); });
+    refreshSites();
+  };
+
   // The map lists SITES (locations), so collapse plans to one representative per
   // group — preferring the active plan so its pin highlights correctly.
   const siteGroups = (() => {
@@ -178,8 +188,6 @@ export default function App() {
       <div style={{ display: mode === "map" ? "block" : "none", height: "100%" }}>
         <MapFinder
           visible={mode === "map"}
-          county={county}
-          onCounty={setCounty}
           overlays={overlays}
           setOverlays={setOverlays}
           layerStatus={layerStatus}
@@ -188,6 +196,7 @@ export default function App() {
           activeSiteId={activeSiteId}
           onOpenSite={openSite}
           onDeleteSite={deleteSiteGroup}
+          onSetStatus={setSiteStatus}
           onUseParcels={newSiteFromMap}
           onSkip={newBlankSite}
         />

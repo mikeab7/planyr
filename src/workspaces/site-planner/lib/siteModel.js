@@ -15,12 +15,34 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 2;
+export const SITE_MODEL_VERSION = 3;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance"];                    // title metes-and-bounds tracts / corridors
 export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
 export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon"]; // neutral drawing markups
+
+/* Project lifecycle status — the deal stage of a site, shown on the map markers.
+ * Ordered pursuit → active → onhold → complete → dead (deal funnel order). New
+ * sites default to "pursuit"; pre-feature records (no status) migrate to "active"
+ * (they predate the field and are presumed live). `STATUSES` is the ordered key
+ * list; `STATUS_META` carries the label used across the UI (legend/menu/counts). */
+export const STATUSES = ["pursuit", "active", "onhold", "complete", "dead"];
+export const STATUS_META = {
+  pursuit: { label: "Pursuit" },
+  active: { label: "Active" },
+  onhold: { label: "On Hold" },
+  complete: { label: "Complete" },
+  dead: { label: "Dead" },
+};
+const DEFAULT_STATUS = "pursuit";       // a brand-new site
+const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
+const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
+// A record already stamped with an older schemaVersion predates this feature, so
+// it's presumed live → "active". Every new record (no prior version) is stamped 3
+// here and falls through to "pursuit". (saveSite re-normalizes through this, so the
+// status it reads back is the explicit one when a status was passed in.)
+const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
@@ -37,6 +59,10 @@ export function createSiteModel(p = {}) {
     // geo anchor + jurisdiction
     origin: p.origin || null,
     county: p.county || null,
+    // deal stage. Honor an explicit status; otherwise a record stamped with an
+    // older schemaVersion is a pre-feature site (→ "active", presumed live), while
+    // a fresh record (no prior version) starts in "pursuit".
+    status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
     parcels: p.parcels || [],
     underlay: p.underlay || null,
@@ -63,6 +89,8 @@ const byKind = (markups, kinds) => (markups || []).filter((m) => kinds.includes(
 
 export const parcelsOf = (m) => m.parcels || [];
 export const elementsOf = (m) => m.els || [];
+// Deal stage, always one of STATUSES (defaults to "pursuit" if somehow unset).
+export const statusOf = (m) => normStatus(m && m.status, DEFAULT_STATUS);
 
 // Everything that constrains development: title easements + routed easement
 // corridors (from markups), per-parcel setbacks (derived), and the live GIS

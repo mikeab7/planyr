@@ -3464,12 +3464,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* top bar — dark graphite chrome */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", position: "relative", zIndex: 60 }}>
         {onBackToMap && <button className="dbtn" style={{ ...dGhost, marginLeft: -4 }} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
+        {/* B10: brand/module mark removed — it now lives once in the shell's product switcher. */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 2 }}>
-          <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
-          </span>
-          <span style={{ fontWeight: 800, letterSpacing: "-0.01em", fontSize: 15, color: "#fff" }}>Site Planyr</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9, whiteSpace: "nowrap" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
             {/* SITE ▾ — switch / rename location */}
             <div style={{ position: "relative" }}>
               <button className="dbtn" style={hdrTab(12.5, "#fff", 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">

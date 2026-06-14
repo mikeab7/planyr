@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
-import { COUNTIES, COUNTIES_MAP } from "./lib/counties.js";
+import { COUNTIES_MAP, candidateCountiesForPoint } from "./lib/counties.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
-  queryAtPoint,
+  identifyParcelAcross,
   largestRingLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -15,6 +15,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
+import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -69,6 +70,61 @@ const ADD_CURSOR =
 const REMOVE_CURSOR =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M5 14 L23 14' stroke='%23b91c1c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
 
+/* Project-status visual language (B8). TWO redundant cues per state — color AND
+ * shape/glyph — so it reads for colorblind users and over a busy aerial:
+ *   pursuit  amber,  dashed ring, no glyph (tentative/uncommitted)
+ *   active   green,  solid, bold — grabs the eye (the live work)
+ *   onhold   slate/indigo (NOT sky-blue, so it survives over blue water), pause ‖
+ *   complete gray,   muted, small check ✓ — recedes
+ *   dead     hollow gray, dimmest, faint ✕, NO fill — recedes (deliberately not red)
+ * `dot` is the swatch color for the legend / list / counts. `dim` recedes a marker. */
+const STATUS_STYLE = {
+  pursuit:  { dot: "#d97706", fill: "#f59e0b", stroke: "#b45309", glyph: "", dashed: true,  dim: false },
+  active:   { dot: "#16a34a", fill: "#16a34a", stroke: "#14532d", glyph: "", dashed: false, dim: false },
+  onhold:   { dot: "#475569", fill: "#475569", stroke: "#1e293b", glyph: "pause", dashed: false, dim: false },
+  complete: { dot: "#94a3b8", fill: "#94a3b8", stroke: "#64748b", glyph: "check", dashed: false, dim: true },
+  dead:     { dot: "#9ca3af", fill: "none",    stroke: "#9ca3af", glyph: "x",     dashed: false, dim: true, hollow: true },
+};
+const statusStyle = (st) => STATUS_STYLE[st] || STATUS_STYLE.pursuit;
+// Compact text glyph per status for the legend / list / menu (the second cue
+// alongside color). Pursuit = hollow ring (uncommitted), active = filled dot.
+const STATUS_GLYPH = { pursuit: "○", active: "●", onhold: "‖", complete: "✓", dead: "✕" };
+
+// Glyph drawn inside the pin head (white), per status. Empty for pursuit/active.
+function pinGlyphSvg(kind) {
+  if (kind === "pause") return `<rect x="11" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/><rect x="16.6" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/>`;
+  if (kind === "check") return `<path d="M10.5 13.4 L13.2 16 L19 9.8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (kind === "x") return `<path d="M11 9.5 L19 17.5 M19 9.5 L11 17.5" stroke="${statusStyle('dead').stroke}" stroke-width="2.2" stroke-linecap="round"/>`;
+  return "";
+}
+
+/* Build a saved-site map pin reflecting its project status + active state.
+ * Active sites are the live ember accent and slightly larger so they pop; the
+ * rest carry their status color/shape and recede when completed/dead. */
+function statusPinIcon(status, active) {
+  const s = statusStyle(status);
+  const fill = active ? "#e8590c" : (s.hollow ? "#ffffff" : s.fill);
+  const stroke = active ? "#7c2d12" : s.stroke;
+  const op = s.dim && !active ? 0.78 : 1;
+  const scale = active ? 1.12 : 1;
+  const w = Math.round(30 * scale), h = Math.round(40 * scale);
+  const glyph = active ? "" : pinGlyphSvg(s.glyph);
+  // pursuit = dashed outline ring (its distinguishing shape cue); others solid.
+  const ringDash = !active && s.dashed ? ` stroke-dasharray="3.4 2.8"` : "";
+  const ringW = !active && s.dashed ? 2.4 : 2;
+  return L.divIcon({
+    className: "",
+    html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4)); opacity:${op};">
+      <svg width="${w}" height="${h}" viewBox="0 0 30 40">
+        <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${fill}" stroke="${stroke}" stroke-width="${ringW}"${ringDash}/>
+        ${active
+          ? `<rect x="9.5" y="8" width="6.5" height="11" fill="#fff" opacity=".95"/><rect x="17.6" y="8" width="3" height="6.5" fill="#fff" opacity=".55"/>`
+          : (glyph || `<circle cx="15" cy="13.5" r="4.4" fill="${s.hollow ? s.stroke : '#fff'}" opacity="${s.hollow ? 0.9 : 0.95}"/>`)}
+      </svg></div>`,
+    iconSize: [w, h], iconAnchor: [Math.round(w / 2), h - 2], tooltipAnchor: [0, -(h - 6)],
+  });
+}
+
 // Ray-cast point-in-polygon on a [[lat,lng], ...] ring.
 function pointInPoly(lat, lng, ring) {
   let inside = false;
@@ -117,15 +173,17 @@ function siteAcres(site) {
   return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
 }
 
-export default function MapFinder({ visible, county, onCounty, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
-  const displayRef = useRef(null);   // visible parcel-line layer
+  const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   const sitesLayerRef = useRef(null); // saved-site footprints
   const onOpenSiteRef = useRef(onOpenSite);
   useEffect(() => { onOpenSiteRef.current = onOpenSite; }, [onOpenSite]);
+  const onSetStatusRef = useRef(onSetStatus);
+  useEffect(() => { onSetStatusRef.current = onSetStatus; }, [onSetStatus]);
   const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
-  const layerUrlRef = useRef(null);  // queryable layer URL
+  const layerUrlsRef = useRef({});   // county -> resolved queryable layer URL (auto-routing)
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
@@ -139,10 +197,19 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
+  const [hidden, setHidden] = useState(() => new Set()); // statuses filtered out of the map
+  const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
-  const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct}]
+  const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct, county}]
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+
+  const toggleHidden = (st) => setHidden((h) => { const n = new Set(h); n.has(st) ? n.delete(st) : n.add(st); return n; });
+  // Apply a status to a site (group), then refresh — closes the right-click menu.
+  const setStatus = (siteId, st) => { onSetStatusRef.current && onSetStatusRef.current(siteId, st); setStatusMenu(null); };
+  // Pipeline counts by status across all sites (for the legend / counts strip).
+  const statusCounts = STATUSES.reduce((m, st) => { m[st] = 0; return m; }, {});
+  sites.forEach((s) => { statusCounts[statusOf(s)] = (statusCounts[statusOf(s)] || 0) + 1; });
 
   const clearHilites = () => {
     const map = mapRef.current;
@@ -152,7 +219,7 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
 
   /* create the map once */
   useEffect(() => {
-    const cfg = COUNTIES_MAP[county] || COUNTIES_MAP.harris;
+    const cfg = COUNTIES_MAP.harris; // default landing view (no pre-picked county)
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
     setZoom(map.getZoom());
@@ -242,20 +309,27 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
     const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
     sites.forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
+      const status = statusOf(site);
+      if (hidden.has(status)) return; // filtered out by the status toggles
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
-      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · click to open`;
+      const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · ${STATUS_META[status]?.label || status} · click to open`;
       const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
+      // Right-click anywhere on a site → status picker at the cursor. (Suppress
+      // the browser's native menu via the underlying DOM event.)
+      const onCtx = (e) => { if (selectModeRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
 
       if (showPlans && site.parcels?.length) {
-        // parcel boundary
+        const sty = statusStyle(status);
+        const lineColor = active ? "#e8590c" : sty.dot;
+        // parcel boundary — tinted to the project status (active stays ember)
         site.parcels.forEach((p) => {
           if (!p.points?.length) return;
           const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
-            color: active ? "#e8590c" : "#22d3ee", weight: 2.25, dashArray: "6 5",
-            fillColor: active ? "#e8590c" : "#22d3ee", fillOpacity: 0.05, interactive: !selectMode,
+            color: lineColor, weight: 2.25, dashArray: sty.dashed && !active ? "5 4" : "6 5",
+            fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
           });
-          if (!selectMode) poly.on("click", openSiteNow).bindTooltip(tip, { direction: "top", sticky: true });
+          if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
           poly.addTo(group);
         });
         // the plan itself: every element in its real fill/stroke (same resolver
@@ -269,24 +343,13 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
             fillOpacity: Math.min(0.92, st.fillOpacity ?? 1),
             interactive: !selectMode,
           });
-          if (!selectMode) poly.on("click", openSiteNow).bindTooltip(tip, { direction: "top", sticky: true });
+          if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
           poly.addTo(group);
         });
       } else {
-        // zoomed out: a branded map pin at the site origin
-        const pin = active ? "#e8590c" : "#191613";
-        const icon = L.divIcon({
-          className: "",
-          html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4));">
-            <svg width="30" height="40" viewBox="0 0 30 40">
-              <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${pin}" stroke="#ffffff" stroke-width="2"/>
-              <rect x="9.5" y="8" width="6.5" height="11" fill="#fff" opacity=".95"/>
-              <rect x="17.6" y="8" width="3" height="6.5" fill="#fff" opacity=".55"/>
-            </svg></div>`,
-          iconSize: [30, 40], iconAnchor: [15, 38], tooltipAnchor: [0, -34],
-        });
-        const marker = L.marker([lat, lon], { icon, interactive: !selectMode, keyboard: false });
-        if (!selectMode) marker.on("click", openSiteNow).bindTooltip(tip, { direction: "top" });
+        // zoomed out: a status-aware map pin at the site origin
+        const marker = L.marker([lat, lon], { icon: statusPinIcon(status, active), interactive: !selectMode, keyboard: false });
+        if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
       }
     });
@@ -294,69 +357,76 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
     sitesLayerRef.current = group;
     return () => { try { map.removeLayer(group); } catch (_) {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode, zoom]);
+  }, [sites, activeSiteId, selectMode, zoom, hidden]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
   };
 
-  /* resolve the parcel layer URL + draw boundaries when the county changes */
+  /* Resolve EVERY CAD county's parcel-layer URL once (no county pre-selection):
+     a click is auto-routed to whichever county's service answers, so we need them
+     all ready. Each is the queryable layer used both to outline parcels and to
+     identify the lot under a click. A county whose service is unreachable is just
+     skipped — its siblings still work. */
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const cfg = COUNTIES_MAP[county];
-    if (!cfg) return;
-    setSelected([]); setErr(""); clearHilites();
-    if (displayRef.current) { map.removeLayer(displayRef.current); displayRef.current = null; }
-    map.setView(cfg.center, cfg.zoom);
-    layerUrlRef.current = null;
     let cancelled = false;
-    (async () => {
-      try {
-        const url = await resolveLayerUrl(cfg.layerUrl || cfg.mapServer);
-        if (cancelled) return;
-        layerUrlRef.current = url;
-        if (selectModeRef.current && !displayRef.current) {
-          const fl = makeParcelLayer(url);
-          fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
-          fl.addTo(map);
-          displayRef.current = fl;
-        }
-      } catch (e) {
-        if (!cancelled) setErr(`Couldn't reach the ${COUNTIES[county]?.label || "county"} parcel service. Pan the aerial and trace by hand, or try again.`);
-      }
-    })();
+    Object.entries(COUNTIES_MAP).forEach(([key, cfg]) => {
+      resolveLayerUrl(cfg.layerUrl || cfg.mapServer)
+        .then((url) => { if (!cancelled) { layerUrlsRef.current[key] = url; if (selectModeRef.current) addDisplay(key); } })
+        .catch(() => {}); // a single county being down must not break the others
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [county]);
+  }, []);
 
-  /* enter/leave select mode: show outlines, set the +/− cursor, enable clicks */
+  // Lazily add a county's visible parcel-outline layer (zoom-gated, county-bounded
+  // so it only paints where that county has coverage). Idempotent per county.
+  const addDisplay = (key) => {
+    const map = mapRef.current;
+    const url = layerUrlsRef.current[key];
+    if (!map || !url || displaysRef.current[key]) return;
+    const fl = makeParcelLayer(url);
+    fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
+    fl.addTo(map);
+    displaysRef.current[key] = fl;
+  };
+  const clearDisplays = () => {
+    const map = mapRef.current;
+    Object.values(displaysRef.current).forEach((fl) => { try { map && map.removeLayer(fl); } catch (_) {} });
+    displaysRef.current = {};
+  };
+
+  /* enter/leave select mode: show all counties' outlines, set the +/− cursor,
+     enable click-to-identify. */
   useEffect(() => {
     selectModeRef.current = selectMode;
     const map = mapRef.current;
     if (!map) return;
     if (selectMode) {
-      if (!displayRef.current && layerUrlRef.current) {
-        const fl = makeParcelLayer(layerUrlRef.current);
-        fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
-        fl.addTo(map);
-        displayRef.current = fl;
-      }
+      Object.keys(layerUrlsRef.current).forEach(addDisplay);
       map.getContainer().style.cursor = ADD_CURSOR;
     } else {
-      if (displayRef.current) { map.removeLayer(displayRef.current); displayRef.current = null; }
+      clearDisplays();
       map.getContainer().style.cursor = "";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectMode]);
 
   const handleClick = async (latlng) => {
-    const url = layerUrlRef.current;
-    if (!url) { setErr("Parcel layer is still loading — give it a second and click again."); return; }
+    // Auto-route: figure out which configured county/counties could contain this
+    // point, then identify against each one's CAD service and use whatever answers.
+    // No county pre-selection required; a border straddle queries both and we take
+    // the first hit. Candidates with an unresolved URL (service still loading or
+    // down) are skipped this click.
+    const candidates = candidateCountiesForPoint(latlng.lat, latlng.lng)
+      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
+      .filter((c) => c.url);
+    if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
     setBusy(true); setErr("");
     try {
-      const feat = await queryAtPoint(url, latlng.lng, latlng.lat);
-      if (!feat) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
+      const hits = await identifyParcelAcross(candidates, latlng.lng, latlng.lat);
+      if (!hits.length) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
+      const { county, feature: feat } = hits[0]; // first county that answered owns the lot
       const ring = largestRingLngLat(feat);
       if (!ring) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const attrs = feat.attributes || {};
@@ -370,7 +440,7 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
       } else {
         const latlngs = ring.map(([lon, lat]) => [lat, lon]);
         hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs }]);
+        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }]);
       }
     } catch (e) {
       setErr(humanizeError(e));
@@ -402,6 +472,9 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
   // boundary aligns to either source, so the planner aerial stays reliable.
   const planSelected = () => {
     const asm = computeAssembly(selected, BASEMAPS.esri.export);
+    // County now comes from the parcels themselves (auto-resolved at click), not a
+    // pre-pick — use the last-selected parcel's county.
+    const county = selected[selected.length - 1]?.county || selected.find((s) => s.county)?.county || null;
     if (asm) onUseParcels({ ...asm, name: selected[selected.length - 1]?.addr || "Untitled site", county });
   };
 
@@ -426,16 +499,13 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
           <span style={{ fontWeight: 800, fontSize: 15, color: "#fff", letterSpacing: "-0.01em" }}>Site Planyr</span>
           <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9 }}>Find a site</span>
         </div>
-        <select style={{ ...field, fontWeight: 600, marginLeft: 4 }} value={county} onChange={(e) => onCounty(e.target.value)}>
-          {Object.entries(COUNTIES).map(([k, c]) => <option key={k} value={k}>{c.label}{c.experimental ? " (beta)" : ""}</option>)}
-        </select>
         <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
           <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
             onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") goAddress(); }} />
           <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
         </div>
         <div style={{ flex: 1 }} />
-        <button className="dbtn" style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Skip — blank canvas</button>
+        <button className="dbtn" title="Start a new blank plan without selecting parcels." style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Start blank</button>
       </div>
 
       {/* map */}
@@ -446,18 +516,43 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
         {sites.length > 0 && (
           <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px 6px" }}>Your sites · {sites.length}</div>
-            <div style={{ maxHeight: 280, overflowY: "auto", paddingBottom: 4 }}>
+            {/* Pipeline by status — legend + filter + counts. Each chip is a toggle
+                (click to hide/show that status on the map); the count is computed
+                live, the glyph + color is the marker legend. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 8px 8px" }}>
+              {STATUSES.map((st) => {
+                const sty = statusStyle(st); const off = hidden.has(st); const n = statusCounts[st] || 0;
+                return (
+                  <button key={st} onClick={() => toggleHidden(st)}
+                    title={`${STATUS_META[st]?.label || st}: ${n} — click to ${off ? "show" : "hide"} on map`}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
+                      fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${off ? PAL.panelLine : sty.dot}`,
+                      background: off ? "#f4f1ea" : "#fff", color: off ? PAL.muted : PAL.ink, opacity: off ? 0.7 : 1, textDecoration: off ? "line-through" : "none" }}>
+                    <span style={{ color: sty.dot, fontSize: 11 }}>{STATUS_GLYPH[st]}</span>
+                    {STATUS_META[st]?.label || st}<span style={{ color: PAL.muted, fontWeight: 700 }}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
               {sites.map((s) => {
                 const isActive = s.id === activeSiteId;
+                const st = statusOf(s); const sty = statusStyle(st);
                 return (
-                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here)" : "Open site"}
+                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status)" : "Open site"}
                     onClick={() => onOpenSite && onOpenSite(s.id)}
                     onDoubleClick={() => flyToSite(s)}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
                     style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
-                    <span style={{ width: 9, height: 9, borderRadius: 2.5, flex: "none", background: s.origin ? "#22d3ee" : "#d6cfbe", border: "1px solid rgba(0,0,0,0.15)" }} />
+                    <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
+                      onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+                      style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
+                        border: `1.5px solid ${sty.dot}`, background: sty.hollow ? "#fff" : sty.dot, color: sty.hollow ? sty.dot : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
+                      {STATUS_GLYPH[st]}
+                    </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
                     {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
                       className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
@@ -488,7 +583,11 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
           <div style={{ maxHeight: 260, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={county} layerStatus={layerStatus} />
+            {/* No county is pre-picked on the map any more (B11). Show the primary
+                market's (Harris/Houston) jurisdiction layers here so the Houston
+                utility overlays stay available; per-site jurisdiction follows the
+                site's own county once one is opened in the planner. */}
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county="harris" layerStatus={layerStatus} />
           </div>
         </div>
 
@@ -528,6 +627,33 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
           }}>{selectMode ? "✓ Selecting — click lots" : "＋ Select parcels"}</button>
         )}
       </div>
+      {/* Right-click status picker — set the project's lifecycle stage. Current
+          state is checked; picking another persists it (via onSetStatus) and the
+          markers/legend re-render. Positioned at the cursor, clamped to viewport. */}
+      {statusMenu && (
+        <div onClick={() => setStatusMenu(null)} onContextMenu={(e) => { e.preventDefault(); setStatusMenu(null); }}
+          style={{ position: "fixed", inset: 0, zIndex: 4200 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
+              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 224),
+              width: 180, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
+            <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
+            {STATUSES.map((st) => {
+              const sty = statusStyle(st); const cur = statusOf(statusMenu.site) === st;
+              return (
+                <button key={st} onClick={() => setStatus(statusMenu.site.id, st)}
+                  style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                    background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500 }}>
+                  <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: 99,
+                    border: `1.5px solid ${sty.dot}`, background: sty.hollow ? "#fff" : sty.dot, color: sty.hollow ? sty.dot : "#fff", fontSize: 9, lineHeight: 1 }}>{STATUS_GLYPH[st]}</span>
+                  <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
+                  {cur && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
