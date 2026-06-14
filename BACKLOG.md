@@ -19,7 +19,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-*(Nothing open — every B-item is in ✅ Done below. Add new items here with the next unused B-number.)*
+### B13 — Refine B11 county resolution: precise boundaries + per-area jurisdiction `[Site Planner / map]` (feature)
+`[ ]` Follow-up to **B11** (shipped in PR #13) — two interim simplifications captured here so they aren't forgotten. Neither is urgent; both are screening-only conveniences today and degrade gracefully.
+- **Coarse bbox pre-filter → real point-in-county.** B11 routes a parcel click to a CAD service using *approximate* per-county bounding boxes (a coarse screen; the CAD that actually returns a lot is the source of truth, with a fall-back to querying all counties). Fine for the 3 configured counties (Harris / Fort Bend / Chambers), but as more counties are added, switch to true point-in-county boundary polygons so the pre-filter stays accurate and cheap.
+- **Layers panel jurisdiction is hardcoded to Harris/Houston.** With no county pre-picked, the map's Layers panel defaults to the Harris/Houston jurisdiction so the Houston utility overlays stay available (matches the prior app default, so not a regression). Resolve the jurisdiction from the map's current area / the opened site's county instead, so utility overlays are correct outside Houston.
 
 ---
 
