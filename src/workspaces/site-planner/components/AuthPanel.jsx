@@ -14,6 +14,9 @@ export default function AuthPanel({ user, recovery, onClose }) {
   const [mode, setMode] = useState(recovery ? "recovery" : "signin"); // signin | signup | reset | recovery
   const [email, setEmail] = useState((user && user.email) || "");
   const [pw, setPw] = useState("");
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
   const [busy, setBusy] = useState(false);
 
@@ -24,7 +27,8 @@ export default function AuthPanel({ user, recovery, onClose }) {
         const { error } = await signIn(email.trim(), pw);
         error ? setMsg({ type: "err", text: error }) : onClose();
       } else if (mode === "signup") {
-        const { error, needsConfirm } = await signUp(email.trim(), pw);
+        if (!first.trim() || !last.trim()) { setMsg({ type: "err", text: "First and last name are required." }); return; }
+        const { error, needsConfirm } = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() });
         if (error) setMsg({ type: "err", text: error });
         else if (needsConfirm) setMsg({ type: "ok", text: "Account created — check your email for a confirmation link, then sign in." });
         else onClose();
@@ -54,13 +58,16 @@ export default function AuthPanel({ user, recovery, onClose }) {
 
   // Signed-in account view (not while completing a recovery).
   if (user && !recovery) {
+    const m = user.user_metadata || {};
+    const name = [m.first_name, m.last_name].filter(Boolean).join(" ");
     return wrap(
       <div>
         <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5 }}>Signed in as</div>
-        <div style={{ fontSize: 14, fontWeight: 650, color: PAL.ink, wordBreak: "break-all", margin: "2px 0 14px" }}>{user.email}</div>
+        {name && <div style={{ fontSize: 14, fontWeight: 700, color: PAL.ink, marginTop: 2 }}>{name}{m.org ? ` · ${m.org}` : ""}</div>}
+        <div style={{ fontSize: name ? 12.5 : 14, fontWeight: name ? 400 : 650, color: name ? PAL.muted : PAL.ink, wordBreak: "break-all", margin: "2px 0 14px" }}>{user.email}</div>
         <button style={{ ...btn(true), width: "100%" }} disabled={busy} onClick={async () => { setBusy(true); await signOut(); onClose(); }}>Sign out</button>
         <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 12 }}>
-          Login is connected, but your sites are still saved in this browser for now — cloud sync of your plans to your account comes in a later update. Nothing about how you save changes today.
+          Your sites are saved to your account in the cloud and sync across your devices. Sign out to work from this browser's local sites instead.
         </div>
       </div>
     );
@@ -84,6 +91,15 @@ export default function AuthPanel({ user, recovery, onClose }) {
         <button style={{ ...btn(mode === "signin"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signin"); setMsg(null); }}>Sign in</button>
         <button style={{ ...btn(mode === "signup"), flex: 1, padding: "7px 0" }} onClick={() => { setMode("signup"); setMsg(null); }}>Sign up</button>
       </div>
+      {mode === "signup" && (
+        <>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input autoComplete="given-name" placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} style={{ ...field, flex: 1 }} />
+            <input autoComplete="family-name" placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} style={{ ...field, flex: 1 }} />
+          </div>
+          <input autoComplete="organization" placeholder="Organization / company" value={org} onChange={(e) => setOrg(e.target.value)} style={field} />
+        </>
+      )}
       <input type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
       {mode !== "reset" && (
         <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />

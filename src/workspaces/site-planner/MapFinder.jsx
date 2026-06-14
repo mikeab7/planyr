@@ -222,6 +222,13 @@ export default function MapFinder({ visible, county, onCounty, overlays, setOver
     }
   }, [visible]);
 
+  /* Returning to the map (e.g. after committing parcels and planning) clears any
+     committed selection and exits select-parcels mode back to the normal map. */
+  useEffect(() => {
+    if (visible) { clearHilites(); setSelected([]); setSelectMode(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
   /* Saved sites on the overview map. Zoomed out: a branded pin per site.
      Zoomed in (>= PLAN_ZOOM): the actual site plan — parcel boundary plus every
      element in its true colors — georeferenced via the site's origin. Clickable

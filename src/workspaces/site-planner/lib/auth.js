@@ -16,9 +16,14 @@ const redirectTo = (() => {
 
 const errMsg = (e) => (e && e.message) || null;
 
-export async function signUp(email, password) {
+export async function signUp(email, password, profile = {}) {
   if (!supabase) return { error: "Cloud not configured." };
-  const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
+  // First/last/org are stored in Supabase user_metadata (options.data).
+  const meta = {};
+  if (profile.firstName) meta.first_name = profile.firstName;
+  if (profile.lastName) meta.last_name = profile.lastName;
+  if (profile.org) meta.org = profile.org;
+  const { data, error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo, data: meta } });
   // When email confirmation is on, signUp returns a user but no session yet.
   return { error: errMsg(error), needsConfirm: !!(data && data.user && !data.session) };
 }

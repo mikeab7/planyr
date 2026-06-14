@@ -4,7 +4,6 @@ import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import AuthPanel from "./components/AuthPanel.jsx";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, clearCloudCache } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -50,11 +49,8 @@ export default function App() {
     return () => { live = false; };
   }, []);
 
-  // PHASE 2: Supabase auth state (login only — does NOT change save/load). Tracks
-  // the signed-in user and opens the password form on a recovery-link return.
-  const [user, setUser] = useState(null);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [recovery, setRecovery] = useState(false);
+  // Supabase auth → data-store switching only. The account UI (sign in/out, modal)
+  // is global in the shell; here we just react to auth to switch cloud↔local storage.
   const [cloudLoading, setCloudLoading] = useState(false);
   const prevUid = useRef(null);
 
@@ -64,7 +60,6 @@ export default function App() {
   // switch so we never show one account's pointer against another's data.
   const applyUser = async (u, event) => {
     const uid = (u && u.id) || null;
-    setUser(u);
     setActiveUser(uid);
     if (uid) {
       setCloudLoading(true);
@@ -85,8 +80,8 @@ export default function App() {
   useEffect(() => {
     if (!supabaseConfigured()) return;
     return onAuthChange((event, u) => {
-      if (event === "PASSWORD_RECOVERY") { setUser(u); setRecovery(true); setAuthOpen(true); return; }
-      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") { setUser(u); return; } // keep session; don't re-switch
+      // Recovery UI + token refresh don't change which data store is active.
+      if (event === "PASSWORD_RECOVERY" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") return;
       applyUser(u, event); // INITIAL_SESSION, SIGNED_IN, SIGNED_OUT
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,17 +215,7 @@ export default function App() {
           />
         )}
       </div>
-      {/* PHASE 2 account control (login only; storage unchanged) */}
-      {supabaseConfigured() && (
-        <button onClick={() => { setRecovery(false); setAuthOpen(true); }}
-          title={user ? `Signed in as ${user.email}` : "Sign in / create account"}
-          style={{ position: "fixed", right: 6, bottom: 46, zIndex: 4000, display: "flex", alignItems: "center", gap: 6, maxWidth: 200,
-            background: "rgba(25,22,19,0.82)", color: "#ece7db", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 99, padding: "3px 10px", fontSize: 10.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
-          <span style={{ width: 7, height: 7, borderRadius: 99, flex: "none", background: user ? "#15803d" : "#9b9482" }} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user ? user.email : "Sign in"}</span>
-        </button>
-      )}
-      {authOpen && <AuthPanel user={user} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />}
+      {/* account control is global in the shell header (top-right) */}
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>

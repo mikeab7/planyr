@@ -108,7 +108,6 @@ const TOOLS = [
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: Shift+V (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
-  { id: "combine", label: "Combine", hint: "Merge parcels: click two or more adjacent parcels (they share a boundary) to pick them, then press Enter (or the Merge button) to fuse them into one. Esc clears the pick" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
   { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
@@ -681,6 +680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
+  const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
   const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
@@ -1041,9 +1041,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && traceMode && tracePts.length >= 2) { e.preventDefault(); commitTrace(); return; }
       if (e.key === "Enter" && tool === "mpolyline" && mkPoly?.pts?.length >= 2) { e.preventDefault(); finishMkPoly(); return; }
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
-      if (e.key === "Enter" && tool === "combine" && combineSel.length >= 2) { e.preventDefault(); combineParcels(); return; }
+      if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -1300,11 +1300,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
 
-  /* ------------ combine parcels (Combine tool) ------------ */
-  const toggleCombine = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  // Fuse the picked parcels (any that share a boundary) into one. Merges
-  // greedily so a connected group of 2+ collapses to a single boundary.
-  const combineParcels = () => {
+  /* ------------ merge parcels (Shift-click multi-select) ------------ */
+  const toggleMerge = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // Fuse the selected parcels (any that share a boundary) into one parcel on the
+  // editable layer — a working merge for test-fit/yield, NOT a recorded legal
+  // consolidation. Merges greedily so a connected group of 2+ collapses to one.
+  const mergeParcels = () => {
     const chosen = parcels.filter((p) => combineSel.includes(p.id));
     if (chosen.length < 2) return;
     let result = chosen[0].points;
@@ -2061,7 +2062,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sideParkingOn(b, name)) return;
     const [nx, ny] = SIDE_N[name];
     const sw = sidewalkOnSide(b, name);
-    const swDepth = sw ? (nx !== 0 ? sw.w : sw.h) : 0; // sit just outside any sidewalk
+    // Offset only by the sidewalk's THICKNESS (never its run) — swThick resolves the
+    // correct axis, so a resized/rotated sidewalk can't leak a ~wall-length value here.
+    const swDepth = sw ? swThick(sw) : 0;
+    // Parking row depth is a FIXED constant (one stall row + aisle) — it must never
+    // be derived from adjacent or just-deleted geometry.
     const parkDepth = settings.stallDepth + settings.aisle;
     const along = ny !== 0 ? b.w : b.h;
     const half = (nx !== 0 ? b.w : b.h) / 2;
@@ -2255,12 +2260,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
-    if (tool === "combine") { e.stopPropagation(); toggleCombine(id); return; } // Combine tool: pick parcels to fuse
     if (tool !== "select") return;
     e.stopPropagation();
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
     if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
+    if (e.shiftKey) { toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
     setSel({ kind: "parcel", id });
     if (pc.locked) return;             // locked parcel: select only, don't move
     pushHistory();
@@ -3177,7 +3182,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTool(id);
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
     if (id !== "select") setMulti([]);
-    if (id !== "combine") setCombineSel([]);
+    if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
     if (id !== "callout") setCalloutDraft(null);
     if (!MARKUP_TOOLS.includes(id)) { setMkRect(null); setMkPoly(null); }
     if (id !== "calibrate") setCalib(null);
@@ -3634,9 +3639,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
                   fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                   stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
-                  style={{ cursor: tool === "combine" ? "pointer" : tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                  style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                   pointerEvents="all"
-                  onPointerDown={(e) => startMoveParcel(e, pc.id)} />;
+                  onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                  onContextMenu={(e) => { if (tool !== "select") return; e.preventDefault(); setCombineSel((s) => (s.includes(pc.id) ? s : [...s, pc.id])); setSel({ kind: "parcel", id: pc.id }); setParcelMenu({ x: e.clientX, y: e.clientY }); }} />;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
@@ -4187,12 +4193,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
-          {/* Combine tool banner — pick parcels, then Merge */}
-          {tool === "combine" && (
+          {/* Merge selection banner — Shift-click parcels to multi-select, then Merge */}
+          {tool === "select" && combineSel.length > 0 && (
             <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              {combineSel.length < 2 ? `Click adjacent parcels to combine — ${combineSel.length} picked` : `${combineSel.length} parcels picked`}
+              {combineSel.length < 2 ? `Shift-click another parcel to merge — ${combineSel.length} selected` : `${combineSel.length} parcels selected`}
               <button className="dbtn" style={{ ...btn(combineSel.length >= 2), padding: "5px 12px", opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }}
-                disabled={combineSel.length < 2} onClick={combineParcels}>Merge ⏎</button>
+                disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels ⏎</button>
+              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setCombineSel([])}>Clear</button>
             </div>
           )}
 
@@ -4217,15 +4224,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split", "combine"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split", "combine"].includes(tool))} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             {toolMenu && (
               <>
                 <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
                   <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
                   <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-                  <button style={menuItem(tool === "combine")} onClick={() => selectTool("combine")}>Combine parcels</button>
                   <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                    <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
                     <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
                   </div>
                 </div>
@@ -4660,14 +4667,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {parcels.map((pc, i) => {
                     const on = selParcel?.id === pc.id;
+                    const picked = combineSel.includes(pc.id);
                     return (
-                      <button key={pc.id} onClick={() => setSel({ kind: "parcel", id: pc.id })}
-                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${on ? PAL.accent : "#e2dccb"}`, background: on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}</div>
+                      <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}{picked ? " ✓" : ""}</div>
                         <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                       </button>
                     );
                   })}
+                </div>
+              )}
+              {parcels.length > 1 && (
+                <div style={{ marginTop: 8 }}>
+                  <button style={{ ...chip, width: "100%", ...(combineSel.length >= 2 ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : { opacity: 0.55 }) }}
+                    disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels{combineSel.length >= 2 ? ` (${combineSel.length})` : ""}</button>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
                 </div>
               )}
               {/* identify any parcel from the county GIS (no import unless you add it) */}
@@ -4746,7 +4761,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {taxInfo.connected && taxInfo.total != null ? (
                     <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: PAL.ink }}>Total tax rate: {taxInfo.total} per $100</div>
                   ) : (
-                    <div style={{ marginTop: 8, fontSize: 11, color: "#b45309", lineHeight: 1.5 }}>▲ {taxInfo.note} Combined rate isn't shown until a rate source is wired for this county.</div>
+                    <div style={{ marginTop: 8, fontSize: 11, color: "#b45309", lineHeight: 1.5 }}>▲ {taxInfo.note} A total tax rate isn't shown until a rate source is wired for this county.</div>
                   )}
                 </>
               )}
@@ -5075,6 +5090,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : overlapWarn}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
         </div>
+      )}
+
+      {parcelMenu && (
+        <>
+          <div onClick={() => setParcelMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
+          <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(parcelMenu.x, window.innerWidth - 206), top: Math.min(parcelMenu.y, window.innerHeight - 130), zIndex: 1999, width: 196 }}>
+            <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
+            <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
+            <div style={{ fontSize: 10.5, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.4, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Shift-click parcels to add more, then Merge.</div>
+          </div>
+        </>
       )}
 
       {typeMenu && (() => {
