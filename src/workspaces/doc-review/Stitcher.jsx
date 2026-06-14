@@ -9,10 +9,13 @@
  *   world.x = A*x − B*y + e ;  world.y = B*x + A*y + f   (SVG matrix(A,B,−B,A,e,f))
  * World↔screen is a single pan/zoom group.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength } from "./lib/takeoff.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
+import ReviewsBar from "./components/ReviewsBar.jsx";
+import { useReviewPersistence } from "./lib/usePersistence.js";
+import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile } from "./lib/reviewStore.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -37,10 +40,10 @@ function sheetBBox(s) {
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Stitcher({ onReview }) {
+export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false }) {
   const svgRef = useRef(null);
-  const [pdfs, setPdfs] = useState([]);          // {id,name,doc,numPages}
-  const [placed, setPlaced] = useState([]);      // {id,name,href,baseW,baseH,M}
+  const [pdfs, setPdfs] = useState([]);          // {srcId,name,doc,numPages,blob,size,storageKey,oversize,missing}
+  const [placed, setPlaced] = useState([]);      // {id,srcId,pageNum,name,href,baseW,baseH,M,missing}
   const [view, setView] = useState({ panX: 40, panY: 40, zoom: 0.4 });
   const [tool, setTool] = useState("pan");       // pan | distance | area | calibrate
   const [align, setAlign] = useState(null);      // { sheetId, step, A1, b1, A2 }
@@ -52,16 +55,44 @@ export default function Stitcher({ onReview }) {
   const [err, setErr] = useState("");
   const drag = useRef(null);
 
+  // --- cloud persistence (stitched-set review) ---
+  const [reviewId, setReviewId] = useState(() => newReviewId());
+  const [title, setTitle] = useState("");
+  const [project, setProject] = useState("");
+  const [discipline, setDiscipline] = useState("");
+  const pdfsRef = useRef([]); useEffect(() => { pdfsRef.current = pdfs; });
+  const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
+  const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
+
   const openFiles = async (files) => {
     const list = [...(files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!list.length) return;
     setBusy(true); setErr("");
     try {
-      const loaded = [];
-      for (const f of list) { const doc = await loadPdf(f); loaded.push({ id: uid(), name: f.name, doc, numPages: doc.numPages }); }
-      setPdfs((p) => [...p, ...loaded]);
+      for (const f of list) {
+        const doc = await loadPdf(f);
+        // Re-drop of a source that was too large / unavailable on load? Re-bind its
+        // bytes (and re-render its placed sheets) instead of adding a duplicate.
+        const miss = pdfsRef.current.find((p) => p.missing && sameName(p.name, f.name));
+        if (miss) { await bindSource(miss.srcId, doc, f); continue; }
+        const srcId = newSourceId();
+        setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, oversize: false, missing: false }]);
+        uploadSource(reviewId, srcId, f).then((r) =>
+          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, oversize: !!r.oversize } : x)))
+        );
+      }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
     finally { setBusy(false); }
+  };
+
+  // Fill in a source's bytes after a re-drop, and re-render any sheets placed from it.
+  const bindSource = async (srcId, doc, blob) => {
+    setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, doc, numPages: doc.numPages, blob, missing: false } : x)));
+    for (const s of placedRef.current.filter((s) => s.srcId === srcId)) {
+      const img = await renderPageToImage(doc, s.pageNum, 2);
+      setPlaced((arr) => arr.map((x) => (x.id === s.id ? { ...x, href: img.href, baseW: img.baseW, baseH: img.baseH, missing: false } : x)));
+    }
+    if (!pdfsRef.current.some((p) => p.missing && p.srcId !== srcId)) setErr("");
   };
 
   const addSheet = async (pdf, pageNum) => {
@@ -71,7 +102,7 @@ export default function Stitcher({ onReview }) {
       setPlaced((arr) => {
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
-        return [...arr, { id: uid(), name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M }];
+        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false }];
       });
     } finally { setBusy(false); }
   };
@@ -123,6 +154,87 @@ export default function Stitcher({ onReview }) {
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
   }); // eslint-disable-line
 
+  /* ---- cloud persistence (stitched set): autosave, resume, load, new ---- */
+  const onMeta = (k, v) => { if (k === "title") setTitle(v); else if (k === "project") setProject(v); else if (k === "discipline") setDiscipline(v); };
+  const buildSnapshot = useCallback(() => ({
+    id: reviewId, kind: "stitch", title, project, discipline,
+    sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
+    stitch: {
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M })),
+      view, measures, ftPerUnit,
+    },
+  }), [reviewId, title, project, discipline, pdfs, placed, view, measures, ftPerUnit]);
+  const isEmpty = useCallback(() => placed.length === 0 && measures.length === 0, [placed, measures]);
+  // Pan/zoom (`view`) is captured in the snapshot but left out of the save triggers so
+  // panning doesn't spam writes — the next real edit (or the flush) saves the latest view.
+  const { status } = useReviewPersistence({
+    buildSnapshot, isEmpty,
+    deps: [reviewId, title, project, discipline, pdfs, placed, measures, ftPerUnit],
+  });
+  useEffect(() => { try { localStorage.setItem("planyr:docreview:lastStitchId", reviewId); } catch (_) {} }, [reviewId]);
+
+  const resetStitch = () => {
+    setReviewId(newReviewId());
+    setTitle(""); setProject(""); setDiscipline("");
+    setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
+    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr("");
+    pdfsRef.current = []; placedRef.current = [];
+  };
+
+  const loadStitch = async (rec) => {
+    setBusy(true);
+    try {
+      setReviewId(rec.id);
+      setTitle(rec.title || ""); setProject(rec.project || ""); setDiscipline(rec.discipline || "");
+      const st = rec.stitch || {};
+      setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
+      if (st.view) setView(st.view);
+      setAlign(null); setDraft(null); setTool("pan");
+      // Re-fetch each source PDF; render placed sheets back from the bytes + saved M.
+      const srcEntries = [];
+      for (const src of rec.sources || []) {
+        let doc = null, missing = true;
+        if (!src.oversize && src.storageKey) {
+          const buf = await downloadSource(src.storageKey);
+          if (buf) { doc = await loadPdf(buf); missing = false; }
+        }
+        srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, oversize: !!src.oversize, missing });
+      }
+      setPdfs(srcEntries); pdfsRef.current = srcEntries;
+      const out = [];
+      for (const s of st.placed || []) {
+        const e = srcEntries.find((x) => x.srcId === s.srcId);
+        let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
+        if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
+      }
+      setPlaced(out); placedRef.current = out;
+      setErr(srcEntries.some((e) => e.missing) ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "");
+    } finally { setBusy(false); }
+  };
+
+  // Controlled load handed down from DocReview (opening a saved stitch review).
+  const loadedId = useRef(null);
+  useEffect(() => {
+    if (!loadReq || loadReq.id === loadedId.current) return;
+    loadedId.current = loadReq.id;
+    loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadReq]);
+  // Otherwise resume the last stitch session on mount (e.g. toggling back from single).
+  const booted = useRef(false);
+  useEffect(() => {
+    if (booted.current) return; booted.current = true;
+    if (loadReq) return;
+    (async () => {
+      let sid = null; try { sid = localStorage.getItem("planyr:docreview:lastStitchId"); } catch (_) {}
+      if (!sid) return;
+      const rec = reconcile(await loadReview(sid), readDraft(await currentUid(), sid));
+      if (rec && rec.kind === "stitch") { loadedId.current = rec.id; await loadStitch(rec); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // takeoff totals (world units → feet via composite calibration)
   const totals = measures.reduce((t, m) => {
     if (m.kind === "distance") { const u = dist(m.pts[0], m.pts[1]); if (ftPerUnit) t.distFt += u * ftPerUnit; }
@@ -130,7 +242,7 @@ export default function Stitcher({ onReview }) {
     return t;
   }, { distFt: 0, areaSf: 0 });
 
-  const tray = pdfs.flatMap((p) => Array.from({ length: p.numPages }, (_, i) => ({ key: p.id + ":" + (i + 1), pdf: p, page: i + 1 })));
+  const tray = pdfs.flatMap((p) => Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":" + (i + 1), pdf: p, page: i + 1 })));
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
   const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
@@ -153,6 +265,8 @@ export default function Stitcher({ onReview }) {
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.05, v.zoom / 1.2) }))}>−</button>
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
+        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
+        <ReviewsBar status={status} signedIn={signedIn} title={title} project={project} discipline={discipline} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -176,9 +290,15 @@ export default function Stitcher({ onReview }) {
             <g transform={G}>
               {placed.map((s) => {
                 const aligning = align && align.sheetId === s.id;
+                const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
+                if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
+                  return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
+                    <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#e7e2d6" stroke="#b3361b" strokeWidth={ls(2)} strokeDasharray={`${ls(8)} ${ls(6)}`} />
+                    <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
+                  </g>;
+                }
                 return <image key={s.id} href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
-                  transform={`matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`}
-                  opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />;
+                  transform={xf} opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />;
               })}
               {/* measures (world coords) */}
               {measures.map((m) => {
