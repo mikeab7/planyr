@@ -1,11 +1,11 @@
-# CLAUDE.md — Planar_Fit Project Handoff
+# CLAUDE.md — Planyr Project Handoff
 
 Complete handoff for any future session. Read top to bottom to orient. This merges
 two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
 backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
-## What Planar_Fit is
+## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
 suite: the existing **Site Planner** (site yield analysis and layout) plus a new
@@ -34,7 +34,7 @@ planner's map; an engineer's drawing overlays the planner's layout).
   never altering or writing back their geometry.
 - **Heavy work off the main thread.** CAD/PDF parsing and large geometry ops belong
   in **Web Workers** (background threads) so the UI never freezes.
-- **Monorepo.** One repository (`Planar_Fit`), a folder per workspace, plus a
+- **Monorepo.** One repository (`planyr`), a folder per workspace, plus a
   walled-off `/server`. Repo count buys nothing on performance; isolation comes from
   module boundaries + lazy-loading inside the one repo.
 

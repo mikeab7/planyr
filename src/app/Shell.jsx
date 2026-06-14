@@ -30,7 +30,7 @@ export default function Shell() {
           <span style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center" }}>
             <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
           </span>
-          Planar
+          Planyr
         </span>
         <nav style={{ display: "flex", gap: 4, marginLeft: 4 }}>
           {WORKSPACES.map((w) => (

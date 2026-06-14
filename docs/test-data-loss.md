@@ -9,7 +9,7 @@ The build environment can't exercise browser `localStorage` + the React
 lifecycle, so this runs **in the browser on the deployed app**. It reads ground
 truth from `localStorage` (not the UI) and prints PASS/FAIL.
 
-**App:** https://mikeab7.github.io/Planar_Fit/
+**App:** https://mikeab7.github.io/planyr/
 
 ## How to run
 1. Open the app, open DevTools → **Console**, paste the whole harness below.
@@ -17,7 +17,7 @@ truth from `localStorage` (not the UI) and prints PASS/FAIL.
    `PF.help()` lists them.
 
 ```js
-// ===== Planar_Fit data-loss verification harness =====
+// ===== Planyr data-loss verification harness =====
 window.PF = (() => {
   const SITES = 'planarfit:sites:v1', CUR = 'planarfit:currentSite:v1', PROBE = 'pfProbe';
   const sites   = () => { try { return JSON.parse(localStorage[SITES] || '{}'); } catch { return {}; } };
