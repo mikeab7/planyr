@@ -1849,6 +1849,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!addrField) throw new Error("No address field on this layer — try an account/ID search.");
         where = `UPPER(${addrField}) LIKE UPPER('%${esc}%')`;
       }
+      // Statewide services (Chambers rides TxGIO's all-Texas parcel layer) need a county
+      // scope, or an ID/address search could match a like-named/numbered parcel in another
+      // county. Apply it only when the scope's field actually exists on this layer, so a
+      // single-county override URL pasted in the box is left untouched (self-healing).
+      const scope = COUNTIES[county]?.scopeWhere;
+      if (scope) {
+        const scopeField = scope.split("=")[0].trim().toLowerCase();
+        if (meta.fields.some((f) => (f.name || "").toLowerCase() === scopeField))
+          where = `(${scope}) AND (${where})`;
+      }
       const feats = await queryFeatures(layerUrl, { where, count: 10 });
       if (!feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
       setLookupRes(feats.map((ft) => ({ ft, layerUrl, idField, addrField })));
