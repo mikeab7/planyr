@@ -1,12 +1,16 @@
 name: Deploy to GitHub Pages
 
-# Builds the Vite app and publishes dist/ to GitHub Pages on every push to the
-# working branch (or main). The first run also enables Pages automatically.
+# Builds the Vite app and publishes dist/ to GitHub Pages on every push to main.
+# The build job also runs on pull requests into main as a "it builds" status check
+# (the deploy job is gated to main, so PRs build but never deploy).
 on:
   push:
     branches:
       - main
       - claude/clever-babbage-vj59nr
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
