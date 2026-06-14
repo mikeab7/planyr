@@ -304,3 +304,41 @@ No anon policy, no admin/cross-user policy (deferred by decision).
 `lngLatRingToFeet` (FT_PER_DEG_LAT = 365223, Mercator-sphere base), aerial export.
 County/city GIS hosts move and stop often — rely on the probe + honest error
 surfacing, never hardcode-and-assume.
+
+---
+
+# Deferred / maintenance backlog
+Low-priority cleanup items captured here so they aren't lost. Nothing in this section
+is urgent or blocking — the app is healthy; pick these up when convenient.
+
+## Retire the old GitHub Pages deploy pipeline (low priority — do later)
+**Status: not started.** The site is healthy; this is cleanup, not a fix.
+
+**Background** — the repo currently has TWO things publishing on every merge to
+`main`:
+1. **Cloudflare Pages** — the real production host, serving planyr.io and
+   [www.planyr.io](https://www.planyr.io). **KEEP THIS.**
+2. **The original GitHub Actions workflow** that builds/deploys to GitHub Pages
+   (the old github.io test site). It still runs on every merge (last observed run
+   #155) even though it's no longer production. **RETIRE THIS.**
+
+**Why retire it:** redundant now that Cloudflare is production. Two builds fire on
+every change (wasted CI minutes, confusing logs), and it keeps a stale copy of the
+app live at the old github.io address that someone could stumble onto.
+
+**How to do it safely when picked up:**
+- Cloudflare deploys via its own GitHub App / webhook connection, NOT via a workflow
+  file in this repo — so disabling or deleting the GitHub Pages workflow should NOT
+  affect the live planyr.io site. Verify before deleting.
+- Find the workflow in `.github/workflows/` that targets GitHub Pages (look for
+  `actions/deploy-pages`, `actions/upload-pages-artifact`,
+  `peaceiris/actions-gh-pages`, or a `github-pages` environment).
+- Reversible first: disable it (restrict its trigger to `workflow_dispatch` /
+  manual-only, or rename the file so it stops running) rather than deleting.
+- Confirm Cloudflare is still the only thing that deploys on the next merge.
+- Once confident, delete the workflow file and optionally set Settings → Pages source
+  to "None" so the old test site stops serving.
+
+**Baseline reference:** after the repo rename, commit `b593a28` triggered a successful
+Cloudflare production build serving planyr.io — so Cloudflare auto-deploy is known-good
+independent of the GitHub Pages workflow.
