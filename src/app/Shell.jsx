@@ -21,6 +21,7 @@ const PAL = { chrome: "#14110e", line: "#2e2a23", ink: "#ece7db", muted: "#9b948
 
 export default function Shell() {
   const [active, setActive] = useState("site-planner");
+  const [switcher, setSwitcher] = useState(false);   // product-switcher dropdown open
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
@@ -35,28 +36,46 @@ export default function Shell() {
 
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active = current.Comp;
-  const tab = (on) => ({
-    padding: "5px 12px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
-    border: "1px solid " + (on ? PAL.ember : "transparent"), background: on ? "rgba(232,89,12,0.16)" : "transparent",
-    color: on ? "#fff" : PAL.muted,
-  });
+  const pick = (id) => { setActive(id); setSwitcher(false); }; // switch workspace from the menu
   const meta = (user && user.user_metadata) || {};
   const who = [meta.first_name, meta.last_name].filter(Boolean).join(" ") || (user && user.email) || "";
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.chrome }}>
       <header style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, height: 38, padding: "0 12px", background: PAL.chrome, borderBottom: `1px solid ${PAL.line}` }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 800, fontSize: 13, color: "#fff", letterSpacing: "-0.01em" }}>
-          <span style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center" }}>
-            <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
-          </span>
-          Planyr
-        </span>
-        <nav style={{ display: "flex", gap: 4, marginLeft: 4 }}>
-          {WORKSPACES.map((w) => (
-            <button key={w.id} style={tab(w.id === active)} onClick={() => setActive(w.id)}>{w.label}</button>
-          ))}
-        </nav>
+        {/* product switcher — brand + current module + chevron; the menu switches modules */}
+        <div style={{ position: "relative" }}>
+          <button onClick={() => setSwitcher((o) => !o)} aria-haspopup="menu" aria-expanded={switcher} title="Switch module"
+            style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 8px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+              border: `1px solid ${switcher ? PAL.line : "transparent"}`, background: switcher ? "rgba(255,255,255,0.06)" : "transparent" }}>
+            <span style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", flex: "none" }}>
+              <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
+            </span>
+            <span style={{ fontWeight: 800, fontSize: 13, color: "#fff", letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>{current.label}</span>
+            <span style={{ color: PAL.muted, fontSize: 11, marginLeft: -1 }}>▾</span>
+          </button>
+          {switcher && (
+            <>
+              <div onClick={() => setSwitcher(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+              <div role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 220, padding: 6, borderRadius: 10,
+                background: PAL.chrome, border: `1px solid ${PAL.line}`, boxShadow: "0 10px 30px rgba(0,0,0,0.45)" }}>
+                <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Planyr modules</div>
+                {WORKSPACES.map((w) => {
+                  const on = w.id === active;
+                  return (
+                    <button key={w.id} role="menuitem" onClick={() => pick(w.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 8px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
+                        fontSize: 12.5, fontWeight: 600, textAlign: "left", border: "1px solid " + (on ? PAL.ember : "transparent"),
+                        background: on ? "rgba(232,89,12,0.16)" : "transparent", color: on ? "#fff" : PAL.ink }}>
+                      <span style={{ flex: 1, whiteSpace: "nowrap" }}>{w.label}</span>
+                      {on && <span style={{ color: PAL.ember, fontSize: 10.5, fontWeight: 700 }}>current</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
         <div style={{ flex: 1 }} />
         {/* global account control (top-right) */}
         {supabaseConfigured() && (
