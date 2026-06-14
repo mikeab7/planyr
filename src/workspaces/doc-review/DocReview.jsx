@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
 import { measureLabel, rollup, dist } from "./lib/takeoff.js";
+import Stitcher from "./Stitcher.jsx";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
@@ -42,6 +43,7 @@ export default function DocReview() {
   const fileRef = useRef(null);
   const renderTok = useRef(0);
 
+  const [mode, setMode] = useState("review"); // review (single sheet) | stitch (multi-sheet)
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -183,6 +185,8 @@ export default function DocReview() {
   const btn = (on) => ({ padding: "6px 10px", fontSize: 12, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
   const curTool = TOOLS.find((t) => t.id === tool);
 
+  if (mode === "stitch") return <Stitcher onReview={() => setMode("review")} />;
+
   // SVG element for one markup (coords ×scale)
   const draw = (m, selected) => {
     const S = (q) => ({ x: q.x * scale, y: q.y * scale });
@@ -247,6 +251,7 @@ export default function DocReview() {
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: `1px solid #2e2a23`, flexWrap: "wrap" }}>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => fileRef.current?.click()}>{fileName ? "Open another…" : "Open PDF…"}</button>
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch sheets ▸</button>
         {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
         {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} onClick={() => { setTool(t.id); setDraft(null); }}>{t.label}</button>)}

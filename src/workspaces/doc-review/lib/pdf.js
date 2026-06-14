@@ -26,3 +26,17 @@ export async function renderPageToCanvas(pdf, pageNum, canvas, scale) {
   await task.promise;
   return { w: canvas.width, h: canvas.height, baseW: base.width, baseH: base.height };
 }
+
+/* Rasterize a page to a PNG data URL (for the stitcher — placed as an <image> and
+ * transformed on a shared canvas). `baseW/baseH` are the page units the markup/
+ * transform math uses; the image is rendered at `scale`× for crispness. */
+export async function renderPageToImage(pdf, pageNum, scale = 2) {
+  const page = await pdf.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+  const base = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  return { href: canvas.toDataURL("image/png"), baseW: base.width, baseH: base.height };
+}
