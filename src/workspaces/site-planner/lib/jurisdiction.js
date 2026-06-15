@@ -168,7 +168,10 @@ export function buildIdentifyParams(source, geom) {
   if (geom.ring && geom.ring.length >= 3) {
     p.geometry = JSON.stringify({ rings: [closeRing(simplifyRing(geom.ring))], spatialReference: { wkid: 4326 } });
     p.geometryType = "esriGeometryPolygon";
-    p.resultRecordCount = 30;
+    p.resultRecordCount = source.kind === "line" ? 40 : 30;
+    // A line source against a parcel = its FRONTAGE: buffer the parcel by the tolerance
+    // so a road centreline in the ROW just outside the lot line still intersects.
+    if (source.kind === "line") { p.distance = source.tolMeters || 40; p.units = "esriSRUnit_Meter"; }
   } else {
     p.geometry = JSON.stringify({ x: geom.lng, y: geom.lat, spatialReference: { wkid: 4326 } });
     p.geometryType = "esriGeometryPoint";
@@ -293,30 +296,40 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// B73 — road maintenance authority near a clicked point. Buffers the point by the
-// source tolerance, then returns the NEAREST segment's authority (State / county /
-// city / federal), or an honest null when nothing mapped is within tolerance.
+// B73 — road maintenance authority. Two modes:
+//   • click (lng,lat)      → the NEAREST segment within tolerance.
+//   • parcel frontage (ring)→ EVERY distinct road fronting the parcel (a lot can
+//     front a state highway + a county road + a city street, each a different
+//     permitting desk), deduped by route.
+// Returns { roads[], nearest|null, authorities[] (distinct labels), ... } — or an
+// honest empty/unknown when nothing mapped is within tolerance (never a guess).
 // ---------------------------------------------------------------------------
 export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const src = JURISDICTION_SOURCES.road;
+  const ring = opts.ring && opts.ring.length >= 3 ? opts.ring : null;
   opts.onStatus && opts.onStatus("road", "loading");
-  const q = identifySource(src, { lng, lat }, opts);
+  const q = identifySource(src, ring ? { ring } : { lng, lat }, opts);
   const r = await q.fresh;
-  let best = null, bestD = Infinity;
-  for (const it of r.items) {
-    const d = polylineDistMeters(it.geometry, lng, lat);
-    if (d < bestD) { bestD = d; best = it; }
-  }
-  if (!best) {
-    const state = r.error ? "failed" : "empty";
-    opts.onStatus && opts.onStatus("road", state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
-    return { road: null, ageMs: r.ageMs, ts: r.ts, error: r.error ? humanize(r.error) : null,
-      note: r.error ? humanize(r.error) : `No mapped road within ${src.tolMeters} m — maintenance authority unknown.` };
-  }
-  const n = normalizeFeature(src, best.attrs);
-  opts.onStatus && opts.onStatus("road", "loaded", null, { ts: r.ts, stale: q.stale });
+  // Normalize each segment → its authority. Point mode orders by distance to the
+  // click (nearest wins); frontage mode keeps the server's parcel+tolerance set.
+  const rows = r.items.map((it) => {
+    const n = normalizeFeature(src, it.attrs);
+    return {
+      route: n.route, system: n.system, funcClass: n.funcClass,
+      authority: roadAuthority(n.authority, n.system),
+      distMeters: ring ? null : Math.round(polylineDistMeters(it.geometry, lng, lat)),
+    };
+  });
+  if (!ring) rows.sort((a, b) => (a.distMeters ?? Infinity) - (b.distMeters ?? Infinity));
+  const seen = new Set(), roads = [];
+  for (const row of rows) { const k = row.route ?? JSON.stringify(row.authority); if (!seen.has(k)) { seen.add(k); roads.push(row); } }
+  const nearest = !ring && roads.length ? roads[0] : null;
+  const authorities = uniq(roads.map((x) => x.authority.label));
+  const state = roads.length ? "loaded" : r.error ? "failed" : "empty";
+  opts.onStatus && opts.onStatus("road", state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
   return {
-    road: { route: n.route, system: n.system, funcClass: n.funcClass, authority: roadAuthority(n.authority, n.system), distMeters: Math.round(bestD) },
-    ageMs: r.ageMs, ts: r.ts, note: src.note,
+    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts,
+    error: r.error ? humanize(r.error) : null,
+    note: roads.length ? src.note : r.error ? humanize(r.error) : `No mapped road within ${src.tolMeters} m — maintenance authority unknown.`,
   };
 }

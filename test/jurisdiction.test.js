@@ -92,6 +92,14 @@ describe("buildIdentifyParams — one connector, parameterized per source", () =
     expect(p.units).toBe("esriSRUnit_Meter");
     expect(p.outFields).toContain("RDWAY_MAINT_AGCY");
   });
+  it("line source against a parcel ring buffers the frontage (polygon + distance)", () => {
+    const ring = [[-95, 29], [-95, 29.01], [-94.99, 29.01], [-94.99, 29]];
+    const p = buildIdentifyParams(JURISDICTION_SOURCES.road, { ring });
+    expect(p.geometryType).toBe("esriGeometryPolygon");
+    expect(p.returnGeometry).toBe("true");
+    expect(p.distance).toBe(40);
+    expect(p.units).toBe("esriSRUnit_Meter");
+  });
 });
 
 describe("normalizeFeature — source schema → one internal shape", () => {
@@ -235,8 +243,8 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("identifyRoadAuthority (B73) — nearest segment", () => {
-  it("returns the NEAREST segment's authority among several", async () => {
+describe("identifyRoadAuthority (B73) — nearest segment / parcel frontage", () => {
+  it("point mode: returns the NEAREST segment's authority among several", async () => {
     const fetchJson = fakeFetch({
       [ROAD]: () => [
         { attributes: { RIA_RTE_ID: "IH0010", HSYS: "IH", RDWAY_MAINT_AGCY: 1, F_SYSTEM: 1 }, geometry: { paths: [[[-95.0, 29.01], [-95.0, 29.02]]] } }, // ~1 km away
@@ -244,21 +252,42 @@ describe("identifyRoadAuthority (B73) — nearest segment", () => {
       ],
     });
     const out = await identifyRoadAuthority(-95.0, 29.0005, { cache: freshCache(), fetchJson });
-    expect(out.road.authority.label).toBe("City");
-    expect(out.road.route).toBe("LS1234");
-    expect(out.road.distMeters).toBeLessThan(20);
+    expect(out.nearest.authority.label).toBe("City");
+    expect(out.nearest.route).toBe("LS1234");
+    expect(out.nearest.distMeters).toBeLessThan(20);
+    expect(out.authorities).toContain("City");
   });
-  it("nothing mapped within tolerance → honest null (unknown), not a guess", async () => {
+  it("frontage mode: a parcel ring lists every distinct fronting authority (deduped)", async () => {
+    const ring = [[-95.0, 29.0], [-95.0, 29.001], [-94.999, 29.001], [-94.999, 29.0]];
+    const fetchJson = fakeFetch({
+      [ROAD]: (url) => {
+        expect(url).toContain("esriGeometryPolygon"); // whole-parcel geometry
+        expect(url).toContain("distance="); // frontage buffer applied
+        return [
+          { attributes: { RIA_RTE_ID: "US0290", HSYS: "US", RDWAY_MAINT_AGCY: 1 }, geometry: { paths: [] } },
+          { attributes: { RIA_RTE_ID: "LS1", HSYS: "LS", RDWAY_MAINT_AGCY: 4 }, geometry: { paths: [] } },
+          { attributes: { RIA_RTE_ID: "LS1", HSYS: "LS", RDWAY_MAINT_AGCY: 4 }, geometry: { paths: [] } }, // dup route
+        ];
+      },
+    });
+    const out = await identifyRoadAuthority(-94.9995, 29.0005, { ring, cache: freshCache(), fetchJson });
+    expect(out.nearest).toBeNull(); // no single nearest in frontage mode
+    expect(out.roads.map((x) => x.route).sort()).toEqual(["LS1", "US0290"]); // deduped
+    expect(out.authorities.sort()).toEqual(["City", "State (TxDOT)"]);
+  });
+  it("nothing mapped within tolerance → honest unknown, not a guess", async () => {
     const out = await identifyRoadAuthority(-95.0, 29.0, { cache: freshCache(), fetchJson: fakeFetch({ [ROAD]: () => [] }) });
-    expect(out.road).toBeNull();
+    expect(out.nearest).toBeNull();
+    expect(out.roads).toEqual([]);
+    expect(out.authorities).toEqual([]);
     expect(out.note).toMatch(/unknown/i);
   });
-  it("a server error surfaces as a null road with the error note, not a throw", async () => {
+  it("a server error surfaces as empty + error note, not a throw", async () => {
     const out = await identifyRoadAuthority(-95.0, 29.0, {
       cache: freshCache(),
       fetchJson: fakeFetch({ [ROAD]: () => { throw new Error("Failed to fetch"); } }),
     });
-    expect(out.road).toBeNull();
+    expect(out.roads).toEqual([]);
     expect(out.error).toBeTruthy();
   });
 });
