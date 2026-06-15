@@ -174,7 +174,7 @@ export default function DocReview() {
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
-  const { status } = useReviewPersistence({
+  const { status, suspendSave } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
     deps: [reviewId, meta, source, markups, calByPage],
   });
@@ -199,6 +199,7 @@ export default function DocReview() {
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
+    suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
