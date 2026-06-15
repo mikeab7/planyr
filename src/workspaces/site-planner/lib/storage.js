@@ -19,10 +19,13 @@ let activeUser = null;
 export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
-// Pull the signed-in user's sites from the cloud into their local cache (replaces it
-// on success, so a stale cache can't linger). Returns { ok, count, error }; on a failed
-// fetch it returns { ok:false } WITHOUT touching the cache, so a transient/offline error
-// can't wipe the user's last-known sites to an empty library (B54).
+// Pull the signed-in user's sites from the cloud into their local cache. Returns
+// { ok, count, error }; on a failed fetch it returns { ok:false } WITHOUT touching the
+// cache, so a transient/offline error can't wipe the user's last-known sites (B54). On
+// success it keeps a local copy that's strictly NEWER than the cloud's — an edit made
+// in the last moment before close that the debounced push didn't land (B18). That merge
+// is intentionally limited to records the cloud STILL returns, so a record deleted on
+// another device is not resurrected; the next edit re-pushes the kept-local copy.
 export async function pullCloud(uid) {
   let models;
   try {
@@ -30,8 +33,14 @@ export async function pullCloud(uid) {
   } catch (e) {
     return { ok: false, count: 0, error: (e && e.message) || "couldn't reach the cloud" };
   }
+  let existing = {};
+  try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   const map = {};
-  for (const m of models) { const norm = createSiteModel(m); if (norm.id) map[norm.id] = norm; }
+  for (const m of models) {
+    const norm = createSiteModel(m); if (!norm.id) continue;
+    const local = existing[norm.id];
+    map[norm.id] = (local && (local.updatedAt || 0) > (norm.updatedAt || 0)) ? createSiteModel(local) : norm;
+  }
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
   return { ok: true, count: models.length };
 }

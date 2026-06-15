@@ -55,17 +55,20 @@ export default function App() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const prevUid = useRef(null);
+  const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
 
   // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
   // sites into their local cache and make that the active store (cloud is home);
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
   const applyUser = async (u, event) => {
+    const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     const uid = (u && u.id) || null;
     setActiveUser(uid);
     if (uid) {
       setCloudLoading(true);
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
+      if (seq !== applySeq.current) return; // superseded by a newer auth event — don't apply stale cloud/view state (B43)
       setCloudLoading(false);
       // B54: a failed fetch no longer wipes the cache — say we're showing the last
       // synced copy rather than presenting a silent (and scary) empty library.

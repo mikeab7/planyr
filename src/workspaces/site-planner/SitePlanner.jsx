@@ -468,8 +468,20 @@ function splitPolygon(points, A, B) {
   }
   if (hits.length < 2) return null;
   hits.sort((u, v) => u.t - v.t);
-  const lo = hits[0], hi = hits[hits.length - 1];
-  if (lo.i === hi.i) return null;
+  let lo = hits[0], hi = hits[hits.length - 1];
+  if (lo.i === hi.i) {
+    // The extreme-t crossings landed on the same edge (degenerate — e.g. the cut grazes
+    // a vertex) while valid interior crossings exist; fall back to the widest-t pair on
+    // DISTINCT edges instead of silently no-op'ing the split (B31).
+    let best = -1, pair = null;
+    for (let p = 0; p < hits.length; p++) for (let q = p + 1; q < hits.length; q++) {
+      if (hits[p].i === hits[q].i) continue;
+      const span = Math.abs(hits[q].t - hits[p].t);
+      if (span > best) { best = span; pair = [hits[p], hits[q]]; }
+    }
+    if (!pair) return null;
+    [lo, hi] = pair;
+  }
   const a1 = lo.i < hi.i ? lo : hi, a2 = lo.i < hi.i ? hi : lo;
   const polyA = [a1.point];
   for (let k = a1.i + 1; k <= a2.i; k++) polyA.push(points[k % n]);
@@ -1250,10 +1262,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const A = roadStart, B = sp, len = Math.hypot(B.x - A.x, B.y - A.y);
         if (len >= 4) {
           const curb = +settings.roadCurb || CURB;
+          const cross = +roadWidth + 2 * curb;
           let rot = Math.atan2(B.y - A.y, B.x - A.x) * 180 / Math.PI;
           if (e.shiftKey) rot = Math.round(rot / 45) * 45;
           pushHistory();
-          const el = { id: uid(), type: "road", cx: (A.x + B.x) / 2, cy: (A.y + B.y) / 2, w: len, h: +roadWidth + 2 * curb, rot, travelW: +roadWidth, curb };
+          // Keep the length axis (w) ≥ the cross axis (h): curb render / resize / roadTravel
+          // infer the cross from min(w,h), so a road drawn shorter than it is wide swapped axes (B61).
+          const el = { id: uid(), type: "road", cx: (A.x + B.x) / 2, cy: (A.y + B.y) / 2, w: Math.max(len, cross), h: cross, rot, travelW: +roadWidth, curb };
           setEls((a) => [...a, el]);
           setSel({ kind: "el", id: el.id });
           setTool("select");
@@ -1819,6 +1834,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const applyCalibration = () => {
     const knownFt = +calibInput;
     if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
+    // A map-sourced underlay is already georeferenced and its two axes can legitimately
+    // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
+    // would mis-size it, so calibration is disabled for from-map underlays (B57a).
+    if (underlay.fromMap) {
+      setOverlapWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.");
+      setTimeout(() => setOverlapWarn(""), 5000);
+      setCalib(null);
+      return;
+    }
     const measured = dist(calib.a, calib.b);
     if (measured <= 0) return;
     const factor = knownFt / measured;
@@ -2691,7 +2715,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     built.clone.removeAttribute("width"); built.clone.removeAttribute("height");
     const ar = (built.w / built.h).toFixed(4); // plan box aspect = the framed crop
     const xml = new XMLSerializer().serializeToString(built.clone);
-    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); // also escape >/" so it's safe to reuse in an attribute/style context (B48)
     const pageCss = paper === "tabloid"
       ? (orient === "portrait" ? "11in 17in" : "17in 11in")
       : (orient === "portrait" ? "letter portrait" : "letter landscape");
@@ -5067,6 +5091,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
                   {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
                 </div>
+                {calls.some((c) => c.curve) && (
+                  <div style={{ flexBasis: "100%", fontSize: 11, color: "#b45309", lineHeight: 1.45 }}>
+                    ⚠ {calls.filter((c) => c.curve).length} curve(s) plotted as straight chords — verify against the survey.
+                  </div>
+                )}
                 {calls.length > 0 && !closes && (
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
                     Corridor width
@@ -5080,7 +5109,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
-                      <span>{i + 1}. {c.bearing}</span><span>{c.distFt.toFixed(2)}′</span>
+                      <span>{i + 1}. {c.bearing}{c.curve ? " ⤿ (chord)" : ""}</span><span>{c.distFt.toFixed(2)}′</span>
                     </div>
                   ))}
                 </div>

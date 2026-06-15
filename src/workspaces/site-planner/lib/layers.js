@@ -213,6 +213,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         probeService(cfg.url).then(({ ok, error }) => {
           if (refs[k] !== "pending") return; // toggled off while probing
           if (!ok) return fail(k, cfg, `${cfg.label}: ${error}`);
+          if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriImage") {
             const o = { url: cfg.url, opacity: st.opacity, pane };
@@ -230,7 +231,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           lyr.on("load", () => onStatus && onStatus(k, "loaded"));
           if (lyr.setOpacity) lyr.setOpacity(st.opacity);
           lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
-        });
+        }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }
     } else if (!st.on && cur) {
       if (cur !== "pending") { try { map.removeLayer(cur); } catch (_) {} }
