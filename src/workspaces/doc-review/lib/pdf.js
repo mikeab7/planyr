@@ -15,7 +15,7 @@ export async function loadPdf(fileOrBuffer) {
 /* Render one page into `canvas` at `scale`. Returns the canvas px size and the
  * page's base (scale-1) size — markups are stored in base/page units so they
  * survive zoom (multiply by scale to draw). */
-export async function renderPageToCanvas(pdf, pageNum, canvas, scale) {
+export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask) {
   const page = await pdf.getPage(pageNum);
   const viewport = page.getViewport({ scale });
   const base = page.getViewport({ scale: 1 });
@@ -23,6 +23,7 @@ export async function renderPageToCanvas(pdf, pageNum, canvas, scale) {
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
   const task = page.render({ canvasContext: ctx, viewport });
+  if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
   return { w: canvas.width, h: canvas.height, baseW: base.width, baseH: base.height };
 }
@@ -38,5 +39,11 @@ export async function renderPageToImage(pdf, pageNum, scale = 2) {
   canvas.width = Math.floor(viewport.width);
   canvas.height = Math.floor(viewport.height);
   await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-  return { href: canvas.toDataURL("image/png"), baseW: base.width, baseH: base.height };
+  // Object URL (revocable) instead of a multi-MB base64 data URL held in state (B45);
+  // the stitcher revokes it on remove/replace/unmount. Fall back to a data URL if the
+  // browser can't produce a blob.
+  const href = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b ? URL.createObjectURL(b) : canvas.toDataURL("image/png")), "image/png")
+  );
+  return { href, baseW: base.width, baseH: base.height };
 }

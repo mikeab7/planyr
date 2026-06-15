@@ -49,6 +49,14 @@ export default function DocReview() {
   const pdfRef = useRef(null);
   const fileRef = useRef(null);
   const renderTok = useRef(0);
+  const renderTaskRef = useRef(null); // current pdf.js RenderTask, so a superseded render can be cancelled (B40)
+  // Destroy the previous PDF document before swapping in a new one — frees the worker
+  // + retained ArrayBuffer; without this every re-open leaks the prior doc (B39).
+  const setPdfDoc = (next) => {
+    const prev = pdfRef.current;
+    if (prev && prev !== next) { try { prev.destroy(); } catch (_) {} }
+    pdfRef.current = next;
+  };
 
   const [mode, setMode] = useState("review"); // review (single sheet) | stitch (multi-sheet)
   const [fileName, setFileName] = useState("");
@@ -89,7 +97,7 @@ export default function DocReview() {
     setBusy(true); setErr("");
     try {
       const pdf = await loadPdf(file);
-      pdfRef.current = pdf;
+      setPdfDoc(pdf);
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
@@ -115,6 +123,9 @@ export default function DocReview() {
     const pdf = pdfRef.current, canvas = canvasRef.current;
     if (!pdf || !canvas) return;
     const tok = ++renderTok.current;
+    // Cancel any in-flight render before starting a new one, so overlapping page/zoom
+    // changes can't fight over the same canvas (PDF.js throws on that) (B40).
+    if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
     let s = scale;
     if (!s) { // fit to container width
       const p = await pdf.getPage(page);
@@ -124,12 +135,23 @@ export default function DocReview() {
       if (tok !== renderTok.current) return;
       setScale(s);
     }
-    const d = await renderPageToCanvas(pdf, page, canvas, s);
-    if (tok !== renderTok.current) return; // a newer render superseded this
-    setDims(d);
+    try {
+      const d = await renderPageToCanvas(pdf, page, canvas, s, (task) => { renderTaskRef.current = task; });
+      if (tok !== renderTok.current) return; // a newer render superseded this
+      setDims(d);
+    } catch (e) {
+      if (e && e.name === "RenderingCancelledException") return; // expected when superseded/unmounted
+      // other render errors: keep the prior frame rather than crashing
+    }
   }, [page, scale]);
 
   useEffect(() => { render(); }, [render, numPages]);
+
+  // Free PDF.js resources on unmount: cancel any in-flight render + destroy the doc (B39/B40).
+  useEffect(() => () => {
+    if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} }
+    try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
+  }, []);
 
   /* ---- cloud persistence: badge, autosave, resume, load, new ---- */
   useEffect(() => {
@@ -168,13 +190,13 @@ export default function DocReview() {
     const buf = src.storageKey ? await downloadSource(src.storageKey) : null;
     if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
     const pdf = await loadPdf(buf);
-    pdfRef.current = pdf;
+    setPdfDoc(pdf);
     setNumPages(pdf.numPages); setScale(0);
   };
   const loadSingleReview = async (rec) => {
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
-    pdfRef.current = null;
+    setPdfDoc(null);
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
@@ -185,7 +207,7 @@ export default function DocReview() {
     await fetchSourceBytes(src);
   };
   const resetSingle = () => {
-    pdfRef.current = null; sourceRef.current = null;
+    setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
     setSource(null); setRedrop("");
@@ -289,17 +311,22 @@ export default function DocReview() {
     return bd <= tol ? best : null;
   };
 
-  // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection
+  // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection.
+  // Keep the handler in a ref (refreshed each render with live closures) and bind the
+  // window listener ONCE — the old no-deps effect re-subscribed on every render, and
+  // onPointerMove re-renders dozens of times/sec while drawing (B41).
+  const onKeyRef = useRef(null);
+  onKeyRef.current = (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
+    else if (e.key === "Escape") { setDraft(null); setSel(null); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
+  };
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-      if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
-      else if (e.key === "Escape") { setDraft(null); setSel(null); }
-      else if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
-    };
+    const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }); // eslint-disable-line
+  }, []);
 
   const zoom = (f) => setScale((s) => Math.max(0.2, Math.min(6, (s || 1) * f)));
   const totals = rollup(markups, calByPage);
