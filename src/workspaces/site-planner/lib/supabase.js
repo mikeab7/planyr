@@ -52,8 +52,11 @@ try { if (typeof window !== "undefined") window.pfSupabase = supabase; } catch (
 export async function testConnection() {
   if (!supabaseConfigured())
     return { ok: false, state: "not-configured", message: "Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY at build." };
-  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(SUPABASE_URL))
-    return { ok: false, state: "error", message: `URL looks off: "${SUPABASE_URL}". Expected https://<ref>.supabase.co (no path/slash/spaces).` };
+  // Accept any https origin (custom Supabase domains are valid), only flagging a
+  // clearly-wrong value — a path, space, or non-https (B37d). The URL was already
+  // normalized to its origin above.
+  if (!/^https:\/\/[^/\s]+$/i.test(SUPABASE_URL))
+    return { ok: false, state: "error", message: `URL looks off: "${SUPABASE_URL}". Expected an https origin like https://<ref>.supabase.co (no path/slash/spaces).` };
   try {
     const r = await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: SUPABASE_ANON } });
     if (r.ok) return { ok: true, state: "connected", message: `Reached Supabase, key accepted (HTTP ${r.status}).` };

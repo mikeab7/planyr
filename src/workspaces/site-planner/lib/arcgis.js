@@ -86,34 +86,41 @@ function ringArea(r) {
   return a / 2;
 }
 
+// The outer-boundary ring of an ArcGIS polygon. Outer rings and holes wind oppositely;
+// the largest ring by |area| is always an outer boundary (a hole can't exceed the ring
+// that contains it), so picking the max-|area| ring can never select a hole — even on a
+// multipart feature whose biggest hole exceeds a small separate part (B36c).
+function largestRing(rings) {
+  let best = rings[0], bestA = Math.abs(ringArea(rings[0]));
+  for (const r of rings) { const a = Math.abs(ringArea(r)); if (a > bestA) { best = r; bestA = a; } }
+  return best;
+}
+
+// Area-weighted centroid of a ring [[x,y],…] — unbiased by vertex density (a plain
+// vertex average drifts toward a densely-digitized curved edge). Falls back to the
+// vertex mean only for a degenerate (zero-area) ring (B36c).
+function ringCentroid(r) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < r.length; i++) {
+    const j = (i + 1) % r.length;
+    const cross = r[i][0] * r[j][1] - r[j][0] * r[i][1];
+    a += cross; cx += (r[i][0] + r[j][0]) * cross; cy += (r[i][1] + r[j][1]) * cross;
+  }
+  if (Math.abs(a) < 1e-9) { let vx = 0, vy = 0; r.forEach(([x, y]) => { vx += x; vy += y; }); return [vx / r.length, vy / r.length]; }
+  a *= 0.5; return [cx / (6 * a), cy / (6 * a)];
+}
+
+const ringClosed = (r) => r.length > 1 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1];
+
 /* Convert an ArcGIS polygon feature (rings in State Plane feet) into the app's
- * local polygon: pick the largest outer ring, recenter on its centroid, and
- * flip Y so north points up on screen. Returns [{x,y}] in feet, or null. */
+ * local polygon: pick the outer ring, recenter on its area centroid, and flip Y so
+ * north points up on screen. Returns [{x,y}] in feet, or null. */
 export function featureToParcel(feature) {
   const rings = feature?.geometry?.rings;
   if (!rings || !rings.length) return null;
-  let best = rings[0];
-  let bestA = Math.abs(ringArea(rings[0]));
-  for (const r of rings) {
-    const a = Math.abs(ringArea(r));
-    if (a > bestA) {
-      best = r;
-      bestA = a;
-    }
-  }
-  let cx = 0;
-  let cy = 0;
-  best.forEach(([x, y]) => {
-    cx += x;
-    cy += y;
-  });
-  cx /= best.length;
-  cy /= best.length;
-  const closed =
-    best.length > 1 &&
-    best[0][0] === best[best.length - 1][0] &&
-    best[0][1] === best[best.length - 1][1];
-  const ring = closed ? best.slice(0, -1) : best;
+  const best = largestRing(rings);
+  const [cx, cy] = ringCentroid(best);
+  const ring = ringClosed(best) ? best.slice(0, -1) : best;
   return ring.map(([x, y]) => ({ x: x - cx, y: -(y - cy) }));
 }
 
@@ -161,28 +168,9 @@ export async function identifyParcelAcross(candidates, lng, lat) {
 export function lngLatFeatureToParcel(feature) {
   const rings = feature?.geometry?.rings;
   if (!rings || !rings.length) return null;
-  let best = rings[0];
-  let bestA = Math.abs(ringArea(rings[0]));
-  for (const r of rings) {
-    const a = Math.abs(ringArea(r));
-    if (a > bestA) {
-      best = r;
-      bestA = a;
-    }
-  }
-  let lon0 = 0;
-  let lat0 = 0;
-  best.forEach(([x, y]) => {
-    lon0 += x;
-    lat0 += y;
-  });
-  lon0 /= best.length;
-  lat0 /= best.length;
-  const closed =
-    best.length > 1 &&
-    best[0][0] === best[best.length - 1][0] &&
-    best[0][1] === best[best.length - 1][1];
-  const ring = closed ? best.slice(0, -1) : best;
+  const best = largestRing(rings);
+  const [lon0, lat0] = ringCentroid(best);
+  const ring = ringClosed(best) ? best.slice(0, -1) : best;
   const FT_PER_DEG_LAT = 365223; // feet per degree latitude (Web-Mercator sphere base)
   const FT_PER_DEG_LON = 365223 * Math.cos((lat0 * Math.PI) / 180);
   const points = ring.map(([lon, lat]) => ({
@@ -193,21 +181,12 @@ export function lngLatFeatureToParcel(feature) {
   return { points, latlngs };
 }
 
-// The largest outer ring of a feature as an open [[lon,lat], ...] array (4326).
+// The outer ring of a feature as an open [[lon,lat], ...] array (4326).
 export function largestRingLngLat(feature) {
   const rings = feature?.geometry?.rings;
   if (!rings || !rings.length) return null;
-  let best = rings[0];
-  let bestA = Math.abs(ringArea(rings[0]));
-  for (const r of rings) {
-    const a = Math.abs(ringArea(r));
-    if (a > bestA) { best = r; bestA = a; }
-  }
-  const closed =
-    best.length > 1 &&
-    best[0][0] === best[best.length - 1][0] &&
-    best[0][1] === best[best.length - 1][1];
-  return closed ? best.slice(0, -1) : best;
+  const best = largestRing(rings);
+  return ringClosed(best) ? best.slice(0, -1) : best;
 }
 
 // Feet per degree using the Web-Mercator sphere base (2πR/360 ≈ 365223 ft) for
