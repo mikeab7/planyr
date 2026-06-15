@@ -42,7 +42,7 @@ export default function Shell() {
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.chrome }}>
-      <header style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, height: 38, padding: "0 12px", background: PAL.chrome, borderBottom: `1px solid ${PAL.line}` }}>
+      <header style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, height: 38, padding: "0 12px", background: PAL.chrome, borderBottom: `1px solid ${PAL.line}`, position: "relative", zIndex: 1 }}>
         {/* product switcher — brand + current module + chevron; the menu switches modules */}
         <div style={{ position: "relative" }}>
           <button onClick={() => setSwitcher((o) => !o)} aria-haspopup="menu" aria-expanded={switcher} title="Switch module"
@@ -90,7 +90,7 @@ export default function Shell() {
           </button>
         )}
       </header>
-      <main style={{ flex: 1, minHeight: 0, position: "relative", background: "#efeadf" }}>
+      <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>
         <Suspense fallback={<div style={{ height: "100%", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>Loading workspace…</div>}>
           <Active />
         </Suspense>
