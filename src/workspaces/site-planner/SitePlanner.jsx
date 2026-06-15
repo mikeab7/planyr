@@ -2659,19 +2659,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
     try {
       const image = new Image();
-      await new Promise((res, rej) => { image.onload = res; image.onerror = rej; image.src = url; });
+      await new Promise((res, rej) => { image.onload = res; image.onerror = () => rej(new Error("image load failed")); image.src = url; });
       const scale = Math.max(1, Math.min(3, 3500 / Math.max(w, h))); // crisp but bounded
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((png) => {
-        if (!png) return;
+        if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Print to PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
         aEl.download = `${fileSlug()}.png`;
         aEl.click();
         URL.revokeObjectURL(aEl.href);
       }, "image/png");
+    } catch (_) {
+      // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
+      // used to reject silently (unhandled) with no download — now surfaced (B50).
+      alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Print to PDF.");
     } finally { URL.revokeObjectURL(url); }
   };
   const printPDF = async (paper = "letter", orient = "landscape") => {
@@ -2681,6 +2685,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const win = window.open("", "_blank");
     if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
     win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
+    try {
     await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
     // Print clone is purely viewBox-driven (no px width/height that fight the CSS/zoom).
     built.clone.removeAttribute("width"); built.clone.removeAttribute("height");
@@ -2726,6 +2731,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Print once the aerial has loaded (or after a beat if it's cached/absent).
     const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
     if (win.document.readyState === "complete") go(); else win.onload = go;
+    } catch (_) {
+      try { win.close(); } catch (e2) {} // don't strand a blank "Preparing…" window if inlining/serialization threw (B50)
+      alert("Couldn't prepare the print view — the aerial basemap may have blocked it. Turn the basemap off and retry.");
+    }
   };
 
   /* ------------ print-frame placement ------------ */
