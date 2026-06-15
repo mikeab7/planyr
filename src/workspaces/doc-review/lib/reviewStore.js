@@ -151,7 +151,7 @@ export async function listProjects() {
   for (const r of data) {
     const id = r.group_id;
     if (!id || byId.has(id)) continue; // newest row wins for the name/status
-    byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "active" });
+    byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown" }); // don't claim "active" when status is missing or the read fell back to the no-status query (B35)
   }
   return [...byId.values()];
 }

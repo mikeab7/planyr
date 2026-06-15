@@ -308,11 +308,32 @@ export default function DocReview() {
   };
 
   const hitTest = (p) => {
-    const tol = 10 / scale;
+    const tol = 10 / scale; // page-unit click tolerance
+    const segDist = (a, b) => { // distance from p to segment a–b (page units)
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+      if (!L2) return dist(p, a);
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; t = Math.max(0, Math.min(1, t));
+      return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+    };
     let best = null, bd = Infinity;
     for (const m of pageMarks) {
       const pts = m.pts || [];
-      for (const q of pts) { const dd = dist(p, q); if (dd < bd) { bd = dd; best = m.id; } }
+      let d = Infinity;
+      if (m.kind === "rect" || m.kind === "cloud") {
+        // shape-aware: a box is selectable across its whole body, not just its 2 corners (B33)
+        const a = pts[0], b = pts[1]; if (!a || !b) continue;
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) d = 0;
+      } else if (m.kind === "text") {
+        // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
+        const q = pts[0]; if (!q) continue;
+        const w = ((m.text || "").length * 6.5 + 6) / scale, h = 16 / scale;
+        if (p.x >= q.x - 2 / scale && p.x <= q.x - 2 / scale + w && p.y >= q.y - 12 / scale && p.y <= q.y - 12 / scale + h) d = 0;
+      } else {
+        // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
+        for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+      }
+      if (d < bd) { bd = d; best = m.id; }
     }
     return bd <= tol ? best : null;
   };
