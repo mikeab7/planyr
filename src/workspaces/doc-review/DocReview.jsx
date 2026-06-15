@@ -119,24 +119,31 @@ export default function DocReview() {
   };
 
   /* ---- render current page ---- */
+  // Compute the fit-to-width scale in its OWN effect when scale===0, so render() stays a
+  // pure draw at a concrete scale. render() used to call setScale internally, which
+  // re-fired the render effect → two overlapping renders / brief dims mismatch (B34).
+  useEffect(() => {
+    if (scale || !pdfRef.current || !canvasRef.current) return;
+    let live = true;
+    (async () => {
+      const p = await pdfRef.current.getPage(page);
+      const base = p.getViewport({ scale: 1 });
+      const avail = (wrapRef.current?.clientWidth || 900) - 24;
+      const s = Math.max(0.2, Math.min(4, avail / base.width));
+      if (live) setScale(s);
+    })();
+    return () => { live = false; };
+  }, [scale, page, numPages]);
+
   const render = useCallback(async () => {
     const pdf = pdfRef.current, canvas = canvasRef.current;
-    if (!pdf || !canvas) return;
+    if (!pdf || !canvas || !scale) return; // the fit effect sets a concrete scale first; render only draws
     const tok = ++renderTok.current;
     // Cancel any in-flight render before starting a new one, so overlapping page/zoom
     // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
-    let s = scale;
-    if (!s) { // fit to container width
-      const p = await pdf.getPage(page);
-      const base = p.getViewport({ scale: 1 });
-      const avail = (wrapRef.current?.clientWidth || 900) - 24;
-      s = Math.max(0.2, Math.min(4, avail / base.width));
-      if (tok !== renderTok.current) return;
-      setScale(s);
-    }
     try {
-      const d = await renderPageToCanvas(pdf, page, canvas, s, (task) => { renderTaskRef.current = task; });
+      const d = await renderPageToCanvas(pdf, page, canvas, scale, (task) => { renderTaskRef.current = task; });
       if (tok !== renderTok.current) return; // a newer render superseded this
       setDims(d);
     } catch (e) {
