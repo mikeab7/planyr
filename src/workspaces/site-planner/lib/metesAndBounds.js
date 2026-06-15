@@ -30,6 +30,10 @@ const CALL_RE = new RegExp(
 /* Parse a legal description into structured calls.
  * Returns [{ bearing:"N45°30'00\"E", deg, az, distFt, raw }]. `az` is azimuth in
  * degrees clockwise from north; `distFt` is the distance converted to feet. */
+// Curve-call indicators near a match → the matched bearing/distance is the CHORD of
+// an arc, not a straight leg. We keep the chord but flag it `curve:true` (B25).
+const CURVE_RE = /(curv|radius|\barc\b|\bdelta\b|radial|chord\s+bears?|central\s+angle)/i;
+
 export function parseCalls(text) {
   if (!text) return [];
   const out = [];
@@ -51,11 +55,17 @@ export function parseCalls(text) {
     const isVara = unit.startsWith("v");
     const distFt = parseFloat(distRaw.replace(/,/g, "")) * (isVara ? VARA_FT : 1);
     if (!isFinite(distFt) || distFt <= 0) continue;
+    // Is this the chord of a curve? Look only within the current clause (since the
+    // last ";" / "." / "THENCE") so a previous curve doesn't taint a later straight leg (B25).
+    const before = src.slice(0, m.index), lc = before.toLowerCase();
+    const clauseStart = Math.max(before.lastIndexOf(";"), before.lastIndexOf("."), lc.lastIndexOf("thence"));
+    const ctx = src.slice(clauseStart >= 0 ? clauseStart : Math.max(0, m.index - 120), m.index);
+    const curve = CURVE_RE.test(ctx);
     const mins = mm ? `${mm}'` : "";
     const secs = ss ? `${ss}"` : "";
     out.push({
       bearing: `${Q1}${dd}°${mins}${secs}${Q2}`,
-      deg, az, distFt, isVara,
+      deg, az, distFt, isVara, curve,
       label: `${Q1} ${dd}°${mm ? ` ${mm}'` : ""}${ss ? ` ${ss}"` : ""} ${Q2}  ${fmtDist(distFt)}`,
       raw: m[0].trim(),
     });
