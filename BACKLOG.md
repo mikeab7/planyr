@@ -8,12 +8,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## How this file works — Claude Code, read this first
 
-- **On each run:** address every item under **🔲 Open**. Skip everything under **✅ Done** — it's already handled.
-- **IDs are permanent.** Never renumber, never reuse a number. A new item gets the next unused B-number, even after earlier items are done.
+- **On each run:** address every item under **🔲 Open**. Skip everything under **✅ Done** — it's already handled. Do **not** action anything under **🕓 Later / Roadmap** unless it's been moved up to Open.
+- **IDs are permanent, and only minted here — at filing time.** The next ID = the highest existing `B#` in this file + 1. Never renumber or reuse a number, even after items are done.
+- **Items pasted from another chat are "blind" to this file** and may carry provisional `NEW-#` (or stale/colliding `B#`) labels — treat those as scratch references only and assign the real next `B#` when filing.
+- **Before filing, dedupe.** If an arriving item already exists here (reported from another chat), merge it into the existing item or skip it — never create a duplicate or a colliding ID.
 - **When you finish an item:** move its whole block from 🔲 Open to ✅ Done, flip `[ ]` to `[x]`, and append a one-line note — what changed, the date, and the PR/commit if there is one.
+- **Always commit after editing this file or finishing a fix** — never leave the working tree dirty. A fix that isn't committed doesn't count as done.
 - **Never delete items.** Completed ones stay in ✅ Done as a record.
 - **If an item is ambiguous,** don't guess. Mark it `[?]`, add your question inline, and leave it in Open.
-- **Bracket tags** like `[Site Planner]` mark the module. `(bug)` / `(feature)` marks the type.
+- **Bracket tags** like `[Site Planner]` mark the module. `(bug)` / `(feature)` / `(task)` marks the type.
 
 ---
 
@@ -174,6 +177,28 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 
 ### B62 — Utility-route corridor leaves a visible gap to the fitting pad `[Site Planner]` (bug) — minor, cosmetic
 `[ ]` `buildUtilRoute` buffers `pts=[source, entry]` where `entry` is on the wall, but the pad sits outside the wall (`entry + normal*(padSize/2+3)`), so the drawn corridor never reaches the pad. Fix: include the pad center in the route (`pts=[source, entry, padC]`) before buffering. (Math/easement-width/overlap checks are otherwise correct.)
+
+<!-- Filed 2026-06-15 from a parallel chat's backlog (its provisional B13–B16 were reassigned here; B1–B12 + protocol deduped against existing items, which already shipped). -->
+
+### B63 — Parallel-session merge safety: branch → PR → green-build gate `[repo / workflow]` (task)
+`[ ]` Guardrail so two concurrent Claude Code sessions can't silently break `main`. git already catches *same-line* collisions (it refuses — the safe, loud case); the real risk is two sessions editing *different but interdependent* files → clean merge, broken app, which only re-building the **combined** result catches. **Active practice (already followed; make it explicit in CLAUDE.md):** each session works on its own branch, never commits to `main`; finishes via a PR; before merge, restacks on the latest `main` and re-runs the build, merging only if green; one PR per backlog item where practical. The *enforced* GitHub branch-protection half is parked under 🕓 Later (needs a paid plan on this private repo + a one-time owner toggle).
+
+### B64 — Clicking into a site is unreliable / won't register `[Site Planner / map]` (bug) `[?]`
+`[ ]` Intermittently, clicking a saved site on the map to open it does nothing — the click never registers and you can't get into the planner. Repro and fix the click/hit handling so opening a site is reliable every time. `[?]` confirm whether this is clicking a *saved-site marker to enter the planner* vs. a *parcel to select*; likely shares a root cause with the already-logged click races (B22 parcel-click race) — check marker hit-area / overlapping panes / the select-mode guard. Needs a runtime repro to fix confidently.
+
+### B65 — White flashing on zoom/pan and general redraw `[Site Planner / map]` (bug)
+`[ ]` With a site loaded, zooming/panning flashes white repeatedly — the view appears to clear to white between redraws instead of holding the previous frame (frequent, not one-off). Make the render path retain the prior frame / paint onto a stable backdrop. Likely suspects: the Leaflet basemap/aerial tile layer, or the SVG/canvas re-rasterizing the imported backdrop on every interaction. Perceived-quality but very visible. Needs a runtime repro.
+
+### B66 — Top-left Site Planyr dropdown renders behind the lower header row `[global UI]` (bug)
+`[ ]` Clicking the top-left module control opens its dropdown *behind* the second header row (a z-index/stacking problem), so it can't be used. Quick fix: raise the menu's z-index above the lower bar. NOTE: B10 (header consolidation → product-switcher) shipped but deliberately left the shell bar and planner context bar as **two physical rows**, so this stacking bug likely persists — verify against the current header and fix the z-index.
+
+---
+
+## 🕓 Later / Roadmap
+
+*Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+- **Enforced merge gate via GitHub branch protection** (the settings half of **B63**): require a PR + a passing build check + "branch up to date before merging" on `main`, plus repo auto-merge. On the **private** repo this only *enforces* on a paid plan (GitHub Pro+); on Free the rules save but don't block — so B63's branch → PR → green discipline is the backstop until then. Keep it a manual owner toggle rather than granting the Claude Code app admin rights on a credential-bound repo.
 
 ---
 
