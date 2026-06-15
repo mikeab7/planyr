@@ -55,17 +55,20 @@ export default function App() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const prevUid = useRef(null);
+  const applyTok = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
 
   // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
   // sites into their local cache and make that the active store (cloud is home);
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
   const applyUser = async (u, event) => {
+    const tok = ++applyTok.current; // a newer auth event supersedes this one (B43)
     const uid = (u && u.id) || null;
     setActiveUser(uid);
     if (uid) {
       setCloudLoading(true);
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
+      if (tok !== applyTok.current) return; // superseded mid-pull — don't clobber the newer event's store/UI
       setCloudLoading(false);
       // B54: a failed fetch no longer wipes the cache — say we're showing the last
       // synced copy rather than presenting a silent (and scary) empty library.
@@ -75,6 +78,7 @@ export default function App() {
       else { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     } else {
+      setCloudLoading(false); // a sign-out clears any in-flight "Loading…" left by a superseded sign-in (B43)
       if (prevUid.current) clearCloudCache(prevUid.current); // don't leave cloud data cached after logout
       setCloudError("");
       if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
