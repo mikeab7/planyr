@@ -514,7 +514,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         </div>
         <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
           <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
-            onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") goAddress(); }} />
+            onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }} />
           <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
         </div>
         <div style={{ flex: 1 }} />
