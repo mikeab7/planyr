@@ -14,6 +14,7 @@
  *               image); the caller destroys it on remove/unmount (cf. B39)
  */
 import { loadAndDownscaleImage } from "./image.js";
+import { detectSheet, parseScaleNote } from "./overlayScale.js";
 
 const MAX_RASTER_DIM = 2600; // cap the rendered raster so memory / the white-knockout pass stay cheap
 
@@ -45,14 +46,26 @@ export async function rasterizePage(pdf, pageNum = 1) {
   return { src: canvas.toDataURL("image/png"), imgW: Math.round(base.width), imgH: Math.round(base.height), page: n };
 }
 
-/* Open a dropped file: rasterize page 1 of a PDF, or decode an image. */
+/* Read an engineer's scale note off a page's text (PDF.js getTextContent) → feet per
+ * inch, or null. Tolerant: a scanned / text-less PDF just yields null. */
+async function readScaleNote(pdf, pageNum = 1) {
+  try {
+    const page = await pdf.getPage(Math.min(Math.max(1, pageNum | 0), pdf.numPages));
+    const tc = await page.getTextContent();
+    return parseScaleNote(tc.items.map((i) => i.str || "").join(" "));
+  } catch (_) { return null; }
+}
+
+/* Open a dropped file: rasterize page 1 of a PDF (plus read its scale note + classify
+ * its sheet size for B73), or decode an image. */
 export async function openOverlayFile(file) {
   if (isPdfFile(file)) {
     const { loadPdf } = await import("../../doc-review/lib/pdf.js"); // shared PDF engine, lazily
     const pdf = await loadPdf(file);
     const r = await rasterizePage(pdf, 1);
-    return { ...r, pageCount: pdf.numPages, pdf };
+    const detectedScale = await readScaleNote(pdf, 1);
+    return { ...r, pageCount: pdf.numPages, pdf, detectedScale, sheet: detectSheet(r.imgW, r.imgH) };
   }
   const { src, w, h } = await loadAndDownscaleImage(file); // PNG/JPG path (reuses the aerial loader)
-  return { src, imgW: w, imgH: h, page: 1, pageCount: 1, pdf: null };
+  return { src, imgW: w, imgH: h, page: 1, pageCount: 1, pdf: null, detectedScale: null, sheet: null };
 }
