@@ -104,7 +104,7 @@ export default function DocReview() {
       setSource({ ...base, storageKey: null, oversize: false });
       uploadSource(srcId, file, meta.projectId, meta.discipline).then((r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
-      });
+      }).catch(() => {}); // best-effort upload; a rejection mustn't become an unhandled rejection
     } catch (e) {
       setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
     } finally { setBusy(false); }

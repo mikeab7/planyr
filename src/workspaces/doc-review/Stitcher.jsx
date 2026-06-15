@@ -81,7 +81,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, oversize: false, missing: false }]);
         uploadSource(srcId, f, meta.projectId, meta.discipline).then((r) =>
           setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, oversize: !!r.oversize } : x)))
-        );
+        ).catch(() => {}); // best-effort upload; don't leak an unhandled rejection
       }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
     finally { setBusy(false); }
