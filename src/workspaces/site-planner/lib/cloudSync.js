@@ -41,6 +41,9 @@ export async function cloudDelete(uid, id) {
 export async function cloudList(uid) {
   if (!supabase || !uid) return [];
   const { data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false });
-  if (error || !data) return [];
-  return data.map((r) => r.data).filter(Boolean);
+  // THROW on a real fetch error so callers can tell it apart from a genuinely-empty
+  // result. Returning [] here let `pullCloud` wipe the local cache to empty on a
+  // transient/offline error, showing a scary "no sites" state (B54).
+  if (error) throw new Error(error.message || "cloud list failed");
+  return (data || []).map((r) => r.data).filter(Boolean);
 }

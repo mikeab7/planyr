@@ -53,6 +53,7 @@ export default function App() {
   // Supabase auth → data-store switching only. The account UI (sign in/out, modal)
   // is global in the shell; here we just react to auth to switch cloud↔local storage.
   const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const prevUid = useRef(null);
 
   // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
@@ -64,14 +65,18 @@ export default function App() {
     setActiveUser(uid);
     if (uid) {
       setCloudLoading(true);
-      try { await pullCloud(uid); } catch (_) {}
+      const res = await pullCloud(uid).catch(() => ({ ok: false }));
       setCloudLoading(false);
+      // B54: a failed fetch no longer wipes the cache — say we're showing the last
+      // synced copy rather than presenting a silent (and scary) empty library.
+      setCloudError(res && res.ok === false ? "Couldn't reach the cloud — showing your last synced copy. Your saved sites are safe; reconnect to refresh." : "");
       const cur = getCurrentSiteId();
       if (cur && loadSite(cur)) { setActiveSiteId(cur); setMode("plan"); } // resume if it's one of theirs
       else { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     } else {
       if (prevUid.current) clearCloudCache(prevUid.current); // don't leave cloud data cached after logout
+      setCloudError("");
       if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     }
@@ -228,6 +233,12 @@ export default function App() {
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
+        </div>
+      )}
+      {cloudError && (
+        <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          <span style={{ flex: 1 }}>{cloudError}</span>
+          <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
