@@ -14,7 +14,6 @@ import {
   resolveLayerUrl,
   queryFeatures,
   queryAtPoint,
-  featureToParcel,
   largestRingLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -1895,6 +1894,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const applyCalibration = () => {
     const knownFt = +calibInput;
     if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
+    // A map-sourced underlay is already georeferenced and its two axes can legitimately
+    // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
+    // would mis-size it, so calibration is disabled for from-map underlays (B57a).
+    if (underlay.fromMap) {
+      setOverlapWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.");
+      setTimeout(() => setOverlapWarn(""), 5000);
+      setCalib(null);
+      return;
+    }
     const measured = dist(calib.a, calib.b);
     if (measured <= 0) return;
     const factor = knownFt / measured;
@@ -1957,7 +1965,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (meta.fields.some((f) => (f.name || "").toLowerCase() === scopeField))
           where = `(${scope}) AND (${where})`;
       }
-      const feats = await queryFeatures(layerUrl, { where, count: 10 });
+      const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat so importFeature projects via the shared 365223 model (B57c)
       if (!feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
       setLookupRes(feats.map((ft) => ({ ft, layerUrl, idField, addrField })));
     } catch (err) {
@@ -1967,7 +1975,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const importFeature = (entry) => {
-    const pts = featureToParcel(entry.ft);
+    // Project with the SAME 365223 equirectangular model as map-click/identify so a
+    // looked-up parcel and a clicked one are sized identically — this path used true
+    // EPSG:2278 feet before, a ~0.3% mismatch for the same lot (B57c). Anchored on the
+    // parcel's own lon/lat centroid so it still drops centered (unchanged placement).
+    const ring = largestRingLngLat(entry.ft); // open [lon,lat] ring (queried in 4326)
+    if (!ring || ring.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
+    const lon0 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+    const lat0 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+    const pts = lngLatRingToFeet(ring, lon0, lat0);
     if (!pts || pts.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory();
     const pc = { id: uid(), points: pts, locked: true };
@@ -5304,6 +5320,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls) {
+  // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
+  // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
+  // defined" inside the els.map during render and blanked the whole page on any
+  // project with a parking element. Resolve it locally from the settings param.
+  const cfgOf = (e) => (e.cfg ? { ...settings, ...e.cfg } : settings);
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
