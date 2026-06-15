@@ -405,6 +405,67 @@ function estTrailers(area, s) {
   return Math.max(0, Math.floor((area * 0.8) / per));
 }
 
+/* --------------- parking row stepping (double-loading) ------------- */
+// A drive aisle is double-loaded when it has a stall row on BOTH sides, so a
+// field of n rows stacks as depth(n) = n·stallDepth + ⌈n/2⌉·aisle (one aisle per
+// pair of rows). "+"/"−" step exactly ONE row: a single-loaded bay (1 row + 1
+// aisle) becomes double-loaded (2 rows, same aisle) before a new aisle is added.
+function parkDepthForRows(n, sd, ai) { n = Math.max(1, Math.round(n)); return n * sd + Math.ceil(n / 2) * ai; }
+function parkRowsForDepth(h, sd, ai) {
+  const mod = 2 * sd + ai; if (mod <= 0) return 1;            // a double-loaded module
+  const m = Math.floor((h + 1e-6) / mod), rem = h - m * mod;  // full modules + leftover
+  return Math.max(1, 2 * m + (rem >= sd - 1e-6 ? 1 : 0));     // a leftover row is single-loaded
+}
+
+/* ------------------------- curbs (derived) ------------------------- */
+// Curbs are auto-placed thin bands (not user geometry): a 6" mono curb is 0.5′ of
+// plan-view width; a heavier 12" curb (trailer option) is 1.0′. One rule, three
+// faces: ALWAYS drawn, ALWAYS in the area/yield math (width feeding it), NEVER in
+// the displayed dimension (the label reads to the face of curb). The element's
+// w/h stays the face-of-curb size, so the curb is derived on top — it floats to
+// the terminal edge as rows are added/removed, with no stored geometry.
+const CURB_6 = 0.5, CURB_12 = 1.0;
+const CURB_TYPES = ["parking", "paving", "trailer"]; // roads carry their own curbs; no curb on a building side
+const curbWidthOf = (el) => (el.curbW === CURB_12 ? CURB_12 : CURB_6);
+const curbHost = (el, allEls) => (el.attachedTo ? (allEls || []).find((x) => x.id === el.attachedTo && !x.points) : null);
+// Outward (terminal/back) edge in the element's LOCAL frame — the edge pointing
+// away from a host building (so a curb never lands on the building side).
+function outwardCurbEdge(el, allEls) {
+  const host = curbHost(el, allEls);
+  if (!host) return null;
+  const loc = rot2(el.cx - host.cx, el.cy - host.cy, -el.rot); // host→el delta in local frame
+  return Math.abs(loc.y) >= Math.abs(loc.x)
+    ? { axis: "y", sign: loc.y >= 0 ? 1 : -1, length: el.w }
+    : { axis: "x", sign: loc.x >= 0 ? 1 : -1, length: el.h };
+}
+// True when a sidewalk/landscape strip sits between this pad and its host, so the
+// pad's inner edge is a sidewalk transition (curb) rather than a building face.
+function sidewalkBetween(el, host, allEls) {
+  if (!host) return false;
+  const a = { x: el.cx - host.cx, y: el.cy - host.cy };
+  return (allEls || []).some((s) => {
+    if ((s.type !== "sidewalk" && s.type !== "landscape") || s.attachedTo !== host.id || s.id === el.id) return false;
+    const b = { x: s.cx - host.cx, y: s.cy - host.cy };
+    return (a.x * b.x + a.y * b.y) > 0 && (b.x * b.x + b.y * b.y) < (a.x * a.x + a.y * a.y); // same side, inboard
+  });
+}
+// Curbed edges (LOCAL frame) — the single source feeding both the drawn band and
+// the area math. Terminal curb on the far edge of every paved section; a
+// transition curb where a sidewalk sits behind it; both depth ends for a free field.
+function curbEdgesOf(el, allEls) {
+  if (el.points || !CURB_TYPES.includes(el.type)) return [];
+  const w = curbWidthOf(el), host = curbHost(el, allEls);
+  if (!host) // free-standing: both depth ends are terminal (no building side to spare)
+    return [{ axis: "y", sign: 1, length: el.w, width: w }, { axis: "y", sign: -1, length: el.w, width: w }];
+  const oe = outwardCurbEdge(el, allEls);
+  if (!oe) return [];
+  const edges = [{ ...oe, width: w }];                               // terminal (far/back) edge
+  if (sidewalkBetween(el, host, allEls)) edges.push({ axis: oe.axis, sign: -oe.sign, length: oe.length, width: w }); // sidewalk transition
+  return edges;
+}
+// Plan-view area of an element's curbs (counts in the SF / impervious math).
+const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
+
 /* ----------------------- polygon split (parcels) ------------------- */
 // Intersection of segment p->q with the infinite line through A,B (if within pq).
 function segLineIntersect(p, q, A, B) {
@@ -2467,10 +2528,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
     const a = e.points ? polyArea(e.points) : e.w * e.h;
+    const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types)
     if (e.type === "building") { bldg += a; if (e.dogEar) { bumpCount++; bumpArea += a; } }
-    else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a;
-    else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
-    else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
+    else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
+    else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
+    else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") pondArea += a;
   });
   // A dog-ear bump-out sits inside its truck court footprint — that overlap is
@@ -2988,14 +3050,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
   })();
 
-  // One repeating parking band = a row of stalls + its drive aisle.
-  const parkBand = (el) => { const c = el ? cfgOf(el) : settings; return (c.stallDepth || settings.stallDepth) + (c.aisle ?? settings.aisle); };
-  // Grow a parking field one band deeper (keeping its near edge fixed); the
-  // stall striping auto-fills the new depth. Loops, so you can stack rows/aisles.
+  // Grow a parking field one row deeper (keeping its near edge fixed); the stall
+  // striping auto-fills the new depth. Loops, so you can stack rows/aisles.
   const growParking = (el, dir = 1) => {
     const cfg = cfgOf(el);
-    const inc = (cfg.stallDepth || settings.stallDepth) + (cfg.aisle ?? settings.aisle);
-    if (dir < 0 && el.h - inc < (cfg.stallDepth || settings.stallDepth)) return; // keep at least one row
+    const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
+    // Step exactly one row: 1 row + aisle (single-loaded) → 2 rows, same aisle
+    // (double-loaded) → +aisle + row (new bay) → … never a two-row module.
+    const n = parkRowsForDepth(el.h, sd, ai);
+    if (n + dir < 1) return;                                  // keep at least one row
+    const newH = parkDepthForRows(n + dir, sd, ai);
     // Grow on the edge pointing AWAY from a host building (so it never grows over
     // it); for a free field this is just the +local-y edge.
     let outSign = 1;
@@ -3004,19 +3068,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const yAxis = rot2(0, 1, el.rot); // +local-y in world
       outSign = (yAxis.x * (el.cx - host.cx) + yAxis.y * (el.cy - host.cy)) >= 0 ? 1 : -1;
     }
-    const off = rot2(0, outSign * dir * inc / 2, el.rot);
+    const off = rot2(0, outSign * (newH - el.h) / 2, el.rot);
     pushHistory();
-    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: x.h + dir * inc, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+    setEls((a) => a.map((x) => x.id === el.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
   };
   // Per-field stall depth / drive-aisle override. Resizes the field's depth to
   // keep its rows consistent, growing on the outward (non-host) edge.
   const setParkCfg = (el, patch) => {
     const cur = cfgOf(el);
-    const oldBand = (cur.stallDepth || settings.stallDepth) + (cur.aisle ?? settings.aisle);
+    const rows = parkRowsForDepth(el.h, cur.stallDepth || settings.stallDepth, cur.aisle ?? settings.aisle);
     const ncfg = { ...(el.cfg || {}), ...patch };
-    const newBand = (ncfg.stallDepth ?? settings.stallDepth) + (ncfg.aisle ?? settings.aisle);
-    const rows = Math.max(1, Math.round(el.h / oldBand));
-    const newH = rows * newBand;
+    const newH = parkDepthForRows(rows, ncfg.stallDepth ?? settings.stallDepth, ncfg.aisle ?? settings.aisle);
     let outSign = 1;
     const host = el.attachedTo ? els.find((x) => x.id === el.attachedTo && !x.points) : null;
     if (host) { const yAxis = rot2(0, 1, el.rot); outSign = (yAxis.x * (el.cx - host.cx) + yAxis.y * (el.cy - host.cy)) >= 0 ? 1 : -1; }
@@ -3024,19 +3086,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, cfg: ncfg, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
   };
+  // Per-element curb width (NEW-3): default 6" (0.5′) or a heavier 12" (1.0′) curb
+  // for trailer-tire/dolly abuse. The property lives globally on any band; only
+  // trailer parking surfaces the control for now.
+  const setCurbW = (el, wv) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, curbW: wv } : x)); };
   // Split a striped parking field into N independent row elements (each one stall
   // row + its aisle), preserving position/rotation so each can be edited / dragged.
   const splitParkingRows = (el) => {
     if (!el || el.points || el.type !== "parking") return;
-    const cfg = cfgOf(el), band = (cfg.stallDepth || settings.stallDepth) + (cfg.aisle ?? settings.aisle);
-    const count = Math.max(1, Math.round(el.h / band));
+    const cfg = cfgOf(el);
+    const count = parkRowsForDepth(el.h, cfg.stallDepth || settings.stallDepth, cfg.aisle ?? settings.aisle);
     if (count < 2) return;
     pushHistory();
+    const bandH = el.h / count;                       // even split into one element per row
     const rows = [];
     for (let i = 0; i < count; i++) {
-      const ly = -el.h / 2 + band * (i + 0.5);       // band centre in local depth
+      const ly = -el.h / 2 + bandH * (i + 0.5);       // band centre in local depth
       const off = rot2(0, ly, el.rot);
-      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: band, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: bandH, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
     }
     setEls((a) => [...a.filter((x) => x.id !== el.id), ...rows]);
     setSel({ kind: "el", id: rows[0].id });
@@ -3054,10 +3121,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const tx = -uy, ty = ux;                          // tangent along the edge
     const plus = { x: ms.x + ux * 16 - tx * 12, y: ms.y + uy * 16 - ty * 12 };
     const minus = { x: ms.x + ux * 16 + tx * 12, y: ms.y + uy * 16 + ty * 12 };
-    const canShrink = el.h - parkBand(el) >= (cfgOf(el).stallDepth || settings.stallDepth);
+    const canShrink = parkRowsForDepth(el.h, cfgOf(el).stallDepth || settings.stallDepth, cfgOf(el).aisle ?? settings.aisle) > 1;
     return (
       <g>
-        {featNode("parkAdd", plus, false, "#2563eb", "Add a parking row + drive aisle", () => growParking(el, 1), null)}
+        {featNode("parkAdd", plus, false, "#2563eb", "Add one parking row", () => growParking(el, 1), null)}
         {canShrink && featNode("parkSub", minus, true, "#b91c1c", "", null, () => growParking(el, -1))}
       </g>
     );
@@ -4608,10 +4675,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <Field label="Stall depth (ft)"><NumInput style={numInput} value={pc.stallDepth} min={8} onCommit={(n) => setParkCfg(selEl, { stallDepth: n })} /></Field>
                         <Field label="Drive aisle (ft)"><NumInput style={numInput} value={pc.aisle} min={0} onCommit={(n) => setParkCfg(selEl, { aisle: n })} /></Field>
                         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row + aisle</button>
+                          <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
-                        {Math.round(selEl.h / ((cfgOf(selEl).stallDepth || settings.stallDepth) + (cfgOf(selEl).aisle ?? settings.aisle))) >= 2 &&
+                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 2 &&
                           <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split into rows</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
@@ -4619,6 +4686,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     );
                   })()}
+                  {selEl.type === "trailer" && !selEl.points && (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Terminal curb</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_6 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_6)}>6″ mono</button>
+                        <button style={{ ...chip, flex: 1, ...(curbWidthOf(selEl) === CURB_12 ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setCurbW(selEl, CURB_12)}>12″ heavy</button>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 5, lineHeight: 1.45 }}>12″ takes trailer-tire/dolly abuse (1.0′ plan width). Drawn + counted in the SF math; the dimension still reads to the face of curb.</div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 4, lineHeight: 1.5 }}>Polygon · {selEl.points.length} points. Drag the body to move. Drag a <b>dot</b> to move a corner, click a <b>＋</b> on an edge to add one, <b>Shift-click</b> a dot to delete. Double-click to change type.</div>
@@ -5199,7 +5276,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                     </>
                   )}
-                  {t.type === "parking" && !t.points && Math.round(t.h / ((cfgOf(t).stallDepth || settings.stallDepth) + (cfgOf(t).aisle ?? settings.aisle))) >= 2 && (
+                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 2 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
                       <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
@@ -5278,6 +5355,16 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     ts.aisles.forEach((a, i) =>
       parts.push(<line key={`ta${i}`} x1={tl.x} y1={tl.y + (a.y0 + a.y1) / 2 * ppf} x2={tl.x + w} y2={tl.y + (a.y0 + a.y1) / 2 * ppf} stroke={st.stroke} strokeWidth={0.6} strokeDasharray="8 6" />));
   }
+  // Derived curbs: thin bands on the terminal / sidewalk-transition edges. Always
+  // drawn (their width scales, so a 12" curb visibly doubles a 6" one); the band's
+  // stroke keeps it legible when the 0.5′ width is sub-pixel at low zoom.
+  curbEdgesOf(el, allEls).forEach((e, i) => {
+    const cpx = e.width * ppf;
+    const x = e.axis === "x" ? (e.sign > 0 ? tl.x + w : tl.x - cpx) : tl.x;
+    const y = e.axis === "y" ? (e.sign > 0 ? tl.y + h : tl.y - cpx) : tl.y;
+    const bw = e.axis === "x" ? cpx : w, bh = e.axis === "y" ? cpx : h;
+    parts.push(<rect key={`curb${i}`} x={x} y={y} width={bw} height={bh} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
+  });
   if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
     const dock = el.dock || "single";
     const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
