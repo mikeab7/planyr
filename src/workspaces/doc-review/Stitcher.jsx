@@ -66,6 +66,26 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
 
+  // Free PDF.js docs + sheet object URLs once they leave state (remove/replace/reset)
+  // and on unmount — otherwise every re-load leaks a doc (worker + retained buffer)
+  // and a multi-MB blob URL (B39/B45). Track what's live and release the rest.
+  const liveDocsRef = useRef([]);
+  useEffect(() => {
+    const live = new Set(pdfs.map((p) => p.doc).filter(Boolean));
+    for (const d of liveDocsRef.current) if (d && !live.has(d)) { try { d.destroy(); } catch (_) {} }
+    liveDocsRef.current = [...live];
+  }, [pdfs]);
+  const liveHrefsRef = useRef([]);
+  useEffect(() => {
+    const live = new Set(placed.map((s) => s.href).filter(Boolean));
+    for (const h of liveHrefsRef.current) if (h && !live.has(h) && h.startsWith("blob:")) { try { URL.revokeObjectURL(h); } catch (_) {} }
+    liveHrefsRef.current = [...live];
+  }, [placed]);
+  useEffect(() => () => {
+    for (const d of liveDocsRef.current) if (d) { try { d.destroy(); } catch (_) {} }
+    for (const h of liveHrefsRef.current) if (h && h.startsWith("blob:")) { try { URL.revokeObjectURL(h); } catch (_) {} }
+  }, []);
+
   const openFiles = async (files) => {
     const list = [...(files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!list.length) return;
@@ -151,10 +171,15 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (isFinite(ft) && ft > 0) { setFtPerUnit(ft / u); setErr(""); }
   };
 
+  // Bind the window keydown listener ONCE; refresh the handler via a ref so it keeps
+  // live closures (finishArea reads the current draft) without re-subscribing on every
+  // render — onPointerMove re-renders constantly while drawing (B41).
+  const onKeyRef = useRef(null);
+  onKeyRef.current = (e) => { if (e.key === "Enter") finishArea(); else if (e.key === "Escape") { setDraft(null); setAlign(null); } };
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Enter") finishArea(); else if (e.key === "Escape") { setDraft(null); setAlign(null); } };
+    const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }); // eslint-disable-line
+  }, []);
 
   /* ---- cloud persistence (stitched set): autosave, resume, load, new ---- */
   const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
