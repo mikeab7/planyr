@@ -9,12 +9,15 @@ import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
 import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
+import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().slice(0, 10);
+const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 
 const TOOLS = [
   { id: "select", label: "Select", hint: "Click a markup to select; Delete removes it." },
@@ -65,12 +68,11 @@ export default function DocReview() {
 
   // --- cloud persistence (single-sheet review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
-  const [title, setTitle] = useState("");
-  const [project, setProject] = useState("");
-  const [discipline, setDiscipline] = useState("");
+  const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [signedIn, setSignedIn] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
 
@@ -97,7 +99,7 @@ export default function DocReview() {
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
       setSource({ ...base, storageKey: null, oversize: false });
-      uploadSource(reviewId, srcId, file).then((r) => {
+      uploadSource(srcId, file, meta.projectId, meta.discipline).then((r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
       });
     } catch (e) {
@@ -134,19 +136,22 @@ export default function DocReview() {
     const off = onAuthChange(r);
     return () => { live = false; off && off(); };
   }, []);
-  const onMeta = (k, v) => { if (k === "title") setTitle(v); else if (k === "project") setProject(v); else if (k === "discipline") setDiscipline(v); };
+  const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
 
   const buildSnapshot = useCallback(() => ({
-    id: reviewId, kind: "single", title, project, discipline,
+    id: reviewId, kind: "single",
+    title: (meta.title || "").trim() || composeTitle(meta),
+    project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
+    item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: source ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, oversize: !!source.oversize }] : [],
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage },
-  }), [reviewId, title, project, discipline, source, fileName, numPages, page, markups, calByPage]);
+  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
   const { status } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
-    deps: [reviewId, title, project, discipline, source, markups, calByPage],
+    deps: [reviewId, meta, source, markups, calByPage],
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
@@ -169,7 +174,7 @@ export default function DocReview() {
     pdfRef.current = null;
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
-    setTitle(rec.title || ""); setProject(rec.project || ""); setDiscipline(rec.discipline || "");
+    setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
@@ -179,7 +184,7 @@ export default function DocReview() {
   const resetSingle = () => {
     pdfRef.current = null; sourceRef.current = null;
     setReviewId(newReviewId());
-    setTitle(""); setProject(""); setDiscipline("");
+    setMeta(newMeta());
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setScale(0);
     setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
@@ -371,12 +376,14 @@ export default function DocReview() {
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
+      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: `1px solid #2e2a23`, flexWrap: "wrap" }}>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => fileRef.current?.click()}>{fileName ? "Open another…" : "Open PDF…"}</button>
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch sheets ▸</button>
+        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
         {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
         {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} onClick={() => { setTool(t.id); setDraft(null); }}>{t.label}</button>)}
@@ -387,7 +394,7 @@ export default function DocReview() {
           <button style={{ ...btn(false) }} onClick={() => setScale(0)} title="Fit width">Fit</button>
         </>}
         <div style={{ flex: 1 }} />
-        <ReviewsBar status={status} signedIn={signedIn} title={title} project={project} discipline={discipline} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
+        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
       </div>
 
       {redrop && (

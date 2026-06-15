@@ -129,6 +129,26 @@ server/                   # placeholder README only — NOT built or deployed; b
   placeholder + drop-to-rebind in the stitcher) rather than failing the save.
 - All changes are inside the doc-review workspace; the lazy chunk split still holds.
 
+### Document Review — project library (B14, new)
+- Reviews/files are **filed under the existing Project/Site records** (a "project" = a
+  Site Planner site group; name = `site`, id = `group_id`). Each review now also carries
+  a `project_id`, `discipline` (Survey/Civil/Architectural/Landscape/Environmental/CAD/
+  Geotech/Other), `item`/type, `revision`, and `doc_date`; the name defaults to
+  `"<Project> - <Item> - YYYY.MM.DD"` (each piece editable in the Reviews menu).
+- **Project lifecycle status is REUSED, not re-added** — it already lives on the Site
+  Model (`sites.data ->> status`; pursuit/active/onhold/complete/dead, per B7/B8). The
+  library reads projects + status from `sites` and writes status back through the Site
+  Planner's own `cloudUpsert`, so there's one source of truth (no parallel store).
+- **`ProjectLibrary` drawer** (file explorer): project (+ status badge, editable) →
+  discipline folder → files newest-first → click to open in the viewer/stitcher; drag-
+  drop a PDF onto a project or discipline to file it. Files stay attached regardless of
+  status. Unlinked reviews show under an "Unfiled" bucket.
+- **Storage paths** are now `<uid>/project-<id>/<discipline>/<srcId>.pdf` (uid still
+  first, so the existing Storage RLS is unchanged). Additive migration:
+  `src/workspaces/doc-review/db/project_library.sql` (adds the index columns; status
+  needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
+  hasn't run yet, so saving never regresses.
+
 ## KEY DECISIONS (must persist)
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
@@ -348,6 +368,15 @@ create table public.doc_reviews (
 -- Storage bucket 'doc-review-files' (private, 50 MB cap): 4 own-folder policies on
 -- storage.objects keyed by (storage.foldername(name))[1] = auth.uid()::text.
 ```
+**Project library (B14):** `reviewStore.js` also has `listProjects` (Site groups +
+status from `sites`), `setProjectStatus` (writes back via the Site Planner's
+`cloudUpsert`), and `fileNewReview` (drag-drop filing); `components/ProjectLibrary.jsx`
+is the explorer drawer; `components/ReviewsBar.jsx` does the project/discipline/item/
+revision/date filing UI + the `"<Project> - <Item> - YYYY.MM.DD"` default name. Index
+columns `project_id/item/revision/doc_date` + object paths `<uid>/project-<id>/
+<discipline>/<srcId>.pdf` come from `doc-review/db/project_library.sql` (additive;
+`upsert`/`list` degrade to the core columns until it's run). Lifecycle status is reused
+from the Site Model, never duplicated.
 
 ## Counties / GIS plumbing
 `lib/counties.js` — county presets (Harris/Fort Bend/Chambers) + `JURISDICTION_LAYERS`
