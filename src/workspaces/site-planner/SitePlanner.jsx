@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile } from "./lib/overlayPdf.js";
+import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -1943,17 +1944,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!file) return;
     setOverlayBusy(true);
     try {
-      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf}
+      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet}
       const id = uid();
       if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
-      const wantFt = (size.w / view.ppf) * 0.6;       // land it ~60% of the visible width wide
-      const ftPerPx = Math.max(0.01, wantFt / Math.max(1, r.imgW));
+      // True real-world scale ONLY when the page is a recognizable plot size AND we read
+      // a scale note (B73); otherwise land it ~60% of the visible width wide to size by hand.
+      const trueScale = r.detectedScale && r.sheet && r.sheet.std;
+      const ftPerPx = trueScale
+        ? ftPerPointForScale(r.detectedScale)
+        : Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, r.imgW));
       const ov = {
         id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
+        detectedScale: r.detectedScale || null, sheet: r.sheet || null,
       };
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
@@ -1996,6 +2002,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
     } catch (_) { /* ignore a bad page render */ }
   };
+  // B73 — apply a drawing scale (feet per inch) to an overlay: ftPerPx = S/72 (points),
+  // keeping it centered so it scales in place to true real-world size.
+  const applyOverlayScale = (id, feetPerInch) => {
+    const S = +feetPerInch;
+    if (!(S > 0)) return;
+    pushHistory();
+    setSheetOverlays((arr) => arr.map((o) => {
+      if (o.id !== id) return o;
+      const cx = o.x + (o.imgW * o.ftPerPx) / 2, cy = o.y + (o.imgH * o.ftPerPx) / 2;
+      const ftPerPx = ftPerPointForScale(S);
+      return { ...o, ftPerPx, x: cx - (o.imgW * ftPerPx) / 2, y: cy - (o.imgH * ftPerPx) / 2 };
+    }));
+  };
+  // Which scale-dropdown option matches an overlay's current size (else "custom").
+  const overlayScaleSel = (o) => { const s = Math.round(scaleForFtPerPoint(o.ftPerPx)); return COMMON_SCALES.includes(s) ? String(s) : "custom"; };
   // Free any held PDF docs when the planner unmounts (cf. B39).
   useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
 
@@ -4715,6 +4736,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
                               <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
                               {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                            </div>
+                          )}
+                          {o.sheet && (
+                            <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ fontSize: 11, color: PAL.muted }}>Scale to the drawing — sizes the sheet to true real-world feet.</div>
+                              <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
+                              <label style={ovRow}><span style={{ width: 48 }}>Scale</span><span>1″=</span>
+                                <select style={{ ...numInput, width: 78, fontFamily: "inherit" }} value={overlayScaleSel(o)} onChange={(e) => { if (e.target.value !== "custom") applyOverlayScale(o.id, e.target.value); }}>
+                                  {COMMON_SCALES.map((s) => <option key={s} value={s}>{s}′</option>)}
+                                  <option value="custom">custom…</option>
+                                </select>
+                                {overlayScaleSel(o) === "custom" && <input style={{ ...numInput, width: 52 }} placeholder="ft" title="Feet per inch — press Enter" onKeyDown={(e) => { if (e.key === "Enter") applyOverlayScale(o.id, e.currentTarget.value); }} />}
+                              </label>
+                              {o.detectedScale && (
+                                <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
+                              )}
+                              <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={Math.round(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
                             </div>
                           )}
                           <div style={{ display: "flex", gap: 6 }}>
