@@ -80,7 +80,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   useEffect(() => {
     const flush = () => {
       const snap = flushLocal();
-      if (snap && readyRef.current) upsertReview({ ...snap, updatedAt: Date.now() });
+      if (snap && readyRef.current) upsertReview({ ...snap, updatedAt: Date.now() }).catch(() => {}); // best-effort flush; tab-close/unmount rejection mustn't surface
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);

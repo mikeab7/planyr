@@ -25,7 +25,7 @@ export async function sampleProfile(path, sampleCount = 48) {
  * invert = lowest point; bank reference = mean of the two ends; depth = bank −
  * invert. Returns { profile:[{d,el}], invertFt, bankFt, depthFt, minFt, maxFt }. */
 export function ditchStats(elevFt, lenFt) {
-  if (!elevFt.length) return null;
+  if (!elevFt || elevFt.length < 2) return null; // need ≥2 samples (1 sample → i/(n-1)=0/0=NaN distance)
   const n = elevFt.length;
   const profile = elevFt.map((el, i) => ({ d: (i / (n - 1)) * lenFt, el }));
   const minFt = Math.min(...elevFt), maxFt = Math.max(...elevFt);

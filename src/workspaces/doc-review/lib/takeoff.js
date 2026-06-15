@@ -29,20 +29,22 @@ export function polyArea(pts) {
  * { kind, calibrated, ...values }. Area in sf + acres; lengths in ft; count int. */
 export function measureValue(m, ftPerUnit) {
   const cal = !!ftPerUnit;
+  const pts = (m && m.pts) || []; // guard degenerate/empty point sets (was crashing on m.pts[0].x)
   if (m.kind === "distance") {
-    const u = dist(m.pts[0], m.pts[1] || m.pts[0]);
+    if (pts.length < 2) return { kind: "distance", calibrated: false, lengthFt: null, raw: 0 };
+    const u = dist(pts[0], pts[1]);
     return { kind: "distance", calibrated: cal, lengthFt: cal ? u * ftPerUnit : null, raw: u };
   }
   if (m.kind === "perimeter") {
-    const u = pathLength(m.pts, true);
+    const u = pathLength(pts, true);
     return { kind: "perimeter", calibrated: cal, lengthFt: cal ? u * ftPerUnit : null, raw: u };
   }
   if (m.kind === "area") {
-    const u = polyArea(m.pts);
+    const u = polyArea(pts);
     const sf = cal ? u * ftPerUnit * ftPerUnit : null;
     return { kind: "area", calibrated: cal, areaSf: sf, areaAc: sf == null ? null : ftToAcres(sf), raw: u };
   }
-  if (m.kind === "count") return { kind: "count", calibrated: true, count: m.pts.length };
+  if (m.kind === "count") return { kind: "count", calibrated: true, count: pts.length };
   return { kind: m.kind, calibrated: cal };
 }
 
@@ -54,8 +56,8 @@ export function measureLabel(m, ftPerUnit) {
   const v = measureValue(m, ftPerUnit);
   if (v.kind === "count") return `${v.count}`;
   if (!v.calibrated) return "set scale";
-  if (v.kind === "area") return `${f2(v.areaAc)} ac · ${f0(v.areaSf)} sf`;
-  return `${f0(v.lengthFt)} ft`;
+  if (v.kind === "area") return Number.isFinite(v.areaSf) ? `${f2(v.areaAc)} ac · ${f0(v.areaSf)} sf` : "—";
+  return Number.isFinite(v.lengthFt) ? `${f0(v.lengthFt)} ft` : "—";
 }
 
 /* Roll up all measurements (across the supplied list) into yield-style totals,

@@ -83,6 +83,9 @@ export default function DocReview() {
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
   const openFile = async (file) => {
     if (!file) return;
+    // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
+    // file would otherwise be read via arrayBuffer() and only then fail).
+    if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
     setBusy(true); setErr("");
     try {
       const pdf = await loadPdf(file);
@@ -101,7 +104,7 @@ export default function DocReview() {
       setSource({ ...base, storageKey: null, oversize: false });
       uploadSource(srcId, file, meta.projectId, meta.discipline).then((r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
-      });
+      }).catch(() => {}); // best-effort upload; a rejection mustn't become an unhandled rejection
     } catch (e) {
       setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
     } finally { setBusy(false); }
@@ -139,7 +142,7 @@ export default function DocReview() {
   const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
 
   const buildSnapshot = useCallback(() => ({
-    id: reviewId, kind: "single",
+    id: reviewId, kind: "single", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,

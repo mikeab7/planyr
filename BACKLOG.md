@@ -27,6 +27,156 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ---
 
+## 🐞 Bug audit — 2026-06-15 (overnight sweep)
+
+Systematic read-through of the whole codebase (5 parallel audits, each finding verified against the source). Severity/confidence noted per item. Items tagged **🔧 fixed in audit PR** were fixed in the same PR that added this section; the rest are triaged for review. IDs are permanent (B15+).
+
+### B15 — Import JSON drops callouts & markups, and leaves stale ones on the canvas `[Site Planner]` (bug) — DATA-LOSS, high
+`[x]` 🔧 fixed in audit PR. `importJSONFile` (SitePlanner.jsx ~2459) set parcels/els/measures/settings/underlay but **not** `callouts`/`markups`, although `exportJSON` writes them. Result: (a) imported callouts/markups are discarded; (b) the currently-open plan's callouts/markups aren't reset, so they bleed into the imported plan and get persisted on the next autosave. Fix: `setCallouts(d.callouts || [])` + `setMarkups(d.markups || [])` in import (symmetric with export).
+
+### B16 — `isBlankSite` ignores `markups` → markup/encumbrance-only sites are silently deleted on leave `[Site Planner]` (bug) — DATA-LOSS, high
+`[x]` 🔧 fixed in audit PR. `isBlankSite` (SitePlanner.jsx ~795) omits `markups`, so a site whose only work is drawn markups or a plotted metes-and-bounds **encumbrance** is treated as blank: the autosave guard skips it and `persistOrDrop` *deletes* the un-located record on unmount. Fix: include `markups` in `isBlankSite` and in the autosave guard object.
+
+### B17 — Doc Review local mirror saved without `updatedAt`; `reconcile` compares mismatched fields `[Document Review]` (bug) — DATA-LOSS risk, high
+`[x]` 🔧 fixed in audit PR. `buildSnapshot` (DocReview.jsx/Stitcher.jsx) omits `updatedAt`, so `flushLocal()→writeDraft` mirrors a record whose `data.updatedAt` is stale/absent; `reconcile` then compares cloud `updatedAt` vs draft `_localAt` (different events/clocks) and can let a stale local draft shadow a newer cloud copy. Fix: stamp `updatedAt: Date.now()` in `buildSnapshot` so the mirror and the cloud `data` carry a consistent timestamp.
+
+### B18 — Last-debounce-window edits flush local-only and are lost when `pullCloud` blind-replaces on next login `[Site Planner]` (bug) — DATA-LOSS, high
+`[ ]` The beforeunload/visibility/unmount/site-switch flushes call `saveSite` (local cache) but **never** `pushSiteToCloud`; `pullCloud` then *replaces* the per-user cache wholesale on next login, discarding any edit made in the final ~400 ms before close that the debounced cloud push missed. Fix options: make `pullCloud` merge by `updatedAt` (keep the newer side), and/or push on `pagehide` via `fetch(..., {keepalive:true})`/`sendBeacon`. (Bigger change — left for review.)
+
+### B19 — Resume-on-mount re-saves the just-loaded review with a fresh `updatedAt` `[Document Review]` (bug) — correctness, medium
+`[ ]` `loadSingleReview`/`loadStitch` set state → the debounce deps change → autosave writes the loaded snapshot back with `updatedAt: now`, so a resume can stamp stale data as newest and (multi-tab) clobber a newer cloud edit. Fix: a `suspendSave` ref set during programmatic load, early-returning from the autosave effect for that tick.
+
+### B20 — `setProjectStatus` rewrites every plan in the group via `cloudUpsert` (strips inline underlay, heavy, clobber risk) `[Document Review]` (bug) — correctness, medium
+`[ ]` Flipping a project's status from the library round-trips each site row's whole `data` through `cloudUpsert`, which `slimForCloud`-strips any still-inline `data:` underlay and bumps `updated_at` on every plan (can clobber a concurrent edit). Cloud copies are usually already slimmed so true loss is unlikely, but a status dropdown shouldn't rewrite full site blobs. Fix: a minimal status-only write (jsonb patch/RPC) or guard the underlay before re-upsert.
+
+### B21 — Down overlay re-probes & repaints the error banner every 45 s forever; background errors share the click-instruction slot `[Site Planner / map]` (bug) — correctness, high
+`[x]` 🔧 fixed in audit PR. `PROBE_TTL` (40 s) < the 45 s re-probe interval, so a genuinely-down enabled layer re-probes and re-fires `onError` every tick, repainting the bottom-left banner indefinitely; that banner is also the only `err` slot, so a background layer hiccup masks the "click a lot" guidance until a user action clears it. Fix: de-duplicate identical error toasts and auto-clear background layer errors after a timeout.
+
+### B22 — Rapid parcel clicks race → duplicate selection + leaked highlight polygon `[Site Planner / map]` (bug) — correctness, medium
+`[ ]` `handleClick` is async with no sequence guard; two fast clicks on the same lot can both take the "add" branch (the toggle check runs before the first `await` resolves), producing a duplicate `selected` entry (double-counted acreage) and an orphaned `L.polygon` left on the map. Fix: guard with an in-flight ref / request id, and remove any pre-existing hilite for a key before overwriting.
+
+### B23 — `ditchStats` returns `NaN` profile distance for a single elevation sample `[Site Planner]` (bug) — correctness, high
+`[x]` 🔧 fixed in audit PR. elevation.js only guards `length === 0`; with exactly one sample, `i/(n-1) = 0/0 = NaN` flows into the cross-section profile/labels. Fix: treat `< 2` samples as insufficient (`return null`), letting the caller's "no samples" path handle it.
+
+### B24 — `measureLabel` prints `"NaN"` / can crash on degenerate measurement points `[Document Review]` (bug) — correctness, medium
+`[x]` 🔧 fixed in audit PR. takeoff.js `measureLabel`/`measureValue` have no finite/length guard; an empty `distance` markup dereferences `m.pts[0].x` (throws) and short polys can render `"NaN ft/ac"`. Fix: guard missing/short `pts` and non-finite values.
+
+### B25 — Metes-and-bounds: curve calls silently parsed as straight chords; no unreadable-call flagging `[Site Planner]` (bug) — correctness, high
+`[ ]` `CALL_RE` has no `radius`/`arc`/`delta`/`chord` handling; given a curve call it matches the chord bearing+distance and dead-reckons it as a straight segment, with no `dropped`/`unparsed` signal — so the traverse is silently wrong and the UI can't warn. (Roadmap already wants "parse curves; flag unreadable.") Fix: detect curve calls and either tessellate the arc or return `{unparsed:true, raw}` so callers can flag them.
+
+### B26 — Metes-and-bounds: parser gaps (dash-DMS unparsed, deg>90 accepted, loose closure floor) `[Site Planner]` (bug) — correctness, medium
+`[ ]` (a) The header advertises `S 12-15 W` but the DMS separator classes exclude `-`, so dash-separated bearings return `[]` (silently dropped). (b) The degrees group `[0-9]{1,3}` accepts a quadrant bearing > 90° (e.g. `N 145 E`) and plots it. (c) `pathCloses` floors tolerance at `max(25, 2%·perim)` so a small lot can be declared "closed" with a 25-ft misclosure, hiding parse errors. Fix: add `-` to the separator classes; reject/flag `deg>90`; drop/shrink the absolute closure floor and always surface the misclosure.
+
+### B27 — Enter-to-commit power-line trace uses stale `tracePts`/`traceMode` `[Site Planner]` (bug) — correctness, medium
+`[x]` 🔧 fixed in audit PR. The keydown effect closes over `traceMode`/`tracePts` but they're not in its dep array, so pressing Enter to finish a trace reads stale values (often `[]`). Fix: add `traceMode`/`tracePts` to the effect deps (double-click already worked because it's a fresh prop).
+
+### B28 — `mergeRings` collinear-cleanup threshold is area-based (scale-dependent) `[Site Planner]` (bug) — correctness, medium
+`[ ]` The corner test `Math.abs(cross) > 1` compares twice-triangle-area in ft² (scales with edge length), so on long edges a real slight bend can be dropped (or noise kept), distorting a merged parcel boundary/acreage. Fix: threshold the *perpendicular distance* `|cross|/hypot(c−a)` against a small foot tolerance.
+
+### B29 — Parking +/− shrink guard ignores per-field `cfg` overrides `[Site Planner]` (bug) — correctness, medium
+`[ ]` `parkBand()`/`canShrink` use global `settings.stallDepth/aisle`, but `growParking` uses `cfgOf(el)`; for a field with per-element cfg the on-canvas − handle is enabled/disabled against the wrong row size (guard disagrees with the actual op). Fix: compute the band from `cfgOf(el)` in the guard too.
+
+### B30 — Markup/measure minimum size is in feet, not pixels → silently discarded when zoomed out `[Site Planner]` (bug) — minor, medium
+`[ ]` The `dist(a,b) >= 2` / `w,h >= 2` minimums are world-feet; at low ppf a deliberate multi-pixel drag can be < 2 ft and the markup/measure is dropped with no feedback. Fix: make the minimum pixel-based (scale by view ppf).
+
+### B31 — Two-point Split returns null when both crossings share an edge `[Site Planner]` (bug) — minor, low
+`[ ]` `if (lo.i === hi.i) return null` uses only the extreme-`t` hits, so a valid straight cut across a concave parcel (whose first/last crossings land on the same edge while valid interior crossings exist) silently no-ops. Fix: when `lo.i === hi.i`, pick the two crossings with distinct edge indices that yield two ≥3-vertex rings.
+
+### B32 — Undo stack polluted by `pushHistory` on no-op edits `[Site Planner]` (bug) — minor, high
+`[ ]` `beginEditCallout` and the dock/type `onChange` handlers call `pushHistory()` before/without an actual change, so cancelling a callout edit or reselecting the same dropdown value adds an undo frame (first Ctrl+Z appears to do nothing). Fix: push history only when a mutation is actually applied.
+
+### B33 — Doc Review redline shapes (rect/cloud/text) are unselectable except at corner points `[Document Review]` (bug) — minor, high
+`[ ]` `hitTest` measures distance only to stored vertices; rect/cloud store two corners and text one point, so clicking an edge or body never selects them (hard to select/delete redlines). Fix: shape-aware hit testing (point-in-rect, distance-to-segment, text bbox).
+
+### B34 — Doc Review single-viewer `render()` calls `setScale` internally → re-entrant render race `[Document Review]` (bug) — correctness, medium
+`[ ]` In fit-to-width mode `render` calls `setScale(s)` then keeps drawing; the `scale` change re-fires the render effect, so two renders run and `dims`/canvas can briefly mismatch the overlay. Fix: compute fit scale in a separate effect; keep `render` a pure draw at a concrete scale.
+
+### B35 — `listProjects` status display is fragile (newest-row-wins; fallback drops status) `[Document Review]` (bug) — minor, medium
+`[ ]` Status is read from whichever group row sorts first by `updated_at`, and if the `status:data->>status` select errors the fallback query omits status so every project shows the default "active" — silently misreporting lifecycle. Fix: resolve status group-consistently and surface "unknown" rather than defaulting to active on a failed status read.
+
+### B36 — Map/GIS minor robustness `[Site Planner / map]` (bug) — minor
+`[ ]` Grouped low-severity items: (a) statewide TxGIO (Chambers) can mislabel a Harris/FB lot's `county` when the real CAD returns nothing (ties to B13 pt 1 — true point-in-county); (b) evidence-layer (OSM/Mapillary) opacity slider flattens per-feature `fillOpacity`; (c) `featureToParcel`/`largestRingLngLat` pick the largest ring by |area| ignoring winding (a big hole can win on multipart) and use a vertex-average instead of polygon centroid for the recenter/projection origin; (d) the documented multi-county straddle "merge" is unimplemented (only `hits[0]` used); (e) no `AbortController` on address search / evidence fetches → a slow response can apply after a newer action.
+
+### B37 — Cloud/auth hardening `[Site Planner / auth]` (bug) — low/minor
+`[x]` 🔧 partially fixed in audit PR. (a) **fixed:** `cloudDelete` now scopes by `user_id` AND `id` (was RLS-only). (b) **fixed:** the autosave cloud push had no `.catch`, leaving the save badge stuck on "Saving…" on a rejected upsert. (c) **fixed:** `metaRef` omitted `county`, so a save whose merge-base lacked county could normalize it to null — now self-contained. (d) **left for review:** `pullCloud` failure on login surfaces an empty library instead of an error; `testConnection` rejects valid custom Supabase domains.
+
+### B38 — SQL/RLS & data-integrity audit (mostly clean) `[Document Review / DB]` (bug) — minor
+`[ ]` A dedicated schema/RLS pass **verified the new code is sound**: both `doc_reviews` and the `sites`/storage policies are owner-scoped (all 4 verbs, `to authenticated`, no `public`/anon/admin), the bucket is private, every client storage path hardcodes uid as the leading segment (so `(storage.foldername(name))[1]` RLS can't be bypassed), both migrations are idempotent, the `(user_id,id)` PK matches every `onConflict`, and the `doc_date` empty-string→`null` boundary holds. Remaining minors: (a) **storage orphaning** — `uploadSource` uses `upsert:true` on a path derived from current project/discipline, so re-filing + re-uploading a source leaves the old object behind (key in `sources[]` is overwritten, so cleanup can't find it); fix by keying objects on the immutable `srcId` only, or deleting the prior key first. (b) `upsertReview`'s pre-migration fallback never **back-fills** the index columns for rows saved before the migration (a later normal edit self-heals that row; values always live in `data` jsonb meanwhile); the fallback regex (`/column|.../`) is also broad. (c) `setProjectStatus` writes rows back through `cloudUpsert` without `createSiteModel` normalization (lossless passthrough, but a status edit could also heal a legacy row if normalized). (`deleteReview` user-scoping — fixed in the audit PR alongside B37a.)
+
+### B39 — PDF.js documents are never `destroy()`'d → growing memory leak across a review session `[Document Review]` (bug) — leak, high
+`[ ]` `loadPdf` returns a `PDFDocumentProxy` (worker + retained ArrayBuffer); every replacement just overwrites `pdfRef.current` / `pdfs[].doc` (openFile, load, resetSingle, resetStitch, loadStitch) with no `.destroy()`, and there's no unmount cleanup. A repo-wide grep for `.destroy()` in doc-review is empty. Heavy construction sets leak MBs per open; the stitcher holds N docs at once. Fix: destroy the prior doc before replacing, destroy each removed/replaced source in the stitcher, and add an unmount effect that destroys the live doc(s). (Deferred from the audit PR only to avoid editing files a parallel agent was reading — will fix in the consolidated pass.)
+
+### B40 — Superseded PDF render tasks are never cancelled `[Document Review]` (bug) — perf, high
+`[ ]` `renderPageToCanvas` creates `page.render(...)` and only awaits its promise; `render()` discards the stale *result* via the `renderTok` token but never calls `task.cancel()`. Rapid page/zoom changes pile up overlapping renders and can hit PDF.js's "cannot use the same canvas during multiple render operations" (throw/torn output). Fix: return the `RenderTask`, keep a ref, `cancel()` before starting a new one and on unmount; treat `RenderingCancelledException` as a no-op.
+
+### B41 — Global keydown effects have no deps array → re-subscribe on every render (hot path) `[Document Review]` (bug) — perf, high
+`[ ]` DocReview.jsx and Stitcher.jsx register their `keydown` listener in an effect with no dependency array (the `}); // eslint-disable-line` pattern), so the handler is removed+re-added after *every* render — and `onPointerMove`→`setCursor` re-renders dozens of times/second while drawing. Fix: register once with `[]` and read `draft`/`sel`/handlers from refs inside `onKey`.
+
+### B42 — `SitePlannerApp` rebuilds `siteGroups` (a Map over all sites) every render `[Site Planner]` (bug) — perf, medium
+`[ ]` `const siteGroups = (() => { … })()` runs unconditionally each render, allocating a fresh array passed as the `sites` prop to `MapFinder` — O(n) per render and a referential-stability hazard that defeats child memoization. Fix: `useMemo(…, [sites, activeSiteId])`. (Safe, small — will fix in the consolidated pass.)
+
+### B43 — `applyUser` auth-event handling has no sequence guard → races on fast auth transitions `[Site Planner / auth]` (bug) — correctness, medium
+`[ ]` `applyUser` is async (`setActiveUser` → `await pullCloud` → `refreshSites`); overlapping auth events (INITIAL_SESSION→SIGNED_IN, or fast sign-out/in) can interleave so `prevUid.current`/`clearCloudCache` run out of order and clear/point at the wrong user's cache. Fix: capture a monotonic token before the await and bail stale completions (the file already uses a `live` guard elsewhere).
+
+### B44 — Doc Review async refresh/flush lack in-flight guards `[Document Review]` (bug) — minor
+`[ ]` (a) `useReviewPersistence`'s unmount cleanup unconditionally fires a cloud `upsert` on every single↔stitch mode toggle (wasteful double-write even when nothing changed) — gate on a dirty flag. (b) `ReviewsBar` re-runs `listReviews()+listProjects()` on every `signedIn` flip while open and has no in-flight guard, so a slow resolution can clobber newer state; (c) `ProjectLibrary.fileDrop` calls `refresh()` in `finally` even if the drawer closed, and overlapping refreshes can interleave. Fix: split outside-click vs fetch effects and add an `ignore`/AbortController guard; `useCallback` the refreshers.
+
+### B45 — Stitcher keeps large PNG data URLs for every placed sheet in state `[Document Review]` (bug) — perf, medium
+`[ ]` `renderPageToImage` returns `canvas.toDataURL("image/png")` at scale 2 and each placed sheet stores that multi-MB base64 string in `placed[].href`; reloads/re-binds regenerate them without releasing the old ones (data URLs can't be revoked). Fix: use `canvas.toBlob` + `URL.createObjectURL`, track and `revokeObjectURL` on remove/replace/unmount.
+
+### B46 — `LayerPanel` Mapillary token desyncs across its two instances `[Site Planner]` (bug) — minor
+`[ ]` The token is seeded once via `useState(() => mapillaryToken())` in each `LayerPanel` (map + planner both render one); typing in one doesn't update the other's local `tok`, and an externally-set token isn't reflected on reopen. Fix: lift the token to shared state (alongside `overlays`) or read from a subscribable source.
+
+### B47 — ArcGIS `where`-clause hardening (LIKE wildcards + auto-detected field names) `[Site Planner]` (bug) — security, medium
+`[ ]` A security pass found the rest of the app **clean** (Supabase queries are parameterized with no injection surface; RLS/storage policies sound; secrets handled correctly; all text/SVG render paths are React-escaped). The one item: the parcel-lookup `where` builder escapes the user *value*'s quotes (`'`→`''`, blocks the realistic breakout) but (a) does not escape LIKE wildcards `%`/`_` (a value of `%` enumerates rows — minor, public read-only data; the statewide TxGIO/Chambers layer is still confined by `scopeWhere`), and (b) interpolates `idField`/`addrField` **unescaped** — and those come from live layer metadata (or a user-pasted "Service / layer URL"), so a hostile/compromised endpoint could inject a field name that defeats the `scopeWhere` county confinement. Read-only/public so not critical. Fix: validate the detected field name against an identifier allowlist (`/^[A-Za-z0-9_.]+$/` and/or `meta.fields.some(f=>f.name===idField)`) before interpolating, and escape `%`/`_` with an `ESCAPE` clause (verify the CAD datasources accept `ESCAPE` before shipping — don't break Harris/FBCAD search).
+
+### B48 — Client-side Anthropic key (title reader) + reusable HTML-escape helper `[Site Planner]` (bug) — note, low
+`[ ]` `lib/titleReader.js` instantiates the Anthropic SDK in the browser with `dangerouslyAllowBrowser:true` and the user's own key from `localStorage` (`planarfit:anthropicKey`). This is the documented BYO-key, no-backend pattern (not a committed/bundled secret), but the key is localStorage-resident and reachable by any script on the origin. Acceptable for a personal tool; harden later by moving the call behind the planned `/server` (key stays server-side) or keeping it in memory only. Also: `printPDF`'s `esc` helper only escapes `&`/`<` (fine for its text/title contexts today) — make it also escape `"`/`>` before reusing it in any attribute/style context.
+
+### B49 — Document Review file-input validation `[Document Review]` (bug) — crash/correctness
+`[x]` 🔧 partially fixed in audit PR. (a) **fixed:** the single-sheet viewer's open/drop accepted ANY file and read the whole thing into memory via `arrayBuffer()` before failing (OOM risk on a huge/non-PDF drop) — now validated by type + non-zero size before `loadPdf`, mirroring the stitcher. (b) **left for review:** the stitcher sniffs only by `.pdf` extension, and its multi-file load loop is in a single `try`, so one bad file silently skips the rest — wrap each `loadPdf` per-file and size-check.
+
+### B50 — Export/print & prompt robustness `[Site Planner]` (bug) — minor
+`[x]` 🔧 partially fixed in audit PR. (a) **fixed:** the per-edge setback `window.prompt` treated an empty/whitespace confirm as `0` (`+""===0`) instead of cancelling — now requires a non-blank numeric. (b) **left for review:** `exportPNG` swallows raster failures (an `image.onerror` rejects with no `.catch`/feedback; `canvas.toBlob`→null silently produces no download) and `printPDF` can leave a stranded blank print window if serialization throws after `window.open` — wrap both in try/catch with a user alert (and `win.close()` on failure). `titleReader` base64-encodes with no size/type guard. (Export filename sanitization, object-URL revocation, empty-state guards, and calibration numeric guards were all audited and are clean.)
+
+### B51 — Stitcher async handlers have no in-flight guard → re-entrant interleave corrupts placed sheets `[Document Review]` (bug) — data-loss, high
+`[ ]` `openFiles`/`addSheet`/`bindSource`/`loadStitch` each `setBusy(true)…await…finally setBusy(false)` but none *reads* busy as a re-entrancy guard, and they mix functional updates (`addSheet`: `setPlaced(arr=>[...arr,…])`) with snapshot overwrites (`loadStitch`: `setPlaced(out)`). Clicking "add sheet" while a load is mid-await lets the load's blind `setPlaced(out)` clobber the just-added sheet. Fix: `busyRef` guard at the top of each, or disable the tray/open while busy; prefer functional updates / reconcile rather than overwrite.
+
+### B52 — Doc Review load/open paths lack a cancellation token → opening B while A loads mixes the two `[Document Review]` (bug) — correctness, high
+`[ ]` `loadStitch` (Stitcher) and `openReview`→`loadSingleReview`→`fetchSourceBytes` (DocReview) run long await chains (download + loadPdf + render) and then unconditionally `setState` (reviewId, meta, markups, pdfRef, placed) with no "is this still the requested review?" check. Open review A then B quickly and A's late resolution overwrites B's PDF/sheets while ids/markups are B's — and the autosave then persists the mix under the wrong id. Fix: capture a token (the requested `rec.id`) in a ref and bail before each post-await `setState` if superseded (mirror the single-sheet `renderTok` pattern). Related to B19.
+
+### B53 — In-planner `identifyAt` lacks a token → second click shows/adds the wrong parcel `[Site Planner]` (bug) — correctness, medium
+`[ ]` `identifyAt` (SitePlanner) sets `{busy:true}`, awaits `resolveLayerUrl`/`queryAtPoint`, then unconditionally `setIdentifyRes({attrs,ring,…})`. Clicking P2 before P1 resolves lets P1 overwrite P2's result, so the panel/`addIdentifiedParcel` use the wrong lot. (Distinct code path from the already-logged MapFinder `handleClick` race, B22.) Fix: a token captured at call start, checked before the post-await `setState`.
+
+### B54 — `pullCloud` overwrites the per-user cache with `{}` when a cloud fetch errors `[Site Planner]` (bug) — data-loss-shaped, medium
+`[ ]` `cloudList` returns `[]` on *error* (cloudSync.js), so `pullCloud` can't tell "no sites" from "fetch failed" and blind-writes an empty map to the per-user cache; signing in while offline/unreachable thus shows "no sites" and wipes the local cloud cache to empty (data safe in Supabase, but a scary empty state that the user might start recreating into). Fix: have `cloudList` throw/return a status on error; `pullCloud` must skip the cache overwrite on error and surface a "couldn't load" state. (Sharpens B18/B37d into a concrete fix.)
+
+### B55 — Fire-and-forget promises without `.catch` → unhandled rejections; async continuations touch torn-down objects `[Document Review / Site Planner]` (bug) — minor
+`[ ]` `uploadSource(...).then(...)` (DocReview + Stitcher), the `usePersistence` unmount/visibility `flush()` cloud upsert, and the `probeService(...).then(...)` overlay continuation all lack `.catch`, so a rejected Storage/DB/network call is an unhandled rejection. The `probeService` continuation also does `lyr.addTo(map)` after the await with no map-teardown guard (can throw if the map was removed mid-probe). Fix: add `.catch(()=>{})` to the fire-and-forget calls (matching the `pushSiteToCloud(...).catch` convention) and guard `addTo` with `map._loaded`.
+
+### B56 — Assorted async UX/robustness `[Site Planner / Document Review]` (bug) — minor
+`[ ]` Grouped: (a) `goAddress` double-submit — Enter isn't gated by `busy` (only the Go button is), so two geocodes can race the `flyTo`; (b) transient `overlapWarn` messages each schedule their own `setTimeout(()=>setOverlapWarn(""))` with the id discarded, so a stale clear blanks a newer warning (and `runXSection` has no in-flight guard); (c) `setProjectStatus` upserts group rows serially and ignores per-row failure, returning `ok:true` even if one plan kept the old status (inconsistent group status) — use `Promise.allSettled` and report partial failure; (d) the evidence layers drop `moveend` events that arrive while a fetch is in flight (no trailing-edge refresh), so the last view may never load; (e) the doc-review mutation handlers (`del`/`onStatus`/`fileDrop`) call `refresh()` after an await with no open/mounted guard.
+
+### B57 — Coordinate/units consistency (core verified clean) `[Site Planner]` (bug) — low
+`[ ]` A dedicated units/coordinate audit **verified the core is sound** — `FT_PER_DEG` usage (365223 lat, `×cos(lat)` lon), lat/lng argument order at every call boundary, the aerial aspect/`ftPerPxY` stretch, `ppfToZoom` Mercator inversion, the doc-review takeoff unit-squaring (px²→ft²), metes-and-bounds az/quadrant math, and the north-up Y-flip are all correct, and the 365223 equirectangular model is a true-ground ~0.3% approximation (not Mercator inflation). Three low-severity items: (a) the underlay **Calibrate** applies a single diagonal-derived scalar to both axes, so it mis-sizes a divergent-axis *from-map* underlay (disable Calibrate when `underlay.fromMap`, or derive per-axis factors); (b) `FT_PER_M = 1/0.3048` is the **international** foot while the CRS is labeled `us-ft`/EPSG:2278 (~2 ppm, cosmetic); (c) address-search ingests true EPSG:2278 feet while map-click/identify use the 365223 equirectangular feet (~0.3% diff for the same lot) — unify the ingestion paths to prevent future drift.
+
+### B58 — Ditch cross-section drops no-data DEM samples without preserving position → wrong pond depth `[Site Planner]` (bug) — correctness, high
+`[ ]` `sampleProfile` (elevation.js) does `.filter(v=>isFinite(v))`, discarding position; `ditchStats` then assumes uniform spacing (`d = i/(n-1)*lenFt`) and takes `bankFt = (elevFt[0]+elevFt[n-1])/2`. 3DEP commonly returns no-data over water/low ground, so surviving samples aren't evenly spaced — the profile x-axis is distorted, and if the true endpoints were no-data the "bank" is taken from interior points, so `depthFt` (the headline number applied to the pond's available depth) is wrong. (Distinct from the B23 1-sample NaN.) Fix: map each sample to its fractional position BEFORE filtering; treat leading/trailing no-data as missing banks rather than substituting interior points.
+
+### B59 — Parking render/count/panel ignore per-element `cfg` → "Drive aisle on the far side" toggle is inert `[Site Planner]` (bug) — correctness, high
+`[ ]` The renderer, metrics, and panel all call `carStalls(el.w, el.h, settings)` with the GLOBAL settings, never `cfgOf(el)`, so a parking field's per-element `cfg` (notably `flipDepth`, and side-parking strips created with `cfg`) has no visual/count effect — the panel's "Drive aisle on the far side" checkbox writes `cfg.flipDepth` but nothing reads it for drawing. Trailer rendering correctly uses `el.cfg`, so it's an inconsistency. Fix: use `cfgOf(el)` (which merges `{...settings, ...el.cfg}`) in the three `carStalls(...)` call sites.
+
+### B60 — Detention bottom area spuriously non-zero when the basin over-tapers `[Site Planner]` (bug) — correctness, medium
+`[ ]` `detentionStorage`'s `areaAt(down)` returns `offsetPolygon(ring, slope*down)` area; when `slope*depth` exceeds the footprint's inradius, `offsetPolygon` yields an inverted (flipped) ring rather than null, and the self-check uses `polyArea` (abs value), so a bogus positive "bottom" passes. Result: overestimated prismoidal volume and the "Basin tapers to a point — reduce depth/slope" guard (`aBottom===0`) never fires. Fix: detect collapse via a signed-area sign flip (or offset distance ≥ inradius) and return 0.
+
+### B61 — Two-click road drawn shorter than it is wide mis-assigns the length/cross axis `[Site Planner]` (bug) — minor
+`[ ]` Road creation sets `w:len, h:roadWidth+2*curb`, but downstream infers the cross axis from `min(w,h)` (curb render `el.w>=el.h`; `roadTravel` `min`; resize `el.h<=el.w`). A stubby road (`len < cross`) has `w<h`, so curbs draw on the wrong edges and the length/width fields control the swapped axis. Fix: tag an explicit length axis at creation and key rendering/resize off it (or clamp `len>=cross`).
+
+### B62 — Utility-route corridor leaves a visible gap to the fitting pad `[Site Planner]` (bug) — minor, cosmetic
+`[ ]` `buildUtilRoute` buffers `pts=[source, entry]` where `entry` is on the wall, but the pad sits outside the wall (`entry + normal*(padSize/2+3)`), so the drawn corridor never reaches the pad. Fix: include the pad center in the route (`pts=[source, entry, padC]`) before buffering. (Math/easement-width/overlap checks are otherwise correct.)
+
+---
+
 ## ✅ Done
 
 ### B1 — Sign-up form: missing fields `[auth]` (bug)

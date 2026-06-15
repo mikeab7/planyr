@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
@@ -169,13 +169,13 @@ export default function App() {
 
   // The map lists SITES (locations), so collapse plans to one representative per
   // group — preferring the active plan so its pin highlights correctly.
-  const siteGroups = (() => {
+  const siteGroups = useMemo(() => {
     const byGroup = new Map();
     sites.forEach((s) => { const g = groupOf(s); if (!byGroup.has(g)) byGroup.set(g, s); });
     const act = activeSiteId && sites.find((s) => s.id === activeSiteId);
     if (act) byGroup.set(groupOf(act), act);
     return [...byGroup.values()];
-  })();
+  }, [sites, activeSiteId]); // stable identity → doesn't force MapFinder to re-render every parent render
 
   // Refresh the map's site list when we land back on it (after the planner has
   // autosaved the latest edits).

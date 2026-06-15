@@ -133,7 +133,7 @@ export async function deleteReview(id) {
     }
   } catch (_) {}
   if (uid) clearDraft(uid, id);
-  const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
+  const { error } = await supabase.from("doc_reviews").delete().eq("user_id", uid).eq("id", id); // scope by owner (defense-in-depth, matches cloudDelete)
   return { ok: !error, error: error ? error.message : null };
 }
 
