@@ -279,7 +279,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      lines / site plans stay on top. */
   useEffect(() => {
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
-      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
     });
     sync();
