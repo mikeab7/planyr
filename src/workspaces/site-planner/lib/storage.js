@@ -19,14 +19,21 @@ let activeUser = null;
 export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
-// Pull the signed-in user's sites from the cloud into their local cache (replaces
-// it, so a stale cache can't linger). Returns the count.
+// Pull the signed-in user's sites from the cloud into their local cache (replaces it
+// on success, so a stale cache can't linger). Returns { ok, count, error }; on a failed
+// fetch it returns { ok:false } WITHOUT touching the cache, so a transient/offline error
+// can't wipe the user's last-known sites to an empty library (B54).
 export async function pullCloud(uid) {
-  const models = await cloudList(uid);
+  let models;
+  try {
+    models = await cloudList(uid);
+  } catch (e) {
+    return { ok: false, count: 0, error: (e && e.message) || "couldn't reach the cloud" };
+  }
   const map = {};
   for (const m of models) { const norm = createSiteModel(m); if (norm.id) map[norm.id] = norm; }
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
-  return models.length;
+  return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
