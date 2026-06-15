@@ -4,9 +4,9 @@
  * layers, and the current county's jurisdiction layers — each with a checkbox,
  * opacity slider, a live status indicator (loading/loaded/empty/failed-with-reason)
  * and a disclaimer note. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { STATEWIDE, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
-import { mapillaryToken, setMapillaryToken } from "../lib/evidenceLayers.js";
+import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 
 const MUTED = "#8a8473", LINE = "#e7e2d6", INK = "#2c2a26";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
@@ -21,6 +21,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
   const jur = jurisdictionFor(county);
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
+  useEffect(() => subscribeMapillaryToken(setTok), []); // keep both LayerPanel copies in sync (B46)
 
   const row = (k, cfg) => {
     const st = overlays[k];
