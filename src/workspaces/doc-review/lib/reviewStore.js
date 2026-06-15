@@ -164,8 +164,12 @@ export async function setProjectStatus(projectId, status) {
   if (!uid) return { ok: false };
   const { data, error } = await supabase.from("sites").select("data").eq("group_id", projectId);
   if (error || !data) return { ok: false };
-  for (const r of data) { if (r.data) await cloudUpsert(uid, { ...r.data, status, updatedAt: Date.now() }); }
-  return { ok: true };
+  // Write each plan in the group in parallel and report partial failure, rather than a
+  // serial loop that returned ok:true even if one plan kept its old status (B56c).
+  const rows = data.filter((r) => r.data);
+  const results = await Promise.allSettled(rows.map((r) => cloudUpsert(uid, { ...r.data, status, updatedAt: Date.now() })));
+  const failed = results.filter((x) => x.status === "rejected" || !(x.value && x.value.ok)).length;
+  return { ok: failed === 0, failed, total: rows.length };
 }
 
 // File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
