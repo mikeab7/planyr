@@ -14,7 +14,6 @@ import {
   resolveLayerUrl,
   queryFeatures,
   queryAtPoint,
-  featureToParcel,
   largestRingLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -1905,7 +1904,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (meta.fields.some((f) => (f.name || "").toLowerCase() === scopeField))
           where = `(${scope}) AND (${where})`;
       }
-      const feats = await queryFeatures(layerUrl, { where, count: 10 });
+      const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat so importFeature projects via the shared 365223 model (B57c)
       if (!feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
       setLookupRes(feats.map((ft) => ({ ft, layerUrl, idField, addrField })));
     } catch (err) {
@@ -1915,7 +1914,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const importFeature = (entry) => {
-    const pts = featureToParcel(entry.ft);
+    // Project with the SAME 365223 equirectangular model as map-click/identify so a
+    // looked-up parcel and a clicked one are sized identically — this path used true
+    // EPSG:2278 feet before, a ~0.3% mismatch for the same lot (B57c). Anchored on the
+    // parcel's own lon/lat centroid so it still drops centered (unchanged placement).
+    const ring = largestRingLngLat(entry.ft); // open [lon,lat] ring (queried in 4326)
+    if (!ring || ring.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
+    const lon0 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+    const lat0 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+    const pts = lngLatRingToFeet(ring, lon0, lat0);
     if (!pts || pts.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory();
     const pc = { id: uid(), points: pts, locked: true };
