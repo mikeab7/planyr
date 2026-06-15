@@ -105,7 +105,14 @@ export const mapillaryToken = () => {
     return (import.meta.env && import.meta.env.VITE_MAPILLARY_TOKEN) || localStorage.getItem("planarfit:mapillaryToken") || "";
   } catch (_) { return ""; }
 };
-export const setMapillaryToken = (t) => { try { t ? localStorage.setItem("planarfit:mapillaryToken", t) : localStorage.removeItem("planarfit:mapillaryToken"); } catch (_) {} };
+// Same-tab pub/sub so both LayerPanel copies (map + planner) reflect a token typed in
+// either one, and pick up an externally-set token without a remount (B46).
+const _mlySubs = new Set();
+export const subscribeMapillaryToken = (cb) => { _mlySubs.add(cb); return () => _mlySubs.delete(cb); };
+export const setMapillaryToken = (t) => {
+  try { t ? localStorage.setItem("planarfit:mapillaryToken", t) : localStorage.removeItem("planarfit:mapillaryToken"); } catch (_) {}
+  _mlySubs.forEach((cb) => { try { cb(mapillaryToken()); } catch (_) {} });
+};
 
 async function fetchMapillary(bounds, token) {
   const bbox = `${bounds.w},${bounds.s},${bounds.e},${bounds.n}`;
