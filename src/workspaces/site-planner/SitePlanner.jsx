@@ -3633,7 +3633,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <g data-export="skip">{pts.map((a, i) => {
                   const b = pts[(i + 1) % pts.length], mid = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
                   return (
-                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const v = window.prompt(`Setback for edge ${i + 1} (ft):`, String(sb[i])); if (v != null && !isNaN(+v)) setEdgeSetback(selParcel, i, +v); }}>
+                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const v = window.prompt(`Setback for edge ${i + 1} (ft):`, String(sb[i])); if (v != null && v.trim() !== "" && !isNaN(+v)) setEdgeSetback(selParcel, i, +v); }}>
                       <rect x={mid.x - 13} y={mid.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
                       <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{f0(sb[i])}′</text>
                     </g>

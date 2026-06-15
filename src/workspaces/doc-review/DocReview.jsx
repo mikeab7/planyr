@@ -83,6 +83,9 @@ export default function DocReview() {
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
   const openFile = async (file) => {
     if (!file) return;
+    // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
+    // file would otherwise be read via arrayBuffer() and only then fail).
+    if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
     setBusy(true); setErr("");
     try {
       const pdf = await loadPdf(file);
