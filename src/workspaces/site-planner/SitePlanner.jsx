@@ -515,7 +515,8 @@ function mergeRings(ringA, ringB, tol = 0.75) {
   for (let i = 0; i < dedup.length; i++) {
     const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
     const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    if (Math.abs(cross) > 1) out.push(b); // keep only true corners
+    const baseLen = Math.hypot(c.x - a.x, c.y - a.y) || 1; // |cross|/base = perpendicular deviation in ft — scale-independent (B28)
+    if (Math.abs(cross) / baseLen > 0.1) out.push(b); // keep a vertex only if it bends > ~0.1 ft off the a→c chord
   }
   const final = out.length >= 3 ? out : dedup;
   return final.length >= 3 ? final : null;
@@ -1333,12 +1334,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Resolved style for a callout (defaults + per-callout overrides).
   const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 8, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
-  const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; pushHistory(); setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); };
+  const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
   const commitEditCallout = () => {
     if (!editCallout) return;
-    const { id, text } = editCallout;
-    if (!text.trim()) setCallouts((a) => a.filter((c) => c.id !== id)); // blank → discard
-    else setCallout(id, { text });
+    const { id, text, isNew } = editCallout;
+    const cur = callouts.find((c) => c.id === id);
+    const orig = (cur && cur.text) || "";
+    if (!text.trim()) { // blank → discard (a brand-new callout's creation already pushed a frame)
+      if (cur && !isNew) pushHistory();
+      setCallouts((a) => a.filter((c) => c.id !== id));
+    } else if (text.trim() !== orig.trim()) { // only a REAL text change adds an undo frame (B32)
+      if (!isNew) pushHistory(); // new callouts already pushed history at creation
+      setCallout(id, { text });
+    }
     setEditCallout(null);
   };
   const cancelEditCallout = () => { if (editCallout?.isNew) setCallouts((a) => a.filter((c) => c.id !== editCallout.id)); setEditCallout(null); };
@@ -1699,9 +1707,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
       let mk = null;
-      if (kind === "mline") { if (dist(a, b) >= 2) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
+      const minFt = 3 / view.ppf; // a deliberate ~3px drag, regardless of zoom — feet-based mins silently dropped real markups when zoomed in (B30)
+      if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
       else { const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-        if (w >= 2 && h >= 2) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle }; }
+        if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle }; }
       if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
       setMkRect(null); drag.current = null; setPanning(false);
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}

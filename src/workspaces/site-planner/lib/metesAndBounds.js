@@ -17,8 +17,8 @@ export const VARA_FT = 100 / 36; // Texas vara = 33 1/3 inches = 2.77778 ft
 // One call: quadrant1, degrees, [minutes], [seconds], quadrant2, then a distance
 // value + unit somewhere just after it (skip filler like "a distance of").
 const CALL_RE = new RegExp(
-  "([NS])\\s*([0-9]{1,3})\\s*(?:[°ºo*:d]|deg(?:rees)?|\\s)?\\s*" + // quadrant + degrees
-  "([0-9]{1,2})?\\s*(?:['’′:m]|min(?:utes)?)?\\s*" +              // minutes
+  "([NS])\\s*([0-9]{1,3})\\s*(?:[°ºo*:d-]|deg(?:rees)?|\\s)?\\s*" + // quadrant + degrees (incl. dash-DMS "12-15")
+  "([0-9]{1,2})?\\s*(?:['’′:m-]|min(?:utes)?)?\\s*" +             // minutes
   "([0-9]{1,2}(?:\\.[0-9]+)?)?\\s*(?:[\"”″s]|sec(?:onds)?)?\\s*" + // seconds
   "([EW])" +                                                      // quadrant2
   "[^0-9NSEW]{0,18}?" +                                           // filler (", a distance of")
@@ -39,6 +39,7 @@ export function parseCalls(text) {
   while ((m = CALL_RE.exec(src))) {
     const [, q1, dd, mm, ss, q2, distRaw, unitRaw] = m;
     const deg = (+dd) + (mm ? +mm / 60 : 0) + (ss ? +ss / 3600 : 0);
+    if (deg > 90) continue; // a quadrant bearing can't exceed 90° — skip a bogus call ("N 145 E") rather than plot a wrong direction (B26)
     const Q1 = q1.toUpperCase(), Q2 = q2.toUpperCase();
     // quadrant bearing → azimuth (clockwise from north)
     let az;
@@ -84,7 +85,7 @@ export function pathCloses(pts, tol) {
   if (pts.length < 4) return false;
   let perim = 0;
   for (let i = 1; i < pts.length; i++) perim += dist2(pts[i - 1], pts[i]);
-  const t = tol ?? Math.max(25, perim * 0.02);
+  const t = tol ?? Math.max(5, perim * 0.02); // honest closure: drop the 25-ft absolute floor that let a small lot "close" with 25 ft of misclosure (B26)
   return dist2(pts[0], pts[pts.length - 1]) <= t;
 }
 

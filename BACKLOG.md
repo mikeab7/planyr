@@ -66,27 +66,30 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 
 ### B25 — Metes-and-bounds: curve calls silently parsed as straight chords; no unreadable-call flagging `[Site Planner]` (bug) — correctness, high
 `[ ]` `CALL_RE` has no `radius`/`arc`/`delta`/`chord` handling; given a curve call it matches the chord bearing+distance and dead-reckons it as a straight segment, with no `dropped`/`unparsed` signal — so the traverse is silently wrong and the UI can't warn. (Roadmap already wants "parse curves; flag unreadable.") Fix: detect curve calls and either tessellate the arc or return `{unparsed:true, raw}` so callers can flag them.
+> Progress 2026-06-15: deferred from the round-2 correctness PR — flagging/tessellating curve calls needs parser + UI work validated against real deed text (risk of breaking the working straight-call parser for Harris/FBCAD); left Open for a focused pass with sample deeds.
 
 ### B26 — Metes-and-bounds: parser gaps (dash-DMS unparsed, deg>90 accepted, loose closure floor) `[Site Planner]` (bug) — correctness, medium
-`[ ]` (a) The header advertises `S 12-15 W` but the DMS separator classes exclude `-`, so dash-separated bearings return `[]` (silently dropped). (b) The degrees group `[0-9]{1,3}` accepts a quadrant bearing > 90° (e.g. `N 145 E`) and plots it. (c) `pathCloses` floors tolerance at `max(25, 2%·perim)` so a small lot can be declared "closed" with a 25-ft misclosure, hiding parse errors. Fix: add `-` to the separator classes; reject/flag `deg>90`; drop/shrink the absolute closure floor and always surface the misclosure.
+`[x]` 🔧 fixed 2026-06-15 (branch `site-planner/correctness-round2`): (a) `-` added to the degree/minute separator classes so `S 12-15 W` parses; (b) `parseCalls` skips any call with `deg > 90`; (c) the `pathCloses` absolute floor dropped 25 ft → 5 ft (the 2% relative term kept), so a small lot can't falsely "close" on 25 ft of misclosure. (a) The header advertises `S 12-15 W` but the DMS separator classes exclude `-`, so dash-separated bearings return `[]` (silently dropped). (b) The degrees group `[0-9]{1,3}` accepts a quadrant bearing > 90° (e.g. `N 145 E`) and plots it. (c) `pathCloses` floors tolerance at `max(25, 2%·perim)` so a small lot can be declared "closed" with a 25-ft misclosure, hiding parse errors. Fix: add `-` to the separator classes; reject/flag `deg>90`; drop/shrink the absolute closure floor and always surface the misclosure.
 
 ### B27 — Enter-to-commit power-line trace uses stale `tracePts`/`traceMode` `[Site Planner]` (bug) — correctness, medium
 `[x]` 🔧 fixed in audit PR. The keydown effect closes over `traceMode`/`tracePts` but they're not in its dep array, so pressing Enter to finish a trace reads stale values (often `[]`). Fix: add `traceMode`/`tracePts` to the effect deps (double-click already worked because it's a fresh prop).
 
 ### B28 — `mergeRings` collinear-cleanup threshold is area-based (scale-dependent) `[Site Planner]` (bug) — correctness, medium
-`[ ]` The corner test `Math.abs(cross) > 1` compares twice-triangle-area in ft² (scales with edge length), so on long edges a real slight bend can be dropped (or noise kept), distorting a merged parcel boundary/acreage. Fix: threshold the *perpendicular distance* `|cross|/hypot(c−a)` against a small foot tolerance.
+`[x]` 🔧 fixed 2026-06-15 (branch `site-planner/correctness-round2`): the corner test now thresholds the perpendicular deviation `|cross|/hypot(c−a)` (> 0.1 ft), so it's scale-independent. The corner test `Math.abs(cross) > 1` compares twice-triangle-area in ft² (scales with edge length), so on long edges a real slight bend can be dropped (or noise kept), distorting a merged parcel boundary/acreage. Fix: threshold the *perpendicular distance* `|cross|/hypot(c−a)` against a small foot tolerance.
 
 ### B29 — Parking +/− shrink guard ignores per-field `cfg` overrides `[Site Planner]` (bug) — correctness, medium
 `[ ]` `parkBand()`/`canShrink` use global `settings.stallDepth/aisle`, but `growParking` uses `cfgOf(el)`; for a field with per-element cfg the on-canvas − handle is enabled/disabled against the wrong row size (guard disagrees with the actual op). Fix: compute the band from `cfgOf(el)` in the guard too.
 
 ### B30 — Markup/measure minimum size is in feet, not pixels → silently discarded when zoomed out `[Site Planner]` (bug) — minor, medium
-`[ ]` The `dist(a,b) >= 2` / `w,h >= 2` minimums are world-feet; at low ppf a deliberate multi-pixel drag can be < 2 ft and the markup/measure is dropped with no feedback. Fix: make the minimum pixel-based (scale by view ppf).
+`[x]` 🔧 fixed 2026-06-15 (branch `site-planner/correctness-round2`): the minimums are now `3 / view.ppf` ft (a ~3px drag), so a deliberate drag isn't silently dropped at any zoom. The `dist(a,b) >= 2` / `w,h >= 2` minimums are world-feet; at low ppf a deliberate multi-pixel drag can be < 2 ft and the markup/measure is dropped with no feedback. Fix: make the minimum pixel-based (scale by view ppf).
 
 ### B31 — Two-point Split returns null when both crossings share an edge `[Site Planner]` (bug) — minor, low
 `[ ]` `if (lo.i === hi.i) return null` uses only the extreme-`t` hits, so a valid straight cut across a concave parcel (whose first/last crossings land on the same edge while valid interior crossings exist) silently no-ops. Fix: when `lo.i === hi.i`, pick the two crossings with distinct edge indices that yield two ≥3-vertex rings.
+> Progress 2026-06-15: deferred from round-2 — the same-edge multi-crossing case is fiddly concave-polygon geometry (minor/low) that's hard to validate without runtime cases; left Open to avoid shipping a bad split.
 
 ### B32 — Undo stack polluted by `pushHistory` on no-op edits `[Site Planner]` (bug) — minor, high
 `[ ]` `beginEditCallout` and the dock/type `onChange` handlers call `pushHistory()` before/without an actual change, so cancelling a callout edit or reselecting the same dropdown value adds an undo frame (first Ctrl+Z appears to do nothing). Fix: push history only when a mutation is actually applied.
+> Progress 2026-06-15 (branch `site-planner/correctness-round2`): the **callout** half is fixed — `beginEditCallout` no longer pushes history on open, and `commitEditCallout` pushes only when the text actually changes (cancel or commit-unchanged adds no frame). The **dock/type dropdown** `onChange` half (reselecting the same value still pushes a frame) remains open.
 
 ### B33 — Doc Review redline shapes (rect/cloud/text) are unselectable except at corner points `[Document Review]` (bug) — minor, high
 `[ ]` `hitTest` measures distance only to stored vertices; rect/cloud store two corners and text one point, so clicking an edge or body never selects them (hard to select/delete redlines). Fix: shape-aware hit testing (point-in-rect, distance-to-segment, text bbox).
@@ -174,6 +177,7 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 
 ### B61 — Two-click road drawn shorter than it is wide mis-assigns the length/cross axis `[Site Planner]` (bug) — minor
 `[ ]` Road creation sets `w:len, h:roadWidth+2*curb`, but downstream infers the cross axis from `min(w,h)` (curb render `el.w>=el.h`; `roadTravel` `min`; resize `el.h<=el.w`). A stubby road (`len < cross`) has `w<h`, so curbs draw on the wrong edges and the length/width fields control the swapped axis. Fix: tag an explicit length axis at creation and key rendering/resize off it (or clamp `len>=cross`).
+> Progress 2026-06-15: deferred from round-2 — a complete fix needs an explicit length-axis tag threaded through render/resize/roadTravel; a creation-time clamp alone leaves resize able to reproduce it. Left Open for that focused change.
 
 ### B62 — Utility-route corridor leaves a visible gap to the fitting pad `[Site Planner]` (bug) — minor, cosmetic
 `[ ]` `buildUtilRoute` buffers `pts=[source, entry]` where `entry` is on the wall, but the pad sits outside the wall (`entry + normal*(padSize/2+3)`), so the drawn corridor never reaches the pad. Fix: include the pad center in the route (`pts=[source, entry, padC]`) before buffering. (Math/easement-width/overlap checks are otherwise correct.)
