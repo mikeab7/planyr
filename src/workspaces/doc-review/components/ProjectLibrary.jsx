@@ -6,7 +6,7 @@
  * existing Supabase backend; reads the project list + status from the Site Planner's
  * sites (one source of truth) and the file index from doc_reviews. Self-contained.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, setProjectStatus, deleteReview, DISCIPLINES, STATUSES, STATUS_META } from "../lib/reviewStore.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c" };
@@ -25,7 +25,13 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
   const [dropTarget, setDropTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = async () => { setBusy(true); try { const [p, r] = await Promise.all([listProjects(), listReviews()]); setProjects(p); setReviews(r); } finally { setBusy(false); } };
+  const reqRef = useRef(0); // in-flight token so an overlapping / late refresh can't clobber newer state (B44)
+  const refresh = async () => {
+    const tok = ++reqRef.current;
+    setBusy(true);
+    try { const [p, r] = await Promise.all([listProjects(), listReviews()]); if (tok !== reqRef.current) return; setProjects(p); setReviews(r); }
+    finally { if (tok === reqRef.current) setBusy(false); }
+  };
   useEffect(() => { if (open && signedIn) refresh(); }, [open, signedIn]);
 
   // Group reviews by project then discipline (an "Unfiled" bucket for unlinked ones).
