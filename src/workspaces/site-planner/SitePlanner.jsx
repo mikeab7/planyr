@@ -1854,6 +1854,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const meta = await getLayerInfo(layerUrl);
       const idField = detectField(meta.fields, "id") || COUNTIES[county]?.idField;
       const addrField = detectField(meta.fields, "address") || COUNTIES[county]?.addrField;
+      // The field NAME gets interpolated into the where-clause and comes from live (or a
+      // user-pasted) layer's metadata — reject anything that isn't a plain identifier so a
+      // hostile/compromised endpoint can't inject SQL that escapes the county scope (B47).
+      const okField = (f) => /^[A-Za-z0-9_.]+$/.test(f || "");
+      if (idField && !okField(idField)) throw new Error("Unexpected parcel-ID field name on this layer.");
+      if (addrField && !okField(addrField)) throw new Error("Unexpected address field name on this layer.");
       const esc = v.replace(/'/g, "''");
       let where;
       if (searchMode === "id") {
@@ -2497,8 +2503,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [identifyMode, setIdentifyMode] = useState(false);
   const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, addr } | { error }
   const idLayerRef = useRef(null);
+  const identifyTok = useRef(0);
   const identifyAt = async (fp) => {
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
+    const tok = ++identifyTok.current; // a later identify click supersedes this one (B53)
     setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
@@ -2507,10 +2515,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         idLayerRef.current = cm.layerUrl || await resolveLayerUrl(cm.mapServer || COUNTIES[siteCounty]?.layerUrl || COUNTIES.harris.layerUrl);
       }
       const feat = await queryAtPoint(idLayerRef.current, lng, lat);
+      if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
       if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
       const ring = largestRingLngLat(feat);
       setIdentifyRes({ attrs: feat.attributes || {}, ring, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
-    } catch (e) { setIdentifyRes({ error: humanizeError(e) }); }
+    } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
   const addIdentifiedParcel = () => {
     if (!identifyRes?.ring || !origin) return;

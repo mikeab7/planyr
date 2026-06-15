@@ -451,8 +451,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
         const latlngs = ring.map(([lon, lat]) => [lat, lon]);
+        if (hilitesRef.current[key]) { try { map.removeLayer(hilitesRef.current[key]); } catch (_) {} } // drop a stale hilite before overwriting → no orphaned polygon if two clicks race (B22)
         hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-        setSelected((s) => [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }]);
+        setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
       }
     } catch (e) {
       setErr(humanizeError(e));
