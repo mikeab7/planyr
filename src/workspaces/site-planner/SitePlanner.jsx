@@ -22,6 +22,8 @@ import {
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
+import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
+import { formatAge } from "./lib/gisCache.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2594,13 +2596,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify (click any spot → county record without importing).
   const [identifyMode, setIdentifyMode] = useState(false);
-  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, addr } | { error }
+  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, lng, lat, addr } | { error }
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
+  // B72/B73 — jurisdiction (city/ETJ/county) + road maintenance authority, on
+  // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B75).
+  const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
+  const checkJurisdiction = async () => {
+    const r = identifyRes;
+    if (!r || r.busy || r.error || r.lng == null) return;
+    setJurInfo({ busy: true });
+    const [j, road] = await Promise.all([
+      identifyJurisdiction(r.lng, r.lat, { ring: r.ring }), // whole-parcel test → flags a straddle
+      identifyRoadAuthority(r.lng, r.lat),
+    ]);
+    setJurInfo({ j, road });
+  };
+  const jurRow = (label, value, ageMs) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "1px 0" }}>
+      <span style={{ color: PAL.muted }}>{label}</span>
+      <span style={{ color: PAL.ink, fontWeight: 600, textAlign: "right" }}>
+        {value}
+        {ageMs != null && <span style={{ color: PAL.muted, fontWeight: 400 }}> · {formatAge(ageMs)}</span>}
+      </span>
+    </div>
+  );
   const identifyAt = async (fp) => {
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later identify click supersedes this one (B53)
-    setIdentifyRes({ busy: true });
+    setJurInfo(null); setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
       if (!idLayerRef.current) {
@@ -2611,7 +2635,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
       if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
       const ring = largestRingLngLat(feat);
-      setIdentifyRes({ attrs: feat.attributes || {}, ring, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+      setIdentifyRes({ attrs: feat.attributes || {}, ring, lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
   const addIdentifiedParcel = () => {
@@ -2622,7 +2646,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = { id: uid(), points, locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null };
     setParcels((a) => [...a, pc]);
     setSel({ kind: "parcel", id: pc.id });
-    setIdentifyRes(null); setIdentifyMode(false);
+    setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
   };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
@@ -4838,7 +4862,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* identify any parcel from the county GIS (no import unless you add it) */}
               <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
                 {origin ? (
-                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); }}>
+                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); setJurInfo(null); }}>
                     {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
                   </button>
                 ) : (
@@ -4856,6 +4880,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             </div>
                           ))}
                           {identifyRes.ring && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
+                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
+                          </button>
+                          {jurInfo && !jurInfo.busy && (
+                            <div style={{ marginTop: 7, borderTop: "1px dashed #ece4d4", paddingTop: 6 }}>
+                              {jurInfo.error ? <span style={{ color: "#b45309" }}>{jurInfo.error}</span> : <>
+                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
+                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", (jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : (jurInfo.j.etj.join(" + ") || "none"))}
+                                {jurRow("Road maint.", jurInfo.road.road ? `${jurInfo.road.road.authority.label}${jurInfo.road.road.route ? ` · ${jurInfo.road.road.route}` : ""}` : "unknown", jurInfo.road.ageMs)}
+                                {jurInfo.j.straddle && <div style={{ color: "#b45309", marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
+                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
+                              </>}
+                            </div>
+                          )}
                         </>}
                   </div>
                 )}
