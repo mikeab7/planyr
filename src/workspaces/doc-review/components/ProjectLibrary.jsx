@@ -89,12 +89,14 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
                   <span style={{ fontSize: 11, color: PAL.muted, width: 10 }}>{isOpen ? "▾" : "▸"}</span>
                   <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                   <span style={{ fontSize: 10.5, color: PAL.muted }}>{p.fileCount}</span>
-                  {p.status
-                    ? <select value={p.status} onClick={(e) => e.stopPropagation()} onChange={(e) => onStatus(e, p.id)}
-                        title="Project status" style={{ fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", border: `1px solid ${STATUS_COLOR[p.status] || PAL.line}`, color: STATUS_COLOR[p.status] || PAL.ink, background: "#fff", borderRadius: 999, padding: "2px 6px", cursor: "pointer" }}>
-                        {STATUSES.map((s) => <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>)}
-                      </select>
-                    : <span style={{ fontSize: 10, color: PAL.muted, fontStyle: "italic" }}>no project</span>}
+                  {p.status == null
+                    ? <span style={{ fontSize: 10, color: PAL.muted, fontStyle: "italic" }}>no project</span>
+                    : (() => { const known = STATUSES.includes(p.status); return (
+                        <select value={known ? p.status : ""} onClick={(e) => e.stopPropagation()} onChange={(e) => onStatus(e, p.id)}
+                          title={known ? "Project status" : "Status unknown — pick one to set it"} style={{ fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", border: `1px solid ${STATUS_COLOR[p.status] || PAL.line}`, color: STATUS_COLOR[p.status] || PAL.ink, background: "#fff", borderRadius: 999, padding: "2px 6px", cursor: "pointer" }}>
+                          {!known && <option value="" disabled>Status?</option>}
+                          {STATUSES.map((s) => <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>)}
+                        </select>); })()}
                 </div>
 
                 {isOpen && (
