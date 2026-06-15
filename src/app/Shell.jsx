@@ -10,6 +10,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 
 // Workspace registry. Each `load` is a dynamic import → its own lazy chunk.
 const WORKSPACES = [
@@ -91,9 +92,16 @@ export default function Shell() {
         )}
       </header>
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>
-        <Suspense fallback={<div style={{ height: "100%", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>Loading workspace…</div>}>
-          <Active />
-        </Suspense>
+        {/* Each workspace gets its own error boundary, keyed by id so switching
+            modules gives a fresh boundary — a render crash in one workspace is
+            contained (shell, switcher, and the other workspace keep working)
+            instead of blanking the whole page. It wraps Suspense so a failed
+            lazy-chunk load is caught too. */}
+        <ErrorBoundary key={active} label={current.label}>
+          <Suspense fallback={<div style={{ height: "100%", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>Loading workspace…</div>}>
+            <Active />
+          </Suspense>
+        </ErrorBoundary>
       </main>
       {authOpen && <AuthPanel user={user} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />}
     </div>

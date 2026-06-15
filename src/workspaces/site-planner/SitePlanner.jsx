@@ -5207,6 +5207,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls) {
+  // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
+  // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
+  // defined" inside the els.map during render and blanked the whole page on any
+  // project with a parking element. Resolve it locally from the settings param.
+  const cfgOf = (e) => (e.cfg ? { ...settings, ...e.cfg } : settings);
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
