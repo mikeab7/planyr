@@ -192,6 +192,16 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 ### B66 — Top-left Site Planyr dropdown renders behind the lower header row `[global UI]` (bug)
 `[ ]` Clicking the top-left module control opens its dropdown *behind* the second header row (a z-index/stacking problem), so it can't be used. Quick fix: raise the menu's z-index above the lower bar. NOTE: B10 (header consolidation → product-switcher) shipped but deliberately left the shell bar and planner context bar as **two physical rows**, so this stacking bug likely persists — verify against the current header and fix the z-index.
 
+### B67 — Attach & mark up a site-plan drawing on a parcel `[Site Planner]` (feature)
+`[ ]` Let the user attach an existing site plan (PDF or JPEG; CAD/DWG out of scope for v1) to a selected parcel and draw on top of it with the full existing markup/element toolset, saved as a persistent, named file tied to that parcel. The pattern mirrors Document Review's **immutable-backdrop + editable-layers-above** model and its Supabase persistence — reuse those patterns, don't stand up a parallel drawing engine or store. (Related to but distinct from B14, which files drawings under *projects* in the Document Review workspace; this attaches to a *parcel* in the Site Planner and marks up with the planner's own tools.)
+- **Entry point.** After clicking a parcel (e.g. the Schiel Road site), offer "Attach drawing" / "Open markup." Allow **multiple drawings per parcel** (a parcel may have several plan sheets).
+- **Backdrop = immutable layer.** The imported PDF/JPEG is the locked backdrop (architecture invariant: imported drawing = immutable; user content lives on editable layers above). PDF → rasterize the chosen page to an image for display; if multipage, let the user pick the page.
+- **Markup layer = editable.** Reuse the current `els` + `markups` suite (lines, polylines, polygons, text, dimensions, freehand — whatever the suite already supports), not a separate drawing engine.
+- **Anchoring v1 = pixel-relative to the backdrop.** Store markup coordinates **normalized to the backdrop's intrinsic pixel dimensions (0–1 fractions, not screen pixels)** so zoom/pan can't corrupt geometry. Nothing may assume the backdrop is screen-sized.
+- **Forward-compat for georeference (deferred).** Persist the backdrop's **intrinsic dimensions** and (for a PDF) **page size/DPI** alongside the markup — the minimum needed later to compute a pixel→Texas-State-Plane (EPSG:2278) transform without re-marking. No georeferencing UI in v1; just don't discard the data that makes it possible.
+- **Persistence.** Save as a named file/record associated with the parcel through the existing Supabase save/load + RLS path (**private by default**). Reopening restores backdrop + markup layer.
+- **Out of scope v1 (follow-ons):** CAD/DWG import; real-world georeferencing; and **overlaying the marked-up plan onto the live map/aerial** — that last is the "overlay onto site" goal that converges with the ★ north-star ("map → drawings → latest set") and the shared coordinate spine. Flagged here as a follow-on, not v1.
+
 ---
 
 ## 🕓 Later / Roadmap
