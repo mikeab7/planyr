@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
+import { openOverlayFile, rasterizePage, isPdfFile } from "./lib/overlayPdf.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -746,6 +747,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
 
+  // Site-plan overlays (B72): backdrop PDFs/images the user drops onto the map and
+  // places by hand (immutable backdrop — above the basemap, below markup/massing).
+  // Distinct from the GIS map `overlays` (app-shared layer props, declared below).
+  const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
+  const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  const [overlayBusy, setOverlayBusy] = useState(false);
+  const overlayFileRef = useRef(null);
+  const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+
   // county parcel lookup
   const [county, setCounty] = useState("harris");
   const [lookupUrl, setLookupUrl] = useState(COUNTIES.harris.layerUrl || COUNTIES.harris.serviceUrl);
@@ -864,15 +874,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [] });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays }; });
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
   // sites — a map-sourced site keeps its record even if you clear it).
-  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay;
+  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay && !(s?.sheetOverlays?.length);
   // Site/plan metadata (name etc.) lives in component state declared below; mirror
   // it into a ref so the (earlier-defined) save effects can include it without a
   // forward reference. The first real save then writes a fully-formed record —
@@ -889,11 +899,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay })) return; // don't save a still-blank site
+    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays })) return; // don't save a still-blank site
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
-      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay });
+      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays });
       if (!ok) { setSaveStatus("unsaved"); return; }
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
@@ -902,10 +912,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("saved");
     }, 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
   const persistOrDrop = () => {
     if (!siteId) return;
     const s = liveRef.current;
@@ -929,7 +939,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]); // eslint-disable-line
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
-    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
+    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0}`).join(";") || "no");
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => {
@@ -939,7 +950,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -1599,6 +1610,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
       return;
     }
+    if (d.mode === "moveSheetOverlay") {
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
+      return;
+    }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
     if (d.mode === "printResize") {
       const aspect = printAspect();
@@ -1919,6 +1935,69 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCalibInput("");
     setTool("select");
   };
+
+  /* ------------ site-plan overlays (B72) ------------ */
+  // Add a dropped PDF/image as a backdrop overlay, placed ~60% of the view wide and
+  // centered on what the user is currently looking at (true scale comes in B73).
+  const addOverlayFile = async (file) => {
+    if (!file) return;
+    setOverlayBusy(true);
+    try {
+      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf}
+      const id = uid();
+      if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
+      const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
+      const wantFt = (size.w / view.ppf) * 0.6;       // land it ~60% of the visible width wide
+      const ftPerPx = Math.max(0.01, wantFt / Math.max(1, r.imgW));
+      const ov = {
+        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        page: r.page || 1, pageCount: r.pageCount || 1,
+        x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
+        ftPerPx, rotation: 0, opacity: 0.85, locked: false,
+      };
+      pushHistory();
+      setSheetOverlays((arr) => [...arr, ov]);
+      setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+    } catch (err) {
+      alert(humanizeError(err));
+    } finally {
+      setOverlayBusy(false);
+    }
+  };
+  const startMoveSheetOverlay = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "moveSheetOverlay", id, fx: fp.x, fy: fp.y, ox: o.x, oy: o.y };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
+  const patchOverlay = (id, patch, hist = true) => {
+    if (hist) pushHistory();
+    setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  };
+  const removeOverlay = (id) => {
+    pushHistory();
+    const doc = overlayDocs.current.get(id);
+    if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
+    setSelOverlay((s) => (s === id ? null : s));
+  };
+  // Re-rasterize a different page (only while the source doc is still in memory).
+  const setOverlayPage = async (id, page) => {
+    const doc = overlayDocs.current.get(id);
+    if (!doc) return;
+    try {
+      const r = await rasterizePage(doc, page);
+      patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
+    } catch (_) { /* ignore a bad page render */ }
+  };
+  // Free any held PDF docs when the planner unmounts (cf. B39).
+  useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -3282,6 +3361,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
+    { id: "overlay", glyph: "▦", label: "Overlay" },
     { id: "standards", glyph: "⚙", label: "Setup" },
   ];
   const railBtn = (on) => ({
@@ -3316,6 +3396,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
+  const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid #ddd6c5`, borderRadius: 4, background: "#fff", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
   const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
@@ -3707,7 +3788,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* body */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}>
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
+          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
+          onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
@@ -3750,6 +3833,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onError={() => { setUnderlayErr(true); setUnderlayLoading(false); }} onLoad={() => { setUnderlayErr(false); setUnderlayLoading(false); }}
                   onPointerDown={startMoveUnderlay} />;
               })()}
+
+              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space,
+                  above the basemap/underlay and below parcels/massing/markup; shown
+                  even with the basemap on (the point is to overlay onto the aerial). */}
+              {sheetOverlays.map((o) => {
+                const tl = f2p({ x: o.x, y: o.y });
+                const w = o.imgW * o.ftPerPx * view.ppf;
+                const h = o.imgH * o.ftPerPx * view.ppf;
+                const cx = tl.x + w / 2, cy = tl.y + h / 2;
+                const isSel = selOverlay === o.id;
+                return (
+                  <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
+                    style={{ cursor: tool === "select" && !o.locked ? "move" : "default" }}
+                    pointerEvents={o.locked ? "none" : "auto"}
+                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
+                    {o.src ? (
+                      <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                    ) : (<>
+                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
+                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>Re-add “{o.name}” — image not synced to this device</text>
+                    </>)}
+                    {isSel && tool === "select" && (
+                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+                    )}
+                  </g>
+                );
+              })}
 
               {/* setback outlines (per-edge) */}
               {settings.showSetback && parcels.map((pc) => {
@@ -4561,6 +4671,62 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 )}
               </>
+            )}
+          </Section>
+          )}
+
+          {/* site-plan overlay (B72) */}
+          {leftPanel === "overlay" && (
+          <Section title="Site-plan overlay">
+            <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={() => overlayFileRef.current?.click()}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
+            <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7, lineHeight: 1.5 }}>
+              Drop a site-plan PDF onto the map (or browse). Drag it to move; set size, rotation &amp; opacity below, then Lock it to draw on top. White paper is knocked out so the map shows through. <i>(Sizing to the drawing scale comes next.)</i>
+            </div>
+            {!sheetOverlays.length ? null : (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {sheetOverlays.map((o) => {
+                  const on = selOverlay === o.id, wFt = o.imgW * o.ftPerPx;
+                  return (
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "#fff" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
+                        <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
+                        <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
+                      </div>
+                      {on && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { opacity: +e.target.value }, false)} />
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
+                            <input type="range" min={0} max={360} step={1} value={o.rotation} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { rotation: +e.target.value }, false)} />
+                            <span style={{ width: 32, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{Math.round(o.rotation)}°</span>
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                            <input style={numInput} value={Math.round(wFt)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                            <span>ft</span>
+                            <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                            <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                          </label>
+                          {o.pageCount > 1 && (
+                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
+                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
+                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} onClick={() => patchOverlay(o.id, { rotation: 0 })}>Reset rotation</button>
+                            <button style={{ ...chip, flex: 1 }} onClick={requestFit}>Fit view</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </Section>
           )}
