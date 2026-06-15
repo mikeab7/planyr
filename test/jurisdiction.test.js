@@ -32,7 +32,7 @@ function fakeFetch(routes) {
   fn.calls = 0;
   return fn;
 }
-const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory";
+const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory", ETJ = "COH_ETJ_view";
 
 // ----------------------------------------------------------------------------
 describe("roadAuthority — coded agency → who maintains (calibrated)", () => {
@@ -100,8 +100,11 @@ describe("normalizeFeature — source schema → one internal shape", () => {
     expect(normalizeFeature(JURISDICTION_SOURCES.county, { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" }))
       .toEqual({ role: "county", name: "Harris", fips: "48201" });
   });
-  it("null-mapped fields resolve to null (e.g. ETJ has no name column yet)", () => {
-    expect(normalizeFeature(JURISDICTION_SOURCES.etj, {})).toEqual({ role: "etj", name: null });
+  it("a single-jurisdiction layer with no name column uses the source constant (Houston ETJ)", () => {
+    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { OBJECTID: 5 })).toEqual({ role: "etj", name: "Houston" });
+  });
+  it("a null-mapped field with no constant stays null", () => {
+    expect(normalizeFeature({ role: "x", fields: { name: null } }, {})).toEqual({ role: "x", name: null });
   });
 });
 
@@ -154,9 +157,10 @@ describe("identifySource — rides the SWR cache (B75)", () => {
     expect(r.error).toBeTruthy();
     expect(r.items[0].attrs.city_name).toBe("Houston"); // last-good preserved
   });
-  it("an unavailable source (ETJ, no endpoint) degrades without a fetch", async () => {
+  it("an unavailable source (no endpoint) degrades without a fetch", async () => {
     const fetchJson = fakeFetch({});
-    const q = identifySource(JURISDICTION_SOURCES.etj, { lng: -95.37, lat: 29.76 }, { fetchJson });
+    const src = { id: "x", role: "x", url: null, unavailable: true, fields: { name: null } };
+    const q = identifySource(src, { lng: -95.37, lat: 29.76 }, { fetchJson });
     expect(q.unavailable).toBe(true);
     expect((await q.fresh).items).toEqual([]);
     expect(fetchJson.calls).toBe(0);
@@ -170,6 +174,7 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
     [CITY]: (url) => url.includes("esriGeometryPolygon")
       ? [{ attributes: { city_name: "Houston" } }, { attributes: { city_name: "Bellaire" } }] // a parcel straddling two cities
       : [{ attributes: { city_name: "Houston" } }],
+    [ETJ]: () => [], // in-city / most points are NOT in the (Houston-only) ETJ ring
   };
   it("a point in one city + county: names resolved, no straddle, not unincorporated", async () => {
     const seen = [];
@@ -183,8 +188,22 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
     expect(out.straddle).toBe(false);
     expect(seen).toContain("city:loaded");
     expect(seen).toContain("county:loaded");
-    // ETJ has no wired source → surfaced as unavailable, never crashes
-    expect(out.sources.find((s) => s.id === "etj").state).toBe("unavailable");
+    // ETJ source is wired (COHGIS) but this in-city point isn't in the ETJ ring → empty
+    expect(out.etj).toEqual([]);
+    expect(out.sources.find((s) => s.id === "etj").state).toBe("empty");
+  });
+  it("an unincorporated point inside Houston's ETJ resolves via the source constant", async () => {
+    const out = await identifyJurisdiction(-95.38, 29.93, {
+      cache: freshCache(),
+      fetchJson: fakeFetch({
+        [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris" } }],
+        [CITY]: () => [],
+        [ETJ]: () => [{ attributes: { OBJECTID: 9, Class: "ETJ" } }], // matched, no name column
+      }),
+    });
+    expect(out.unincorporated).toBe(true);
+    expect(out.etj).toEqual(["Houston"]);
+    expect(out.sources.find((s) => s.id === "etj").state).toBe("loaded");
   });
   it("a whole-parcel test flags a boundary straddle (every city listed)", async () => {
     const ring = [[-95.46, 29.70], [-95.46, 29.72], [-95.44, 29.72], [-95.44, 29.70]];
@@ -195,7 +214,7 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
   it("a point in no city reads as unincorporated", async () => {
     const out = await identifyJurisdiction(-95.0, 30.5, {
       cache: freshCache(),
-      fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Montgomery" } }], [CITY]: () => [] }),
+      fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Montgomery" } }], [CITY]: () => [], [ETJ]: () => [] }),
     });
     expect(out.unincorporated).toBe(true);
     expect(out.city).toEqual([]);
@@ -207,6 +226,7 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
       fetchJson: fakeFetch({
         [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris" } }],
         [CITY]: () => { throw new Error("Failed to fetch"); },
+        [ETJ]: () => [],
       }),
     });
     expect(out.county).toEqual(["Harris"]);

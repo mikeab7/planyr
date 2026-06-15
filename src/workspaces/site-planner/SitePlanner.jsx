@@ -4888,7 +4888,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {jurInfo.error ? <span style={{ color: "#b45309" }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
                                 {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", (jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : (jurInfo.j.etj.join(" + ") || "none"))}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : "not in Houston ETJ"), jurInfo.j.ages.etj)}
                                 {jurRow("Road maint.", jurInfo.road.road ? `${jurInfo.road.road.authority.label}${jurInfo.road.road.route ? ` · ${jurInfo.road.road.route}` : ""}` : "unknown", jurInfo.road.ageMs)}
                                 {jurInfo.j.straddle && <div style={{ color: "#b45309", marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
                                 <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>

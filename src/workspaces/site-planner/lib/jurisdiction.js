@@ -52,16 +52,21 @@ export const JURISDICTION_SOURCES = {
     sourceName: "TxGIO (statewide)",
     note: "Texas city limits (TxGIO). A point in no city reads as unincorporated. Screening only — verify with the city.",
   },
-  // No single statewide ETJ layer is published — ETJ is per-city / regional (H-GAC
-  // covers the 13-county Houston metro). Kept as a registry row so the UI shows an
-  // honest "no source wired" rather than silently omitting ETJ; add confirmed
-  // per-publisher rows here as they come online. ETJ is volatile by law (landowners
-  // may petition out; annexations move it), so it is ALWAYS screening-only.
+  // ETJ is fragmented (no statewide layer): wired to the City of Houston's own GIS
+  // (COHGIS) ETJ — the priority metro. It is Houston-only, so a point outside
+  // Houston's ETJ reads "not in Houston ETJ" (it may still sit in another city's
+  // ETJ — add those as rows). The layer carries no per-feature city name, so the
+  // name is a constant. ETJ is volatile by law (SB2038 releases; annexations move
+  // it), so it is ALWAYS screening-only. Verified + calibrated 2026-06-15 (Aldine /
+  // Spring, unincorporated near Houston → in ETJ; downtown / in-city → not).
   etj: {
     id: "etj", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    url: null, unavailable: true, fields: { name: null },
-    sourceName: null,
-    note: "No statewide ETJ layer is published; ETJ is per-city / regional (e.g. H-GAC for the Houston metro). Source not yet wired — add a registry row per confirmed publisher.",
+    url: "https://services.arcgis.com/NummVBqZSIJKUeVR/arcgis/rest/services/COH_ETJ_view/FeatureServer/1",
+    fields: { name: null }, nameConst: "Houston",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Houston GIS (COHGIS)",
+    coverage: "City of Houston only",
+    note: "City of Houston ETJ (COHGIS, reflects SB2038 releases). Houston metro only — add other cities' ETJ as registry rows. ETJ is volatile — screening only.",
   },
   road: {
     id: "road", role: "road", label: "Road maintenance authority", kind: "line",
@@ -177,6 +182,9 @@ export function buildIdentifyParams(source, geom) {
 export function normalizeFeature(source, attrs) {
   const out = { role: source.role };
   for (const [key, col] of Object.entries(source.fields)) out[key] = col ? (attrs?.[col] ?? null) : null;
+  // A single-jurisdiction layer (e.g. the Houston-only ETJ) carries no name column;
+  // every matched feature IS that jurisdiction, so fall back to the source constant.
+  if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;
   return out;
 }
 
