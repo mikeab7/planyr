@@ -184,16 +184,21 @@ export default function DocReview() {
   useEffect(() => { try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {} }, [reviewId]);
   useEffect(() => { try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {} }, [mode]);
 
-  const fetchSourceBytes = async (src) => {
+  const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
+  const fetchSourceBytes = async (src, tok) => {
     if (!src) return;
+    if (tok != null && tok !== loadTok.current) return; // superseded before fetching
     if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
     const buf = src.storageKey ? await downloadSource(src.storageKey) : null;
+    if (tok != null && tok !== loadTok.current) return; // a newer review opened while downloading
     if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
     const pdf = await loadPdf(buf);
+    if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     setNumPages(pdf.numPages); setScale(0);
   };
   const loadSingleReview = async (rec) => {
+    const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
@@ -204,7 +209,7 @@ export default function DocReview() {
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop("");
-    await fetchSourceBytes(src);
+    await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
     setPdfDoc(null); sourceRef.current = null;

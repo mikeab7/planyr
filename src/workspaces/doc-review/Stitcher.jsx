@@ -86,7 +86,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     for (const h of liveHrefsRef.current) if (h && h.startsWith("blob:")) { try { URL.revokeObjectURL(h); } catch (_) {} }
   }, []);
 
+  // B51/B52: loadStitch rebuilds pdfs[]/placed[] wholesale, so block user adds while a
+  // load runs (an add's sheet would be clobbered by the load's blind setPlaced), and let
+  // a newer open supersede an older in-flight load by token.
+  const loadingRef = useRef(false);
+  const loadTok = useRef(0);
   const openFiles = async (files) => {
+    if (loadingRef.current) return; // don't add sources while a load is rebuilding them (B51)
     const list = [...(files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!list.length) return;
     setBusy(true); setErr("");
@@ -118,6 +124,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
 
   const addSheet = async (pdf, pageNum) => {
+    if (loadingRef.current) return; // a load is rebuilding placed[]; its blind setPlaced would clobber this sheet (B51)
     setBusy(true);
     try {
       const img = await renderPageToImage(pdf.doc, pageNum, 2);
@@ -212,7 +219,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
 
   const loadStitch = async (rec) => {
-    setBusy(true);
+    const tok = ++loadTok.current; // a newer open supersedes this load (B52)
+    loadingRef.current = true; setBusy(true);
     try {
       setReviewId(rec.id);
       setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
@@ -230,17 +238,19 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         }
         srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, oversize: !!src.oversize, missing });
       }
+      if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
       setPdfs(srcEntries); pdfsRef.current = srcEntries;
       const out = [];
       for (const s of st.placed || []) {
         const e = srcEntries.find((x) => x.srcId === s.srcId);
         let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
-        if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
+        if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
         out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
       }
+      if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
       setPlaced(out); placedRef.current = out;
       setErr(srcEntries.some((e) => e.missing) ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "");
-    } finally { setBusy(false); }
+    } finally { if (tok === loadTok.current) { loadingRef.current = false; setBusy(false); } }
   };
 
   // Controlled load handed down from DocReview (opening a saved stitch review).
