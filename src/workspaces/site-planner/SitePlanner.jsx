@@ -792,7 +792,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
   // sites — a map-sourced site keeps its record even if you clear it).
-  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !s?.underlay;
+  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay;
   // Site/plan metadata (name etc.) lives in component state declared below; mirror
   // it into a ref so the (earlier-defined) save effects can include it without a
   // forward reference. The first real save then writes a fully-formed record —
@@ -809,7 +809,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, underlay })) return; // don't save a still-blank site
+    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay })) return; // don't save a still-blank site
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
@@ -818,7 +818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved"));
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved")).catch(() => setSaveStatus("unsaved"));
       else setSaveStatus("saved");
     }, 400);
     return () => clearTimeout(t);
@@ -1049,7 +1049,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -2462,6 +2462,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ensureIdAbove([...(d.parcels || []).map((p) => p.id), ...(d.els || []).map((e) => e.id)]);
         pushHistory();
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
+        setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
         setSettings((s) => ({ ...s, ...(d.settings || {}) }));
         setUnderlay(d.underlay || null);
         setSel(null);
@@ -2511,7 +2512,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   // Keep the save metadata current (so the first non-blank save is fully formed).
-  useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, origin: restored?.origin ?? null }; });
+  useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin: restored?.origin ?? null }; });
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };

@@ -31,7 +31,8 @@ export async function cloudUpsert(uid, model) {
 
 export async function cloudDelete(uid, id) {
   if (!supabase || !uid || !id) return { ok: false };
-  const { error } = await supabase.from("sites").delete().eq("id", id); // RLS limits to own rows
+  // Scope by user_id AND id (defense-in-depth — don't rely on RLS alone).
+  const { error } = await supabase.from("sites").delete().eq("user_id", uid).eq("id", id);
   return { ok: !error, error: error ? error.message : null };
 }
 

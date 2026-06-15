@@ -139,7 +139,7 @@ export default function DocReview() {
   const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
 
   const buildSnapshot = useCallback(() => ({
-    id: reviewId, kind: "single",
+    id: reviewId, kind: "single", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,

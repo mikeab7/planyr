@@ -159,7 +159,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   /* ---- cloud persistence (stitched set): autosave, resume, load, new ---- */
   const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
   const buildSnapshot = useCallback(() => ({
-    id: reviewId, kind: "stitch",
+    id: reviewId, kind: "stitch", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
