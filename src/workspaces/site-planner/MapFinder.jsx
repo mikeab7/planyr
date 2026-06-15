@@ -196,6 +196,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
+  const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [hidden, setHidden] = useState(() => new Set()); // statuses filtered out of the map
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
@@ -225,6 +226,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     setZoom(map.getZoom());
     const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
+    // Resolve the Layers-panel jurisdiction from the map's current area (B13): pick the
+    // county whose extent covers the view centre, so utility overlays are right outside
+    // Houston too. (candidateCountiesForPoint falls back to all → "harris" when away.)
+    const onMove = () => { const c = map.getCenter(); const cand = candidateCountiesForPoint(c.lat, c.lng); if (cand.length) setViewCounty(cand[0]); };
+    onMove();
     const onMouseMove = (e) => {
       if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
       const inside = selectedRef.current.some((s) => pointInPoly(e.latlng.lat, e.latlng.lng, s.latlngs));
@@ -234,10 +240,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const onDragEnd = () => { draggingRef.current = false; map.getContainer().style.cursor = selectModeRef.current ? ADD_CURSOR : ""; };
     map.on("click", onClick);
     map.on("zoomend", onZoom);
+    map.on("moveend", onMove);
     map.on("mousemove", onMouseMove);
     map.on("dragstart", onDragStart);
     map.on("dragend", onDragEnd);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.remove(); mapRef.current = null; };
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -583,11 +590,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "7px -9px 6px" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 4 }}>Layers</div>
           <div style={{ maxHeight: 260, overflowY: "auto", margin: "0 -2px", paddingRight: 2 }}>
-            {/* No county is pre-picked on the map any more (B11). Show the primary
-                market's (Harris/Houston) jurisdiction layers here so the Houston
-                utility overlays stay available; per-site jurisdiction follows the
-                site's own county once one is opened in the planner. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county="harris" layerStatus={layerStatus} />
+            {/* No county is pre-picked on the map any more (B11). The jurisdiction
+                shown here follows the map's current area (B13) — `viewCounty` is
+                resolved from the view centre on every moveend — so the right utility
+                overlays are offered outside Houston too; per-site jurisdiction still
+                follows the site's own county once one is opened in the planner. */}
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} />
           </div>
         </div>
 
