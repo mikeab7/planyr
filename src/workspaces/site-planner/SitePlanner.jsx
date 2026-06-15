@@ -1834,6 +1834,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const applyCalibration = () => {
     const knownFt = +calibInput;
     if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
+    // A map-sourced underlay is already georeferenced and its two axes can legitimately
+    // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
+    // would mis-size it, so calibration is disabled for from-map underlays (B57a).
+    if (underlay.fromMap) {
+      setOverlapWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.");
+      setTimeout(() => setOverlapWarn(""), 5000);
+      setCalib(null);
+      return;
+    }
     const measured = dist(calib.a, calib.b);
     if (measured <= 0) return;
     const factor = knownFt / measured;
