@@ -838,7 +838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return;
     const s = liveRef.current;
     if (isBlankSite(s) && !loadSite(siteId)?.origin) { deleteSite(siteId); onSiteDropped?.(siteId); }
-    else saveSite({ id: siteId, ...metaRef.current, ...s });
+    else { saveSite({ id: siteId, ...metaRef.current, ...s }); if (isCloudActive()) pushSiteToCloud(siteId).catch(() => {}); } // push too, so a last-window edit reaches the cloud before the next pullCloud (B18)
   };
   useEffect(() => {
     if (active || !siteId) return;
@@ -849,7 +849,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // page is closing/navigating, so a change made just before leaving isn't lost.
   useEffect(() => {
     if (!siteId) return;
-    const flush = () => { const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const flush = () => { const s = liveRef.current; if (!isBlankSite(s)) { saveSite({ id: siteId, ...metaRef.current, ...s }); if (isCloudActive()) pushSiteToCloud(siteId).catch(() => {}); } }; // visibility-hidden fires before tab-close, so the cloud gets the final edit (B18)
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
@@ -2540,7 +2540,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin: restored?.origin ?? null }; });
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) { saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); if (isCloudActive()) pushSiteToCloud(siteId).catch(() => {}); } }; // push on site-switch so the prior site's last edit isn't lost to the next pullCloud (B18)
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
