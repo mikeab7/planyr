@@ -308,12 +308,17 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      element in its true colors — georeferenced via the site's origin. Clickable
      to open (unless we're in parcel-select mode, where clicks add parcels). */
   const PLAN_ZOOM = 15;
+  // Derive the pin-vs-plan switch OUTSIDE the effect so the saved-site layer is
+  // only torn down + rebuilt when the threshold is actually crossed — not on every
+  // zoom step. A rebuild landing between mousedown and mouseup destroys the path that
+  // received the press, so Leaflet emits no `click` and opening the site silently
+  // fails; fewer rebuilds = fewer swallowed clicks (B64).
+  const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
     const group = L.layerGroup();
-    const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
     sites.forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
@@ -364,7 +369,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     sitesLayerRef.current = group;
     return () => { try { map.removeLayer(group); } catch (_) {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode, zoom, hidden]);
+  }, [sites, activeSiteId, selectMode, showPlans, hidden]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
