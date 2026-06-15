@@ -14,11 +14,14 @@ import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength } from "./lib/takeoff.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
+import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().slice(0, 10);
+const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
 
 // page-units → world, and inverse
@@ -57,9 +60,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   // --- cloud persistence (stitched-set review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
-  const [title, setTitle] = useState("");
-  const [project, setProject] = useState("");
-  const [discipline, setDiscipline] = useState("");
+  const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const pdfsRef = useRef([]); useEffect(() => { pdfsRef.current = pdfs; });
   const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
@@ -77,7 +79,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         if (miss) { await bindSource(miss.srcId, doc, f); continue; }
         const srcId = newSourceId();
         setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, oversize: false, missing: false }]);
-        uploadSource(reviewId, srcId, f).then((r) =>
+        uploadSource(srcId, f, meta.projectId, meta.discipline).then((r) =>
           setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, oversize: !!r.oversize } : x)))
         );
       }
@@ -155,27 +157,30 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   }); // eslint-disable-line
 
   /* ---- cloud persistence (stitched set): autosave, resume, load, new ---- */
-  const onMeta = (k, v) => { if (k === "title") setTitle(v); else if (k === "project") setProject(v); else if (k === "discipline") setDiscipline(v); };
+  const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
   const buildSnapshot = useCallback(() => ({
-    id: reviewId, kind: "stitch", title, project, discipline,
+    id: reviewId, kind: "stitch",
+    title: (meta.title || "").trim() || composeTitle(meta),
+    project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
+    item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
     stitch: {
       placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M })),
       view, measures, ftPerUnit,
     },
-  }), [reviewId, title, project, discipline, pdfs, placed, view, measures, ftPerUnit]);
+  }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
   const isEmpty = useCallback(() => placed.length === 0 && measures.length === 0, [placed, measures]);
   // Pan/zoom (`view`) is captured in the snapshot but left out of the save triggers so
   // panning doesn't spam writes — the next real edit (or the flush) saves the latest view.
   const { status } = useReviewPersistence({
     buildSnapshot, isEmpty,
-    deps: [reviewId, title, project, discipline, pdfs, placed, measures, ftPerUnit],
+    deps: [reviewId, meta, pdfs, placed, measures, ftPerUnit],
   });
   useEffect(() => { try { localStorage.setItem("planyr:docreview:lastStitchId", reviewId); } catch (_) {} }, [reviewId]);
 
   const resetStitch = () => {
     setReviewId(newReviewId());
-    setTitle(""); setProject(""); setDiscipline("");
+    setMeta(newMeta());
     setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
     setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr("");
     pdfsRef.current = []; placedRef.current = [];
@@ -185,7 +190,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setBusy(true);
     try {
       setReviewId(rec.id);
-      setTitle(rec.title || ""); setProject(rec.project || ""); setDiscipline(rec.discipline || "");
+      setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);
@@ -249,8 +254,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const alignMsg = align && ["Click reference point #1 (on a placed sheet)", "Click the SAME point on the sheet being aligned", "Click reference point #2", "Click the matching point #2 on the sheet"][align.step];
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper }}
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
+      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={onOpenReview} signedIn={signedIn} />
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid #2e2a23", flexWrap: "wrap" }}>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
@@ -266,7 +272,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
-        <ReviewsBar status={status} signedIn={signedIn} title={title} project={project} discipline={discipline} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
+        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>

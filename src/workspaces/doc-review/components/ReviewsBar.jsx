@@ -1,11 +1,12 @@
 /* Reviews toolbar control (Document Review) — shared by the single-sheet viewer and
- * the stitcher. Shows an honest save badge and a dropdown to name the current review
- * (title / project / discipline), start a new one, and open or delete saved reviews.
- * Self-contained: it fetches the review list itself when the menu opens, so neither
- * host has to thread it through. Cloud writes are RLS-scoped to the signed-in user.
+ * the stitcher. Shows an honest save badge and a dropdown to FILE the current review:
+ * link it to a Project/Site, set discipline / item / revision / date (the name defaults
+ * to "<Project> - <Item> - YYYY.MM.DD", each piece editable), start a new one, and open
+ * or delete saved reviews. Self-contained — it fetches the project + review lists itself
+ * when the menu opens. Cloud writes are RLS-scoped to the signed-in user.
  */
 import { useEffect, useRef, useState } from "react";
-import { listReviews, deleteReview } from "../lib/reviewStore.js";
+import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
 
 const PAL = { ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chromeInk: "#ece7db", chromeMuted: "#9b9482" };
 
@@ -20,17 +21,18 @@ const fmtWhen = (s) => {
   try { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (_) { return ""; }
 };
 
-export default function ReviewsBar({ status = "local", signedIn = false, title = "", project = "", discipline = "", onMeta, onOpen, onNew }) {
+export default function ReviewsBar({ status = "local", signedIn = false, meta = {}, onMeta, onOpen, onNew }) {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState(null); // null = not loaded yet
+  const [rows, setRows] = useState(null);     // saved reviews (null = not loaded)
+  const [projects, setProjects] = useState([]);
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
 
-  const refresh = async () => { setBusy(true); try { setRows(await listReviews()); } finally { setBusy(false); } };
+  const refresh = async () => { setBusy(true); try { const [r, p] = await Promise.all([listReviews(), listProjects()]); setRows(r); setProjects(p); } finally { setBusy(false); } };
 
   useEffect(() => {
     if (!open) return;
-    if (signedIn) refresh(); else setRows([]);
+    if (signedIn) refresh(); else { setRows([]); setProjects([]); }
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -38,9 +40,10 @@ export default function ReviewsBar({ status = "local", signedIn = false, title =
   }, [open, signedIn]);
 
   const badge = BADGE[status] || BADGE.local;
-  const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box" };
+  const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "#fff" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
 
+  const onProject = (id) => { const p = projects.find((x) => x.id === id); onMeta?.("projectId", id || null); onMeta?.("project", p ? p.name : ""); };
   const del = async (e, id) => {
     e.stopPropagation();
     if (!window.confirm("Delete this review and its stored PDFs? This can't be undone.")) return;
@@ -57,19 +60,30 @@ export default function ReviewsBar({ status = "local", signedIn = false, title =
       >Reviews ▾</button>
 
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 290, maxHeight: 420, overflowY: "auto", background: "#fff", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", zIndex: 50, padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, maxHeight: 460, overflowY: "auto", background: "#fff", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", zIndex: 50, padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
           {!signedIn && (
             <div style={{ fontSize: 11.5, color: "#b45309", lineHeight: 1.5, marginBottom: 10 }}>
-              Sign in (in the Site Planner workspace) to save reviews to the cloud. Your work stays in memory until then.
+              Sign in (in the Site Planner workspace) to save & file reviews to the cloud. Your work stays in memory until then.
             </div>
           )}
 
-          <div style={lbl}>Current review</div>
-          <input value={title} placeholder="Untitled review" onChange={(e) => onMeta?.("title", e.target.value)} style={fld} />
+          <div style={lbl}>File this review</div>
+          <select value={meta.projectId || ""} onChange={(e) => onProject(e.target.value)} style={fld}>
+            <option value="">Unfiled (no project)</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={meta.discipline || ""} onChange={(e) => onMeta?.("discipline", e.target.value)} style={fld}>
+            <option value="">Discipline…</option>
+            {DISCIPLINES.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
           <div style={{ display: "flex", gap: 6 }}>
-            <input value={project} placeholder="Project" onChange={(e) => onMeta?.("project", e.target.value)} style={fld} />
-            <input value={discipline} placeholder="Discipline" onChange={(e) => onMeta?.("discipline", e.target.value)} style={fld} />
+            <input value={meta.item || ""} placeholder="Item / type" onChange={(e) => onMeta?.("item", e.target.value)} style={fld} />
+            <input value={meta.revision || ""} placeholder="Rev" onChange={(e) => onMeta?.("revision", e.target.value)} style={{ ...fld, width: 80 }} />
           </div>
+          <input type="date" value={meta.docDate || ""} onChange={(e) => onMeta?.("docDate", e.target.value)} style={fld} />
+          <div style={{ ...lbl, marginTop: 8 }}>Name</div>
+          <input value={meta.title || ""} placeholder={composeTitle(meta)} onChange={(e) => onMeta?.("title", e.target.value)} style={fld} />
+
           <button onClick={() => { onNew?.(); setOpen(false); }} style={{ marginTop: 10, width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 7, border: `1px solid ${PAL.accent}`, background: "#fff", color: PAL.accent }}>＋ New review</button>
 
           <div style={{ borderTop: `1px solid ${PAL.line}`, margin: "12px -12px 0", padding: "10px 12px 0" }}>
