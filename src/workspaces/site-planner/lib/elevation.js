@@ -15,10 +15,13 @@ export async function sampleProfile(path, sampleCount = 48) {
   if (!r.ok) throw new Error(`3DEP HTTP ${r.status}`);
   const j = await r.json();
   if (j.error) throw new Error(j.error.message || "3DEP error");
-  return (j.samples || [])
-    .map((s) => parseFloat(s.value))
-    .filter((v) => isFinite(v))
-    .map((m) => m * M_TO_FT);
+  // Preserve POSITION: one entry per evenly-spaced sample, mapping no-data (water/
+  // void) to null instead of dropping it — so a later stat can place each surviving
+  // sample at its true fractional distance and not distort the x-axis (B58).
+  return (j.samples || []).map((s) => {
+    const v = parseFloat(s.value);
+    return isFinite(v) ? v * M_TO_FT : null;
+  });
 }
 
 /* Reduce a profile to ditch screening stats. `lenFt` is the line's ground length.
@@ -27,8 +30,15 @@ export async function sampleProfile(path, sampleCount = 48) {
 export function ditchStats(elevFt, lenFt) {
   if (!elevFt || elevFt.length < 2) return null; // need ≥2 samples (1 sample → i/(n-1)=0/0=NaN distance)
   const n = elevFt.length;
-  const profile = elevFt.map((el, i) => ({ d: (i / (n - 1)) * lenFt, el }));
-  const minFt = Math.min(...elevFt), maxFt = Math.max(...elevFt);
-  const bankFt = (elevFt[0] + elevFt[n - 1]) / 2;
+  // Place each surviving sample at its TRUE fractional position and skip no-data
+  // (null) points, so dropping voids never compresses the x-axis (B58).
+  const profile = [];
+  for (let i = 0; i < n; i++) { const el = elevFt[i]; if (el == null || !isFinite(el)) continue; profile.push({ d: (i / (n - 1)) * lenFt, el }); }
+  if (profile.length < 2) return null;
+  const els = profile.map((p) => p.el);
+  const minFt = Math.min(...els), maxFt = Math.max(...els);
+  // Banks = the end-most VALID samples (if a true end is no-data we fall back to the
+  // nearest valid one) rather than substituting an interior point as the bank (B58).
+  const bankFt = (profile[0].el + profile[profile.length - 1].el) / 2;
   return { profile, invertFt: minFt, bankFt, depthFt: Math.max(0, bankFt - minFt), minFt, maxFt };
 }

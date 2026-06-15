@@ -263,10 +263,17 @@ function offsetPolygon(pts, d) {
  * is exact for linear side slopes. Areas come from inward polygon offsets:
  * offset = slope × (depth below top of bank). Returns areas (sf) + volume. */
 function detentionStorage(ring, depth, freeboard, slope) {
+  const sgnArea = (r) => { let a = 0; for (let i = 0, m = r.length; i < m; i++) { const p = r[i], q = r[(i + 1) % m]; a += p.x * q.y - q.x * p.y; } return a / 2; };
+  const ringSgn = sgnArea(ring);
   const areaAt = (down) => { // wetted/section area at `down` ft below top of bank
     if (down <= 0) return polyArea(ring);
     const r = offsetPolygon(ring, slope * down);
-    return r ? polyArea(r) : 0; // collapsed (basin comes to a point) → 0
+    if (!r) return 0; // offset collapsed to nothing
+    // An over-taper makes offsetPolygon return an inverted/self-intersecting ring whose
+    // |area| is bogus; a winding-sign flip vs. the footprint means the basin tapered
+    // PAST a point → zero area (so the "tapers to a point" guard can fire) (B60).
+    if (ringSgn === 0 || sgnArea(r) * ringSgn <= 0) return 0;
+    return polyArea(r);
   };
   const aTop = polyArea(ring);
   const dw = Math.max(0, depth - freeboard);       // water depth
@@ -318,7 +325,7 @@ function buildUtilRoute(source, b, opts, uid) {
   const entry = ew.mid;
   let nx = entry.x - ctr.x, ny = entry.y - ctr.y; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
   const padC = { x: entry.x + nx * (opts.padSize / 2 + 3), y: entry.y + ny * (opts.padSize / 2 + 3) };
-  const pts = [source, entry];
+  const pts = [source, entry, padC]; // reach the fitting pad just outside the wall, not just the wall midpoint (B62)
   return { id: uid(), kind: "utilRoute", util: opts.util, pts, corridor: bufferPolyline(pts, opts.width), pad: rectRing(padC, opts.padSize, opts.padSize), width: opts.width, fitting: opts.fitting, label: opts.label, stroke: opts.color };
 }
 
@@ -2432,7 +2439,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const a = e.points ? polyArea(e.points) : e.w * e.h;
     if (e.type === "building") { bldg += a; if (e.dogEar) { bumpCount++; bumpArea += a; } }
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a;
-    else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, settings).count; }
+    else if (e.type === "parking") { parkArea += a; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "trailer") { trailArea += a; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") pondArea += a;
   });
@@ -2940,7 +2947,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   // One repeating parking band = a row of stalls + its drive aisle.
-  const parkBand = () => settings.stallDepth + settings.aisle;
+  const parkBand = (el) => { const c = el ? cfgOf(el) : settings; return (c.stallDepth || settings.stallDepth) + (c.aisle ?? settings.aisle); };
   // Grow a parking field one band deeper (keeping its near edge fixed); the
   // stall striping auto-fills the new depth. Loops, so you can stack rows/aisles.
   const growParking = (el, dir = 1) => {
@@ -3005,7 +3012,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const tx = -uy, ty = ux;                          // tangent along the edge
     const plus = { x: ms.x + ux * 16 - tx * 12, y: ms.y + uy * 16 - ty * 12 };
     const minus = { x: ms.x + ux * 16 + tx * 12, y: ms.y + uy * 16 + ty * 12 };
-    const canShrink = el.h - parkBand() >= settings.stallDepth;
+    const canShrink = el.h - parkBand(el) >= (cfgOf(el).stallDepth || settings.stallDepth);
     return (
       <g>
         {featNode("parkAdd", plus, false, "#2563eb", "Add a parking row + drive aisle", () => growParking(el, 1), null)}
@@ -4586,7 +4593,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
                       return <span style={{ color: "#7c3aed" }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} sf) → <b style={{ color: PAL.ink }}>{f0(area + ba)} sf</b> total<br /></span>;
                     })()}
-                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, settings).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
+                    {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
@@ -5200,7 +5207,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
 
   if (el.type === "parking") {
-    const cs = carStalls(el.w, el.h, settings);
+    const cs = carStalls(el.w, el.h, cfgOf(el));
     cs.bands.forEach((b, i) => {
       const bandW = b.n * b.pitch;
       parts.push(<rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
