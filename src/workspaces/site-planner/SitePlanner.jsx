@@ -1680,6 +1680,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
+    if (d.mode === "ovScale") { // corner handle: uniform scale about the (fixed) center
+      const ftPerPx = Math.max(0.001, d.ftPerPx0 * (Math.hypot(fp.x - d.C.x, fp.y - d.C.y) / d.grabDist));
+      const W = d.imgW * ftPerPx, H = d.imgH * ftPerPx;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ftPerPx, x: d.C.x - W / 2, y: d.C.y - H / 2 } : o)));
+      return;
+    }
+    if (d.mode === "ovRotate") { // rotate handle: rotate about the center
+      const rotation = (((d.rot0 + (Math.atan2(fp.y - d.C.y, fp.x - d.C.x) - d.a0) * 180 / Math.PI) % 360) + 360) % 360;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, rotation } : o)));
+      return;
+    }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
     if (d.mode === "printResize") {
       const aspect = printAspect();
@@ -2050,6 +2061,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel(null); setSelOverlay(id);
     pushHistory();
     drag.current = { mode: "moveSheetOverlay", id, fx: fp.x, fy: fp.y, ox: o.x, oy: o.y };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  // On-canvas resize (corner) + rotate handles for the selected overlay (B72 — completes
+  // the original spec). Both scale/rotate about the overlay center so they compose with any
+  // existing rotation; the panel sliders remain as an alternative.
+  const startScaleOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovScale", id, C, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const startRotateOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovRotate", id, C, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0 };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
   // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
@@ -4016,6 +4054,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {isSel && tool === "select" && (
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
+                    {isSel && tool === "select" && !o.locked && !ovCalib && (<>
+                      {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
+                        <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                          style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+                      ))}
+                      <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+                      <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                        style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+                    </>)}
                   </g>
                 );
               })}
