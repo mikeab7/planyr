@@ -484,7 +484,14 @@ busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 > the click-reliability work in **B64**.
 
 ### B99 — Parcel lock model: locked by default, explicit unlock to edit `[Site Planner]` (feature)
-`[ ]` Key points:
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Most of this was already in place —
+parcels are created `locked:true` (map import, draw, rect, split, merge, identify), locking already
+guards vertex-drag / vertex-add / polygon-move, and a per-parcel **🔓 Lock / 🔒 Unlock** toggle lives
+in the Parcel panel. Remaining work landed here: **removed the persistent 🔒 badge** from the saved-parcel
+list row (state now reads from the panel toggle when a parcel is selected, not an always-on glyph). Lock
+is a distinct field from active (B100). `locked` already persists per parcel in the Site Model `data`
+(no version bump needed — it's a per-parcel field, like `fill`/`setbacks`).
+Original spec:
 - **Remove the persistent lock badge** next to parcels.
 - Treat **all parcels as locked by default** so geometry can't be moved or edited by accident.
 - Provide an explicit per-parcel **"unlock to edit"** action; **re-lock** when done.
@@ -495,7 +502,17 @@ busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 > via a selector, per the conformance rule).
 
 ### B100 — Active / Inactive parcels driving calculations `[Site Planner]` (feature)
-`[ ]` Key points:
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Per-parcel `active` flag (default
+**active**; missing = active, so existing sites are unchanged until a parcel is toggled off). New
+`activeParcelsOf` selector + a unit test. `siteSqft` now sums **active parcels only**, so every
+downstream metric (coverage, FAR, impervious, detention %, open space) follows automatically. Added an
+**✓ Active / ◯ Inactive** toggle in the Parcel panel (beside Lock) + `toggleParcelActive`; inactive
+parcels render **dimmed + dashed** on the canvas (visible for context, clearly excluded) and show
+"· inactive" in the saved-parcel list; the Yield panel notes "Excludes N inactive parcel(s)." No
+`SITE_MODEL_VERSION` bump — `active` is a per-parcel field (defaulted at read, like `locked`/`fill`),
+so no migration is needed. **Scope note:** the *map's* site-acreage label (MapFinder) intentionally still
+shows the full footprint (all parcels) — B100 targets the planner's yield/coverage/detention math.
+Original spec:
 - Add a per-parcel **Active/Inactive** toggle.
 - **All area-based calculations — yield, coverage, detention, and similar — count ONLY active parcels.**
 - Inactive parcels stay **visible for context** but render **dimmed or with diagonal-line shading** so

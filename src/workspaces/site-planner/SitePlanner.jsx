@@ -2837,6 +2837,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
   };
+  // Active/Inactive is independent of lock (B100): inactive parcels drop out of every area
+  // calc but stay on the canvas (dimmed). Missing = active, so toggling off sets active:false.
+  const toggleParcelActive = (id) => {
+    pushHistory();
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, active: pc.active === false } : pc)));
+  };
   const toggleMarkupLock = (id) => {
     pushHistory();
     setMarkups((a) => a.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m)));
@@ -2846,7 +2852,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Per-element striping/count config: a strip may override the global standards
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
-  const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
+  // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
+  const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
@@ -4168,9 +4175,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
+                const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
                   fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                   stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                  strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                   style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                   pointerEvents="all"
                   onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -5300,7 +5309,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
                         style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}{picked ? " ✓" : ""}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
                         <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                       </button>
                     );
@@ -5437,6 +5446,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
@@ -5496,6 +5506,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ))}
             </div>
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
+            {parcels.some((p) => p.active === false) && (
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
+                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
+              </div>
+            )}
             {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
             {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
             {metricRow("FAR", f2(far), "(1-story)")}
