@@ -32,6 +32,43 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ---
 
+## 🎨 UI audit pass — 2026-06-16
+
+Full UI workstream from `UI_AUDIT.md` (re-authored this session: the predecessor 58-item
+audit lived only in a parallel chat and was never committed, and several of its findings
+were already implemented on `main`, so it was redone against HEAD + headless screenshots in
+`ui-audit/screens/`). The brief's "coordinate-with" B-numbers (B2/B3/B10/B15/B16/B18/B19) were
+that chat's provisional numbers — reconciled in `UI_AUDIT.md` (they map to real B2/B3/B10/**B65**/**B66** + two net-new). Net-new UI items minted here: **B93–B99**.
+
+### B98 — UI pass: element colours, tool naming, Parcel→Boundary, Pan remap, one save badge `[Site Planyr / UI]` (task)
+`[x]` Done 2026-06-16 (branch `claude/laughing-babbage-hrxgct`). Five priority UI fixes from the audit:
+- **Element colour differentiation (H2)** — paving / car parking / trailer / sidewalk / road read as one grey; now distinct hue+lightness + colour-blind-safe textures (sidewalk dot grid, trailer diagonal), parking striping / road centreline carry their own cue. `planStyle` gains a generic `pattern` field; `renderElPx` texFill resolves it. Commit 512fe6e.
+- **Tool naming (D10/D11)** — right-rail draw tools match the canvas/legend canonical names: Parking→**Car Parking**, Trailer→**Trailer Parking**, Pond→**Detention Pond**. Commit 1138a3f.
+- **"Parcel" duplication (C1/D5)** — the word was on both rails; right draw/split group renamed **Boundary** (menu still "Draw new parcel / Split a parcel"), left **Parcel** inspector kept (model: left = views, right = tools). Commit 1138a3f.
+- **Pan remap (D4)** — off `Shift+V` onto **H** + hold-**Space** temporary hand-pan; V always selects. Commit 1138a3f.
+- **One save/sync badge (E2 / cross-ref B10)** — folded the separate floating "Cloud ✓/off/err" diagnostic into the planner header badge: Syncing / Synced ✓ / Saved ✓ (device) / Offline / Unsaved. Commit b74894f.
+> Verified `✓ already done` (no change needed): undo/redo/zoom-fit tooltips+disabled (audit B6–B8), planner scale bar / north arrow / zoom-to-fit (G1–G3), switcher dropdown z-index (B66).
+
+### B93 — Standardize the right-rail element-row anatomy `[Site Planyr / UI]` (task)
+`[ ]` Site-element tool rows are inconsistent: Building / Road / Car Parking are 2-line (label + sub-label) with a `▾` preset menu; Paving / Trailer Parking / Detention Pond are 1-line with none. Adopt a uniform row template (consistent height + a sub-label slot; `▾` only where presets exist) so the rail reads as one tidy column. (Audit D13 — deferred from the UI pass: cosmetic with regression risk and the original target spec wasn't available; do deliberately.)
+
+### B94 — Road width preset wording / units consistency `[Site Planyr / UI]` (task)
+`[ ]` The Road tool's sub-label says "N′ travel" but its width `▾` menu lists "N′ wide — drag the length"; unify to "travel" everywhere and confirm the displayed-dimension-vs-curb units read consistently with the B70 three-way curb contract. (Audit D-Road; this is the parallel chat's "B19 roads units/rename".)
+
+### B95 — No sign-in affordance when Supabase is unconfigured `[global UI / auth]` (bug)
+`[ ]` The shell account control only renders when `supabaseConfigured()` is true, so a build without cloud env shows **no** sign-in / account entry point at all (the door is simply missing, not disabled). Show a "Sign in" affordance (or an explicit "cloud off" hint) even when unconfigured. (Audit A3.)
+
+### B96 — Minor UI polish cluster (File menu, map furniture, instruction copy, doc-review badge) `[Site Planyr / Document Review / UI]` (task)
+`[ ]` Grouped low-severity: (a) File `▾` items lack icon/divider consistency and tooltips; (b) the **map finder** has Leaflet zoom but no scale bar / north / "frame all sites" (the planner has all three) — add a Leaflet scale control + fit-to-sites; (c) the map's bottom-left instruction says "+ Select parcels (top-right)" but the button renders bottom-center — make copy and position agree; (d) Document Review's "Not saved" badge should align visually with the planner's unified save pill (dot + state word). (Audit B11 / J2 / J4 / K2.)
+
+### B97 — Legend swatch should also carry the H2 pattern cue `[Site Planyr / UI]` (task)
+`[ ]` After B98's colour+pattern differentiation, the Setup legend ("Element default colours") shows colour-only swatches; overlay each type's pattern (sidewalk dots, trailer diagonal, landscape hatch, pond water) so the colour-blind secondary cue is also in the key. (Audit H5. Note: the parallel chat's "B18 remove legend" is intentionally NOT done — after H2 the legend is the key to the palette.)
+
+### B99 — Planner is not responsive at mobile width `[Site Planyr / UI]` (feature)
+`[ ]` At ~390px the fixed 168px right rail + the left rail/panel consume most of the width and the canvas collapses to a sliver; the header wraps. The planner is effectively desktop-only. Needs a mobile treatment (collapsible/off-canvas rails, a bottom toolbar). Larger effort — roadmap, not a quick fix. (Audit L1; see `ui-audit/screens/planner-mobile.png`.)
+
+---
+
 ## 🐞 Bug audit — 2026-06-15 (overnight sweep)
 
 Systematic read-through of the whole codebase (5 parallel audits, each finding verified against the source). Severity/confidence noted per item. Items tagged **🔧 fixed in audit PR** were fixed in the same PR that added this section; the rest are triaged for review. IDs are permanent (B15+).
