@@ -5,7 +5,7 @@ import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -806,8 +806,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
   const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
   const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
+  const [pagePick, setPagePick] = useState(null); // multi-page PDF awaiting a sheet choice (B67 increment 2)
+  const [rehydratingId, setRehydratingId] = useState(null); // drawing whose backdrop is being re-fetched from Storage
   const drawingFileRef = useRef(null);
   const drawingPushTimer = useRef(null);
+  const parcelDrawingsRef = useRef(parcelDrawings);
+  useEffect(() => { parcelDrawingsRef.current = parcelDrawings; }, [parcelDrawings]);
   // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
   // autosave owns), then debounce the cloud push. Keeps this collection off the main
   // autosave path so it needs no new wiring through every flush/snapshot site.
@@ -817,23 +821,75 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(drawingPushTimer.current);
     drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
   };
+  // Back a freshly-attached drawing with its source file in Storage (B67 increment 2b), so
+  // its backdrop rebuilds on another device. Background + fallback-safe: logged-out / oversize
+  // / error just keeps the local raster (storageKey stays unset → "re-attach on load").
+  const uploadDrawingSource = async (recId, file) => {
+    if (!file) return;
+    const res = await uploadParcelDrawingFile(siteId, recId, file).catch(() => null);
+    if (!res) return;
+    persistDrawings(parcelDrawingsRef.current.map((d) => (d.id === recId ? { ...d, storageKey: res.key, ext: res.ext } : d)));
+  };
+  // Build + persist + open a drawing record from a rasterized page/image; back it with the source.
+  const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount, file) => {
+    const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+      name, kind, page: raster.page || 1, pageCount: pageCount || 1,
+      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
+      markups: [], createdAt: Date.now(), updatedAt: Date.now() };
+    persistDrawings([...parcelDrawings, rec]);
+    setOpenDrawingId(rec.id);
+    if (file) uploadDrawingSource(rec.id, file);
+    return rec;
+  };
   const onAttachDrawing = async (parcelId, file) => {
     if (!file || !parcelId) return;
     if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    const baseName = (file.name || "Drawing").replace(/\.[^.]+$/, "");
     try {
       const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
-      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // only page 1's raster is needed (page picker = follow-on)
-      const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
-        name: (file.name || "Drawing").replace(/\.[^.]+$/, ""), kind: isPdfFile(file) ? "pdf" : "image",
-        page: r.page || 1, pageCount: r.pageCount || 1, intrinsic: { w: r.imgW, h: r.imgH }, src: r.src,
-        markups: [], createdAt: Date.now(), updatedAt: Date.now() };
-      persistDrawings([...parcelDrawings, rec]);
-      setOpenDrawingId(rec.id);
+      // Multi-page PDF → let the user pick the sheet (keep the PDF + File alive to re-rasterize + upload).
+      if (r.pdf && r.pageCount > 1) { setPagePick({ parcelId, pdf: r.pdf, pageCount: r.pageCount, name: baseName, first: r, file }); return; }
+      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // single page — first raster is all we need
+      addDrawingFromRaster(parcelId, baseName, isPdfFile(file) ? "pdf" : "image", r, r.pageCount || 1, file);
     } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
   };
+  // Page-picker: rasterize the chosen sheet of a multi-page PDF, then attach it (B67 increment 2a).
+  const pickPage = async (n) => {
+    const pp = pagePick; if (!pp) return;
+    setPagePick(null);
+    try {
+      const raster = pp.first && pp.first.page === n ? pp.first : await rasterizePage(pp.pdf, n);
+      addDrawingFromRaster(pp.parcelId, `${pp.name} — p.${n}`, "pdf", raster, pp.pageCount, pp.file);
+    } catch (_) { setOverlapWarn("Couldn't render that page — try another."); }
+    finally { try { pp.pdf.destroy(); } catch (_) {} }
+  };
+  const cancelPagePick = () => { if (pagePick) { try { pagePick.pdf.destroy(); } catch (_) {} setPagePick(null); } };
+  // Rehydrate a drawing's backdrop from Storage when it was opened without a local raster
+  // (cross-device: the cloud row's src was stripped, but storageKey + the source survive).
+  useEffect(() => {
+    if (!openDrawingId) return;
+    const d = parcelDrawingsRef.current.find((x) => x.id === openDrawingId);
+    if (!d || d.src || !d.storageKey) return;
+    let live = true;
+    setRehydratingId(d.id);
+    (async () => {
+      let src = null;
+      try {
+        if (d.kind === "pdf") { const bytes = await downloadOverlayBytes(d.storageKey); if (bytes) { const rr = await rasterizeStoredPdf(bytes, d.page || 1); src = rr && rr.src; } }
+        else { src = await downloadOverlayDataUrl(d.storageKey); }
+      } catch (_) { /* keep the placeholder */ }
+      if (live) { if (src) setParcelDrawings((cur) => cur.map((x) => (x.id === d.id ? { ...x, src } : x))); setRehydratingId(null); }
+    })();
+    return () => { live = false; };
+  }, [openDrawingId]); // eslint-disable-line react-hooks/exhaustive-deps
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
-  const deleteDrawing = (id) => { persistDrawings(parcelDrawings.filter((d) => d.id !== id)); if (openDrawingId === id) setOpenDrawingId(null); };
+  const deleteDrawing = (id) => {
+    const gone = parcelDrawings.find((d) => d.id === id);
+    if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
+    persistDrawings(parcelDrawings.filter((d) => d.id !== id));
+    if (openDrawingId === id) setOpenDrawingId(null);
+  };
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
@@ -5726,8 +5782,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {openDrawingId && (() => {
         const d = parcelDrawings.find((x) => x.id === openDrawingId);
         if (!d) return null;
-        return <ParcelDrawing drawing={d} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
+        return <ParcelDrawing drawing={d} loading={rehydratingId === d.id} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
       })()}
+      {/* Multi-page PDF sheet picker (B67 increment 2) */}
+      {pagePick && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }} onClick={cancelPagePick}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink }}>Pick a sheet</div>
+            <div style={{ fontSize: 12, color: PAL.chromeMuted, margin: "5px 0 12px" }}>“{pagePick.name}” has {pagePick.pageCount} pages — choose which one to attach as the backdrop.</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {Array.from({ length: pagePick.pageCount }, (_, i) => i + 1).map((n) => (
+                <button key={n} onClick={() => pickPage(n)} title={`Attach page ${n}`}
+                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>{n}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
         const calls = parseCalls(mbText);
