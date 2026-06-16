@@ -17,6 +17,28 @@ scaffolded). Last updated mid-2026.
 > remind Michael). This is how features that pass CI but were never clicked don't slip
 > through, and how recurring checks (e.g. GIS endpoint liveness) get a periodic nudge.
 
+## How to talk to me (Michael) — IMPORTANT, applies to every reply
+Michael is an industrial real-estate developer, not a software engineer. In chat,
+explain everything in plain English — the way you'd explain it to a smart person who
+doesn't write code. This is a standing rule, not a one-off.
+- **Lead with what it means for me or the product** — what I'll see, do, or get — not
+  how it's built.
+- **No bare jargon or acronyms.** Don't make me decode terms like SWR, blob store,
+  raster, IndexedDB, dynamicMapLayer, RLS, etc. If a technical word is genuinely
+  unavoidable, give its plain meaning in the same breath — e.g. "caching (remembering
+  the last copy so it loads fast)".
+- **When you offer options, describe each by what actually happens for me and the real
+  trade-off**, not by the technique. Make the difference between options concrete
+  ("this one makes the wetlands map itself pop up instantly, even when the county
+  server is down; that one only remembers a little 'worked 5 min ago' label").
+- **Plainer, not vaguer.** Simpler words, but stay honest and precise. If you're unsure
+  or a thing is risky, say so in plain terms.
+- If I seem confused, it usually means the explanation had too much jargon — re-explain
+  in simpler terms, don't just repeat.
+
+This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
+PR descriptions, code comments, and the backlog technical and precise as usual.
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
