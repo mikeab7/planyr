@@ -59,6 +59,31 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 - **Separate dimension lines from name labels.** The edge-dimension callouts (the red `"300′"`, the `"638′"`, the `"5′"`) are a different layer than the centred element names — they should not share the same collision pool or overlap the name labels.
 - **Sanity check** against this exact layout (building 300′ × 638′ beside a narrow trailer strip beside a 9-ac pond) — if all of those read cleanly, the fix holds.
 
+### B122 — Auto-number buildings with contiguous renumber-on-delete `[Site Planner]` (feature)  *(arrived as "NEW-1"; re-minted B119→B122 after concurrent merges (#76/#77/#78) took B119–B121)*
+`[ ]` Assign each building a sequential display number, shown as **"Building N"**. Numbering rules:
+- **Order — placement order.** Numbers follow placement order: first building placed is Building 1, next is Building 2, etc. (Spatial ordering — e.g. left-to-right across the site — is a possible future toggle but **not** this item; placement order is the default since that's what delete-renumbering implies.)
+- **Contiguous, no gaps.** The set is always 1…N. Delete Building 2 of {1,2,3} → old Building 3 becomes Building 2, leaving {1,2}. A newly placed building always appends as N+1.
+- **Single building is still "Building 1"** — number from 1 even when there's only one, so adding a second doesn't relabel the first.
+- **CRITICAL — the number is a display label, not an identity.** Each building must carry a **stable internal ID (a UUID that never changes)**, separate from its visible number; the display number is just its position in the ordered list. This matters because other modules (Cost Estimating, Project Scheduling, Document Review file links) will eventually reference buildings — if those references point at the display number, deleting a building silently re-points every reference when numbers shift. **Bind all cross-references to the stable ID; render the number purely from list position.**
+- **Renumber-on-delete is immediate** and updates every visible building label in one pass.
+> Feeds **B123** (the building-label restructure) — B123's label Line 1 ("Building N") is exactly this display number, so build the two together (number = list position; stable ID = persisted identity). **Dedupe: net-new** — no existing item assigns building numbers or a stable per-building ID (B121 is label *collision/legibility*, not numbering). Filed from chat as provisional "NEW-1"; minted **B122** here (next after main's B121).
+
+### B123 — Restructure building label + make square footage persist on zoom-out `[Site Planner]` (feature)  *(arrived as "NEW-2"; re-minted B120→B123 after concurrent merges took B119–B121)*
+`[ ]` Today the square footage vanishes early on zoom-out because the label has no priority order — it just shrinks until lines disappear. Rebuild the building label as a **4-line stack with an explicit level-of-detail order** (level-of-detail = which lines survive as you zoom out vs. which drop first):
+```
+Building 1
+198,000 sf
+(incl. 2 bump-outs)
+300' × 638'
+```
+- **Line 1 — "Building N"** (from **B122**). Highest priority; last thing to drop.
+- **Line 2 — square footage** ("198,000 sf"). Second-highest priority — this is the line that disappears too eagerly today. It should survive zoom-out far longer than it does now, dropping only at extreme zoom-out where even the name is barely legible. Not literally pinned always-on, just promoted near the top of the drop order so it stops vanishing prematurely.
+- **Line 3 — modifier parenthetical,** rendered **only** when the building has one. Change the current "+2 bump-outs" wording to **"(incl. 2 bump-outs)"** — abbreviate "includes" → "incl." with the period, keep the parentheses. No parenthetical line at all when there are no bump-outs.
+- **Line 4 — dimensions** ("300' × 638'"). Lowest priority; first to drop on zoom-out.
+- **Drop order, first-to-drop → last:** dimensions → parenthetical → square footage → name.
+- **Build on B121's shared label level-of-detail/collision system — do NOT stand up a parallel label renderer.** This per-building 4-line stack is the building-specific concretization of B121's "Label priority / level-of-detail" tier; building labels must feed into B121's same priority/collision pool and its name-vs-dimension layer split.
+> **Depends on B122** (Line 1 is its "Building N") and **coordinates with B121**. **Dedupe vs. B121:** not a duplicate — B121 is the *general* cross-element collision / leader-line / LOD engine; B123 is the *building label's* specific content + drop order (the 4-line stack, the sf-persistence priority, and the "+2 bump-outs"→"(incl. 2 bump-outs)" wording — none of which B121 spells out). Implement B123's ordering **inside** B121's engine, not beside it. (B121 even cites this exact building label — `"Building … sf (+2 bump-outs) 300′×638′"` — as its overlap example.) Filed from chat as provisional "NEW-2"; minted **B123** here.
+
 ---
 
 ## 🎨 UI audit pass — 2026-06-16
