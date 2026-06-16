@@ -42,6 +42,13 @@ was never clicked" quietly ships broken.
 - **If it fails:** most likely a CORS block — a GIS host must allow the planyr.io origin.
   Note the failing host from the console. The feature degrades to honest "unknown"/error
   text, so a failure is visible, not silent.
+- **2026-06-16 — data path verified live** (Node, calling the shipped functions against
+  the production endpoints): downtown Houston → **Houston / Harris**, not in ETJ, road
+  **City**; Spring → **unincorporated + Houston ETJ + Harris**; Sugar Land → **Fort Bend**.
+  Field maps, normalization, the ETJ constant and county-key mapping are all correct
+  against live data. **Still ⏳ for the browser layer only** — CORS from the planyr.io
+  origin + the on-screen Identify-panel render — which needs a real browser (preview
+  https://claude-festive-davinci-0oco2.planyr.pages.dev, or planyr.io).
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
@@ -82,8 +89,8 @@ was never clicked" quietly ships broken.
 - **Expect:** No repeated white flash between frames (the paper backdrop holds). A partial
   fix shipped UNVERIFIED; if it persists, re-enable zoom animation / double-buffer next.
 
-### V7 — 🌐 GIS endpoint liveness (no browser needed) ⏳
-- **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (built green) · **Next check** 2026-07-16
+### V7 — 🌐 GIS endpoint liveness (no browser needed) ✅
+- **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (all 4 → HTTP 200 + fields: county 12 / city 11 / etj 6 / road 133) · **Next check** 2026-07-16
 - **Steps (any session, curl):** probe each source root for HTTP 200 + JSON:
   - County `https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0?f=json`
   - City `https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0?f=json`
