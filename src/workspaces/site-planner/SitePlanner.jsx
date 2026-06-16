@@ -3972,6 +3972,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
               </pattern>
+              {/* colour-blind-safe secondary cues for the paved surfaces (H2): trailer
+                  reads as a coarse diagonal (opposite lean to landscape), sidewalk as a
+                  fine concrete-scoring dot grid. */}
+              <pattern id="pat-trailer" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#b09a6c" strokeWidth="0.9" opacity="0.5" />
+              </pattern>
+              <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
+                <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
+              </pattern>
             </defs>
 
             {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
@@ -5720,7 +5729,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
-  const texFill = st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
