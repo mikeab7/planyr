@@ -1176,18 +1176,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
-      if (e.key === "Enter" && traceMode && tracePts.length >= 2) { e.preventDefault(); commitTrace(); return; }
-      if (e.key === "Enter" && tool === "mpolyline" && mkPoly?.pts?.length >= 2) { e.preventDefault(); finishMkPoly(); return; }
-      if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
-      if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
+      // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
+      if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
+      if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -1936,7 +1935,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (traceMode) commitTrace(); else if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (tool === "mpolygon" || tool === "mpolyline") finishMkPoly(); else if (draftElPoly) closeElPoly(); };
+  // One shared completion path for EVERY multi-point tool, used by BOTH Enter and double-click,
+  // so "finish / auto-close" behaves identically everywhere. Each finisher guards its own minimum
+  // point count, so this no-ops (rather than cancelling the draft) when there aren't enough yet.
+  const finishActiveDrawing = () => {
+    if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
+    if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : 2)) { finishMeasure(); return true; }
+    if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
+    if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
+    if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
+    if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
+    return false;
+  };
+  // Remove the last placed vertex of whatever multi-point shape is in progress (Backspace/Delete);
+  // empties a polygon draft to null so it's fully cancelled once the last point is gone.
+  const removeLastVertex = () => {
+    if (traceMode && tracePts.length) { setTracePts((a) => a.slice(0, -1)); return true; }
+    if (tool === "split" && splitPath.length) { setSplitPath((a) => a.slice(0, -1)); return true; }
+    if (tool === "measure" && measDraft.length) { setMeasDraft((a) => a.slice(0, -1)); return true; }
+    if (mkPoly?.pts?.length) { setMkPoly((m) => { const pts = m.pts.slice(0, -1); return pts.length ? { ...m, pts } : null; }); return true; }
+    if (draftPoly?.length) { setDraftPoly((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; }
+    if (draftElPoly?.pts?.length) { setDraftElPoly((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; }); return true; }
+    return false;
+  };
+  // Double-click finishes exactly the way Enter does (the shared path above).
+  const onBgDouble = () => { finishActiveDrawing(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -5379,8 +5403,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
 
           <Section title="Roads" collapsed>
-            <Field label="Curb width"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
-            <Field label="Travel widths">
+            <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
+            <Field label="Road widths (ft)">
               <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
             </Field>
@@ -5400,18 +5424,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })}
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
           </Section>
-
-          {/* legend */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", padding: "11px 13px", background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" }}>
-            {Object.keys(TYPE).map((k) => {
-              const st = typeStyle(k, settings);
-              return (
-                <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
-                  <span style={{ width: 11, height: 11, background: st.fill, border: `1px solid ${st.stroke}`, borderRadius: 3, display: "inline-block" }} />{TYPE[k].label.split(" / ")[0]}
-                </div>
-              );
-            })}
-          </div>
           </>)}
           </div>
           {/* drag handle to resize the menu */}

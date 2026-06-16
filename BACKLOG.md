@@ -30,16 +30,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 >
 > **What this is (plain English, 2026-06-15) — the "county resolution" theme.** B13-pt1 + **B36(a)** + **B36(d)** are really one piece of work: *how the app decides which county's appraisal-district (CAD) service to query when you click the map.* Today it screens by approximate per-county **bounding boxes** — fine for interior clicks in the 3 configured counties (Harris / Fort Bend / Chambers). The gaps, all near a county border or when a 4th+ county is added: **B13-pt1** the bboxes overlap/approximate → replace with true county **boundary polygons** (point-in-polygon); **B36(a)** the statewide TxGIO fallback can mislabel a Harris/FB lot's `county` when the primary CAD returns nothing; **B36(d)** a click on a county line should query both CADs and merge (only the first hit is used today). **Needs a county-boundary GIS dataset** to load + test points against — a data-source decision, so it's **feature-scale, not a quick fix**, and **low urgency** (interior clicks in the current 3 counties are fine). When picked up: choose/confirm the boundary source first, then point-in-polygon resolution + straddle merge fall out of it.
 
-### B93 — Remove the element-type color legend from the Setup/defaults page `[Site Planner / Setup]` (task)
-`[ ]` Remove the element-type color legend (Building, Paving, Car Parking, Trailer Parking, Detention Pond, Sidewalk, Landscape, Road) from the defaults/Setup page. Confirm it's display-only first; if element colors are actually *defined* there (not just shown), keep the color definitions the canvas relies on and remove only the visual key. (Distinct from the map **status** legend in B7/B8, which stays.)
-
-### B94 — Roads defaults: show "ft" units + rename "Travel widths" → "Road widths" `[Site Planner / Setup — Roads]` (bug)
-`[ ]` In the ROADS panel (Curb width 0.5; Travel widths 24, 26, 30, 36, 40): (1) **Show units** — both fields are in feet but display none; add "ft" to each so 0.5 (curb = 6″) and 24–40 (roads) aren't misread as different scales. (2) **Rename** "Travel widths" → "Road widths" (plural — it's a list of presets); "travel width" is the wrong term. (Distinct from **B89**, which fixed the NaN-road validation on this same field — this is the units/label half.)
-
-### B95 — Uniform polygon completion across ALL drawing tools (Enter/double-click finish + auto-close, Esc cancel, Backspace removes last vertex) `[Site Planner / drawing]` (bug)
-`[ ]` Pressing **Enter** while drawing a multi-point area should auto-close the shape (connect last→first) instead of requiring an extra click back on the start point (a triangle should be 3 clicks + Enter, not 4). Make this ONE shared drawing behavior across every multi-point tool — Building, Paving, Car Parking, Trailer Parking, Detention Pond, Sidewalk, Landscape, Parcel, and any custom area — not pond-only. Apply uniformly while auditing: **Enter or double-click = finish** (auto-close polygons), **Esc = cancel** the in-progress shape, **Backspace/Delete = remove the last placed vertex**. Road (free-draw) is related — Enter/double-click finishes the line, but as an open path don't force a closing segment. Implement the completion behavior in one shared place so it's consistent across every tool.
-> Current state (for whoever picks this up): double-click already closes parcel/element polygons via `onBgDouble`, but **Enter has no handler for the `parcel` / element-polygon / `mpolygon` tools** (only measure / split / mpolyline / trace), so Enter-to-close is the main gap; Esc-cancel already exists (one shared handler); per-vertex Backspace undo does not exist yet.
-
 ---
 
 ## 🐞 Bug audit — 2026-06-15 (overnight sweep)
@@ -364,6 +354,15 @@ fresh cluster — fixed here.
 ---
 
 ## ✅ Done
+
+### B93 — Remove the element-type color legend from the Setup/defaults page `[Site Planner / Setup]` (task)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Confirmed display-only first: element colors are *defined* in the "Element default colors" section (the color pickers writing `settings.typeStyles` via `setTypeStyle`) and in `TYPE`/`typeStyle`, which the canvas reads — the legend was just a swatch+label key. Removed the legend block only; color definitions untouched.
+
+### B94 — Roads defaults: show "ft" units + rename "Travel widths" → "Road widths" `[Site Planner / Setup — Roads]` (bug)
+`[x]` Done 2026-06-16. Labels are now "Curb width (ft)" and "Road widths (ft)" (matching the panel's other `(ft)` labels). Label-only change — the persisted `roadCurb`/`roadWidths` setting keys and the travel+curb geometry are unchanged. (The per-element "Travel width (ft)" field on a *selected road* is left as-is — there it's accurately the drivable width excluding curbs.)
+
+### B95 — Uniform polygon completion across ALL drawing tools `[Site Planner / drawing]` (bug)
+`[x]` Done 2026-06-16. One shared `finishActiveDrawing()` now drives BOTH Enter and double-click (`onBgDouble`), so finish/auto-close is identical across parcel, every area element (building/paving/parking/trailer/pond/sidewalk/landscape + custom polygons), measure, split, markup poly/polyline, and trace — Enter previously had no handler for parcel / element-polygon / mpolygon. Added `removeLastVertex()` so Backspace/Delete undoes the last placed vertex mid-draw (before the delete-selection fallback); Esc-cancel already existed. Road free-draw still finishes as an open path (no forced closing segment). Each finisher keeps its own min-point guard, so Enter/double-click no-ops instead of cancelling a too-short draft; `draftPoly`/`draftElPoly` added to the keydown effect deps so the handler reads the current draft.
 
 ### B1 — Sign-up form: missing fields `[auth]` (bug)
 `[x]` Sign-up must collect **First name**, **Last name**, and **Organization/Company**. These fields are currently absent.
