@@ -295,6 +295,26 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
   return out;
 }
 
+// Configured CAD county keys (those with a wired parcel service) — maps a TxDOT
+// county name back onto the app's routing keys for the B36(a) label correction.
+const COUNTY_NAME_TO_KEY = { harris: "harris", "fort bend": "fortbend", chambers: "chambers" };
+
+/* The true county at a point, via the verified TxDOT county-boundary layer (cached).
+ * Returns { name, key } — `key` is the app's configured CAD key when recognized,
+ * else null (county known but not a wired CAD). This is the point-in-county
+ * primitive B13-pt1 / B36(a) were waiting on: a parcel that the statewide TxGIO
+ * fallback labelled "Chambers" can be checked and relabelled to its real county.
+ * (Deliberately NOT used to REPLACE the bbox routing pre-filter — the existing
+ * parallel "query candidates, answerer wins" identify is faster + more resilient
+ * than a blocking county lookup; this only corrects a label after the fact.) */
+export async function countyAtPoint(lng, lat, opts = {}) {
+  const src = JURISDICTION_SOURCES.county;
+  const r = await identifySource(src, { lng, lat }, opts).fresh;
+  const name = r.items.map((it) => normalizeFeature(src, it.attrs).name).find(Boolean) || null;
+  if (!name) return { name: null, key: null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+  return { name: String(name), key: COUNTY_NAME_TO_KEY[String(name).toLowerCase()] || null, ageMs: r.ageMs, ts: r.ts };
+}
+
 // ---------------------------------------------------------------------------
 // B73 — road maintenance authority. Two modes:
 //   • click (lng,lat)      → the NEAREST segment within tolerance.

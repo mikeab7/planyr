@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   JURISDICTION_SOURCES, ROAD_MAINT_AGENCY, roadAuthority,
   buildIdentifyParams, normalizeFeature, simplifyRing, polylineDistMeters,
-  identifySource, identifyJurisdiction, identifyRoadAuthority,
+  identifySource, identifyJurisdiction, identifyRoadAuthority, countyAtPoint,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 
@@ -239,6 +239,29 @@ describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
     });
     expect(out.county).toEqual(["Harris"]);
     expect(out.sources.find((s) => s.id === "city").state).toBe("failed");
+  });
+});
+
+// ----------------------------------------------------------------------------
+describe("countyAtPoint (B13/B36) — point-in-county primitive", () => {
+  it("returns the county name + the configured CAD key", async () => {
+    const out = await countyAtPoint(-95.37, 29.76, { cache: freshCache(), fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris" } }] }) });
+    expect(out.name).toBe("Harris");
+    expect(out.key).toBe("harris");
+  });
+  it("maps 'Fort Bend' onto the fortbend key", async () => {
+    const out = await countyAtPoint(-95.8, 29.5, { cache: freshCache(), fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Fort Bend" } }] }) });
+    expect(out.key).toBe("fortbend");
+  });
+  it("a county with no wired CAD has a name but a null key", async () => {
+    const out = await countyAtPoint(-94.6, 29.7, { cache: freshCache(), fetchJson: fakeFetch({ [COUNTY]: () => [{ attributes: { CNTY_NM: "Galveston" } }] }) });
+    expect(out.name).toBe("Galveston");
+    expect(out.key).toBeNull();
+  });
+  it("no county (offshore / empty) → name + key both null", async () => {
+    const out = await countyAtPoint(0, 0, { cache: freshCache(), fetchJson: fakeFetch({ [COUNTY]: () => [] }) });
+    expect(out.name).toBeNull();
+    expect(out.key).toBeNull();
   });
 });
 
