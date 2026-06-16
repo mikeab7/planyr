@@ -1,19 +1,26 @@
 /* Shared element styling for the planner canvas AND the map overview, so a
  * site plan looks identical wherever it's drawn. */
 
-// Architectural presentation palette — warm poché building, restrained greys for
-// paving, soft sage landscape, muted desaturated water. `weight` feeds a line
-// hierarchy (property line / building heaviest, surface edges medium, internal
-// striping hairline). Building carries a soft drop shadow in the renderer.
+// Architectural presentation palette — warm poché building, soft sage landscape,
+// muted desaturated water, and a DIFFERENTIATED set of surface colours so the
+// paved types never read as one undifferentiated grey (the old failure: paving,
+// car/trailer parking, sidewalk and road were all near-identical warm greys).
+// Each surface now carries two redundant cues so it stays legible for colour-blind
+// users too: a distinct hue + lightness AND, for the plainest fills, a texture
+// pattern (`pattern`, painted over the fill in the renderer). Parking always shows
+// its stall striping and road its centreline/curbs, so those carry their own
+// secondary cue; paving stays the neutral baseline. `weight` feeds a line hierarchy
+// (property line / building heaviest, surface edges medium, internal striping
+// hairline). Building carries a soft drop shadow in the renderer.
 export const TYPE = {
   building: { fill: "#f3ece1", stroke: "#33302b", label: "Building", weight: 2, shadow: true },
-  paving: { fill: "#dcd8d0", stroke: "#a59f93", label: "Paving / Drive", weight: 1.25 },
-  parking: { fill: "#e2ded6", stroke: "#a8a294", label: "Car Parking", weight: 1.25 },
-  trailer: { fill: "#d7d3ca", stroke: "#a29c8e", label: "Trailer Parking", weight: 1.25 },
+  paving: { fill: "#d6d1c7", stroke: "#9a9384", label: "Paving / Drive", weight: 1.25 },
+  parking: { fill: "#cdd7dd", stroke: "#7d949e", label: "Car Parking", weight: 1.25 },
+  trailer: { fill: "#e3d4b2", stroke: "#b09a6c", label: "Trailer Parking", weight: 1.25, pattern: "trailer" },
   pond: { fill: "#9fc4d4", stroke: "#5d8497", label: "Detention Pond", weight: 1.25, water: true },
-  sidewalk: { fill: "#e7e3da", stroke: "#b3ad9f", label: "Sidewalk", weight: 1 },
+  sidewalk: { fill: "#eceae3", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
-  road: { fill: "#cfcabf", stroke: "#8f897c", label: "Road", weight: 1.25 },
+  road: { fill: "#b9b4a8", stroke: "#7c786d", label: "Road", weight: 1.25 },
 };
 
 // Resolved style for a type = built-in default merged with any user-set default
@@ -32,6 +39,7 @@ export const elStyle = (el, settings) => {
     shadow: !!base.shadow,
     hatch: !!base.hatch,
     water: !!base.water,
+    pattern: base.pattern || null,
   };
 };
 

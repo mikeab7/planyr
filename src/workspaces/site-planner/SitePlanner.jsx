@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
@@ -110,16 +111,16 @@ const ToolIcon = ({ id, size = 15 }) => (
 
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
-  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: Shift+V (press V for Select)" },
+  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
   { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
-  { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
-  { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
-  { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
+  { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
+  { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
+  { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
@@ -718,7 +719,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -760,6 +761,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
+  const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
+  const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
@@ -799,6 +802,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
+  // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
+  const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
+  const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
+  const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
+  const drawingFileRef = useRef(null);
+  const drawingPushTimer = useRef(null);
+  // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
+  // autosave owns), then debounce the cloud push. Keeps this collection off the main
+  // autosave path so it needs no new wiring through every flush/snapshot site.
+  const persistDrawings = (next) => {
+    setParcelDrawings(next);
+    if (siteId) saveSite({ id: siteId, parcelDrawings: next });
+    clearTimeout(drawingPushTimer.current);
+    drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
+  };
+  const onAttachDrawing = async (parcelId, file) => {
+    if (!file || !parcelId) return;
+    if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    try {
+      const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
+      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // only page 1's raster is needed (page picker = follow-on)
+      const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+        name: (file.name || "Drawing").replace(/\.[^.]+$/, ""), kind: isPdfFile(file) ? "pdf" : "image",
+        page: r.page || 1, pageCount: r.pageCount || 1, intrinsic: { w: r.imgW, h: r.imgH }, src: r.src,
+        markups: [], createdAt: Date.now(), updatedAt: Date.now() };
+      persistDrawings([...parcelDrawings, rec]);
+      setOpenDrawingId(rec.id);
+    } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
+  };
+  const updateDrawingMarks = (id, markups) =>
+    persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
+  const deleteDrawing = (id) => { persistDrawings(parcelDrawings.filter((d) => d.id !== id)); if (openDrawingId === id) setOpenDrawingId(null); };
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
@@ -1170,7 +1205,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
-      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
+      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
+      if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
+      // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
+      if (e.key === " " || e.code === "Space") {
+        if (document.activeElement && document.activeElement.tagName === "BUTTON") return; // let Space activate a focused button
+        if (!spaceRef.current) { spaceRef.current = true; setSpacePan(true); }
+        e.preventDefault(); // arm hold-to-pan; also blocks the page from scrolling
+        return;
+      }
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
@@ -1188,8 +1231,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
+    const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly]); // eslint-disable-line
 
   const deleteSel = () => {
@@ -1267,6 +1312,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
 
     if (printMode) { // in print-placement: background drag pans only (frame has its own handles)
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (spaceRef.current) { // Space held → temporary hand-pan over whatever tool/mode is active (D4)
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       svgRef.current.setPointerCapture(e.pointerId);
@@ -4018,8 +4069,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           Snap {settings.gridSize}′
         </button>
         {vSep}
-        {/* autosave indicator */}
-        <span style={{ fontSize: 11, color: saveStatus === "unsaved" ? "#fbbf24" : PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : saveStatus === "unsaved" ? "Unsaved" : "Saved ✓"}</span>
+        {/* single save/sync badge — folds in the cloud connection state (synced /
+            syncing / offline / error), replacing the old separate "Cloud ✓" pill (B10/E2) */}
+        {(() => {
+          const cloudActive = isCloudActive();
+          const connOk = cloud?.state === "connected";
+          let label, dot, color = PAL.chromeMuted, spin = false, tip;
+          if (saveStatus === "saving") {
+            label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
+          } else if (saveStatus === "unsaved") {
+            color = "#fbbf24"; dot = "#f59e0b";
+            label = cloudActive && !connOk ? "Offline" : "Unsaved";
+            tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
+          } else if (cloudActive && connOk) {
+            label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
+          } else if (cloudActive) {
+            label = "Offline"; color = "#fbbf24"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
+          } else {
+            label = "Saved ✓"; dot = "#9b9482"; tip = "Saved on this device. Sign in to sync across your devices.";
+          }
+          return (
+            <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flex: "none", animation: spin ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+              {label}
+            </span>
+          );
+        })()}
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div style={{ position: "relative" }}>
@@ -4028,15 +4103,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <>
                 <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 220 }}>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+                  <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
+                  <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
                   <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
                     onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+                  <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+                  <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
+                  <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
                 </div>
               </>
             )}
@@ -4054,7 +4129,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -4071,6 +4146,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </pattern>
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
+              </pattern>
+              {/* colour-blind-safe secondary cues for the paved surfaces (H2): trailer
+                  reads as a coarse diagonal (opposite lean to landscape), sidewalk as a
+                  fine concrete-scoring dot grid. */}
+              <pattern id="pat-trailer" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#b09a6c" strokeWidth="0.9" opacity="0.5" />
+              </pattern>
+              <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
+                <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
             </defs>
 
@@ -4673,7 +4757,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {[
                   ["1", <>Pick a <b>parcel from the map</b> (‹ Map) to start from real county data,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
-                  ["3", <>or draw a boundary with the <b>Parcel</b> tool on the right.</>],
+                  ["3", <>or draw one with the <b>Boundary</b> tool (right rail).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
                     <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
@@ -4771,11 +4855,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
           <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
-          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")}><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>⇧V</span></button>
+          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             {toolMenu && (
               <>
                 <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
@@ -4826,7 +4910,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={id} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Parking</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Car Parking</span>
                       <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
                     </button>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
@@ -4862,7 +4946,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                         <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
                         {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
+                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
                         ))}
                       </div>
                     </>
@@ -4870,7 +4954,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
               );
             }
-            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label}</button>;
+            // B93: give the preset-less site-element rows (paving/trailer/pond) the same
+            // two-line anatomy as Building/Road/Car Parking, so the rail reads as one
+            // uniform column (these just have no "▾" preset menu).
+            const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
+            return (
+              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id={id} /> {t.label}</span>
+                {sub && <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{sub}</span>}
+              </button>
+            );
           })}
 
           {railHdr("Shapes")}
@@ -5300,7 +5393,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Parcel tool.</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Boundary tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {parcels.map((pc, i) => {
@@ -5365,6 +5458,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </Section>
           )}
+          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
+              up on an immutable backdrop. */}
+          {leftPanel === "parcel" && selParcel && (() => {
+            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
+            return (
+              <Section title="Attached drawings">
+                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
+                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
+                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
+                {mine.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                    {mine.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "#fff" }}>
+                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
+                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
+                        </button>
+                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
+                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
           {/* appraisal-district property data for the selected parcel */}
           {leftPanel === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
@@ -5584,7 +5704,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
               {[
-                ["Tools", ""], ["V", "Select"], ["⇧V", "Pan (hand)"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
+                ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
                 ["Ctrl/⌘ D", "Duplicate"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
@@ -5602,6 +5722,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
         </div>
       )}
+      {/* Parcel-attached drawing markup modal (B67) */}
+      {openDrawingId && (() => {
+        const d = parcelDrawings.find((x) => x.id === openDrawingId);
+        if (!d) return null;
+        return <ParcelDrawing drawing={d} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
+      })()}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
         const calls = parseCalls(mbText);
@@ -5840,7 +5966,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
-  const texFill = st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (

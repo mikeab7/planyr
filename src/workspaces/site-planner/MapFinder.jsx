@@ -179,6 +179,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const mapRef = useRef(null);
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   const sitesLayerRef = useRef(null); // saved-site footprints
+  const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
+  const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
   const onOpenSiteRef = useRef(onOpenSite);
   useEffect(() => { onOpenSiteRef.current = onOpenSite; }, [onOpenSite]);
   const onSetStatusRef = useRef(onSetStatus);
@@ -232,6 +234,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const cfg = COUNTIES_MAP.harris; // default landing view (no pre-picked county)
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
+    L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
@@ -253,10 +256,24 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     map.on("mousemove", onMouseMove);
     map.on("dragstart", onDragStart);
     map.on("dragend", onDragEnd);
-    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.remove(); mapRef.current = null; };
+    // B64: track whether a pointer is currently pressed on the map, so the saved-site
+    // layer is never torn down + rebuilt between a mousedown and mouseup (that destroys
+    // the path that received the press and Leaflet swallows the click). On release, run
+    // any deferred rebuild a tick later so the pending click dispatches first.
+    const containerEl = map.getContainer();
+    const onPress = () => { pressedRef.current = true; };
+    const onRelease = () => {
+      pressedRef.current = false;
+      if (pendingRebuildRef.current) { const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; setTimeout(fn, 0); }
+    };
+    containerEl.addEventListener("pointerdown", onPress);
+    containerEl.addEventListener("pointerup", onRelease);
+    containerEl.addEventListener("pointercancel", onRelease);
+    return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fit the map to all LOCATED saved sites (blank-planner sites have no origin). (B96b)
   /* aerial imagery layer (swappable source) */
   useEffect(() => {
     const map = mapRef.current;
@@ -326,6 +343,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const build = () => {
+    if (!mapRef.current) return; // unmounted while deferred
     if (sitesLayerRef.current) { map.removeLayer(sitesLayerRef.current); sitesLayerRef.current = null; }
     const group = L.layerGroup();
     sites.forEach((site) => {
@@ -376,7 +395,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     });
     group.addTo(map);
     sitesLayerRef.current = group;
-    return () => { try { map.removeLayer(group); } catch (_) {} };
+    };
+    // Defer the rebuild if a press is in flight (B64); otherwise build now.
+    if (pressedRef.current) { pendingRebuildRef.current = build; return; }
+    build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sites, activeSiteId, selectMode, showPlans, hidden]);
 

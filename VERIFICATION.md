@@ -131,6 +131,22 @@ was never clicked" quietly ships broken.
 - **Expect:** all 200 with a `fields` array. County/city GIS hosts move occasionally — if one
   404s/moves, re-point its row in `src/workspaces/site-planner/lib/jurisdiction.js`.
 
+### V8 — Attach & mark up a drawing on a parcel (B67) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site, select a **parcel** → Parcel panel → **"＋ Attach a drawing (PDF / JPG)"**
+  → pick a real engineering PDF (then also a JPEG). Draw with **Pen / Line / Box / Text**,
+  recolour, **Select** + **Delete**, **zoom (wheel) + pan (drag in Select)**, click **Done**,
+  reopen the drawing, then **reload the page**.
+- **Expect:** page 1 rasterizes as an **immutable backdrop**; markups stay **locked to the
+  drawing** through zoom/pan (stored pixel-relative); multiple drawings list under the parcel;
+  markups **persist** across reopen + reload (signed in, same device). `ui-audit/screens/
+  parcel-drawing.png` shows the modal headless (an SVG stand-in, not a real PDF) — this step
+  confirms it with a real file.
+- **Known limits (NOT bugs — increment 2):** multi-page PDFs show **page 1** only (no page
+  picker yet); after a **re-login on another device** the backdrop shows a "re-attach to view
+  — markups saved" placeholder (the raster is local-only until Storage backing lands; the
+  markups always persist).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
