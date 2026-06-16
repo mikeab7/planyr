@@ -347,6 +347,110 @@ fresh cluster — fixed here.
 
 ---
 
+## 🎨 UI/UX & parcel-interaction overhaul — 2026-06-16 (product walkthrough)
+
+Filed from a product walkthrough of the map + planner chrome and the parcel-interaction
+model. Provisional **NEW-1…NEW-8** minted **B93–B100** here. Deduped against existing
+items — **B10** (two-header consolidation + product switcher) already shipped for the
+*planner* context bar and explicitly left "a single physical row is a later polish," so
+**B93** is that remaining polish for the *map* view (net-new, not a re-file); the rest have
+no existing Open counterpart. All eight are `[ ]` Open.
+
+### B93 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
+`[ ]` **Repro:** the map view shows two stacked header bars — a black account bar on top (the
+shell header) and a white search/actions bar below (the MapFinder header) — with the brand/module
+lockup ("Site Planyr") appearing on both. **Expected:** a single header holding the logo, the
+**"Find a site"** search + **Go**, the account menu, and the primary actions (**Start blank**).
+Drop the redundant second "Site Planyr" lockup and reclaim the vertical space for the map.
+> Dedup: the map-view counterpart to **B10** (done — the *planner* context bar got the
+> brand-dedup + product switcher, but its done-note explicitly deferred "a single physical row"
+> as "later polish"). B93 is that remaining single-row polish for the **MapFinder** header.
+> Mind the **B66** stacking-context fix (shell header vs. workspace z-index floor) when collapsing
+> the bars so the product-switcher dropdown still paints above the map. (If the rendered mark truly
+> reads "Site Planr", that's also a **B3** spelling regression to fix in passing.)
+
+### B94 — Remove the "Drag to move the map" hint card `[Site Planner / map]` (task)
+`[ ]` The persistent bottom-left note ("Drag to move the map. Hit '+ Select parcels'…") is noise
+once you know the app. **Remove the persistent card.** If first-run guidance is still wanted, show it
+as a **one-time, dismissible** hint (a small bubble that appears the first time, then goes away)
+rather than a permanent fixture.
+> Cross-ref: **B21** notes the bottom-left slot is shared between this click-guidance and error
+> toasts (a background layer error masks the guidance). Removing/relocating the persistent card
+> interacts with that shared slot — coordinate so a one-time hint and transient layer-error toasts
+> don't fight over the same corner.
+
+### B95 — Redesign the Sites panel (collapsible, safer delete, see-all) `[Site Planner / map]` (feature)
+`[ ]` Rework the saved-sites panel:
+- **Collapsible** — collapsed = a slim tab/handle (optionally showing the site count); expanded =
+  the full list. **Persist** the open/closed state.
+- **Safer delete** — remove the always-visible per-row **X**. Delete must take intent: move it behind
+  a per-row **"more actions" (⋯)** menu with a confirm.
+- **Primary row action = the crosshair** (zoom-to-site). Reveal the other row buttons **on hover**
+  rather than showing them on every row at all times.
+- Keep the **status filter chips**, but **hide zero-count statuses**; default to an **all-sites** view.
+> Cross-ref: builds on the saved-sites panel from **B7/B8** (status legend + per-state show/hide
+> filters + pipeline counts). "Hide zero-count statuses / default all-sites" refines those existing
+> filters — extend them, don't fork a parallel panel. Status set + visuals stay per B7/B8.
+
+### B96 — Rework the left tool rail (order, polish, fits on one page) `[Site Planner]` (task)
+`[ ]` Reorder and polish the planner's left tool rail:
+- **Reorder with Yield at the top.** Suggested grouping: primary modes up top (**Yield, Parcel,
+  Element**); utilities pinned to the bottom (**Aerial, Overlay, Setup**).
+- **Lighten the selected-tool highlight** — an accent bar or subtle fill, not the heavy brown block —
+  and tighten vertical spacing + icon sizing so it reads as polished.
+- The **full rail must fit within the viewport height** — no scrolling to reach a tool.
+> Note: **Overlay** is the **B72** tool (shipped browser-only) — slot it into the "utilities" group
+> at the bottom.
+
+### B97 — Compact the right Layers / Utility Evidence panel so it fits on one page `[Site Planner]` (bug)
+`[ ]` **Repro:** the Layers + Utility Evidence list is tall enough to overflow, pushing lower items
+off-screen and forcing a scroll. **Expected:** reduce row height, padding, and section spacing so every
+layer and tool fits without scrolling. If the list keeps growing, make the two sections (**Layers** /
+**Utility Evidence**) **collapsible**. Single-page, no-scroll is the bar.
+
+### B98 — Stop the parcel popup from firing on every click; declutter it `[Site Planner / map]` (bug)
+`[ ]` **Repro:** clicking inside a parcel opens the parcel popup, but while drawing/measuring you click
+inside parcels constantly, so it fires far too often and gets in the way; the on-parcel overlay is also
+busy/unclear (line + vertex handles + length labels all at once). **Expected:**
+- When a **draw/measure tool is active**, clicks go to the **tool** and do **NOT** open the popup.
+- Parcel info opens only via an **explicit action** — selecting with the Parcel/Select tool, a
+  **double-click**, or a small **"i" button** — and shows in a **side or pinned panel** rather than a
+  popover that keeps reappearing.
+- **Trim the popup to essentials** — name/ID, area, status, active/inactive, lock state — with details
+  behind an **expand**.
+> Cross-ref: the identify path + result panel already exist (**B53** `identifyAt`→`setIdentifyRes`;
+> **B6** select tool). The "active/inactive" + "lock state" essentials come from **B100** / **B99**.
+> Gate the popup behind the active-tool check rather than adding a parallel identify path; relates to
+> the click-reliability work in **B64**.
+
+### B99 — Parcel lock model: locked by default, explicit unlock to edit `[Site Planner]` (feature)
+`[ ]` Key points:
+- **Remove the persistent lock badge** next to parcels.
+- Treat **all parcels as locked by default** so geometry can't be moved or edited by accident.
+- Provide an explicit per-parcel **"unlock to edit"** action; **re-lock** when done.
+- **Lock (can the shape be edited) is independent of active/inactive (B100).** Two separate properties
+  on a parcel.
+> Cross-ref: the trimmed parcel popup (**B98**) surfaces lock state in its essentials. Persist lock
+> per parcel on the Site Model (additive field → bump `SITE_MODEL_VERSION`, extend `migrate`, expose
+> via a selector, per the conformance rule).
+
+### B100 — Active / Inactive parcels driving calculations `[Site Planner]` (feature)
+`[ ]` Key points:
+- Add a per-parcel **Active/Inactive** toggle.
+- **All area-based calculations — yield, coverage, detention, and similar — count ONLY active parcels.**
+- Inactive parcels stay **visible for context** but render **dimmed or with diagonal-line shading** so
+  it's obvious they're excluded.
+- **New parcels default to Active.**
+- Expose the toggle in the **parcel info panel (B98)**, and ideally **inline** on the parcel itself.
+> Cross-ref: independent of lock (**B99**). The "active only" rule must thread through the
+> yield/coverage/detention math (the `siteSqft` / `developableArea` inputs) — additive Site Model field
+> → bump `SITE_MODEL_VERSION`, extend `migrate`, expose via a selector; the self-intersection/area
+> guards from **B81/B86** feed the same totals, so keep them in step.
+
+<!-- Filed 2026-06-16 from a product walkthrough (provisional NEW-1…NEW-8 → minted B93–B100 here; deduped against B10/B7/B8/B53/B66, which already shipped — these are net-new UI/parcel-interaction work). -->
+
+---
+
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
