@@ -223,6 +223,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const cfg = COUNTIES_MAP.harris; // default landing view (no pre-picked county)
     const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
     mapRef.current = map;
+    L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => { if (selectModeRef.current) handleClick(e.latlng); };
     const onZoom = () => setZoom(map.getZoom());
@@ -247,6 +248,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return () => { map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fit the map to all LOCATED saved sites (blank-planner sites have no origin). (B96b)
+  const fitToSites = () => {
+    const map = mapRef.current; if (!map) return;
+    const pts = sites.filter((s) => s.origin).map((s) => [s.origin.lat, s.origin.lon]);
+    if (!pts.length) return;
+    if (pts.length === 1) map.flyTo(pts[0], 15, { duration: 0.6 });
+    else map.fitBounds(L.latLngBounds(pts), { padding: [70, 70], maxZoom: 16 });
+  };
 
   /* aerial imagery layer (swappable source) */
   useEffect(() => {
@@ -531,7 +541,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         {/* saved sites */}
         {sites.length > 0 && (
           <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
-            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px 6px" }}>Your sites · {sites.length}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px 6px" }}>
+              <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Your sites · {sites.length}</span>
+              <span style={{ flex: 1 }} />
+              {sites.some((s) => s.origin) && (
+                <button onClick={fitToSites} title="Zoom the map to show all your located sites"
+                  style={{ fontSize: 10.5, fontWeight: 700, color: PAL.accent, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>⊡ Fit all</button>
+              )}
+            </div>
             {/* Pipeline by status — legend + filter + counts. Each chip is a toggle
                 (click to hide/show that status on the map); the count is computed
                 live, the glyph + color is the marker legend. */}

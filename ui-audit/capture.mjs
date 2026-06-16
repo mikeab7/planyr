@@ -51,6 +51,17 @@ const seedScript = (current) => `(() => {
   } catch (e) {}
 })();`;
 
+// Two LOCATED saved sites (with an origin) + no currentSite, so the app boots to the
+// map finder showing the "Your sites" panel, markers, the scale bar and "Fit all" (B96b).
+const locatedSites = {
+  a1: { id: "a1", groupId: "a1", site: "Katy Logistics Park", name: "Plan 1", origin: { lat: 29.786, lon: -95.83 }, county: "harris", parcels: [parcel], els: [els[0]], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now(), data: { status: "active" } },
+  a2: { id: "a2", groupId: "a2", site: "Brookshire Tract", name: "Plan 1", origin: { lat: 29.78, lon: -95.95 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now(), data: { status: "pursuit" } },
+};
+const mapSitesSeed = `(() => { try {
+  localStorage.setItem('planarfit:sites:v1', JSON.stringify(${JSON.stringify(locatedSites)}));
+  localStorage.removeItem('planarfit:currentSite:v1');
+} catch (e) {} })();`;
+
 const fitFirst = async (page) => { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 5000 }); };
 
 // Each shot: { name, seed:true|false, viewport?, prep?(page) }. `seed:true` boots
@@ -69,6 +80,7 @@ const SHOTS = [
   { name: "planner-shortcuts.png", seed: true, prep: async (p) => { await p.locator('[title="Keyboard shortcuts (?)"]').click({ timeout: 5000 }); } },
   { name: "planner-mobile.png", seed: true, viewport: { width: 390, height: 844 }, prep: fitFirst },
   { name: "map.png", seed: false },
+  { name: "map-sites.png", rawSeed: mapSitesSeed },
   { name: "doc-review.png", seed: false, prep: async (p) => {
       await p.locator('[title="Switch module"]').click({ timeout: 5000 });
       await p.getByRole("menuitem", { name: "Document Review" }).click({ timeout: 5000 });
@@ -78,7 +90,7 @@ const SHOTS = [
 
 async function shot(browser, s) {
   const ctx = await browser.newContext({ viewport: s.viewport || { width: 1440, height: 900 }, deviceScaleFactor: 1.5 });
-  await ctx.addInitScript(seedScript(s.seed));
+  await ctx.addInitScript(s.rawSeed || seedScript(s.seed));
   const page = await ctx.newPage();
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1400);
