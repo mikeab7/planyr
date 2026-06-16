@@ -5,6 +5,7 @@ import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile } from "./lib/overlayPdf.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -797,6 +798,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [overlayBusy, setOverlayBusy] = useState(false);
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+  const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup
   const [county, setCounty] = useState("harris");
@@ -1179,7 +1181,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
@@ -1271,6 +1273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
+    if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
     if (xsecMode) { // ditch cross-section: two clicks → sample elevations
       const sp = snapPt(fp);
       if (xsecPts.length === 0) { setXsecPts([sp]); setOverlapWarn("Click the far side of the ditch."); }
@@ -2078,6 +2081,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Which scale-dropdown option matches an overlay's current size (else "custom").
   const overlayScaleSel = (o) => { const s = Math.round(scaleForFtPerPoint(o.ftPerPx)); return COMMON_SCALES.includes(s) ? String(s) : "custom"; };
+  // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
+  // a real length → rescale (pinned at the first click). align: 2 points on the drawing
+  // then the 2 matching points on the map → similarity (move + rotate + scale).
+  const onOvCalibClick = (fp) => {
+    const o = sheetOverlays.find((x) => x.id === ovCalib.id);
+    if (!o) { setOvCalib(null); return; }
+    const pts = [...ovCalib.pts, fp];
+    if (ovCalib.kind === "trace") {
+      if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
+      const measuredFt = dist(pts[0], pts[1]);
+      const v = window.prompt("Real length of that line on the drawing (ft):", "");
+      setOvCalib(null);
+      const realFt = v == null ? NaN : +v;
+      const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
+      if (!patch) return;
+      pushHistory();
+      setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    } else {
+      // align: collect alternating drawing→map points (pairs); apply on demand (≥2 pairs)
+      setOvCalib({ ...ovCalib, pts });
+    }
+  };
+  // Apply the collected drawing→map pairs as a best-fit similarity (B73). 2 pairs = exact;
+  // 3+ = least-squares, with an RMS residual shown so a poor (distorted) fit is visible.
+  const applyOvAlign = () => {
+    if (!ovCalib || ovCalib.kind !== "align") return;
+    const o = sheetOverlays.find((x) => x.id === ovCalib.id);
+    const nPairs = Math.floor(ovCalib.pts.length / 2);
+    if (!o || nPairs < 2) return;
+    const pairs = [];
+    for (let i = 0; i < nPairs; i++) pairs.push({ from: ovCalib.pts[2 * i], to: ovCalib.pts[2 * i + 1] });
+    const S = solveSimilarityLSQ(pairs);
+    const patch = applySimilarityToOverlay(o, S);
+    setOvCalib(null);
+    if (!patch) return;
+    pushHistory();
+    setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    setOverlapWarn(`Aligned to ${nPairs} point${nPairs > 1 ? "s" : ""} — fit residual ≈ ${Math.round(S.residual)}′.`);
+    setTimeout(() => setOverlapWarn(""), 5000);
+  };
+  const ovCalibMsg = () => {
+    if (!ovCalib) return "";
+    const n = ovCalib.pts.length;
+    if (ovCalib.kind === "trace") return n === 0 ? "Click one end of a known dimension on the drawing." : "Click the other end — then enter its real length.";
+    const pairNo = Math.floor(n / 2) + 1;
+    return n % 2 === 0 ? `Click a known point on the drawing (point ${pairNo}).` : "Now click where that point belongs on the map.";
+  };
   // Free any held PDF docs when the planner unmounts (cf. B39).
   useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
 
@@ -3879,7 +3929,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3943,6 +3993,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     )}
                   </g>
                 );
+              })}
+
+              {/* overlay calibration feedback (B73): clicked points + the traced line */}
+              {ovCalib && ovCalib.pts.map((p, i) => {
+                const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
+                const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
+                return (
+                  <g key={`ovc${i}`} pointerEvents="none">
+                    <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
+                    <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
+                  </g>
+                );
+              })}
+              {/* connectors: trace = the measured line; align = each drawing→map pair */}
+              {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
+                const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" pointerEvents="none" />;
+              })()}
+              {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
+                const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
+                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />;
               })}
 
               {/* setback outlines (per-edge) */}
@@ -4802,6 +4873,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
                             </div>
                           )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
+                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
+                          </div>
                           {o.sheet && (
                             <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                               <div style={{ fontSize: 11, color: PAL.muted }}>Scale to the drawing — sizes the sheet to true real-world feet.</div>
@@ -5516,6 +5591,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
           <span>{pobMode ? "Click the point of beginning on the plan to anchor the description (Esc to cancel)." : overlapWarn}</span>
           {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>}
+        </div>
+      )}
+
+      {ovCalib && (
+        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
+          background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
+          {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
+            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+          )}
+          <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
         </div>
       )}
 
