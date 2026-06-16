@@ -410,7 +410,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
 ### B104 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
-`[ ]` **Repro:** the map view shows two stacked header bars — a black account bar on top (the
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`) — the brand-dedup, matching how **B10**
+handled the planner. **Dropped the redundant "Site Planyr" lockup (icon + wordmark) from the MapFinder
+header**, since the shell header already shows "Planyr · Site Planyr"; the map bar now leads with just its
+"Find a site" context label + the search/Go + Start blank. No z-index change, so the B66 stacking fix is
+untouched. Consistent with B10, a **single physical row** (folding the map bar's controls up into the
+shell header) stays a later polish — the duplicate-brand complaint, which was the actual repro, is fixed.
+⏳ Not browser-verified. Original spec:
 shell header) and a white search/actions bar below (the MapFinder header) — with the brand/module
 lockup ("Site Planyr") appearing on both. **Expected:** a single header holding the logo, the
 **"Find a site"** search + **Go**, the account menu, and the primary actions (**Start blank**).
@@ -434,7 +440,15 @@ selection guidance** (only while `selectMode` is on), and the **first-run hint**
 > don't fight over the same corner.
 
 ### B106 — Redesign the Sites panel (collapsible, safer delete, see-all) `[Site Planner / map]` (feature)
-`[ ]` Rework the saved-sites panel:
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Reworked the saved-sites panel:
+**collapsible** — the "Your sites · N" header is now a toggle that folds the panel to a slim bar; state
+persists per device. **Safer delete** — the per-row crosshair + delete are hidden by default and **reveal
+on hover** (or when the row is the active site), so the always-visible ✕ is gone; delete still routes
+through the existing confirm modal. **Primary row action** stays click-to-open (crosshair = zoom),
+revealed on hover per spec. **Status chips** now **hide zero-count statuses** (only statuses with sites
+show); the list itself already defaults to all sites (the chips filter map markers, per B7/B8). Interpreted
+the "⋯ more-actions menu" as hover-reveal + the existing confirm (decluttered without a new dropdown).
+⏳ Visual — not browser-verified. Original spec:
 - **Collapsible** — collapsed = a slim tab/handle (optionally showing the site count); expanded =
   the full list. **Persist** the open/closed state.
 - **Safer delete** — remove the always-visible per-row **X**. Delete must take intent: move it behind
