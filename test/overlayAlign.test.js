@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   imagePointToWorld, scaleOverlayAbout, similarityTransform, alignOverlaySimilarity,
+  solveSimilarityLSQ, applySimilarityToOverlay,
 } from "../src/workspaces/site-planner/lib/overlayAlign.js";
 
 const ov = (over = {}) => ({ x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 0, ...over });
@@ -55,5 +56,46 @@ describe("overlay align — alignOverlaySimilarity 2-point (B73)", () => {
     const patch = alignOverlaySimilarity(o, p1, p2, q1, q2);
     expect(patch.ftPerPx).toBeCloseTo(o.ftPerPx * 0.5, 6);
     expect(patch.rotation).toBeCloseTo(90, 5);
+  });
+});
+
+describe("overlay align — solveSimilarityLSQ N-point fit + residual (B73)", () => {
+  const pair = (f, t) => ({ from: f, to: t });
+  it("matches the exact 2-point similarity (≈0 residual)", () => {
+    const T = solveSimilarityLSQ([pair({ x: 0, y: 0 }, { x: 5, y: 5 }), pair({ x: 10, y: 0 }, { x: 5, y: 15 })]);
+    near(T.apply({ x: 0, y: 0 }), { x: 5, y: 5 });
+    near(T.apply({ x: 10, y: 0 }), { x: 5, y: 15 });
+    expect(T.residual).toBeCloseTo(0, 6);
+    expect(T.scale).toBeCloseTo(1, 6);
+  });
+  it("recovers a known similarity from 4 consistent points (≈0 residual)", () => {
+    const truth = (p) => ({ x: 100 + 2 * (p.x * Math.cos(0.5) - p.y * Math.sin(0.5)), y: 50 + 2 * (p.x * Math.sin(0.5) + p.y * Math.cos(0.5)) }); // scale 2, +0.5 rad
+    const src = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 8 }, { x: 0, y: 8 }];
+    const T = solveSimilarityLSQ(src.map((p) => pair(p, truth(p))));
+    expect(T.scale).toBeCloseTo(2, 5);
+    expect(T.rotDeg).toBeCloseTo((0.5 * 180) / Math.PI, 4);
+    expect(T.residual).toBeCloseTo(0, 5);
+    src.forEach((p) => near(T.apply(p), truth(p)));
+  });
+  it("reports a non-zero residual when a point is perturbed (no exact rigid fit)", () => {
+    const T = solveSimilarityLSQ([
+      pair({ x: 0, y: 0 }, { x: 0, y: 0 }), pair({ x: 10, y: 0 }, { x: 10, y: 0 }),
+      pair({ x: 5, y: 5 }, { x: 5, y: 9 }), // off the rigid fit
+    ]);
+    expect(T.residual).toBeGreaterThan(0.5);
+  });
+  it("returns null for fewer than 2 pairs or coincident sources", () => {
+    expect(solveSimilarityLSQ([pair({ x: 1, y: 1 }, { x: 0, y: 0 })])).toBe(null);
+    expect(solveSimilarityLSQ([pair({ x: 2, y: 2 }, { x: 0, y: 0 }), pair({ x: 2, y: 2 }, { x: 9, y: 9 })])).toBe(null);
+  });
+  it("applySimilarityToOverlay lands all points via the fit (rotated overlay, 3 pts)", () => {
+    const o = { x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 15 };
+    const ipts = [[120, 90], [640, 110], [400, 520]];
+    const from = ipts.map(([ix, iy]) => imagePointToWorld(o, ix, iy));
+    const to = [{ x: 900, y: 1800 }, { x: 1500, y: 1850 }, { x: 1180, y: 2300 }];
+    const T = solveSimilarityLSQ(from.map((f, i) => pair(f, to[i])));
+    const o2 = { ...o, ...applySimilarityToOverlay(o, T) };
+    // each drawing point lands on its fitted target (residual is tiny here)
+    ipts.forEach(([ix, iy], i) => near(imagePointToWorld(o2, ix, iy), T.apply(from[i]), 4));
   });
 });
