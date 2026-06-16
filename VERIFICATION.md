@@ -176,6 +176,20 @@ was never clicked" quietly ships broken.
   rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
 - **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
 
+### V11 — Phone layout (B113) + "Cloud off" affordance (B111) ⏳
+- **Why ⏳:** verified headless at 390×844 (`planner-mobile.png`, `planner-mobile-tools.png`,
+  `planner-mobile-panel.png`) but real touch + rotation want a live click-through.
+- **Steps (B113, on a phone or a ~390px-wide window):** open a site in the planner. The canvas
+  should fill the width (not a sliver). Tap the orange **"✎ Tools"** button (bottom-right) → the tool
+  palette **slides in from the right**; pick a tool → it **auto-closes** so you can draw; tap the dim
+  backdrop to dismiss it. Tap a left-rail button (Yield/Parcel/…) → its panel **overlays** the canvas;
+  tap the same button to close. Rotate to landscape and back. The top header should **scroll
+  sideways**, not wrap onto two lines.
+- **Expect:** at desktop width everything is exactly as before (the mobile styles are width-gated).
+- **Steps (B111):** load a build with **no Supabase env** (cloud unconfigured). The top-right account
+  corner should show a muted **"⊘ Cloud off"** pill (not empty); click it → a popover explains work is
+  saved on this device only. (A configured build still shows the normal Sign in / account button.)
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

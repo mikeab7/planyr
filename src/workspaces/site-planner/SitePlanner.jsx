@@ -762,6 +762,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
+  // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
+  // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
+  // right tool palette collapses behind a toggle. matchMedia keeps it in sync with
+  // rotate/resize. The desktop layout is untouched (every mobile style is `narrow ?`-gated).
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
@@ -3795,6 +3807,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (id !== "parking") setParkingMenu(false);
     if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
+    if (narrow) setMobileTools(false); // B113: picking a tool dismisses the phone overlay rail so you can draw
   };
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
@@ -4058,7 +4071,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       {/* top bar — dark graphite chrome */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", position: "relative", zIndex: 60 }}>
+      <div className="dark-scroll" style={{ display: "flex", alignItems: "center", gap: narrow ? 5 : 10, padding: narrow ? "0 8px" : "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", overflowX: narrow ? "auto" : "visible", position: "relative", zIndex: 60 }}>
         {onBackToMap && <button className="dbtn" style={{ ...dGhost, marginLeft: -4 }} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
         {/* B10: brand/module mark removed — it now lives once in the shell's product switcher. */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 2 }}>
@@ -4192,7 +4205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </div>
 
       {/* body */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
@@ -4923,8 +4936,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
         </div>
 
-        {/* right-side tool rail — dark chrome */}
-        <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
+        {/* phone-only floating button to summon the tool rail (B113) */}
+        {narrow && !mobileTools && (
+          <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
+            style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
+            ✎ Tools
+          </button>
+        )}
+        {/* right-side tool rail — dark chrome. On phones it overlays the canvas
+            (slide-in from the right) instead of permanently eating 168px (B113). */}
+        {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
+        <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px",
+          overflowY: narrow ? "auto" : "visible",
+          position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
+          zIndex: narrow ? 1205 : 30,
+          transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
+          boxShadow: narrow ? "-10px 0 28px rgba(0,0,0,0.45)" : "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
           <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
           <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
@@ -5098,7 +5125,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {leftPanel && (<>
-          <div style={{ width: leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px" }}>
+          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px",
+            ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* aerial underlay */}
           {leftPanel === "aerial" && (
           <Section title="Aerial underlay">
@@ -5760,9 +5788,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
           </>)}
           </div>
-          {/* drag handle to resize the menu */}
-          <div onPointerDown={startLeftResize} title="Drag to resize"
-            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />
+          {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
+          {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
+            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />}
           </>)}
         </div>
       </div>
