@@ -99,6 +99,34 @@ was never clicked" quietly ships broken.
 - **Expect:** all 200 with a `fields` array. County/city GIS hosts move occasionally — if one
   404s/moves, re-point its row in `src/workspaces/site-planner/lib/jurisdiction.js`.
 
+### V8 — Cached vector FEMA/NWI layers draw + image fallback (B96 follow-on, piece 2) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** On planyr.io, zoom to a Houston-area site (zoom ≥ 12). In the Layers panel toggle
+  **FEMA flood zones**, then **Wetlands (NWI)**. Pan to a nearby view and back; then zoom out.
+- **Expect:** flood zones draw as **colored polygons** (NOT a flat picture) — floodway dark red,
+  high-risk SFHA blue, 500-yr orange, minimal-risk faint; hovering shows e.g. "Zone AE · … —
+  screening only". Wetlands draw colored by type. The panel shows a **data age** ("refreshed
+  just now/Nm ago"). Returning to a prior view **repaints instantly** (browser-cached). **Zoom
+  out / cover a big area** → it swaps to the standard FEMA/NWI **image** with a note (the
+  fallback). **KEY CHECK (CORS, the main unknown):** if polygons never appear and it always
+  shows the picture saying "couldn't load the data", then the agency `/query` endpoints block
+  cross-origin fetches from planyr.io — the vector path isn't viable for that host (the image
+  fallback still protects the user); report it. Also confirm a FEMA polygon's zone label looks
+  right — if zones are blank/mis-bucketed, FEMA may have renumbered NFHL sublayer 28 (fix the
+  index in `lib/vectorLayers.js` `VECTOR_SOURCES` + `imageFallback.layers`). Tuning: if the first
+  pull at z12 is slow or partial, bump `minVectorZoom` in `VECTOR_SOURCES`.
+
+### V9 — 🌐 FEMA/NWI `/query` endpoint + field liveness ⏳ (egress-gated here)
+- **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (⚠️ **egress-blocked** from the
+  Claude container — `hazards.fema.gov` + `fwspublicservices.wim.usgs.gov` are not on this
+  environment's network allowlist; add them to probe server-side, or verify via V8 in a browser) · **Next check** 2026-07-16
+- **Steps (curl, once the two hosts are allowlisted):** confirm the sublayer indices + fields:
+  - FEMA `https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28?f=json`
+  - NWI `https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0?f=json`
+- **Expect:** 200 + `name` = "Flood Hazard Zones" with fields **FLD_ZONE/ZONE_SUBTY/SFHA_TF**
+  (FEMA 28), and "Wetlands" with **WETLAND_TYPE/ATTRIBUTE** (NWI 0). A renumber → one-line edit
+  in `VECTOR_SOURCES` (`lib/vectorLayers.js`) + `imageFallback.layers`.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

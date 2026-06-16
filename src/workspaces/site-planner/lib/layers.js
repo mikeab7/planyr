@@ -15,11 +15,18 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
+import { vectorOverlay } from "./vectorOverlay.js";
+import { VECTOR_SOURCES } from "./vectorLayers.js";
 
 export { JURISDICTION_LAYERS };
 
 export const STATEWIDE = {
   fema: {
+    // Cached VECTOR layer: pull the actual flood polygons and draw them, falling back
+    // to the dynamicMapLayer image (url/layers below, via VECTOR_SOURCES.imageFallback)
+    // when zoomed out or the data fetch is blocked. See lib/vectorLayers.js.
+    kind: "vector",
+    vector: VECTOR_SOURCES.fema,
     label: "FEMA flood zones",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
     layers: [27, 28], // flood hazard boundaries + zones (standard NFHL symbology)
@@ -27,6 +34,8 @@ export const STATEWIDE = {
     opacity: 0.55,
   },
   wetlands: {
+    kind: "vector",
+    vector: VECTOR_SOURCES.wetlands,
     label: "Wetlands (NWI)",
     // Canonical USFWS endpoint. The old www.fws.gov host redirects here, which
     // caused a double request every refresh — point straight at the real host.
@@ -207,6 +216,12 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       } else if (cfg.kind === "mapillary") {
         if (!mapillaryToken()) { fail(k, cfg, "Add a Mapillary token to enable this layer."); return; }
         const lyr = mapillaryLayer(report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "vector") {
+        // Cached vector layer (real polygons + browser SWR cache); it decides vector
+        // vs. flat image internally and falls back to the agency picture on its own,
+        // so no health-probe gate here (and it never goes blank).
+        const lyr = vectorOverlay(cfg.vector, report, { pane, opacity: st.opacity });
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else {
         // image / feature service — probe health first
