@@ -45,6 +45,8 @@ const drawing = {
   markups: [
     { id: "m1", type: "rect", color: "#dc2626", pts: [{ x: 0.13, y: 0.17 }, { x: 0.55, y: 0.52 }] },
     { id: "m2", type: "text", color: "#2563eb", pts: [{ x: 0.16, y: 0.6 }], text: "verify setback" },
+    { id: "cal1", type: "calib", color: "#7c3aed", feet: 200, ftPerPx: 200 / (0.42 * 800), pts: [{ x: 0.13, y: 0.9 }, { x: 0.55, y: 0.9 }] },
+    { id: "meas1", type: "measure", color: "#0f766e", pts: [{ x: 0.62, y: 0.3 }, { x: 0.88, y: 0.3 }] },
   ], createdAt: Date.now(), updatedAt: Date.now(),
 };
 const demoSite = {
