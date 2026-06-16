@@ -11,10 +11,10 @@ import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } fr
 const PAL = { ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chromeInk: "#ece7db", chromeMuted: "#9b9482" };
 
 const BADGE = {
-  saving:  { text: "Saving…", color: "#fbbf24" },
-  saved:   { text: "Saved ✓", color: "#86efac" },
-  unsaved: { text: "Unsaved", color: "#fbbf24" },
-  local:   { text: "Not saved", color: "#9b9482" },
+  saving:  { text: "Saving…", color: "#fbbf24", dot: "#f59e0b" },
+  saved:   { text: "Saved ✓", color: "#86efac", dot: "#22c55e" },
+  unsaved: { text: "Unsaved", color: "#fbbf24", dot: "#f59e0b" },
+  local:   { text: "Not saved", color: "#9b9482", dot: "#9b9482" },
 };
 
 const fmtWhen = (s) => {
@@ -62,7 +62,8 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
 
   return (
     <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center", gap: 8 }}>
-      <span title="Save state" style={{ fontSize: 11, color: badge.color, fontWeight: 600, minWidth: 60, textAlign: "right" }}>{badge.text}</span>
+      <span title="Save state" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: badge.color, fontWeight: 600, minWidth: 60, justifyContent: "flex-end" }}>
+        <span style={{ width: 7, height: 7, borderRadius: 99, background: badge.dot, flex: "none" }} />{badge.text}</span>
       <button
         onClick={() => setOpen((o) => !o)}
         style={{ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }}

@@ -3970,15 +3970,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <>
                 <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 220 }}>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+                  <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
+                  <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
                   <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
                     onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+                  <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+                  <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
                   <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
+                  <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
                 </div>
               </>
             )}
@@ -4810,7 +4810,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
               );
             }
-            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label}</button>;
+            // B93: give the preset-less site-element rows (paving/trailer/pond) the same
+            // two-line anatomy as Building/Road/Car Parking, so the rail reads as one
+            // uniform column (these just have no "▾" preset menu).
+            const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
+            return (
+              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id={id} /> {t.label}</span>
+                {sub && <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{sub}</span>}
+              </button>
+            );
           })}
 
           {railHdr("Shapes")}
