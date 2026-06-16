@@ -94,7 +94,9 @@ export function vectorOverlay(source, onStatus, { pane, opacity = 0.55 } = {}) {
     try { res = await fetchCached(source, bb, { cache: gisCache }); lastVectorError = null; }
     catch (e) { lastVectorError = e; }
     busy = false;
+    const hasFeats = !!(res && res.data && res.data.features && res.data.features.length);
     if (lastVectorError) showImage(`Showing the standard picture — couldn't load the data (${(lastVectorError && lastVectorError.message) || "fetch failed"})`);
+    else if (!hasFeats) showImage("Showing the standard picture"); // vectors came back empty here → fall back to the reliable image baseline
     else paintVector(res.data, res.ts, res.stale);
     if (pending) { pending = false; refresh(); } // trailing-edge refresh for the view that moved mid-fetch
   };
