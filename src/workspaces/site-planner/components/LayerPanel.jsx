@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { STATEWIDE, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
+import { formatAge } from "../lib/gisCache.js";
 
 const MUTED = "#8a8473", LINE = "#e7e2d6", INK = "#2c2a26";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
@@ -22,17 +23,39 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
   useEffect(() => subscribeMapillaryToken(setTok), []); // keep both LayerPanel copies in sync (B46)
+  // Tick every 30s so a cached layer's age keeps counting up while the panel is open
+  // (screening-only honesty — a stale boundary should never look current) (B75).
+  const [, forceTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => forceTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  // Collapsible groups so the panel fits on one page without scrolling (B97). Collapse state
+  // persists per device; each header shows how many layers in the group are currently on.
+  const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem("planarfit:layerGroups:v1") || "{}") || {}; } catch (_) { return {}; } });
+  const toggleGroup = (g) => setCollapsed((c) => { const n = { ...c, [g]: !c[g] }; try { localStorage.setItem("planarfit:layerGroups:v1", JSON.stringify(n)); } catch (_) {} return n; });
+  const onCount = (obj) => Object.keys(obj).filter((k) => overlays[k]?.on).length;
+  const groupHead = (g, label, count) => (
+    <button onClick={() => toggleGroup(g)} title={collapsed[g] ? "Show" : "Hide"}
+      style={{ ...groupHdr, display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", padding: "5px 0 4px", margin: "5px 0 3px", cursor: "pointer" }}>
+      <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed[g] ? "rotate(-90deg)" : "none", display: "inline-block" }}>▼</span>
+      <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
+      {count > 0 && <span style={{ color: INK, fontWeight: 700 }}>{count} on</span>}
+    </button>
+  );
 
   const row = (k, cfg) => {
     const st = overlays[k];
     if (!st) return null;
     const ls = st.on ? layerStatus[k] : null;
     const meta = ls && STATUS[ls.state];
+    const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
     return (
       <div key={k} style={{ marginBottom: 5 }}>
         <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
           <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
+          {age && (ls.state === "loaded" || ls.state === "empty") && (
+            <span title={`Cached copy — refreshed ${age}${ls.stale ? " · showing last-good while it refreshes" : ""}. Screening only; verify against the source.`}
+              style={{ fontSize: 9.5, color: ls.stale ? "#b45309" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
+          )}
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
               animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
@@ -59,12 +82,12 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   return (
     <div>
-      {Object.entries(STATEWIDE).map(([k, cfg]) => row(k, cfg))}
+      {groupHead("statewide", "Map layers", onCount(STATEWIDE))}
+      {!collapsed.statewide && Object.entries(STATEWIDE).map(([k, cfg]) => row(k, cfg))}
 
-      <div style={{ borderTop: `1px solid ${LINE}`, margin: "6px 0 0" }} />
-      <div style={groupHdr}>Utility evidence</div>
-      {Object.entries(EVIDENCE).map(([k, cfg]) => row(k, cfg))}
-      {overlays.mapillary?.on && (
+      {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
+      {!collapsed.evidence && Object.entries(EVIDENCE).map(([k, cfg]) => row(k, cfg))}
+      {!collapsed.evidence && overlays.mapillary?.on && (
         <div style={{ marginBottom: 5 }}>
           {!tok && (
             <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, lineHeight: 1.4, marginBottom: 3 }}>
@@ -80,13 +103,10 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
         </div>
       )}
 
-      <div style={{ borderTop: `1px solid ${LINE}`, margin: "6px 0 5px" }} />
-      <div style={{ fontSize: 10, color: MUTED, fontWeight: 700, marginBottom: 4, lineHeight: 1.3 }}>
-        {jur ? jur.label : "This jurisdiction"}
-      </div>
-      {jur && Object.keys(jur.layers || {}).length > 0
+      {groupHead("jurisdiction", jur ? jur.label : "This jurisdiction", jur ? onCount(jur.layers || {}) : 0)}
+      {!collapsed.jurisdiction && (jur && Object.keys(jur.layers || {}).length > 0
         ? Object.entries(jur.layers).map(([k, cfg]) => row(k, cfg))
-        : <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>}
+        : <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4 }}>{(jur && jur.note) || "No local GIS layers wired for this jurisdiction yet."}</div>)}
     </div>
   );
 }

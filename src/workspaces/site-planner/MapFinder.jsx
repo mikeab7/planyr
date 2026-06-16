@@ -16,6 +16,7 @@ import {
 } from "./lib/arcgis.js";
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
+import { countyAtPoint } from "./lib/jurisdiction.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -198,6 +199,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
+  // First-run-only map hint (B105): the old persistent "Drag to move" card is now a one-time,
+  // dismissible bubble. Remembered in localStorage so it never returns once dismissed.
+  const [showMapHint, setShowMapHint] = useState(() => { try { return !localStorage.getItem("planarfit:mapHintDismissed:v1"); } catch (_) { return true; } });
+  const dismissMapHint = () => { setShowMapHint(false); try { localStorage.setItem("planarfit:mapHintDismissed:v1", "1"); } catch (_) {} };
+  // Sites panel: collapsible (persisted) + per-row hover-reveal of the crosshair/delete actions (B106).
+  const [sitesPanelOpen, setSitesPanelOpen] = useState(() => { try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; } });
+  const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
+  const [hoverRow, setHoverRow] = useState(null);
   const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [hidden, setHidden] = useState(() => new Set()); // statuses filtered out of the map
@@ -265,14 +274,6 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   }, []);
 
   // Fit the map to all LOCATED saved sites (blank-planner sites have no origin). (B96b)
-  const fitToSites = () => {
-    const map = mapRef.current; if (!map) return;
-    const pts = sites.filter((s) => s.origin).map((s) => [s.origin.lat, s.origin.lon]);
-    if (!pts.length) return;
-    if (pts.length === 1) map.flyTo(pts[0], 15, { duration: 0.6 });
-    else map.fitBounds(L.latLngBounds(pts), { padding: [70, 70], maxZoom: 16 });
-  };
-
   /* aerial imagery layer (swappable source) */
   useEffect(() => {
     const map = mapRef.current;
@@ -304,7 +305,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      lines / site plans stay on top. */
   useEffect(() => {
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
-      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
     });
     sync();
@@ -487,6 +488,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         if (hilitesRef.current[key]) { try { map.removeLayer(hilitesRef.current[key]); } catch (_) {} } // drop a stale hilite before overwriting → no orphaned polygon if two clicks race (B22)
         hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
         setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+        // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
+        // for a Harris/FB lot when that county's own CAD didn't — relabel via a true
+        // point-in-county lookup. Non-blocking + additive: only patches the saved
+        // entry's county, never the select/hilite flow.
+        if (county === "chambers") {
+          countyAtPoint(latlng.lng, latlng.lat)
+            .then(({ key: ckey }) => { if (ckey && ckey !== "chambers") setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
+            .catch(() => {});
+        }
       }
     } catch (e) {
       setErr(humanizeError(e));
@@ -539,11 +549,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       {/* top bar — dark graphite chrome */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", zIndex: 1000 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ width: 22, height: 22, borderRadius: 6, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", boxShadow: "0 2px 6px rgba(232,89,12,0.45)", flex: "none" }}>
-            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
-          </span>
-          <span style={{ fontWeight: 800, fontSize: 15, color: "#fff", letterSpacing: "-0.01em" }}>Site Planyr</span>
-          <span style={{ color: PAL.chromeMuted, fontSize: 11, fontWeight: 500, borderLeft: `1px solid ${PAL.chromeLine}`, paddingLeft: 9 }}>Find a site</span>
+          {/* B104: the brand lockup is dropped here — the shell header already shows "Planyr · Site
+              Planyr", so this bar keeps only its context label and no longer duplicates the brand
+              (mirrors B10's planner-header dedup; a single physical row stays a later polish). */}
+          <span style={{ color: PAL.chromeInk, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>Find a site</span>
         </div>
         <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
           <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
@@ -561,19 +570,19 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         {/* saved sites */}
         {sites.length > 0 && (
           <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 12px 6px" }}>
-              <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>Your sites · {sites.length}</span>
-              <span style={{ flex: 1 }} />
-              {sites.some((s) => s.origin) && (
-                <button onClick={fitToSites} title="Zoom the map to show all your located sites"
-                  style={{ fontSize: 10.5, fontWeight: 700, color: PAL.accent, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>⊡ Fit all</button>
-              )}
-            </div>
-            {/* Pipeline by status — legend + filter + counts. Each chip is a toggle
-                (click to hide/show that status on the map); the count is computed
-                live, the glyph + color is the marker legend. */}
+            {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
+            <button onClick={toggleSitesPanel} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
+              style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px" }}>
+              <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
+              <span style={{ flex: 1, textAlign: "left" }}>Your sites</span>
+              <span style={{ color: PAL.ink, fontWeight: 700 }}>{sites.length}</span>
+            </button>
+            {sitesPanelOpen && (<>
+            {/* Pipeline by status — legend + filter + counts. Each chip toggles that status on the
+                map; zero-count statuses are hidden to keep it tidy (B106). */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 8px 8px" }}>
-              {STATUSES.map((st) => {
+              {STATUSES.filter((st) => (statusCounts[st] || 0) > 0).map((st) => {
                 const sty = statusStyle(st); const off = hidden.has(st); const n = statusCounts[st] || 0;
                 return (
                   <button key={st} onClick={() => toggleHidden(st)}
@@ -591,10 +600,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
               {sites.map((s) => {
                 const isActive = s.id === activeSiteId;
                 const st = statusOf(s); const sty = statusStyle(st);
+                const showActions = hoverRow === s.id || isActive; // crosshair + delete reveal on hover (B106)
                 return (
                   <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status)" : "Open site"}
                     onClick={() => onOpenSite && onOpenSite(s.id)}
                     onDoubleClick={() => flyToSite(s)}
+                    onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
                     style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
                     <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
@@ -607,18 +618,21 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
                       <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
-                    {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
-                      className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
-                    </button>}
-                    <button title="Delete site and all its plans" aria-label="Delete site" onClick={(e) => { e.stopPropagation(); setConfirmDel(s); }}
-                      className="gbtn-danger" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-                    </button>
+                    <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
+                      {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
+                        className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
+                      </button>}
+                      <button title="Delete site and all its plans" aria-label="Delete site" onClick={(e) => { e.stopPropagation(); setConfirmDel(s); }}
+                        className="gbtn-danger" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
+            </>)}
           </div>
         )}
 
@@ -645,16 +659,27 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           </div>
         </div>
 
-        {/* instruction / error */}
-        <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
-          {err
-            ? err
-            : !selectMode
-              ? "Drag to move the map, then hit “＋ Select parcels” below to start adding lots."
-              : zoom != null && zoom < PARCEL_MINZOOM
-                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
-        </div>
+        {/* error toast (bottom-left) — surfaced only when there's an error */}
+        {err && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+            {err}
+          </div>
+        )}
+        {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
+        {!err && selectMode && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+            {zoom != null && zoom < PARCEL_MINZOOM
+              ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+              : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+          </div>
+        )}
+        {/* first-run-only, dismissible hint — replaces the old persistent "Drag to move" card (B105) */}
+        {!err && !selectMode && showMapHint && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 360, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <span>Drag to move the map. Hit “＋ Select parcels” to start adding lots.</span>
+            <button onClick={dismissMapHint} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
+          </div>
+        )}
 
         {/* selection card */}
         {selected.length > 0 && (

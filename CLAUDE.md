@@ -10,6 +10,37 @@ scaffolded). Last updated mid-2026.
 > **✅ Done**. (This is the product bug/feature backlog — distinct from the
 > "Deferred / maintenance backlog" section near the end of this file, which tracks
 > ops/infra cleanup.)
+>
+> **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
+> green but still need a click-through on planyr.io. On every run, also scan it and
+> **surface any item that's ⏳ unverified or due** (run it if you have a browser, else
+> remind Michael). This is how features that pass CI but were never clicked don't slip
+> through, and how recurring checks (e.g. GIS endpoint liveness) get a periodic nudge.
+
+## How to talk to me (Michael) — IMPORTANT, applies to every reply
+Michael is an industrial real-estate developer, not a software engineer. In chat,
+explain everything in plain English — the way you'd explain it to a smart person who
+doesn't write code. This is a standing rule, not a one-off.
+- **Lead with what it means for me or the product** — what I'll see, do, or get — not
+  how it's built.
+- **No bare jargon, but teach me a little.** Never leave me to decode a term cold. DO
+  deliberately drop in the occasional real technical term so I build up the vocabulary
+  over time — just always pair it with its plain meaning the first time it appears,
+  e.g. "a service worker (a small background helper in your browser that quietly keeps
+  copies of things so they load instantly next time)" or "caching (remembering the last
+  copy so it loads fast)". A term here and there with its meaning = good; a wall of
+  unexplained acronyms (SWR, blob store, raster, IndexedDB, RLS…) = not.
+- **When you offer options, describe each by what actually happens for me and the real
+  trade-off**, not by the technique. Make the difference between options concrete
+  ("this one makes the wetlands map itself pop up instantly, even when the county
+  server is down; that one only remembers a little 'worked 5 min ago' label").
+- **Plainer, not vaguer.** Simpler words, but stay honest and precise. If you're unsure
+  or a thing is risky, say so in plain terms.
+- If I seem confused, it usually means the explanation had too much jargon — re-explain
+  in simpler terms, don't just repeat.
+
+This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
+PR descriptions, code comments, and the backlog technical and precise as usual.
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -76,6 +107,14 @@ server/                   # placeholder README only — NOT built or deployed; b
 - **Land work via pull requests; require a passing build check to merge.** The GitHub
   Actions workflow runs the build on every PR (a green "it builds" check) and on
   pushes to `main`; the deploy job is gated to `main` only.
+- **"Commit" means take it LIVE — the whole chain, no stopping, no asking.** When the
+  owner says "commit" (or "ship it", "make it live"), do _all_ of: stage → `git commit`
+  → push the branch → open the PR into `main` → merge it (enable auto-merge if a check
+  must go green first). Merging to `main` is what ships it. Do **not** stop at a local
+  commit, and do **not** ask "want me to open the PR?" — opening and merging the PR is
+  part of what "commit" already authorized. The only acceptable stop short of live is a
+  hard blocker (merge conflict, red required check, protection that rejects the merge) —
+  report _that_, not a request for permission.
 - **Deploy = GitHub Pages (production).** Because the suite is one app with an in-app
   workspace switcher, "seeing both live" is one URL — you switch tabs inside it.
 - **Cloudflare Pages is optional and deferred.** Its only job is per-branch preview

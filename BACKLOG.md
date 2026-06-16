@@ -29,6 +29,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > Progress 2026-06-15 (this PR): **point 2 done** — the map's Layers panel jurisdiction is no longer hardcoded to Harris; `MapFinder` resolves `viewCounty` from the view centre via `candidateCountiesForPoint` on every `moveend`, so the correct utility overlays are offered outside Houston (falls back to Harris when the centre is outside all configured counties; per-site jurisdiction still follows the opened site's county). **Point 1** (true point-in-polygon county boundaries vs. the bbox pre-filter) remains open — the bbox screen is still adequate for the 3 configured counties, so this is deferred until more counties are added.
 >
 > **What this is (plain English, 2026-06-15) — the "county resolution" theme.** B13-pt1 + **B36(a)** + **B36(d)** are really one piece of work: *how the app decides which county's appraisal-district (CAD) service to query when you click the map.* Today it screens by approximate per-county **bounding boxes** — fine for interior clicks in the 3 configured counties (Harris / Fort Bend / Chambers). The gaps, all near a county border or when a 4th+ county is added: **B13-pt1** the bboxes overlap/approximate → replace with true county **boundary polygons** (point-in-polygon); **B36(a)** the statewide TxGIO fallback can mislabel a Harris/FB lot's `county` when the primary CAD returns nothing; **B36(d)** a click on a county line should query both CADs and merge (only the first hit is used today). **Needs a county-boundary GIS dataset** to load + test points against — a data-source decision, so it's **feature-scale, not a quick fix**, and **low urgency** (interior clicks in the current 3 counties are fine). When picked up: choose/confirm the boundary source first, then point-in-polygon resolution + straddle merge fall out of it.
+>
+> **Progress 2026-06-15 (branch `claude/festive-davinci-0oco2n`): the point-in-county primitive now exists.** B72 landed the verified TxDOT county-boundary layer, and `lib/jurisdiction.js` `countyAtPoint(lng,lat)` resolves the true county (cached) and maps it to a configured CAD key — exactly the dataset/primitive this item was waiting on. **Pt 1's routing SWAP is deliberately NOT done:** the existing parallel "query candidate CADs, answerer wins" identify is faster + more resilient than a blocking point-in-county lookup before every click, so replacing the bbox pre-filter would regress, not improve. The primitive is instead used additively for the **B36(a)** label correction (see B36's note). The data gap pt 1 cited is closed; the bbox pre-filter stays by choice.
 
 ---
 
@@ -38,34 +40,32 @@ Full UI workstream from `UI_AUDIT.md` (re-authored this session: the predecessor
 audit lived only in a parallel chat and was never committed, and several of its findings
 were already implemented on `main`, so it was redone against HEAD + headless screenshots in
 `ui-audit/screens/`). The brief's "coordinate-with" B-numbers (B2/B3/B10/B15/B16/B18/B19) were
-that chat's provisional numbers — reconciled in `UI_AUDIT.md` (they map to real B2/B3/B10/**B65**/**B66** + two net-new). Net-new UI items minted here: **B93–B99**.
+that chat's provisional numbers — reconciled in `UI_AUDIT.md` (they map to real B2/B3/B10/**B65**/**B66** + two net-new). **Renumbered on merge:** these were minted B93–B99 on the branch, but `main` had meanwhile spent B93–B107 on its own UI/GIS work, so they are **B108–B113** here — and a couple are now superseded by main's parallel changes (noted inline; the legend item was dropped entirely).
 
-### B98 — UI pass: element colours, tool naming, Parcel→Boundary, Pan remap, one save badge `[Site Planyr / UI]` (task)
+### B108 — UI pass: element colours, tool naming, Parcel→Boundary, Pan remap, one save badge `[Site Planyr / UI]` (task)  *(branch "B98")*
 `[x]` Done 2026-06-16 (branch `claude/laughing-babbage-hrxgct`). Five priority UI fixes from the audit:
 - **Element colour differentiation (H2)** — paving / car parking / trailer / sidewalk / road read as one grey; now distinct hue+lightness + colour-blind-safe textures (sidewalk dot grid, trailer diagonal), parking striping / road centreline carry their own cue. `planStyle` gains a generic `pattern` field; `renderElPx` texFill resolves it. Commit 512fe6e.
 - **Tool naming (D10/D11)** — right-rail draw tools match the canvas/legend canonical names: Parking→**Car Parking**, Trailer→**Trailer Parking**, Pond→**Detention Pond**. Commit 1138a3f.
 - **"Parcel" duplication (C1/D5)** — the word was on both rails; right draw/split group renamed **Boundary** (menu still "Draw new parcel / Split a parcel"), left **Parcel** inspector kept (model: left = views, right = tools). Commit 1138a3f.
 - **Pan remap (D4)** — off `Shift+V` onto **H** + hold-**Space** temporary hand-pan; V always selects. Commit 1138a3f.
-- **One save/sync badge (E2 / cross-ref B10)** — folded the separate floating "Cloud ✓/off/err" diagnostic into the planner header badge: Syncing / Synced ✓ / Saved ✓ (device) / Offline / Unsaved. Commit b74894f.
+- **One save/sync badge (E2 / cross-ref B10)** — folded the separate floating "Cloud ✓/off/err" diagnostic into the planner header badge: Syncing / Synced ✓ / Saved ✓ (device) / Offline / Unsaved (b74894f). **Merge note:** `main` shipped its own header badge in parallel; the merge collapsed cleanly to the richer cloud-aware pill (no duplicate) — sanity-check it against main's `onSiteSaved` callback flow on the live preview.
 > Verified `✓ already done` (no change needed): undo/redo/zoom-fit tooltips+disabled (audit B6–B8), planner scale bar / north arrow / zoom-to-fit (G1–G3), switcher dropdown z-index (B66).
 
-### B93 — Standardize the right-rail element-row anatomy `[Site Planyr / UI]` (task)
+### B109 — Standardize the right-rail element-row anatomy `[Site Planyr / UI]` (task)  *(branch "B93")*
 `[x]` Done 2026-06-16. The preset-less site-element rows (Paving / Trailer Parking / Detention Pond) now use the same two-line anatomy as Building / Road / Car Parking — icon + label + a one-word sub-label ("drive / court", "back-in storage", "detention basin"); they just carry no `▾` preset menu. All six SITE ELEMENTS rows now read as one uniform column. (Audit D13.)
 
-### B94 — Road width preset wording / units consistency `[Site Planyr / UI]` (task)
-`[x]` Done 2026-06-16. The Road width `▾` menu now reads "N′ travel — drag the length" (was "N′ wide"), matching the tool's sub-label and the B70 three-way curb contract (the width is the travel width; the 6″ curb is added on top). (Audit D-Road; the parallel chat's "B19 roads units/rename".)
+### B110 — Road width preset wording `[Site Planyr / UI]` (task)  *(branch "B94")*
+`[x]` Done 2026-06-16. The Road width `▾` menu now reads "N′ travel — drag the length" (was "N′ wide"), matching the tool's sub-label and the B70 three-way curb contract (the width is the travel width; the 6″ curb is added on top). **Cross-check `main`'s B102** (Setup Roads "ft" units + "Travel widths"→"Road widths" rename) — both shipped; the wording agrees (travel width is the contract). (Audit D-Road.)
 
-### B95 — No sign-in affordance when Supabase is unconfigured `[global UI / auth]` (bug)
+### B111 — No sign-in affordance when Supabase is unconfigured `[global UI / auth]` (bug)  *(branch "B95")*
 `[ ]` The shell account control only renders when `supabaseConfigured()` is true, so a build without cloud env shows **no** sign-in / account entry point at all (the door is simply missing, not disabled). Show a "Sign in" affordance (or an explicit "cloud off" hint) even when unconfigured. (Audit A3.)
 
-### B96 — Minor UI polish cluster (File menu, map furniture, instruction copy, doc-review badge) `[Site Planyr / Document Review / UI]` (task)
-`[x]` Done 2026-06-16. (a) **DONE** — File `▾` items got explanatory tooltips (dividers already existed; leading icons deliberately skipped — emoji/glyphs would clash with the drafting palette and the labels are already clear); (b)/(c) done earlier (map scale bar + Fit all; instruction copy); (d) **DONE** — Document Review's save badge now leads with a colored status dot (Saving/Saved/Unsaved/Not-saved), matching the planner's unified pill. Original grouped text below.
-> Grouped low-severity: (a) File `▾` items lack icon/divider consistency and tooltips; (b) **DONE** — added a Leaflet imperial scale bar (bottom-right) + a "⊡ Fit all" button in the "Your sites" panel that frames all located sites (`fitToSites`/`fitBounds`); a north arrow on a slippy Leaflet map is unconventional and skipped (2026-06-16); (c) **DONE** — the map's bottom-left instruction said "+ Select parcels (top-right)" but the button renders bottom-center; reworded to "…hit '＋ Select parcels' below…" (2026-06-16); (d) Document Review's "Not saved" badge should align visually with the planner's unified save pill (dot + state word). (Audit B11 / J2 / J4 / K2.) Remaining: (a), (d).
+### B112 — Minor polish: File-menu tooltips + Document Review save-badge dot `[Site Planyr / Document Review / UI]` (task)  *(branch "B96", trimmed)*
+`[x]` Done 2026-06-16. (a) **DONE** — File `▾` items got explanatory tooltips (dividers already existed; leading icons skipped — they'd clash with the drafting palette). (d) **DONE** — Document Review's save badge now leads with a colored status dot (Saving/Saved/Unsaved/Not-saved), matching the planner's unified pill. **Dropped on merge:** the map scale-bar / "Fit all" / instruction-copy parts (b, c) — `main`'s B104–B106 redesigned that map furniture (collapsible Sites panel, dismissible hint), so my versions were superseded and removed during the merge. (Audit B11 / J2 / J4 / K2.)
 
-### B97 — Legend swatch should also carry the H2 pattern cue `[Site Planyr / UI]` (task)
-`[x]` Done 2026-06-16. Each Setup-legend swatch is now a 13px SVG that draws the type's pattern over its fill (sidewalk dots, trailer diagonal, landscape hatch, pond water lines), self-contained so it doesn't depend on the canvas pattern defs — so the colour-blind secondary cue is in the key too. (Audit H5. Note: the parallel chat's "B18 remove legend" is intentionally NOT done — after H2 the legend is the key to the palette.)
+> Dropped on merge — the branch's **"B97" legend H2-cue:** `main`'s **B101** deliberately removed the element-type colour legend from the Setup page (declutter), so re-adding a legend there was reverted in the merge. The H2 colour-blind textures still render on the canvas elements themselves; only the redundant Setup key is gone.
 
-### B99 — Planner is not responsive at mobile width `[Site Planyr / UI]` (feature)
+### B113 — Planner is not responsive at mobile width `[Site Planyr / UI]` (feature)  *(branch "B99")*
 `[ ]` At ~390px the fixed 168px right rail + the left rail/panel consume most of the width and the canvas collapses to a sliver; the header wraps. The planner is effectively desktop-only. Needs a mobile treatment (collapsible/off-canvas rails, a bottom toolbar). Larger effort — roadmap, not a quick fix. (Audit L1; see `ui-audit/screens/planner-mobile.png`.)
 
 ---
@@ -152,6 +152,7 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 ### B36 — Map/GIS minor robustness `[Site Planner / map]` (bug) — minor
 `[ ]` Grouped low-severity items: (a) statewide TxGIO (Chambers) can mislabel a Harris/FB lot's `county` when the real CAD returns nothing (ties to B13 pt 1 — true point-in-county); (b) evidence-layer (OSM/Mapillary) opacity slider flattens per-feature `fillOpacity`; (c) `featureToParcel`/`largestRingLngLat` pick the largest ring by |area| ignoring winding (a big hole can win on multipart) and use a vertex-average instead of polygon centroid for the recenter/projection origin; (d) the documented multi-county straddle "merge" is unimplemented (only `hits[0]` used); (e) no `AbortController` on address search / evidence fetches → a slow response can apply after a newer action.
 > **Status 2026-06-15:** (b) shipped in PR #33, (c) shipped in PR #37. (e) is effectively moot — evidence fetches are serialized (busy-guard + `lastKey` + the B56d trailing-edge) and address search is busy-gated (B56a), so a stale response can't apply; an AbortController would only save bandwidth. Remaining **(a)** + **(d)** are the county-resolution theme — see the consolidated note under **B13** (needs a county-boundary dataset; feature-scale, low urgency). Item stays `[ ]` for (a)/(d).
+> **Progress 2026-06-15 (branch `claude/festive-davinci-0oco2n`): (a) addressed; (d) resolved as moot.** **(a)** — the statewide TxGIO (`chambers`) source mislabelling a Harris/FB lot is now corrected: when a click's answer came from that source, `MapFinder.handleClick` runs `countyAtPoint` (true point-in-county via the verified TxDOT county layer) and relabels the saved entry to its real CAD key — non-blocking + additive (only the label, never the select/hilite flow). Live CNTY_NM strings verified to map cleanly (Harris / Fort Bend / Chambers / Galveston→no-CAD). **(d)** — a single click's "straddle merge" is moot: a point lies in ONE county, so `hits[0]` (first answerer) is correct, and a multi-PARCEL selection crossing a line already adds each lot on its own click. Both remaining sub-items handled; only live browser confirmation of the correction path is left.
 
 ### B37 — Cloud/auth hardening `[Site Planner / auth]` (bug) — low/minor
 `[x]` 🔧 partially fixed in audit PR. (a) **fixed:** `cloudDelete` now scopes by `user_id` AND `id` (was RLS-only). (b) **fixed:** the autosave cloud push had no `.catch`, leaving the save badge stuck on "Saving…" on a rejected upsert. (c) **fixed:** `metaRef` omitted `county`, so a save whose merge-base lacked county could normalize it to null — now self-contained. (d) **fixed:** `testConnection` now accepts any https origin (custom Supabase domains) — PR #27; the `pullCloud`-failure-empty-library half was fixed separately as B54 (#21).
@@ -295,6 +296,8 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 > **Dedup / shared machinery.** This IS the "overlay the drawing onto the live map/aerial" follow-on that **B67** explicitly carved out as out-of-scope-v1. B72 stays **distinct from B67**: B67 attaches a drawing to a *parcel* and marks it up in *pixel-relative* space (a document canvas); B72 places a drawing onto the *map* in *real-world* coordinates. They **share machinery** — PDF rasterize, immutable-backdrop layer model, multipage page-picker, Supabase Storage persistence — as does the Document Review **overlay/compare + `Stitcher.jsx`** work; build on those primitives, don't fork a second engine. **B73** adds scale calibration + precise alignment on top; B72 ships without it.
 > Progress 2026-06-15 (branch `claude/nice-dirac-029jok`, this session): **browser-only MVP shipped.** New left-rail **Overlay** panel + drag-drop a PDF/image onto the planner map: it rasterizes the page (reusing the doc-review PDF.js engine via a **dynamic import**, so PDF.js still loads only on first use — its own lazy `pdf-*.js` chunk — and parses off the main thread on PDF.js's worker), drops it centered in the current view as an **immutable backdrop in feet space** (above the basemap/underlay, below parcels/massing/markup, shown over the aerial). Manipulation: **drag to move**, panel **opacity / rotation / width(ft) ± / lock / remove**; multi-page PDFs get an **in-session page picker**; near-white paper is knocked to transparent so the map shows through. Persists with the project as an additive Site Model field **`sheetOverlays`** (`SITE_MODEL_VERSION` 3→4, `sheetOverlaysOf` selector); the raster persists locally and the **transform** syncs to the cloud (the raster is stripped from the cloud row like the aerial — shows a "re-add on this device" placeholder, matching doc-review). Additive + guarded: an empty `sheetOverlays` is a no-op, so **existing sites/users are unaffected**. **lint 0 errors · 30/30 tests · build green.** ⏳ **UNVERIFIED in a live browser** — please try it on planyr.io and report glitches. **Deferred (kept Open):** the **B73** scale-calibration / 2-pt precise-align tranche; storing the **original PDF in Supabase Storage** for true cross-device reload (today only the transform syncs); **on-canvas corner/rotate handles** (panel controls for now); multiply-blend white-knockout for colored sheets. Because these remain, B72 stays `[ ]`.
 > Progress 2026-06-16 (same session): **Supabase Storage cross-device reload shipped** (the picked storage decision). On add, a PDF overlay's **original file uploads** to the existing private `doc-review-files` bucket at `<uid>/site-overlays/<siteId>/<id>.pdf` (uid-first → existing RLS unchanged) and its `storageKey` saves with the overlay. The cloud row still strips the big raster (small rows), but on another device the overlay now **re-fetches the PDF from Storage and re-rasterizes** (showing "Loading drawing from cloud…" meanwhile) instead of "re-add." `lib/overlayStorage.js` (`uploadOverlayPdf` / `downloadOverlayBytes`, mirrors doc-review's `reviewStore`) + `rasterizeStoredPdf`; **fully additive & fallback-safe** — logged-out / oversize (>50 MB) / any error → stays inline exactly as before, so persistence can't regress. 3 unit tests pin the uid-first key. **lint 0 · 54/54 · build green.** ⏳ Runtime-unverified (needs a live Supabase session). **Remaining B72 polish:** on-canvas resize/rotate handles; Storage-backing image overlays (PDF-only today); deleting the Storage object on overlay remove (orphan only wastes quota).
+> Progress 2026-06-16 (same session): **on-canvas resize + rotate handles shipped** (completes the original B72 manipulation spec — "scale via corner handles, rotate"). A selected, unlocked overlay shows 4 corner handles (uniform scale about the center) + a rotate handle above the top edge (rotate about the center); both compose with any existing rotation and ride inside the overlay's rotated group, with the panel sliders kept as an alternative. New `ovScale` / `ovRotate` drag modes mirror the existing `moveSheetOverlay` pattern; scaling reuses the already-tested center-scaling math. **lint 0 · 55/55 tests · build green.** ⏳ UNVERIFIED in a browser. **Remaining B72 polish:** Storage-backing image overlays (PDF-only today) + Storage-object cleanup on remove. **Remaining B73:** true affine/skew (matrix model) + GeoPDF.
+> Progress 2026-06-16 (same session): **B72 Storage polish done.** (1) **Image overlays now Storage-back too** — `overlayStorage.js` generalized to `uploadOverlayFile` (PDF/PNG/JPG via `fileKind`; key carries the extension) + `downloadOverlayDataUrl`; the reload effect branches PDF (re-rasterize) vs image (restore the data-URL src, dims already known), so a PNG/JPG overlay reloads cross-device instead of "re-add." (2) **Remove cleans up the cloud copy** — `deleteOverlayObject` fires on overlay removal so Storage objects don't orphan. Still additive & fallback-safe (unsupported type / logged-out / error → stay inline). 7 storage unit tests (key ext + `fileKind` MIME/extension/unsupported). **lint 0 · 105/105 tests · build green.** ⏳ Runtime-unverified. **B72 polish now empty;** only **B73** true affine/skew + GeoPDF remain (both niche, deferred by decision).
 
 ### B73 — Calibrate the overlay to the drawing scale (default), with optional precise alignment `[Site Planner]` (feature)
 `[ ]` Get the **B72** map overlay to correct **real-world size** automatically from the drawing scale. Builds on B72 (which ships first, eyeballed); **position and rotation stay by-hand by default** ("just get it in the area, let me nudge it"). Why a separate calibration step exists: a site-plan PDF has a scale (how big to draw) but no coordinates (where / how rotated), and the scale math is exact only when the page is at its true plot size.
@@ -386,6 +389,211 @@ fresh cluster — fixed here.
 
 > **Triaged but NOT changed (still open / deferred, by decision):** building bump-outs aren't clamped when the host shrinks (medium, geometry — risk-deferred); `deleteSite` cloud delete stays fire-and-forget (zombie only if the delete fails — B-class edge); over-quota save still drops the underlay and reports success (graceful-degradation, minor); `currentSite` pointer global-not-per-user (low). County straddle/out-of-coverage messaging stays under **B13/B36**; metes curve + dash-DMS under **B25/B26**; bundle size / Anthropic-SDK / Mapillary-token / Nominatim / deploy-churn remain LOW/infra.
 
+<!-- Filed 2026-06-15 from a parallel chat's GIS batch (its provisional NEW-1…NEW-4 → B93…B96 here). (RENUMBERED from a stale B72–B75 — `main` had since filled B72–B92 with the overlay tool + an audit batch; IDs are permanent.) Build order for the batch: B96 (cache) first → B93 + B94 ride on it → B95 deferred. One generic ArcGIS-REST connector serves B93 + B94 (parameterized per source; no per-city/per-source code paths). -->
+
+### B93 — Jurisdiction identify: city limits, ETJ & county `[Site Planner / GIS]` (feature)
+`[ ]` Click any point — or, **on explicit request**, run on the active parcel — and get back which jurisdictions it falls in: incorporated city (or "unincorporated"), any city **ETJ** (extraterritorial jurisdiction), and county (Harris, Fort Bend, Montgomery, Galveston, Brazoria…). **Trigger: click / explicit request only — NOT auto-loaded on every parcel.**
+- **Interaction:** a map click runs a point-in-polygon "identify" against the loaded boundary layers; also identify-on-demand for the active parcel. **Test the whole parcel, not just its centroid** — flag boundary-straddle (e.g. partly City of Houston, partly unincorporated Harris Co.) and list *every* jurisdiction it touches rather than forcing one answer.
+- **Coverage:** Houston-metro priority cities (Houston, Baytown, Missouri City, Sugar Land, Pearland, …), but driven by a **source registry**, never per-city hardcoded logic — adding a city = adding a registry row, not new code.
+- **Source-priority chain (the crux):** query in fallback order per layer — authoritative city source where it publishes good GIS (e.g. Houston / COHGIS) → regional backbone (**H-GAC**, the Houston-Galveston Area Council, whose GIS covers the 13-county region) → statewide backbone (**TxDOT Open Data**, which publishes city limits + ETJ statewide). **One generic ArcGIS-REST connector** parameterized per source; a registry row stores endpoint URL, layer ID, and a field map. (Same connector serves **B94** — build it once.)
+- **Field mapping:** every source names the city field differently (`CITY_NM` / `NAME` / `MUNICIPALITY` …). The registry normalizes each source's schema into one internal shape so the UI is source-agnostic.
+- **Reuse existing GIS infra — do NOT build a parallel system:** same cache (**B96**), same per-layer honest status + visible data-age, same ~45 s self-heal re-probe, same Texas State Plane frame.
+- **Screening-only framing:** ETJ is volatile (Texas law now lets landowners petition out of a city's ETJ; annexations move city limits) — label results screening-only, always show source + age, never present as a legal/official determination, keep a visible "verify with the jurisdiction" note.
+- **Build step before wiring (evidence-first):** confirm each candidate endpoint actually responds and carries the expected fields, then calibrate against a few parcels whose jurisdiction is already known. Don't assume an endpoint/schema exists — verify it.
+> **Relationship to B13 / B36 (county-resolution theme) — not a duplicate, but adjacent.** B13-pt1 and B36(a)/(d) have been *waiting on a county-boundary polygon dataset* to replace the coarse per-county **bbox** pre-filter (true point-in-county CAD routing + straddle merge). B93 introduces exactly that data path — county boundary polygons loaded via the new source registry + point-in-polygon. So B93's county layer **is** the dataset those items need: land it and B13-pt1 / B36(a)/(d) can be closed or folded in. They're still distinct items (B13/B36 = *internal CAD-routing*; B93 = a *user-facing* city/ETJ/county identify) — build them aware of each other so the boundary data loads once, not twice.
+> **Endpoint verification needs network egress (2026-06-15, filing session):** the build-before-wiring step above is blocked from a default web session — outbound to the GIS hosts (`server.arcgisonline.com`, `services.arcgis.com`, `gis.h-gac.com`, TxGIO/TxDOT) returns `403 host_not_allowed` from the environment egress proxy. Recipe: in the environment editor set **Network access → Custom** (keep "Also include default list of common package managers" checked so npm/GitHub still work) and add, one per line: `*.arcgis.com` (TxDOT + city AGOL services), `*.arcgisonline.com`, `gis.h-gac.com` (H-GAC), `*.geographic.texas.gov` (TxGIO), plus `www.gis.hctx.net` + `gis.fbcad.org` (HCAD/FBCAD, for calibrating against known-jurisdiction parcels). **The proxy is fixed when a session starts**, so the change applies to a NEW session — not the one that saved it. Verify the hosts respond, then do the verify/calibrate pass before wiring.
+> **Progress 2026-06-15 (branch `claude/festive-davinci-0oco2n`): egress unblocked → endpoints verified + calibrated → connector built, tested, wired.** The allowlist recipe above took effect in a FRESH session (the proxy picks up the policy at session start, not mid-session): all GIS hosts now reachable — `server.arcgisonline.com` / `services.arcgis.com` (AGOL) / `feature.geographic.texas.gov` (TxGIO) / `www.gis.hctx.net` all 200; H-GAC + FBCAD are *allowed* but upstream-503 right now (not a proxy block). **Verified + calibrated against known ground:** city limits = TxGIO `City_Boundaries/Texas_City_Boundaries/MapServer/0` field `city_name` (downtown Houston → "Houston"); county = TxDOT `Texas_County_Boundaries/FeatureServer/0` field `CNTY_NM` (same point → "Harris" / FIPS 48201). **ETJ has no statewide layer** — only per-city / regional publishers (H-GAC for the metro); kept as a registry row that honestly reads "source not wired" rather than faked. **Built `src/workspaces/site-planner/lib/jurisdiction.js`:** ONE generic, registry-driven ArcGIS-REST connector on the B96 SWR cache — `JURISDICTION_SOURCES` rows (url/layer/field-map/query-kind), `normalizeFeature` (each source's schema → one internal shape), and `identifyJurisdiction(lng,lat,{ring})` which tests the WHOLE parcel via a polygon-intersect so a boundary **straddle** lists every city/county touched (point fallback when no ring); honest per-source status + visible data-age; screening-only. **Wired** into the planner's Identify panel as an explicit-request "⚖︎ Jurisdiction & road authority" button (never auto-loaded, per spec). **23 unit tests** (`test/jurisdiction.test.js`, injected fetch + cache); `lint` (0 errors) / `test` (68 pass) / `build` green; lazy chunks still split. **Remaining (kept `[ ]`):** wire a real ETJ source (H-GAC when its server recovers, or per-city COHGIS rows); **live browser confirmation** (CORS from the app origin + on-map render — same handoff as B96); and the **B13/B36 fold-in** (this county layer IS the boundary dataset those items were waiting on — close/merge in a follow-up so the data loads once).
+> **ETJ leg wired 2026-06-15 (same branch):** B93's third leg is no longer a gap — wired to the City of Houston's own COHGIS ETJ (`COH_ETJ_view/FeatureServer/1`, reflects SB2038 releases), verified + calibrated (Aldine / Spring, unincorporated near Houston → in the ETJ ring; downtown / in-city → not). Houston-only by design (the priority metro); other cities' ETJ are additive registry rows. `normalizeFeature` gained a `nameConst` fallback so a single-jurisdiction layer with no city-name column still resolves ("Houston"). So **all three legs (city + ETJ + county) are now wired against verified sources**; what remains is live browser confirmation + the B13/B36 fold-in.
+
+### B94 — Road / right-of-way maintenance authority `[Site Planner / GIS]` (feature)
+`[ ]` For the road(s) fronting the site — or a clicked road segment — return **who maintains it (TxDOT, county, or city).** A different question from which jurisdiction the *parcel* sits in (**B93**).
+- **Why it matters:** the maintaining authority controls the driveway/access permit, the right-of-way, traffic, and utility cuts. A TxDOT state highway, a Harris County road, and a City of Houston street fronting the same parcel each send you to a different permitting desk.
+- **Data:** TxDOT roadway inventory as backbone — flags **on-system** (state-maintained highways) vs **off-system** (locally maintained) plus a jurisdiction attribute; supplement with county-road and city-street layers where published.
+- **Interaction:** these are **line** features, not polygons — use a **nearest-segment** query within a small tolerance from the click or the parcel frontage; return road name, route ID, and maintenance authority.
+- **Patchiness expected:** road-jurisdiction data is less complete than boundary polygons. Returning **"unknown" with honest status is correct** and far better than a wrong guess (same never-auto-guess-on-low-confidence rule as auto-filing).
+- **Reuse:** the **same one generic ArcGIS-REST connector** + registry + cache (**B96**) + honest status/age as B93 — no per-source code paths.
+> **Progress 2026-06-15 (branch `claude/festive-davinci-0oco2n`): built on the shared connector, verified + calibrated.** Backbone = TxDOT `TxDOT_Roadway_Inventory/FeatureServer/0` (polyline). `identifyRoadAuthority(lng,lat)` buffers the click by 40 m, then returns the **nearest** segment (`polylineDistMeters` — a local-equirectangular point-to-segment distance) with its maintenance authority. **`RDWAY_MAINT_AGCY` calibrated from the live distinct HSYS×agency cross-tab:** 1 = State/TxDOT (IH/US/SH/FM/RM…), 2 = County (CR), 4 = City (LS), 7–15 = Federal (all ride HSYS=FD), 5/6/16 = toll/managed-lane; an unrecognized code falls back to the HSYS class and otherwise reads an honest **"Unknown"** (never a guess). Shares B93's registry + connector + B96 cache + status/age, and is wired into the same Identify-panel button. Covered by the B93 test file (nearest-segment pick among several, honest-unknown when nothing's within tolerance, server-error → null not throw). **Remaining (kept `[ ]`):** identify off the **parcel frontage** (today it's the click point); supplement with county-road / city-street layers where published; live browser confirmation.
+> **Parcel-frontage added 2026-06-15 (same branch):** `identifyRoadAuthority` now also takes the parcel ring → returns EVERY distinct fronting authority (buffers the parcel polygon by the tolerance, dedupes by route), not just a clicked point's nearest segment — so a lot that fronts a state highway AND a city street shows both permitting desks. **Validated live** against the TxDOT endpoint: a downtown-Houston parcel box → 8 segments within 40 m, distinct authorities **City + State (TxDOT)** (the exact multi-desk case the item calls out). Point mode (nearest segment) is retained for a bare click; the planner now passes the active parcel's ring. +3 tests (72 total). Remaining: optional county-road / city-street supplement layers where published; live browser confirmation.
+
+### B95 — Jurisdiction → development-consequence summary `[Site Planner / GIS]` (task, downstream — DEFERRED)
+`[ ]` Optional downstream layer: translate the raw boundary facts from **B93 / B94** into the questions that drive a deal — who regulates platting/subdivision (city directly / city-via-ETJ / county), whether zoning applies (Houston has none; most others do), who reviews drainage/detention and fire flow, which property-tax jurisdictions apply, and who issues the access permit (from B94).
+- Plugs into the existing **verdict-engine** concept (the `developableArea()` synthesis stub); stays a **screening aid, not legal advice.**
+- **Defer until B93 / B94 are solid.** Rules are per-jurisdiction and accrue over time — start with Houston plus the 2–3 most common cities and expand as hit.
+
+### B96 — GIS layer cache (stale-while-revalidate) `[Site Planner / GIS]` (feature)
+`[ ]` Browser-local cached copy of each GIS layer's last-good response so lookups are **instant and survive a source being slow or offline.** Plain-English: a "cache" = a stored copy of the last good answer, reused instead of re-asking the server every time.
+- **Pattern:** on load, paint last-known-good from cache immediately → fire a background refresh → swap in fresh data when it returns → **always display the data's age** on screen.
+- **Scope:** all GIS layers, **including the new jurisdiction + road-authority layers (B93 / B94)** — this is the mechanism that makes those feel seamless rather than laggy.
+- **Storage:** browser-local so it persists across reloads; no server, no new credentials — stays in the browser-only tranche. Per-user privacy already covered by the existing model.
+- **Screening-only:** always surface age so a stale boundary is never mistaken for current. **Extends** the existing per-layer honest status + ~45 s self-heal re-probe — doesn't replace them.
+- **Build order:** **do this first in the batch** — B93 / B94 ride on it for the "instant + survives a source outage" behavior. Formalizes the CLAUDE.md roadmap item "GIS layer caching — next immediate item."
+> **Step 0 — current-state finding (2026-06-15, this filing): stale-while-revalidate is NOT implemented today; it remains only planned.** What exists in the GIS path is adjacent but different: **(1)** an **in-memory** service-*health* probe cache (`lib/layers.js` `_probeCache`, 40 s `PROBE_TTL`) that feeds the ~45 s self-heal re-probe — it caches *whether a service is up*, not its response data, and is lost on reload; **(2)** an **in-memory, per-session** memoization of Overpass/Mapillary vector results keyed per rounded bbox (`lib/evidenceLayers.js` `_cache`) — also lost on reload, with no background refresh and no age shown. The raster overlays (`syncOverlayLayers` → esri `dynamicMapLayer`/`imageMapLayer`/`featureLayer`) and parcel queries (`lib/arcgis.js` `fetch`) hit the network live on every view. No `localStorage`/IndexedDB persistence of any GIS response exists. **Conclusion: build the SWR cache from scratch** — a browser-local, request-keyed store (paint-stale → background-revalidate → show age) — then have B93/B94's connector read/write it and retrofit the evidence-layer memoization onto it.
+>
+> **Progress 2026-06-15 (branch `claude/festive-davinci-0oco2n`): cache mechanism built + unit-tested; first consumer wired.** New `src/workspaces/site-planner/lib/gisCache.js` — a generic stale-while-revalidate primitive: synchronous `swr(key, fetcher, {ttl})` returns the cached copy to paint *now* **plus** a background `fresh` promise that revalidates and swaps in, with browser-local persistence (namespaced + byte-capped localStorage, oldest-evicted on quota, every storage touch guarded so a failure degrades to a plain live fetch), an in-process L1 memo, and a `formatAge` helper. **15 unit tests** (`test/gisCache.test.js`, deterministic via an injected store + clock) cover staleness, age buckets, paint-stale→revalidate, failed-refresh-keeps-last-good, quota eviction, total-budget trim, and namespace isolation (it never evicts the `planarfit:*` site data). **First consumer wired:** the Overpass evidence layer now rides the cache — it **persists across reloads** (the old in-memory Map did not) — and the Layers panel shows each cached layer's **data age** ("refreshed 3m ago", amber while showing last-good during a refresh), threaded `onStatus(id,state,msg,{ts,stale})` → `layerStatus` → `LayerPanel` (30 s ticker so the age keeps counting). `lint` (0 errors) / `test` (45 pass) / `build` all green. **Remaining (kept `[ ]`):** the *primary* consumers are **B93/B94**'s ArcGIS-REST connector (not built — egress-blocked here); and **live runtime confirmation** of cross-reload persistence + on-map age needs the GIS hosts on the network egress allowlist (same caveat as B93). Server-rendered raster overlays (FEMA/NWI/3DEP image exports) aren't SWR-cacheable *as data* and keep their existing probe-based status.
+>
+> **Progress 2026-06-15 (this session, branch `claude/festive-davinci-0oco2n`): the primary consumer landed.** Egress is now unblocked (the allowlist took effect in a fresh session — see B93), so B93/B94's `lib/jurisdiction.js` ArcGIS-REST connector is built and rides this cache (`gisCache.swr`, per-source TTLs, `formatAge` age shown in the Identify panel). The cache primitive + both consumers are `lint` / `test` (68 pass) / `build` green together. Still `[ ]` only for **live runtime confirmation** (cross-reload persistence + on-panel age in a real browser) — the one piece that needs the app actually running, not just the hosts reachable.
+>
+> **Progress 2026-06-16 (branch `claude/nice-dirac-029jok`): vector-tier for the raster overlays — directly closes the "raster overlays aren't SWR-cacheable _as data_" gap noted above.** Instead of caching FEMA/NWI flat image exports, pull the actual POLYGONS and cache those (smaller, owned, re-stylable, queryable). New `lib/vectorLayers.js` (pure, Web-Worker-movable, dependency-injected) hits each MapServer's `/query` (Esri JSON, `outSR=4326`) for **FEMA flood (NFHL sublayer 28)** + **NWI wetlands (0)**, rides `gisCache.swr` (paint-stale → revalidate → show age), styles each zone/wetland-type locally, and `decideVectorOrImage` **falls back to the existing `dynamicMapLayer` image** when a source is image-only, the vector pull errors (e.g. CORS), the view is below `minVectorZoom`, or the bbox exceeds `maxAreaDeg` — so a layer never goes blank. Registry-driven (one row per layer, à la `jurisdiction.js`); paging on `exceededTransferLimit` + a `maxFeatures` cap; Douglas–Peucker simplify before store; screening `note` on every source. **31 unit tests** (`test/vectorLayers.test.js`; injected fetch + cache + clock — query/paging/truncate, Esri→GeoJSON, simplify, FEMA+NWI symbology, vector-vs-image decision, SWR cold/warm-fresh/warm-stale). `lint` 0 / `test` 136 / `build` green. **This is piece 1 of 2 — the pure engine, not yet wired into the map (no behavior change).** Piece 2 (next): an `L.geoJSON` view-driven overlay + one `syncOverlayLayers` dispatch branch + a **cloud tier** (`public.gis_vector_cache`, RLS private-by-default, keyed per project) so the polygons are owned in the cloud per project, not browser-only. Live planyr.io verification required — **CORS on the `/query` endpoints is the key runtime unknown** (a host that served image tiles may still block a `fetch`; the image fallback is exactly the safety net).
+
+---
+
+## 🎨 UI/UX & parcel-interaction overhaul — 2026-06-16 (product walkthrough)
+
+Filed from a product walkthrough of the map + planner chrome and the parcel-interaction
+model. Provisional **NEW-1…NEW-8** were minted B93–B100, but **B93–B96 collided** with the
+same-day GIS batch (PR #46, which had already shipped code under B93–B96); per the dedupe
+protocol they are **renumbered B104–B107** here (B97–B100 were unique and keep their IDs; the
+GIS batch keeps B93–B96). Deduped against existing items — **B10** (two-header consolidation +
+product switcher) already shipped for the *planner* context bar and explicitly left "a single
+physical row is a later polish," so **B104** is that remaining polish for the *map* view
+(net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
+
+### B104 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`) — the brand-dedup, matching how **B10**
+handled the planner. **Dropped the redundant "Site Planyr" lockup (icon + wordmark) from the MapFinder
+header**, since the shell header already shows "Planyr · Site Planyr"; the map bar now leads with just its
+"Find a site" context label + the search/Go + Start blank. No z-index change, so the B66 stacking fix is
+untouched. Consistent with B10, a **single physical row** (folding the map bar's controls up into the
+shell header) stays a later polish — the duplicate-brand complaint, which was the actual repro, is fixed.
+⏳ Not browser-verified. Original spec:
+shell header) and a white search/actions bar below (the MapFinder header) — with the brand/module
+lockup ("Site Planyr") appearing on both. **Expected:** a single header holding the logo, the
+**"Find a site"** search + **Go**, the account menu, and the primary actions (**Start blank**).
+Drop the redundant second "Site Planyr" lockup and reclaim the vertical space for the map.
+> Dedup: the map-view counterpart to **B10** (done — the *planner* context bar got the
+> brand-dedup + product switcher, but its done-note explicitly deferred "a single physical row"
+> as "later polish"). B104 is that remaining single-row polish for the **MapFinder** header.
+> Mind the **B66** stacking-context fix (shell header vs. workspace z-index floor) when collapsing
+> the bars so the product-switcher dropdown still paints above the map. (If the rendered mark truly
+> reads "Site Planr", that's also a **B3** spelling regression to fix in passing.)
+
+### B105 — Remove the "Drag to move the map" hint card `[Site Planner / map]` (task)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). The persistent bottom-left card is
+gone; replaced by a **one-time, dismissible** first-run bubble (same copy + an ✕, remembered in
+`localStorage` `planarfit:mapHintDismissed:v1`). Split the old shared box into three states so they no
+longer fight over the corner (the B21 cross-ref): an **error toast** (only when `err`), **contextual
+selection guidance** (only while `selectMode` is on), and the **first-run hint** (idle, until dismissed).
+> Cross-ref: **B21** notes the bottom-left slot is shared between this click-guidance and error
+> toasts (a background layer error masks the guidance). Removing/relocating the persistent card
+> interacts with that shared slot — coordinate so a one-time hint and transient layer-error toasts
+> don't fight over the same corner.
+
+### B106 — Redesign the Sites panel (collapsible, safer delete, see-all) `[Site Planner / map]` (feature)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Reworked the saved-sites panel:
+**collapsible** — the "Your sites · N" header is now a toggle that folds the panel to a slim bar; state
+persists per device. **Safer delete** — the per-row crosshair + delete are hidden by default and **reveal
+on hover** (or when the row is the active site), so the always-visible ✕ is gone; delete still routes
+through the existing confirm modal. **Primary row action** stays click-to-open (crosshair = zoom),
+revealed on hover per spec. **Status chips** now **hide zero-count statuses** (only statuses with sites
+show); the list itself already defaults to all sites (the chips filter map markers, per B7/B8). Interpreted
+the "⋯ more-actions menu" as hover-reveal + the existing confirm (decluttered without a new dropdown).
+⏳ Visual — not browser-verified. Original spec:
+- **Collapsible** — collapsed = a slim tab/handle (optionally showing the site count); expanded =
+  the full list. **Persist** the open/closed state.
+- **Safer delete** — remove the always-visible per-row **X**. Delete must take intent: move it behind
+  a per-row **"more actions" (⋯)** menu with a confirm.
+- **Primary row action = the crosshair** (zoom-to-site). Reveal the other row buttons **on hover**
+  rather than showing them on every row at all times.
+- Keep the **status filter chips**, but **hide zero-count statuses**; default to an **all-sites** view.
+> Cross-ref: builds on the saved-sites panel from **B7/B8** (status legend + per-state show/hide
+> filters + pipeline counts). "Hide zero-count statuses / default all-sites" refines those existing
+> filters — extend them, don't fork a parallel panel. Status set + visuals stay per B7/B8.
+
+### B107 — Rework the left tool rail (order, polish, fits on one page) `[Site Planner]` (task)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). **Reordered** `leftTabs` to the spec —
+primary modes on top (**Yield, Parcel, Element**), utilities pinned below (**Aerial, Overlay, Setup**).
+The selected-tab highlight was **already** the requested light treatment (a 3px ember accent bar + a
+subtle `rgba(232,89,12,0.14)` fill, not a heavy brown block), and the 6-tab column already fits the
+viewport, so no style change was needed there. ⏳ If a live look still reads "heavy," that's a quick
+follow-up — flagging since this wasn't browser-verified. Original spec retained below.
+Reorder and polish the planner's left tool rail:
+- **Reorder with Yield at the top.** Suggested grouping: primary modes up top (**Yield, Parcel,
+  Element**); utilities pinned to the bottom (**Aerial, Overlay, Setup**).
+- **Lighten the selected-tool highlight** — an accent bar or subtle fill, not the heavy brown block —
+  and tighten vertical spacing + icon sizing so it reads as polished.
+- The **full rail must fit within the viewport height** — no scrolling to reach a tool.
+> Note: **Overlay** is the **B72** tool (shipped browser-only) — slot it into the "utilities" group
+> at the bottom.
+
+### B97 — Compact the right Layers / Utility Evidence panel so it fits on one page `[Site Planner]` (bug)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). The three groups in the shared
+`LayerPanel` — **Map layers**, **Utility evidence**, and the **jurisdiction** group — are now
+**collapsible** (click the header; state persists per device in `localStorage`), each header showing an
+"N on" count so you can collapse what you're not using and keep the whole panel on one page. Also
+tightened the group header/row spacing. Applies on both the map and the planner (shared component).
+⏳ Not browser-verified — if it still overflows when everything's expanded, the next lever is a fixed
+max-height + inner scroll on the open groups. Original spec:
+off-screen and forcing a scroll. **Expected:** reduce row height, padding, and section spacing so every
+layer and tool fits without scrolling. If the list keeps growing, make the two sections (**Layers** /
+**Utility Evidence**) **collapsible**. Single-page, no-scroll is the bar.
+
+### B98 — Stop the parcel popup from firing on every click; declutter it `[Site Planner / map]` (bug)
+`[x]` Verified already satisfied + completed by B99/B100 (2026-06-16). The behavioral asks were already
+met in the code: **(1)** `startMoveParcel` early-returns unless `tool === "select"` (SitePlanner.jsx),
+so clicking a parcel while a draw/measure tool is active goes to the **tool**, not the parcel — it does
+NOT fire while drawing. **(2)** Parcel info already shows in the **left side panel** (opened on
+select-tool click), not a re-appearing popover; the map uses hover **tooltips** + click-to-open-site
+(no Leaflet `bindPopup` on parcels). **(3)** "Trim to essentials": the panel leads with area + geometry
+check + **Active/Lock** (added in B99/B100), and the full county appraisal fields are already behind an
+"all fields" expand. So no risky rework was warranted; the residual is cosmetic ordering best judged in a
+live view. (If a specific popover is still observed on the live site, reopen with a repro — couldn't find
+one in the code.) Original spec:
+inside parcels constantly, so it fires far too often and gets in the way; the on-parcel overlay is also
+busy/unclear (line + vertex handles + length labels all at once). **Expected:**
+- When a **draw/measure tool is active**, clicks go to the **tool** and do **NOT** open the popup.
+- Parcel info opens only via an **explicit action** — selecting with the Parcel/Select tool, a
+  **double-click**, or a small **"i" button** — and shows in a **side or pinned panel** rather than a
+  popover that keeps reappearing.
+- **Trim the popup to essentials** — name/ID, area, status, active/inactive, lock state — with details
+  behind an **expand**.
+> Cross-ref: the identify path + result panel already exist (**B53** `identifyAt`→`setIdentifyRes`;
+> **B6** select tool). The "active/inactive" + "lock state" essentials come from **B100** / **B99**.
+> Gate the popup behind the active-tool check rather than adding a parallel identify path; relates to
+> the click-reliability work in **B64**.
+
+### B99 — Parcel lock model: locked by default, explicit unlock to edit `[Site Planner]` (feature)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Most of this was already in place —
+parcels are created `locked:true` (map import, draw, rect, split, merge, identify), locking already
+guards vertex-drag / vertex-add / polygon-move, and a per-parcel **🔓 Lock / 🔒 Unlock** toggle lives
+in the Parcel panel. Remaining work landed here: **removed the persistent 🔒 badge** from the saved-parcel
+list row (state now reads from the panel toggle when a parcel is selected, not an always-on glyph). Lock
+is a distinct field from active (B100). `locked` already persists per parcel in the Site Model `data`
+(no version bump needed — it's a per-parcel field, like `fill`/`setbacks`).
+Original spec:
+- **Remove the persistent lock badge** next to parcels.
+- Treat **all parcels as locked by default** so geometry can't be moved or edited by accident.
+- Provide an explicit per-parcel **"unlock to edit"** action; **re-lock** when done.
+- **Lock (can the shape be edited) is independent of active/inactive (B100).** Two separate properties
+  on a parcel.
+> Cross-ref: the trimmed parcel popup (**B98**) surfaces lock state in its essentials. Persist lock
+> per parcel on the Site Model (additive field → bump `SITE_MODEL_VERSION`, extend `migrate`, expose
+> via a selector, per the conformance rule).
+
+### B100 — Active / Inactive parcels driving calculations `[Site Planner]` (feature)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). Per-parcel `active` flag (default
+**active**; missing = active, so existing sites are unchanged until a parcel is toggled off). New
+`activeParcelsOf` selector + a unit test. `siteSqft` now sums **active parcels only**, so every
+downstream metric (coverage, FAR, impervious, detention %, open space) follows automatically. Added an
+**✓ Active / ◯ Inactive** toggle in the Parcel panel (beside Lock) + `toggleParcelActive`; inactive
+parcels render **dimmed + dashed** on the canvas (visible for context, clearly excluded) and show
+"· inactive" in the saved-parcel list; the Yield panel notes "Excludes N inactive parcel(s)." No
+`SITE_MODEL_VERSION` bump — `active` is a per-parcel field (defaulted at read, like `locked`/`fill`),
+so no migration is needed. **Scope note:** the *map's* site-acreage label (MapFinder) intentionally still
+shows the full footprint (all parcels) — B100 targets the planner's yield/coverage/detention math.
+Original spec:
+- Add a per-parcel **Active/Inactive** toggle.
+- **All area-based calculations — yield, coverage, detention, and similar — count ONLY active parcels.**
+- Inactive parcels stay **visible for context** but render **dimmed or with diagonal-line shading** so
+  it's obvious they're excluded.
+- **New parcels default to Active.**
+- Expose the toggle in the **parcel info panel (B98)**, and ideally **inline** on the parcel itself.
+> Cross-ref: independent of lock (**B99**). The "active only" rule must thread through the
+> yield/coverage/detention math (the `siteSqft` / `developableArea` inputs) — additive Site Model field
+> → bump `SITE_MODEL_VERSION`, extend `migrate`, expose via a selector; the self-intersection/area
+> guards from **B81/B86** feed the same totals, so keep them in step.
+
+<!-- Filed 2026-06-16 from a product walkthrough (provisional NEW-1…NEW-8 → minted B93–B100; B93–B96 later renumbered B104–B107 to resolve a same-day collision with the GIS batch — B97–B100 unchanged; deduped against B10/B7/B8/B53/B66, which already shipped — these are net-new UI/parcel-interaction work). -->
+
 ---
 
 ## 🕓 Later / Roadmap
@@ -397,6 +605,17 @@ fresh cluster — fixed here.
 ---
 
 ## ✅ Done
+
+> **ID note (2026-06-16):** these three were filed/implemented as B93–B95, but a concurrent `main` (PRs #46/#51) had blindly taken B93–B100 for different items. Per the dedupe protocol they're **renumbered B101–B103** here (content is unique — no overlap with main's GIS/UI-overhaul items); the implementing commit message still says "B93–B95" (the provisional numbers). The colliding UI batch (PR #51) was separately renumbered **B104–B107**, so B93–B107 are now unique and gapless (GIS keeps B93–B96).
+
+### B101 — Remove the element-type color legend from the Setup/defaults page `[Site Planner / Setup]` (task)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`; filed provisionally as B93). Confirmed display-only first: element colors are *defined* in the "Element default colors" section (the color pickers writing `settings.typeStyles` via `setTypeStyle`) and in `TYPE`/`typeStyle`, which the canvas reads — the legend was just a swatch+label key. Removed the legend block only; color definitions untouched.
+
+### B102 — Roads defaults: show "ft" units + rename "Travel widths" → "Road widths" `[Site Planner / Setup — Roads]` (bug)
+`[x]` Done 2026-06-16 (filed provisionally as B94). Labels are now "Curb width (ft)" and "Road widths (ft)" (matching the panel's other `(ft)` labels). Label-only change — the persisted `roadCurb`/`roadWidths` setting keys and the travel+curb geometry are unchanged. (The per-element "Travel width (ft)" field on a *selected road* is left as-is — there it's accurately the drivable width excluding curbs.)
+
+### B103 — Uniform polygon completion across ALL drawing tools `[Site Planner / drawing]` (bug)
+`[x]` Done 2026-06-16 (filed provisionally as B95). One shared `finishActiveDrawing()` now drives BOTH Enter and double-click (`onBgDouble`), so finish/auto-close is identical across parcel, every area element (building/paving/parking/trailer/pond/sidewalk/landscape + custom polygons), measure, split, markup poly/polyline, and trace — Enter previously had no handler for parcel / element-polygon / mpolygon. Added `removeLastVertex()` so Backspace/Delete undoes the last placed vertex mid-draw (before the delete-selection fallback); Esc-cancel already existed. Road free-draw still finishes as an open path (no forced closing segment). Each finisher keeps its own min-point guard, so Enter/double-click no-ops instead of cancelling a too-short draft; `draftPoly`/`draftElPoly` added to the keydown effect deps so the handler reads the current draft.
 
 ### B1 — Sign-up form: missing fields `[auth]` (bug)
 `[x]` Sign-up must collect **First name**, **Last name**, and **Organization/Company**. These fields are currently absent.

@@ -200,7 +200,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
     if (st.on && !cur) {
       refs[k] = "pending";
       onStatus && onStatus(k, "loading");
-      const report = (s, msg) => onStatus && onStatus(k, s, msg);
+      const report = (s, msg, extra) => onStatus && onStatus(k, s, msg, extra); // extra carries data-age {ts,stale} for B75
       if (cfg.kind === "overpass") {
         const lyr = overpassLayer(cfg.query, report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;

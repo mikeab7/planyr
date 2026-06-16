@@ -5,7 +5,7 @@ import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayPdf, downloadOverlayBytes } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -27,6 +27,8 @@ import {
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
+import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
+import { formatAge } from "./lib/gisCache.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -941,7 +943,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!origin) return;
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
-      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { setOverlapWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`); setTimeout(() => setOverlapWarn(""), 6000); },
     });
     sync();
@@ -1221,20 +1223,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("mellipse"); return; }
       if ((e.key === "p" || e.key === "P") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolygon"); return; }
       if ((e.key === "n" || e.key === "N") && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("mpolyline"); return; }
-      if (e.key === "Enter" && traceMode && tracePts.length >= 2) { e.preventDefault(); commitTrace(); return; }
-      if (e.key === "Enter" && tool === "mpolyline" && mkPoly?.pts?.length >= 2) { e.preventDefault(); finishMkPoly(); return; }
-      if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
-      if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
+      // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
+      if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
+      if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -1731,6 +1732,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
+    if (d.mode === "ovScale") { // corner handle: uniform scale about the (fixed) center
+      const ftPerPx = Math.max(0.001, d.ftPerPx0 * (Math.hypot(fp.x - d.C.x, fp.y - d.C.y) / d.grabDist));
+      const W = d.imgW * ftPerPx, H = d.imgH * ftPerPx;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ftPerPx, x: d.C.x - W / 2, y: d.C.y - H / 2 } : o)));
+      return;
+    }
+    if (d.mode === "ovRotate") { // rotate handle: rotate about the center
+      const rotation = (((d.rot0 + (Math.atan2(fp.y - d.C.y, fp.x - d.C.x) - d.a0) * 180 / Math.PI) % 360) + 360) % 360;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, rotation } : o)));
+      return;
+    }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
     if (d.mode === "printResize") {
       const aspect = printAspect();
@@ -1989,7 +2001,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setDraftElPoly(null);
     setTool("select");
   };
-  const onBgDouble = () => { if (traceMode) commitTrace(); else if (tool === "parcel") closePoly(); else if (tool === "split") finishSplit(); else if (tool === "measure") finishMeasure(); else if (tool === "mpolygon" || tool === "mpolyline") finishMkPoly(); else if (draftElPoly) closeElPoly(); };
+  // One shared completion path for EVERY multi-point tool, used by BOTH Enter and double-click,
+  // so "finish / auto-close" behaves identically everywhere. Each finisher guards its own minimum
+  // point count, so this no-ops (rather than cancelling the draft) when there aren't enough yet.
+  const finishActiveDrawing = () => {
+    if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
+    if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : 2)) { finishMeasure(); return true; }
+    if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
+    if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
+    if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
+    if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
+    return false;
+  };
+  // Remove the last placed vertex of whatever multi-point shape is in progress (Backspace/Delete);
+  // empties a polygon draft to null so it's fully cancelled once the last point is gone.
+  const removeLastVertex = () => {
+    if (traceMode && tracePts.length) { setTracePts((a) => a.slice(0, -1)); return true; }
+    if (tool === "split" && splitPath.length) { setSplitPath((a) => a.slice(0, -1)); return true; }
+    if (tool === "measure" && measDraft.length) { setMeasDraft((a) => a.slice(0, -1)); return true; }
+    if (mkPoly?.pts?.length) { setMkPoly((m) => { const pts = m.pts.slice(0, -1); return pts.length ? { ...m, pts } : null; }); return true; }
+    if (draftPoly?.length) { setDraftPoly((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; }
+    if (draftElPoly?.pts?.length) { setDraftElPoly((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; }); return true; }
+    return false;
+  };
+  // Double-click finishes exactly the way Enter does (the shared path above).
+  const onBgDouble = () => { finishActiveDrawing(); };
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -2081,8 +2118,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
-      if (isPdfFile(file) && isCloudActive()) { // back the PDF up to Storage for cross-device reload (B72)
-        uploadOverlayPdf(siteId, id, file).then((res) => {
+      if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
+        uploadOverlayFile(siteId, id, file).then((res) => {
           if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
         }).catch(() => {});
       }
@@ -2103,6 +2140,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "moveSheetOverlay", id, fx: fp.x, fy: fp.y, ox: o.x, oy: o.y };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
+  // On-canvas resize (corner) + rotate handles for the selected overlay (B72 — completes
+  // the original spec). Both scale/rotate about the overlay center so they compose with any
+  // existing rotation; the panel sliders remain as an alternative.
+  const startScaleOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovScale", id, C, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const startRotateOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovRotate", id, C, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0 };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
   // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
   const patchOverlay = (id, patch, hist = true) => {
     if (hist) pushHistory();
@@ -2112,6 +2176,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
     setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
     setSelOverlay((s) => (s === id ? null : s));
   };
@@ -2198,9 +2264,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (async () => {
       for (const o of missing) {
         try {
-          const bytes = await downloadOverlayBytes(o.storageKey);
-          const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
-          if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
+            const bytes = await downloadOverlayBytes(o.storageKey);
+            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+            if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          } else { // image: its raster IS the source — restore the src directly (dims already known)
+            const src = await downloadOverlayDataUrl(o.storageKey);
+            if (!cancelled && src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src } : x)));
+          }
         } finally { overlayFetching.current.delete(o.id); }
       }
     })();
@@ -2817,6 +2888,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
   };
+  // Active/Inactive is independent of lock (B100): inactive parcels drop out of every area
+  // calc but stay on the canvas (dimmed). Missing = active, so toggling off sets active:false.
+  const toggleParcelActive = (id) => {
+    pushHistory();
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, active: pc.active === false } : pc)));
+  };
   const toggleMarkupLock = (id) => {
     pushHistory();
     setMarkups((a) => a.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m)));
@@ -2826,7 +2903,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Per-element striping/count config: a strip may override the global standards
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
-  const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
+  // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
+  const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
@@ -2881,13 +2959,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify (click any spot → county record without importing).
   const [identifyMode, setIdentifyMode] = useState(false);
-  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, addr } | { error }
+  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, lng, lat, addr } | { error }
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
+  // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
+  // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B96).
+  const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
+  const checkJurisdiction = async () => {
+    const r = identifyRes;
+    if (!r || r.busy || r.error || r.lng == null) return;
+    setJurInfo({ busy: true });
+    const [j, road] = await Promise.all([
+      identifyJurisdiction(r.lng, r.lat, { ring: r.ring }), // whole-parcel test → flags a straddle
+      identifyRoadAuthority(r.lng, r.lat, { ring: r.ring }), // parcel frontage → every fronting authority
+    ]);
+    setJurInfo({ j, road });
+  };
+  const jurRow = (label, value, ageMs) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "1px 0" }}>
+      <span style={{ color: PAL.muted }}>{label}</span>
+      <span style={{ color: PAL.ink, fontWeight: 600, textAlign: "right" }}>
+        {value}
+        {ageMs != null && <span style={{ color: PAL.muted, fontWeight: 400 }}> · {formatAge(ageMs)}</span>}
+      </span>
+    </div>
+  );
   const identifyAt = async (fp) => {
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later identify click supersedes this one (B53)
-    setIdentifyRes({ busy: true });
+    setJurInfo(null); setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
       if (!idLayerRef.current) {
@@ -2898,7 +2998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
       if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
       const ring = largestRingLngLat(feat);
-      setIdentifyRes({ attrs: feat.attributes || {}, ring, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+      setIdentifyRes({ attrs: feat.attributes || {}, ring, lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
   const addIdentifiedParcel = () => {
@@ -2909,7 +3009,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = { id: uid(), points, locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null };
     setParcels((a) => [...a, pc]);
     setSel({ kind: "parcel", id: pc.id });
-    setIdentifyRes(null); setIdentifyMode(false);
+    setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
   };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
@@ -3565,9 +3665,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
   const leftTabs = [
-    { id: "props", glyph: "✎", label: "Element" },
-    { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "yield", glyph: "∑", label: "Yield" },
+    { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
     { id: "standards", glyph: "⚙", label: "Setup" },
@@ -4100,6 +4200,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {isSel && tool === "select" && (
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
+                    {isSel && tool === "select" && !o.locked && !ovCalib && (<>
+                      {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
+                        <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                          style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+                      ))}
+                      <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+                      <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                        style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+                    </>)}
                   </g>
                 );
               })}
@@ -4150,9 +4259,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
+                const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
                   fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                   stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                  strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                   style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                   pointerEvents="all"
                   onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -5291,7 +5402,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
                         style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}{picked ? " ✓" : ""}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
                         <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                       </button>
                     );
@@ -5308,7 +5419,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* identify any parcel from the county GIS (no import unless you add it) */}
               <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
                 {origin ? (
-                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); }}>
+                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); setJurInfo(null); }}>
                     {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
                   </button>
                 ) : (
@@ -5326,6 +5437,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             </div>
                           ))}
                           {identifyRes.ring && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
+                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
+                          </button>
+                          {jurInfo && !jurInfo.busy && (
+                            <div style={{ marginTop: 7, borderTop: "1px dashed #ece4d4", paddingTop: 6 }}>
+                              {jurInfo.error ? <span style={{ color: "#b45309" }}>{jurInfo.error}</span> : <>
+                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
+                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : "not in Houston ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
+                                {jurInfo.j.straddle && <div style={{ color: "#b45309", marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
+                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
+                              </>}
+                            </div>
+                          )}
                         </>}
                   </div>
                 )}
@@ -5440,6 +5566,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
@@ -5499,6 +5626,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ))}
             </div>
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
+            {parcels.some((p) => p.active === false) && (
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
+                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
+              </div>
+            )}
             {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
             {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
             {metricRow("FAR", f2(far), "(1-story)")}
@@ -5533,8 +5665,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
 
           <Section title="Roads" collapsed>
-            <Field label="Curb width"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
-            <Field label="Travel widths">
+            <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
+            <Field label="Road widths (ft)">
               <input style={{ ...numInput, width: 150 }} value={settings.roadWidths ?? "24, 26, 30, 36, 40"}
                 onChange={(e) => setSettings((s) => ({ ...s, roadWidths: e.target.value }))} />
             </Field>
@@ -5554,26 +5686,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             })}
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
           </Section>
-
-          {/* legend — colour + the H2 texture cue, so the key carries the
-              colour-blind-safe secondary signal too (B97) */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", padding: "11px 13px", background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" }}>
-            {Object.keys(TYPE).map((k) => {
-              const st = typeStyle(k, settings);
-              const pat = st.pattern || (st.hatch ? "hatch" : st.water ? "water" : null);
-              return (
-                <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
-                  <svg width="13" height="13" style={{ display: "block", flex: "none" }} aria-hidden="true">
-                    <rect x="0.5" y="0.5" width="12" height="12" rx="2.5" fill={st.fill} stroke={st.stroke} strokeWidth="1" />
-                    {pat === "hatch" && [13, 8, 18].map((d, i) => <line key={i} x1={0} y1={d} x2={d} y2={0} stroke={st.stroke} strokeWidth="0.8" opacity="0.55" />)}
-                    {pat === "trailer" && [0, -5, 5].map((o, i) => <line key={i} x1={o} y1={0} x2={o + 13} y2={13} stroke={st.stroke} strokeWidth="0.8" opacity="0.6" />)}
-                    {pat === "water" && [4.5, 8.5].map((y, i) => <line key={i} x1={2} y1={y} x2={11} y2={y} stroke={st.stroke} strokeWidth="0.8" opacity="0.5" />)}
-                    {pat === "sidewalk" && [3.5, 9.5].flatMap((cx) => [3.5, 9.5].map((cy) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={0.9} fill="#9c998d" opacity="0.6" />))}
-                  </svg>{TYPE[k].label.split(" / ")[0]}
-                </div>
-              );
-            })}
-          </div>
           </>)}
           </div>
           {/* drag handle to resize the menu */}

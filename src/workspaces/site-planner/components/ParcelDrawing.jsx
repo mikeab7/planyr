@@ -33,7 +33,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose }) {
 
   // Persist whenever the markup set settles (parent merges into the site record).
   // Skip the mount fire so opening a drawing doesn't re-save unchanged markups.
-  useEffect(() => { if (firstSave.current) { firstSave.current = false; return; } onSave?.(marks); /* eslint-disable-next-line */ }, [marks]);
+  useEffect(() => { if (firstSave.current) { firstSave.current = false; return; } onSave?.(marks); }, [marks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fit the backdrop to the viewport on mount / resize.
   const fit = () => {
@@ -42,7 +42,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose }) {
     const s = Math.min(cw / iw, ch / ih) * 0.92;
     setView({ scale: s, ox: (cw - iw * s) / 2, oy: (ch - ih * s) / 2 });
   };
-  useEffect(() => { fit(); const on = () => fit(); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fit(); const on = () => fit(); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The displayed backdrop rect (screen px) and 0..1 <-> screen helpers.
   const Wd = iw * view.scale, Hd = ih * view.scale;
