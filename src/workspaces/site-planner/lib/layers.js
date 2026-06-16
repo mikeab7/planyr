@@ -236,7 +236,12 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             if (cfg.layers) o.layers = cfg.layers;
             lyr = EL.dynamicMapLayer(o);
           }
-          lyr.on("requesterror", (e) => fail(k, cfg, `${cfg.label}: ${e && e.message ? e.message : "request error"}`));
+          // A requesterror is often a NON-fatal hiccup — e.g. a CORS-blocked metadata /
+          // service-info fetch while the f=image export still renders via a CORS-exempt
+          // <img>. Surface a quiet per-layer status, but DON'T drop the layer or fire the
+          // alarming toast; the 'load' event below flips it back to "loaded" if the image
+          // lands. (A genuinely-down service simply shows its quiet "failed" dot.)
+          lyr.on("requesterror", (e) => onStatus && onStatus(k, "failed", `${cfg.label}: ${e && e.message ? e.message : "request error"}`));
           lyr.on("load", () => onStatus && onStatus(k, "loaded"));
           if (lyr.setOpacity) lyr.setOpacity(st.opacity);
           lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
