@@ -63,4 +63,18 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
   it("developableArea is still the reserved stub (returns null, not a fabricated number)", () => {
     expect(developableArea(createSiteModel()).available).toBeNull();
   });
+
+  // Type-confusion guard: a tampered/legacy/bad-sync record with a non-array collection must NOT
+  // survive into the model (it would throw on .reduce/.map downstream and blank the whole app).
+  it("coerces non-array collection fields to [] instead of keeping garbage", () => {
+    const m = createSiteModel({ parcels: "oops", els: 42, markups: { bad: 1 }, measures: null, callouts: undefined, settings: "x" });
+    expect(m.parcels).toEqual([]);
+    expect(m.els).toEqual([]);
+    expect(m.markups).toEqual([]);
+    expect(m.measures).toEqual([]);
+    expect(m.callouts).toEqual([]);
+    expect(m.settings).toEqual({});
+    // and the downstream that crashed (siteSqft = parcels.reduce(...)) is now safe:
+    expect(() => m.parcels.reduce((s) => s, 0)).not.toThrow();
+  });
 });
