@@ -19,13 +19,38 @@ let activeUser = null;
 export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
+// Pure merge of the local cache with the cloud's records (exported for tests).
+// CRITICAL (B119 data-loss fix): build from the LOCAL cache first, so a site the cloud
+// did NOT return is PRESERVED — never silently dropped. The old code built the cache from
+// the cloud list alone, so any local record absent from the cloud (its push hadn't landed
+// yet — slow network, a stale session, or a brand-new site) was wiped on the next pull;
+// the resume then couldn't find the open site and bounced to the map ("my work vanished").
+// Cloud copies overlay newer-wins (cloud wins ties so a genuine cross-device edit lands).
+// `toPush` = ids the cloud is missing or has an OLDER copy of → re-push them so flaky/offline
+// pushes actually reach the cloud instead of being stranded on one device.
+// (Trade-off: a single device can't tell "never pushed" from "deleted on another device",
+// so a cross-device delete may reappear once. For a single user that's effectively never,
+// and reappearing is recoverable; silently losing work is not. A per-record synced-marker
+// is the fully-correct follow-up — see BACKLOG B119.)
+export function mergePulledSites(existing, cloudModels) {
+  const map = {};
+  for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
+  const cloudAt = {};
+  for (const m of (cloudModels || [])) {
+    const n = createSiteModel(m); if (!n.id) continue;
+    cloudAt[n.id] = n.updatedAt || 0;
+    const local = map[n.id];
+    if (!local || (local.updatedAt || 0) <= (n.updatedAt || 0)) map[n.id] = n; // cloud same/newer wins
+  }
+  const toPush = Object.keys(map).filter((id) => !(id in cloudAt) || (map[id].updatedAt || 0) > cloudAt[id]);
+  return { map, toPush };
+}
+
 // Pull the signed-in user's sites from the cloud into their local cache. Returns
 // { ok, count, error }; on a failed fetch it returns { ok:false } WITHOUT touching the
 // cache, so a transient/offline error can't wipe the user's last-known sites (B54). On
-// success it keeps a local copy that's strictly NEWER than the cloud's — an edit made
-// in the last moment before close that the debounced push didn't land (B18). That merge
-// is intentionally limited to records the cloud STILL returns, so a record deleted on
-// another device is not resurrected; the next edit re-pushes the kept-local copy.
+// success it MERGES (see mergePulledSites): local-only work is kept + re-pushed, never
+// dropped (B119); cloud edits overlay newer-wins.
 export async function pullCloud(uid) {
   let models;
   try {
@@ -35,13 +60,11 @@ export async function pullCloud(uid) {
   }
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const map = {};
-  for (const m of models) {
-    const norm = createSiteModel(m); if (!norm.id) continue;
-    const local = existing[norm.id];
-    map[norm.id] = (local && (local.updatedAt || 0) > (norm.updatedAt || 0)) ? createSiteModel(local) : norm;
-  }
+  const { map, toPush } = mergePulledSites(existing, models);
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
+  // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
+  for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
   return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }

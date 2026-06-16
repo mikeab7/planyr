@@ -4,7 +4,7 @@ import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, clearCloudCache, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -68,8 +68,14 @@ export default function App() {
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
   const applyUser = async (u, event) => {
-    const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     const uid = (u && u.id) || null;
+    // supabase-js re-emits SIGNED_IN on tab focus / token refresh. When it's the SAME
+    // user already active, nothing actually changed — skip the re-pull + view reset that
+    // would otherwise bounce an open plan back to the map a couple minutes later (the
+    // B119 "work disappears on its own" churn). A real switch (different user) or a
+    // sign-out still runs in full.
+    if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
+    const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     setActiveUser(uid);
     setSignedInUid(uid);     // null when logged out → the on-device-sites prompt only shows when signed in
     setMigrateMsg(""); setHideMigrate(false); // reset the prompt on any real auth switch
@@ -86,7 +92,11 @@ export default function App() {
       else { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     } else {
-      if (prevUid.current) clearCloudCache(prevUid.current); // don't leave cloud data cached after logout
+      // Deliberately DON'T wipe the per-user cloud cache here. supabase-js also emits
+      // SIGNED_OUT for a transient token-refresh failure, and clearing the cache on that
+      // made signed-in work vanish (B119). The cache is keyed per-uid and only read while
+      // that user is active (logged out, the app reads the legacy store), so leaving it is
+      // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");
       if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
       refreshSites();

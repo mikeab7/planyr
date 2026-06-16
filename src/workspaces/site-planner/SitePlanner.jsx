@@ -1058,6 +1058,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
+  // True ONLY when a cloud write actually failed while signed in (not the normal logged-out
+  // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
+  // cloud save is never silent again (B120). Cleared on the next successful save.
+  const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -1075,11 +1079,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved")).catch(() => setSaveStatus("unsaved"));
-      else setSaveStatus("saved");
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
+  // Manual "Retry now" for the loud cloud-save-failure banner (B120).
+  const retryCloudSave = () => {
+    if (!siteId) return;
+    setSaveStatus("saving");
+    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
@@ -4185,6 +4195,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </span>
           );
         })()}
+        {/* LOUD cloud-save-failure banner (B120) — a failed cloud write is no longer a
+            silent tiny badge. Honest: the work is safe on this device and will retry. */}
+        {cloudSaveFailed && (
+          <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+            <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+            <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
+            <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          </div>
+        )}
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div style={{ position: "relative" }}>
