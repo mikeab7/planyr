@@ -20,7 +20,7 @@ export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // Pure merge of the local cache with the cloud's records (exported for tests).
-// CRITICAL (B119 data-loss fix): build from the LOCAL cache first, so a site the cloud
+// CRITICAL (B124 data-loss fix): build from the LOCAL cache first, so a site the cloud
 // did NOT return is PRESERVED — never silently dropped. The old code built the cache from
 // the cloud list alone, so any local record absent from the cloud (its push hadn't landed
 // yet — slow network, a stale session, or a brand-new site) was wiped on the next pull;
@@ -31,7 +31,7 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // (Trade-off: a single device can't tell "never pushed" from "deleted on another device",
 // so a cross-device delete may reappear once. For a single user that's effectively never,
 // and reappearing is recoverable; silently losing work is not. A per-record synced-marker
-// is the fully-correct follow-up — see BACKLOG B119.)
+// is the fully-correct follow-up — see BACKLOG B124.)
 export function mergePulledSites(existing, cloudModels) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
@@ -50,7 +50,7 @@ export function mergePulledSites(existing, cloudModels) {
 // { ok, count, error }; on a failed fetch it returns { ok:false } WITHOUT touching the
 // cache, so a transient/offline error can't wipe the user's last-known sites (B54). On
 // success it MERGES (see mergePulledSites): local-only work is kept + re-pushed, never
-// dropped (B119); cloud edits overlay newer-wins.
+// dropped (B124); cloud edits overlay newer-wins.
 export async function pullCloud(uid) {
   let models;
   try {

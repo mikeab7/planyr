@@ -72,7 +72,7 @@ export default function App() {
     // supabase-js re-emits SIGNED_IN on tab focus / token refresh. When it's the SAME
     // user already active, nothing actually changed — skip the re-pull + view reset that
     // would otherwise bounce an open plan back to the map a couple minutes later (the
-    // B119 "work disappears on its own" churn). A real switch (different user) or a
+    // B124 "work disappears on its own" churn). A real switch (different user) or a
     // sign-out still runs in full.
     if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
     const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
@@ -94,7 +94,7 @@ export default function App() {
     } else {
       // Deliberately DON'T wipe the per-user cloud cache here. supabase-js also emits
       // SIGNED_OUT for a transient token-refresh failure, and clearing the cache on that
-      // made signed-in work vanish (B119). The cache is keyed per-uid and only read while
+      // made signed-in work vanish (B124). The cache is keyed per-uid and only read while
       // that user is active (logged out, the app reads the legacy store), so leaving it is
       // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");

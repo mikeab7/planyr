@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { mergePulledSites } from "../src/workspaces/site-planner/lib/storage.js";
 
-// Regression guard for B119: pullCloud used to rebuild the local cache from the cloud
+// Regression guard for B124: pullCloud used to rebuild the local cache from the cloud
 // list ALONE, silently dropping any local site the cloud hadn't returned yet (a push
 // that hadn't landed / a brand-new site). mergePulledSites must keep local-only work.
 const rec = (id, updatedAt, extra = {}) => ({ id, updatedAt, ...extra });
 
-describe("mergePulledSites — pullCloud must never drop local-only work (B119)", () => {
+describe("mergePulledSites — pullCloud must never drop local-only work (B124)", () => {
   it("preserves a local site the cloud didn't return, and flags it to re-push", () => {
     const { map, toPush } = mergePulledSites({ a: rec("a", 100) }, []); // cloud returned nothing
     expect(map.a).toBeTruthy();

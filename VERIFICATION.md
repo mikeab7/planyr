@@ -210,7 +210,7 @@ was never clicked" quietly ships broken.
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V13 — ★ Persistence: saved work must never disappear (B119 / B120) ⏳ — HIGH PRIORITY
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) ⏳ — HIGH PRIORITY
 - **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
 - **Why this matters:** this is the fix for the owner-reported data-loss scare — work vanishing on its
   own a couple minutes after a reload. Root cause: `pullCloud` rebuilt the local cache from the cloud

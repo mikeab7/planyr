@@ -1060,7 +1060,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
   // True ONLY when a cloud write actually failed while signed in (not the normal logged-out
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
-  // cloud save is never silent again (B120). Cleared on the next successful save.
+  // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
@@ -1084,7 +1084,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
-  // Manual "Retry now" for the loud cloud-save-failure banner (B120).
+  // Manual "Retry now" for the loud cloud-save-failure banner (B125).
   const retryCloudSave = () => {
     if (!siteId) return;
     setSaveStatus("saving");
@@ -4195,7 +4195,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </span>
           );
         })()}
-        {/* LOUD cloud-save-failure banner (B120) — a failed cloud write is no longer a
+        {/* LOUD cloud-save-failure banner (B125) — a failed cloud write is no longer a
             silent tiny badge. Honest: the work is safe on this device and will retry. */}
         {cloudSaveFailed && (
           <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
