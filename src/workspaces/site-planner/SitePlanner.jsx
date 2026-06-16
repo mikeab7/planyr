@@ -709,8 +709,16 @@ const ensureIdAbove = (ids) => {
   });
 };
 
+// Snap is a global drafting preference (a tool mode), NOT a per-site attribute —
+// default OFF so elements move freely; the choice persists across sites/reloads once
+// turned on. We still mirror it into `settings.snap` so every read site is unchanged,
+// but the per-site saved value is ignored on load/import in favour of this pref.
+const SNAP_PREF_KEY = "planarfit:snap";
+const loadSnapPref = () => { try { return localStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; } };
+const saveSnapPref = (on) => { try { localStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
+
 const DEFAULT_SETTINGS = {
-  gridSize: 10, snap: true,
+  gridSize: 10, snap: false,
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -767,7 +775,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
-  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
+  // snap comes from the global pref (a tool mode), never the per-site saved value.
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
+  const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
@@ -1265,7 +1275,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
-      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSettings((s) => ({ ...s, snap: !s.snap })); return; } // toggle snap (hold Alt while dragging to bypass for one move)
+      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
       // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
       if (e.key === " " || e.code === "Space") {
         if (document.activeElement && document.activeElement.tagName === "BUTTON") return; // let Space activate a focused button
@@ -3005,7 +3015,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pushHistory();
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
         setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
-        setSettings((s) => ({ ...s, ...(d.settings || {}) }));
+        setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
@@ -4126,7 +4136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
         </div>
         <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to grid & flush against neighbours — click or press S to toggle; hold Alt while dragging to place freely">
+          onClick={() => setSnap(!settings.snap)} title="Snap to grid & flush against neighbours — click or press S to toggle; hold Alt while dragging to place freely">
           <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
           {settings.snap ? `Snap ${settings.gridSize}′` : "Snap off"}
         </button>
@@ -5709,7 +5719,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "standards" && (<>
           <Section title="Site defaults">
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSettings((s) => ({ ...s, snap: e.target.checked }))} /> Snap to grid &amp; neighbours (S)</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
