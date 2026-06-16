@@ -119,24 +119,31 @@ export default function DocReview() {
   };
 
   /* ---- render current page ---- */
+  // Compute the fit-to-width scale in its OWN effect when scale===0, so render() stays a
+  // pure draw at a concrete scale. render() used to call setScale internally, which
+  // re-fired the render effect → two overlapping renders / brief dims mismatch (B34).
+  useEffect(() => {
+    if (scale || !pdfRef.current || !canvasRef.current) return;
+    let live = true;
+    (async () => {
+      const p = await pdfRef.current.getPage(page);
+      const base = p.getViewport({ scale: 1 });
+      const avail = (wrapRef.current?.clientWidth || 900) - 24;
+      const s = Math.max(0.2, Math.min(4, avail / base.width));
+      if (live) setScale(s);
+    })();
+    return () => { live = false; };
+  }, [scale, page, numPages]);
+
   const render = useCallback(async () => {
     const pdf = pdfRef.current, canvas = canvasRef.current;
-    if (!pdf || !canvas) return;
+    if (!pdf || !canvas || !scale) return; // the fit effect sets a concrete scale first; render only draws
     const tok = ++renderTok.current;
     // Cancel any in-flight render before starting a new one, so overlapping page/zoom
     // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
-    let s = scale;
-    if (!s) { // fit to container width
-      const p = await pdf.getPage(page);
-      const base = p.getViewport({ scale: 1 });
-      const avail = (wrapRef.current?.clientWidth || 900) - 24;
-      s = Math.max(0.2, Math.min(4, avail / base.width));
-      if (tok !== renderTok.current) return;
-      setScale(s);
-    }
     try {
-      const d = await renderPageToCanvas(pdf, page, canvas, s, (task) => { renderTaskRef.current = task; });
+      const d = await renderPageToCanvas(pdf, page, canvas, scale, (task) => { renderTaskRef.current = task; });
       if (tok !== renderTok.current) return; // a newer render superseded this
       setDims(d);
     } catch (e) {
@@ -174,7 +181,7 @@ export default function DocReview() {
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
-  const { status } = useReviewPersistence({
+  const { status, suspendSave } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
     deps: [reviewId, meta, source, markups, calByPage],
   });
@@ -199,6 +206,7 @@ export default function DocReview() {
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
+    suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
@@ -307,11 +315,32 @@ export default function DocReview() {
   };
 
   const hitTest = (p) => {
-    const tol = 10 / scale;
+    const tol = 10 / scale; // page-unit click tolerance
+    const segDist = (a, b) => { // distance from p to segment a–b (page units)
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+      if (!L2) return dist(p, a);
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; t = Math.max(0, Math.min(1, t));
+      return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+    };
     let best = null, bd = Infinity;
     for (const m of pageMarks) {
       const pts = m.pts || [];
-      for (const q of pts) { const dd = dist(p, q); if (dd < bd) { bd = dd; best = m.id; } }
+      let d = Infinity;
+      if (m.kind === "rect" || m.kind === "cloud") {
+        // shape-aware: a box is selectable across its whole body, not just its 2 corners (B33)
+        const a = pts[0], b = pts[1]; if (!a || !b) continue;
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) d = 0;
+      } else if (m.kind === "text") {
+        // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
+        const q = pts[0]; if (!q) continue;
+        const w = ((m.text || "").length * 6.5 + 6) / scale, h = 16 / scale;
+        if (p.x >= q.x - 2 / scale && p.x <= q.x - 2 / scale + w && p.y >= q.y - 12 / scale && p.y <= q.y - 12 / scale + h) d = 0;
+      } else {
+        // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
+        for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+      }
+      if (d < bd) { bd = d; best = m.id; }
     }
     return bd <= tol ? best : null;
   };

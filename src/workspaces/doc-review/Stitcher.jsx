@@ -204,7 +204,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const isEmpty = useCallback(() => placed.length === 0 && measures.length === 0, [placed, measures]);
   // Pan/zoom (`view`) is captured in the snapshot but left out of the save triggers so
   // panning doesn't spam writes — the next real edit (or the flush) saves the latest view.
-  const { status } = useReviewPersistence({
+  const { status, suspendSave } = useReviewPersistence({
     buildSnapshot, isEmpty,
     deps: [reviewId, meta, pdfs, placed, measures, ftPerUnit],
   });
@@ -221,6 +221,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const loadStitch = async (rec) => {
     const tok = ++loadTok.current; // a newer open supersedes this load (B52)
     loadingRef.current = true; setBusy(true);
+    suspendSave(); // this programmatic load sets the autosave deps; don't re-save what we loaded (B19)
     try {
       setReviewId(rec.id);
       setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
@@ -239,6 +240,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, oversize: !!src.oversize, missing });
       }
       if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
+      suspendSave(); // re-park across this load's async commits (B19)
       setPdfs(srcEntries); pdfsRef.current = srcEntries;
       const out = [];
       for (const s of st.placed || []) {
@@ -248,6 +250,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
+      suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
       setPlaced(out); placedRef.current = out;
       setErr(srcEntries.some((e) => e.missing) ? "Some source PDFs weren't available (too large to store) — drop the files to fill in the placeholders." : "");
     } finally { if (tok === loadTok.current) { loadingRef.current = false; setBusy(false); } }

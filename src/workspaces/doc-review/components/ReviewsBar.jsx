@@ -27,17 +27,26 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
   const [projects, setProjects] = useState([]);
   const [busy, setBusy] = useState(false);
   const ref = useRef(null);
+  const reqRef = useRef(0); // in-flight token: a newer refresh supersedes an older slow one (B44)
 
-  const refresh = async () => { setBusy(true); try { const [r, p] = await Promise.all([listReviews(), listProjects()]); setRows(r); setProjects(p); } finally { setBusy(false); } };
+  const refresh = async () => {
+    const tok = ++reqRef.current;
+    setBusy(true);
+    try { const [r, p] = await Promise.all([listReviews(), listProjects()]); if (tok !== reqRef.current) return; setRows(r); setProjects(p); }
+    finally { if (tok === reqRef.current) setBusy(false); }
+  };
 
-  useEffect(() => {
+  useEffect(() => { // fetch the lists when the menu opens / auth flips (refresh is token-guarded)
     if (!open) return;
     if (signedIn) refresh(); else { setRows([]); setProjects([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, signedIn]);
+  useEffect(() => { // outside-click to close — its own effect so it isn't rebound on every fetch (B44)
+    if (!open) return;
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, signedIn]);
+  }, [open]);
 
   const badge = BADGE[status] || BADGE.local;
   const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "#fff" };

@@ -3,6 +3,10 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
+import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import { uploadOverlayPdf, downloadOverlayBytes } from "./lib/overlayStorage.js";
+import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -127,6 +131,12 @@ const TOOLS = [
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
 const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
+// Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
+// or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
+// element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
+const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
 // Snap an angle to the nearest 45° (for Shift-constrained drawing).
@@ -202,6 +212,23 @@ const centroid = (pts) => {
   let x = 0, y = 0;
   pts.forEach((p) => { x += p.x; y += p.y; });
   return { x: x / pts.length, y: y / pts.length };
+};
+// Proper segment crossing (excludes shared endpoints / collinear touches). Used to
+// reject self-intersecting "bow-tie" outlines, whose shoelace area is silently wrong.
+const segsCross = (p1, p2, p3, p4) => {
+  const o = (a, b, c) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+  const o1 = o(p1, p2, p3), o2 = o(p1, p2, p4), o3 = o(p3, p4, p1), o4 = o(p3, p4, p2);
+  return !!o1 && !!o2 && !!o3 && !!o4 && o1 !== o2 && o3 !== o4;
+};
+// Does a closed ring cross itself? O(n²), fine for hand-drawn shapes (few vertices).
+const polySelfIntersects = (pts) => {
+  const n = pts.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if ((i + 1) % n === j || (j + 1) % n === i) continue; // adjacent / wrap edges share a vertex
+    if (segsCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
+  }
+  return false;
 };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // Measure records are {mode, pts}. Old records were {a,b} — normalize both.
@@ -342,6 +369,9 @@ function carStalls(w, h, s) {
   const ai = s.aisle;
   const slantDx = ang === 90 ? 0 : rowDepth / Math.tan(rad); // lean across the depth
   const mod = rowDepth * 2 + ai;
+  // Degenerate-config guard: a 0 stall-depth+aisle (mod) or 0 stall-width (pitch) makes
+  // mods/perRow Infinity → an unbounded band loop that hard-freezes the tab. Bail to empty.
+  if (!(mod > 0) || !(pitch > 0)) return { count: 0, bands: [], aisles: [], pitch: pitch > 0 ? pitch : 0, rowDepth, angle: ang };
   const perRow = Math.max(0, Math.floor((w - slantDx) / pitch));
   const mods = Math.max(0, Math.floor(h / mod));
   let count = 0;
@@ -370,7 +400,7 @@ function carStalls(w, h, s) {
 // drive lane (~60′) so tractors can back trailers in — not a solid pack.
 function trailerStalls(w, h, s) {
   const tl = s.trailerL, tw = s.trailerW, ai = Math.max(0, s.trailerAisle || 0);
-  const perRow = Math.max(0, Math.floor(w / tw));
+  const perRow = tw > 0 ? Math.max(0, Math.floor(w / tw)) : 0;
   // Single striped row (e.g. trailer parking flush against a wall): one band
   // filling the strip depth, columns every tw.
   if (s.single) {
@@ -378,6 +408,8 @@ function trailerStalls(w, h, s) {
     return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
   }
   const mod = tl * 2 + ai;
+  // Same freeze guard as carStalls: 0 trailer-length + 0 aisle would loop forever.
+  if (!(mod > 0)) return { count: 0, bands: [], aisles: [], cols: perRow, tw, tl };
   const mods = Math.max(0, Math.floor(h / mod));
   let count = 0;
   const bands = [], aisles = [];
@@ -645,10 +677,23 @@ const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) 
 // silently "fixing" it.
 const countyAcres = (attrs) => {
   if (!attrs) return null;
-  const acresKey = Object.keys(attrs).find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
-  if (acresKey) return { acres: +attrs[acresKey], source: acresKey };
-  const areaKey = Object.keys(attrs).find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
-  if (areaKey) return { acres: +attrs[areaKey] / 43560, source: areaKey, fromArea: true };
+  const keys = Object.keys(attrs);
+  const num = (k) => +attrs[k];
+  const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
+  // 1) An explicit, already-in-acres field.
+  const acresKey = keys.find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
+  if (acresKey) return { acres: num(acresKey), source: acresKey };
+  // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
+  //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
+  //    so we don't misread square-metres as square-feet (the old regex matched neither, then
+  //    divided a m² value by 43560 → ~10.76× too small, flagging every correct lot as wrong).
+  const unitOf = (areaK) => { const want = (areaK + "_unit").toLowerCase(); const uk = keys.find((k) => k.toLowerCase() === want); return uk ? String(attrs[uk]) : ""; };
+  const areaAcresKey = keys.find((k) => /(gis_?area|legal_?area)$/i.test(k) && ok(k) && /acre/i.test(unitOf(k)));
+  if (areaAcresKey) return { acres: num(areaAcresKey), source: areaAcresKey };
+  // 3) Last resort: a projected Shape area. Assume EPSG:2278 US-ft² (÷43560); the caller flags a
+  //    ~10.76× gap as a likely square-metre projection rather than silently trusting it.
+  const areaKey = keys.find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && ok(k));
+  if (areaKey) return { acres: num(areaKey) / 43560, source: areaKey, fromArea: true };
   return null;
 };
 
@@ -747,6 +792,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [calib, setCalib] = useState(null);          // {a:{x,y}, b?:{x,y}}
   const [calibInput, setCalibInput] = useState("");
   const fileRef = useRef(null);
+
+  // Site-plan overlays (B72): backdrop PDFs/images the user drops onto the map and
+  // places by hand (immutable backdrop — above the basemap, below markup/massing).
+  // Distinct from the GIS map `overlays` (app-shared layer props, declared below).
+  const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
+  const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  const [overlayBusy, setOverlayBusy] = useState(false);
+  const overlayFileRef = useRef(null);
+  const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+  const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
+  const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup
   const [county, setCounty] = useState("harris");
@@ -866,15 +922,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [] });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays }; });
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
   // sites — a map-sourced site keeps its record even if you clear it).
-  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay;
+  const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay && !(s?.sheetOverlays?.length);
   // Site/plan metadata (name etc.) lives in component state declared below; mirror
   // it into a ref so the (earlier-defined) save effects can include it without a
   // forward reference. The first real save then writes a fully-formed record —
@@ -891,11 +947,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay })) return; // don't save a still-blank site
+    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays })) return; // don't save a still-blank site
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
-      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay });
+      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays });
       if (!ok) { setSaveStatus("unsaved"); return; }
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
@@ -904,10 +960,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("saved");
     }, 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
   const persistOrDrop = () => {
     if (!siteId) return;
     const s = liveRef.current;
@@ -931,7 +987,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [siteId]); // eslint-disable-line
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
-    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none");
+    "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0}`).join(";") || "no");
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => {
@@ -941,7 +998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -980,7 +1037,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const r = svgRef.current.getBoundingClientRect();
     return { x: (cx - r.left - view.offX) / view.ppf, y: (cy - r.top - view.offY) / view.ppf };
   }, [view]);
-  const snap = useCallback((v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : Math.round(v * 100) / 100), [settings]);
+  const snap = useCallback((v) => {
+    const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
+    return settings.snap ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
+  }, [settings]);
   const snapPt = useCallback((p) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
   // Snap to the nearest parcel boundary within ~5 ft (or ~10 px); used by Split.
   const snapToBoundary = useCallback((p) => {
@@ -1125,13 +1185,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -1174,7 +1234,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
   const pasteClip = () => {
     if (!clip.current) return;
-    const { attachedTo, ...src } = clip.current; // a pasted copy starts unattached
+    const src = detachClone(clip.current); // a pasted copy starts standalone (no host/court links)
     const off = (settings.gridSize || 10) * 2; // nudge the copy so it's visible
     const el = src.points
       ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
@@ -1187,7 +1247,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const duplicateEl = (id) => {
     const src = els.find((x) => x.id === id);
     if (!src) return;
-    const { attachedTo, ...rest } = src;
+    const rest = detachClone(src);
     const off = settings.gridSize || 10;
     const el = rest.points
       ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
@@ -1217,6 +1277,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
     if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
+    if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
     if (xsecMode) { // ditch cross-section: two clicks → sample elevations
       const sp = snapPt(fp);
       if (xsecPts.length === 0) { setXsecPts([sp]); setOverlapWarn("Click the far side of the ditch."); }
@@ -1300,7 +1361,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "calibrate") {
       // Calibration points are NOT grid-snapped — we want to land exactly on
       // the screenshot feature the user is clicking.
-      if (!underlay) return;
+      if (!underlay) { setOverlapWarn("Calibrate needs an underlay — drop an aerial/screenshot first (Aerial ▾)."); setTimeout(() => setOverlapWarn(""), 5000); return; }
       if (!calib || calib.b) { setCalib({ a: fp }); setCalibInput(""); }
       else setCalib((c) => ({ a: c.a, b: fp }));
       return;
@@ -1354,9 +1415,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSplitPath([]);
   };
   // Commit the in-progress polyline / area measurement.
+  // Warn (but still accept) when a freshly-closed outline crosses itself or has ~zero area,
+  // so a silently-wrong shoelace area can't slip into the yield math unnoticed.
+  const flashPolyWarn = (pts, label) => {
+    if (polySelfIntersects(pts)) { setOverlapWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`); setTimeout(() => setOverlapWarn(""), 7000); }
+    else if (polyArea(pts) < 1) { setOverlapWarn(`${label} has almost no area — check the outline.`); setTimeout(() => setOverlapWarn(""), 6000); }
+  };
   const finishMeasure = () => {
     if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); flashPolyWarn(measDraft, "Measured area"); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -1374,6 +1441,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? splitPolygon(pc.points, pts[0], pts[1])
         : splitPolygonPath(pc.points, pts);
       if (halves) {
+        // Concave-cut guard: if the two pieces don't conserve the original area (they overlap or
+        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a warning
+        // instead of saving corrupted geometry that throws off every downstream yield number.
+        const whole = polyArea(pc.points), sum = polyArea(halves[0]) + polyArea(halves[1]);
+        if (polySelfIntersects(halves[0]) || polySelfIntersects(halves[1]) || Math.abs(sum - whole) > whole * 0.02 + 1) {
+          setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
+          setTimeout(() => setOverlapWarn(""), 7000);
+          return;
+        }
         pushHistory();
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
         const a = { id: uid(), points: halves[0], locked: true, ...inherit };
@@ -1599,6 +1675,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "moveUnderlay") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setUnderlay((u) => (u ? { ...u, x: d.ox + dx, y: d.oy + dy } : u));
+      return;
+    }
+    if (d.mode === "moveSheetOverlay") {
+      const dx = fp.x - d.fx, dy = fp.y - d.fy;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
@@ -1843,6 +1924,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       const pc = { id: uid(), points: draftPoly, locked: true };
       setParcels((a) => [...a, pc]);
+      flashPolyWarn(draftPoly, "Parcel");
       requestFit();
     }
     setDraftPoly(null);
@@ -1853,6 +1935,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const el = { id: uid(), type: draftElPoly.type, points: draftElPoly.pts, rot: 0 };
       setEls((a) => [...a, el]);
       setSel({ kind: "el", id: el.id });
+      flashPolyWarn(draftElPoly.pts, "Element");
     }
     setDraftElPoly(null);
     setTool("select");
@@ -1895,7 +1978,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const applyCalibration = () => {
     const knownFt = +calibInput;
-    if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
+    if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0) || !(underlay.ftPerPx > 0)) return;
     // A map-sourced underlay is already georeferenced and its two axes can legitimately
     // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
     // would mis-size it, so calibration is disabled for from-map underlays (B57a).
@@ -1921,6 +2004,159 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setCalibInput("");
     setTool("select");
   };
+
+  /* ------------ site-plan overlays (B72) ------------ */
+  // Add a dropped PDF/image as a backdrop overlay, placed ~60% of the view wide and
+  // centered on what the user is currently looking at (true scale comes in B73).
+  const addOverlayFile = async (file) => {
+    if (!file) return;
+    setOverlayBusy(true);
+    try {
+      const r = await openOverlayFile(file); // {src,imgW,imgH,page,pageCount,pdf,detectedScale,sheet}
+      const id = uid();
+      if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
+      const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
+      // True real-world scale ONLY when the page is a recognizable plot size AND we read
+      // a scale note (B73); otherwise land it ~60% of the visible width wide to size by hand.
+      const trueScale = r.detectedScale && r.sheet && r.sheet.std;
+      const ftPerPx = trueScale
+        ? ftPerPointForScale(r.detectedScale)
+        : Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, r.imgW));
+      const ov = {
+        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        page: r.page || 1, pageCount: r.pageCount || 1,
+        x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
+        ftPerPx, rotation: 0, opacity: 0.85, locked: false,
+        detectedScale: r.detectedScale || null, sheet: r.sheet || null,
+      };
+      pushHistory();
+      setSheetOverlays((arr) => [...arr, ov]);
+      setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      if (isPdfFile(file) && isCloudActive()) { // back the PDF up to Storage for cross-device reload (B72)
+        uploadOverlayPdf(siteId, id, file).then((res) => {
+          if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
+        }).catch(() => {});
+      }
+    } catch (err) {
+      alert(humanizeError(err));
+    } finally {
+      setOverlayBusy(false);
+    }
+  };
+  const startMoveSheetOverlay = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "moveSheetOverlay", id, fx: fp.x, fy: fp.y, ox: o.x, oy: o.y };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
+  const patchOverlay = (id, patch, hist = true) => {
+    if (hist) pushHistory();
+    setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  };
+  const removeOverlay = (id) => {
+    pushHistory();
+    const doc = overlayDocs.current.get(id);
+    if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
+    setSelOverlay((s) => (s === id ? null : s));
+  };
+  // Re-rasterize a different page (only while the source doc is still in memory).
+  const setOverlayPage = async (id, page) => {
+    const doc = overlayDocs.current.get(id);
+    if (!doc) return;
+    try {
+      const r = await rasterizePage(doc, page);
+      patchOverlay(id, { src: r.src, imgW: r.imgW, imgH: r.imgH, page: r.page });
+    } catch (_) { /* ignore a bad page render */ }
+  };
+  // B73 — apply a drawing scale (feet per inch) to an overlay: ftPerPx = S/72 (points),
+  // keeping it centered so it scales in place to true real-world size.
+  const applyOverlayScale = (id, feetPerInch) => {
+    const S = +feetPerInch;
+    if (!(S > 0)) return;
+    pushHistory();
+    setSheetOverlays((arr) => arr.map((o) => {
+      if (o.id !== id) return o;
+      const cx = o.x + (o.imgW * o.ftPerPx) / 2, cy = o.y + (o.imgH * o.ftPerPx) / 2;
+      const ftPerPx = ftPerPointForScale(S);
+      return { ...o, ftPerPx, x: cx - (o.imgW * ftPerPx) / 2, y: cy - (o.imgH * ftPerPx) / 2 };
+    }));
+  };
+  // Which scale-dropdown option matches an overlay's current size (else "custom").
+  const overlayScaleSel = (o) => { const s = Math.round(scaleForFtPerPoint(o.ftPerPx)); return COMMON_SCALES.includes(s) ? String(s) : "custom"; };
+  // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
+  // a real length → rescale (pinned at the first click). align: 2 points on the drawing
+  // then the 2 matching points on the map → similarity (move + rotate + scale).
+  const onOvCalibClick = (fp) => {
+    const o = sheetOverlays.find((x) => x.id === ovCalib.id);
+    if (!o) { setOvCalib(null); return; }
+    const pts = [...ovCalib.pts, fp];
+    if (ovCalib.kind === "trace") {
+      if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
+      const measuredFt = dist(pts[0], pts[1]);
+      const v = window.prompt("Real length of that line on the drawing (ft):", "");
+      setOvCalib(null);
+      const realFt = v == null ? NaN : +v;
+      const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
+      if (!patch) return;
+      pushHistory();
+      setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    } else {
+      // align: collect alternating drawing→map points (pairs); apply on demand (≥2 pairs)
+      setOvCalib({ ...ovCalib, pts });
+    }
+  };
+  // Apply the collected drawing→map pairs as a best-fit similarity (B73). 2 pairs = exact;
+  // 3+ = least-squares, with an RMS residual shown so a poor (distorted) fit is visible.
+  const applyOvAlign = () => {
+    if (!ovCalib || ovCalib.kind !== "align") return;
+    const o = sheetOverlays.find((x) => x.id === ovCalib.id);
+    const nPairs = Math.floor(ovCalib.pts.length / 2);
+    if (!o || nPairs < 2) return;
+    const pairs = [];
+    for (let i = 0; i < nPairs; i++) pairs.push({ from: ovCalib.pts[2 * i], to: ovCalib.pts[2 * i + 1] });
+    const S = solveSimilarityLSQ(pairs);
+    const patch = applySimilarityToOverlay(o, S);
+    setOvCalib(null);
+    if (!patch) return;
+    pushHistory();
+    setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    setOverlapWarn(`Aligned to ${nPairs} point${nPairs > 1 ? "s" : ""} — fit residual ≈ ${Math.round(S.residual)}′.`);
+    setTimeout(() => setOverlapWarn(""), 5000);
+  };
+  const ovCalibMsg = () => {
+    if (!ovCalib) return "";
+    const n = ovCalib.pts.length;
+    if (ovCalib.kind === "trace") return n === 0 ? "Click one end of a known dimension on the drawing." : "Click the other end — then enter its real length.";
+    const pairNo = Math.floor(n / 2) + 1;
+    return n % 2 === 0 ? `Click a known point on the drawing (point ${pairNo}).` : "Now click where that point belongs on the map.";
+  };
+  // Free any held PDF docs when the planner unmounts (cf. B39).
+  useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
+  // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
+  // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
+  useEffect(() => {
+    const missing = sheetOverlays.filter((o) => o.storageKey && !o.src && !overlayFetching.current.has(o.id));
+    if (!missing.length) return;
+    let cancelled = false;
+    missing.forEach((o) => overlayFetching.current.add(o.id));
+    (async () => {
+      for (const o of missing) {
+        try {
+          const bytes = await downloadOverlayBytes(o.storageKey);
+          const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+          if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+        } finally { overlayFetching.current.delete(o.id); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sheetOverlays]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -2599,8 +2835,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, lng, lat, addr } | { error }
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
-  // B72/B73 — jurisdiction (city/ETJ/county) + road maintenance authority, on
-  // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B75).
+  // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
+  // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B96).
   const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
   const checkJurisdiction = async () => {
     const r = identifyRes;
@@ -2900,7 +3136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gridLines = () => {
     const out = [];
     const minF = p2fStatic(0, 0), maxF = p2fStatic(size.w, size.h);
-    const step = settings.gridSize;
+    const step = Math.max(0.1, +settings.gridSize || 10); // guard: a 0/negative grid size would loop forever
     const major = step * 10;
     const startX = Math.floor(minF.x / step) * step, endX = Math.ceil(maxF.x / step) * step;
     const startY = Math.floor(minF.y / step) * step, endY = Math.ceil(maxF.y / step) * step;
@@ -3306,6 +3542,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
+    { id: "overlay", glyph: "▦", label: "Overlay" },
     { id: "standards", glyph: "⚙", label: "Setup" },
   ];
   const railBtn = (on) => ({
@@ -3340,6 +3577,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
+  const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid #ddd6c5`, borderRadius: 4, background: "#fff", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
   const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
@@ -3377,10 +3615,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
   const anchorEncumbrance = (pob) => {
     const { calls } = pobMode;
+    if (!calls || !calls.length) { setOverlapWarn("No bearings were recognized in that description — check the metes-and-bounds format."); setTimeout(() => setOverlapWarn(""), 7000); setPobMode(null); return; }
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { setPobMode(null); setOverlapWarn(""); return; }
+    if (!ring || ring.length < 3) { setOverlapWarn("Couldn't form a shape from those calls — check the description."); setTimeout(() => setOverlapWarn(""), 6000); setPobMode(null); return; }
     const gap = misclosure(path);
     const mk = {
       id: uid(), kind: "encumbrance",
@@ -3479,6 +3718,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const runXSection = async (p0, p1) => {
     if (!origin) { setOverlapWarn("Cross-section needs a located site (a real-world origin)."); setTimeout(() => setOverlapWarn(""), 6000); return; }
     const lenFt = _hyp(p0, p1);
+    if (!(lenFt > 1)) { setOverlapWarn("Cross-section line is too short — draw a longer line."); setTimeout(() => setOverlapWarn(""), 5000); setXsecMode(false); setXsecPts([]); return; }
     setXsec({ p0, p1, lenFt, busy: true, stats: null });
     setXsecMode(false); setXsecPts([]);
     try {
@@ -3731,12 +3971,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* body */}
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* canvas */}
-        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}>
+        <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
+          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
+          onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -3774,6 +4016,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   onError={() => { setUnderlayErr(true); setUnderlayLoading(false); }} onLoad={() => { setUnderlayErr(false); setUnderlayLoading(false); }}
                   onPointerDown={startMoveUnderlay} />;
               })()}
+
+              {/* site-plan overlays (B72) — placed PDF/image backdrops in feet space,
+                  above the basemap/underlay and below parcels/massing/markup; shown
+                  even with the basemap on (the point is to overlay onto the aerial). */}
+              {sheetOverlays.map((o) => {
+                const tl = f2p({ x: o.x, y: o.y });
+                const w = o.imgW * o.ftPerPx * view.ppf;
+                const h = o.imgH * o.ftPerPx * view.ppf;
+                const cx = tl.x + w / 2, cy = tl.y + h / 2;
+                const isSel = selOverlay === o.id;
+                return (
+                  <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
+                    style={{ cursor: tool === "select" && !o.locked ? "move" : "default" }}
+                    pointerEvents={o.locked ? "none" : "auto"}
+                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
+                    {o.src ? (
+                      <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                    ) : (<>
+                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
+                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
+                    </>)}
+                    {isSel && tool === "select" && (
+                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* overlay calibration feedback (B73): clicked points + the traced line */}
+              {ovCalib && ovCalib.pts.map((p, i) => {
+                const sp = f2p(p), isMap = ovCalib.kind === "align" && i % 2 === 1;
+                const label = ovCalib.kind === "align" ? (isMap ? "map" : `${i / 2 + 1}`) : `${i + 1}`;
+                return (
+                  <g key={`ovc${i}`} pointerEvents="none">
+                    <circle cx={sp.x} cy={sp.y} r={5} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={1.5} />
+                    <text x={sp.x + 8} y={sp.y - 6} fontSize={11} fontWeight={700} fill={isMap ? "#2563eb" : PAL.accent} stroke="#fff" strokeWidth={0.5} paintOrder="stroke">{label}</text>
+                  </g>
+                );
+              })}
+              {/* connectors: trace = the measured line; align = each drawing→map pair */}
+              {ovCalib && ovCalib.kind === "trace" && ovCalib.pts.length >= 2 && (() => {
+                const a = f2p(ovCalib.pts[0]), b = f2p(ovCalib.pts[1]);
+                return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="5 4" pointerEvents="none" />;
+              })()}
+              {ovCalib && ovCalib.kind === "align" && Array.from({ length: Math.floor(ovCalib.pts.length / 2) }, (_, k) => {
+                const a = f2p(ovCalib.pts[2 * k]), b = f2p(ovCalib.pts[2 * k + 1]);
+                return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />;
+              })}
 
               {/* setback outlines (per-edge) */}
               {settings.showSetback && parcels.map((pc) => {
@@ -3989,6 +4279,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
                       }}
                       placeholder="Type, Enter to save"
+                      maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
@@ -4202,6 +4493,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>
               );
             })()}
+
+            {/* During overlay trace/align, capture EVERY click as a calibration point —
+                a transparent top layer so a click on the overlay/parcels/elements places
+                a point instead of starting a move or selection (fixes "Align doesn't work"). */}
+            {ovCalib && (
+              <rect x={0} y={0} width={size.w} height={size.h} fill="transparent" pointerEvents="all"
+                style={{ cursor: "crosshair" }}
+                onPointerDown={(e) => { if (e.button === 0) { e.stopPropagation(); onOvCalibClick(p2f(e.clientX, e.clientY)); } }} />
+            )}
           </svg>
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
@@ -4474,7 +4774,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                         <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter(Boolean).map((w) => (
+                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
                           <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
                         ))}
                       </div>
@@ -4589,6 +4889,83 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
           )}
 
+          {/* site-plan overlay (B72) */}
+          {leftPanel === "overlay" && (
+          <Section title="Site-plan overlay">
+            <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={() => overlayFileRef.current?.click()}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
+            <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7, lineHeight: 1.5 }}>
+              Drop a site-plan PDF onto the map (or browse). Drag it to move; set size, rotation &amp; opacity below, then Lock it to draw on top. White paper is knocked out so the map shows through. <i>(Sizing to the drawing scale comes next.)</i>
+            </div>
+            {!sheetOverlays.length ? null : (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                {sheetOverlays.map((o) => {
+                  const on = selOverlay === o.id, wFt = o.imgW * o.ftPerPx;
+                  return (
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "#fff" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
+                        <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
+                        <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
+                      </div>
+                      {on && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
+                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
+                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { opacity: +e.target.value }, false)} />
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
+                            <input type="range" min={0} max={360} step={1} value={o.rotation} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { rotation: +e.target.value }, false)} />
+                            <span style={{ width: 32, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{Math.round(o.rotation)}°</span>
+                          </label>
+                          <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                            <input style={numInput} value={Math.round(wFt)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                            <span>ft</span>
+                            <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                            <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                          </label>
+                          {o.pageCount > 1 && (
+                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
+                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
+                              <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
+                              {!overlayDocs.current.has(o.id) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
+                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
+                          </div>
+                          {o.sheet && (
+                            <div style={{ borderTop: `1px dashed #e3dccb`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ fontSize: 11, color: PAL.muted }}>Scale to the drawing — sizes the sheet to true real-world feet.</div>
+                              <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
+                              <label style={ovRow}><span style={{ width: 48 }}>Scale</span><span>1″=</span>
+                                <select style={{ ...numInput, width: 78, fontFamily: "inherit" }} value={overlayScaleSel(o)} onChange={(e) => { if (e.target.value !== "custom") applyOverlayScale(o.id, e.target.value); }}>
+                                  {COMMON_SCALES.map((s) => <option key={s} value={s}>{s}′</option>)}
+                                  <option value="custom">custom…</option>
+                                </select>
+                                {overlayScaleSel(o) === "custom" && <input style={{ ...numInput, width: 52 }} placeholder="ft" title="Feet per inch — press Enter" onKeyDown={(e) => { if (e.key === "Enter") applyOverlayScale(o.id, e.currentTarget.value); }} />}
+                              </label>
+                              {o.detectedScale && (
+                                <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
+                              )}
+                              <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={Math.round(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1 }} onClick={() => patchOverlay(o.id, { rotation: 0 })}>Reset rotation</button>
+                            <button style={{ ...chip, flex: 1 }} onClick={requestFit}>Fit view</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+          )}
+
           {/* Element menu — selection details + properties (or an empty hint) */}
           {leftPanel === "props" && !selEl && !selCallout && !selMarkup && (
             <Section title="Element">
@@ -4670,8 +5047,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </>
                   ) : (
                     <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   <Field label="Rotation (°)">
@@ -4966,14 +5343,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ca = countyAcres(selParcel.attrs);
                 if (!ca || !ca.acres) return null;
                 const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
-                const diff = Math.abs(mine - ca.acres) / ca.acres;
-                const tenx = ca.fromArea && (diff > 0.6) && Math.abs(mine - ca.acres / 10.7639) / (ca.acres / 10.7639) < 0.1;
-                const [color, mark] = tenx ? ["#b45309", "▲"] : diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
+                // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
+                // multiplying it back by that factor matches our geometry, treat it as m² and use the
+                // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
+                const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
+                const county = m2 ? ca.acres * 10.7639 : ca.acres;
+                const diff = Math.abs(mine - county) / county;
+                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
                 return (
                   <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "6px 9px" }}>
-                    <b>{mark} Geometry check</b> · county {f2(ca.acres)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                    {tenx && <div style={{ marginTop: 2 }}>Shape area looks like m² — verify projection.</div>}
-                    {!tenx && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                    <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
+                    {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
+                    {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
                   </div>
                 );
               })()}
@@ -5286,6 +5667,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
+      {ovCalib && (
+        <div style={{ position: "fixed", left: "50%", bottom: 84, transform: "translateX(-50%)", zIndex: 2500, maxWidth: "80vw",
+          background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
+          {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
+            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+          )}
+          <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
+        </div>
+      )}
+
       {parcelMenu && (
         <>
           <div onClick={() => setParcelMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
@@ -5522,10 +5914,13 @@ function NumInput({ value, onCommit, min, max, style, placeholder }) {
   const commit = () => {
     editing.current = false;
     const n = parseFloat(draft);
-    if (isNaN(n)) { setDraft(value == null ? "" : String(value)); return; }
+    // Reject NaN AND ±Infinity: parseFloat("1e999")/"Infinity" are NOT NaN, and Math.max(min, Infinity)
+    // is Infinity, so a min-clamp can't catch it — a non-finite value poisons geometry to NaN and then
+    // persists as null (JSON.stringify(Infinity) === null). The default 1e7 cap also bounds the absurd.
+    if (!Number.isFinite(n)) { setDraft(value == null ? "" : String(value)); return; }
     let v = n;
     if (min != null) v = Math.max(min, v);
-    if (max != null) v = Math.min(max, v);
+    v = Math.min(max != null ? max : 1e7, v);
     setDraft(String(v));
     if (v !== value) onCommit(v);
   };

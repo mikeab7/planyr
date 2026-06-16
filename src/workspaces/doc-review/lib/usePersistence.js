@@ -28,6 +28,8 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   const readyRef = useRef(false);
   const uidRef = useRef(null);
   const firstRun = useRef(true);
+  const suspendUntilRef = useRef(0); // a programmatic load parks this in the future so the autosave won't re-save what it just loaded (B19)
+  const dirtyRef = useRef(false); // an unsaved edit since the last successful write — gates the unmount/hide flush so a single↔stitch toggle doesn't re-upsert unchanged data (B44)
 
   // Track cloud readiness up front and on auth changes. The badge stays "local"
   // ("Not saved") until a real edit drives a real write — we never claim "Saved" for
@@ -53,6 +55,12 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     return snap;
   }, []);
 
+  // A programmatic load (resume/open) sets the same deps the autosave watches; parking
+  // the suspend window in the future makes the next autosave tick(s) skip, so a just-
+  // loaded snapshot isn't re-stamped with a fresh updatedAt (which could clobber a newer
+  // cloud edit). Re-armed before each async commit so a slow load stays covered (B19).
+  const suspendSave = useCallback((ms = 1500) => { suspendUntilRef.current = Date.now() + ms; }, []);
+
   const writeNow = useCallback(async () => {
     if (!enabledRef.current || emptyRef.current()) return;
     const snap = flushLocal();
@@ -60,13 +68,16 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     if (!readyRef.current) { setStatus("local"); return; }
     setStatus("saving");
     const { ok } = await upsertReview({ ...snap, updatedAt: Date.now() });
+    if (ok) dirtyRef.current = false; // cloud has the latest; a later edit re-flags dirty (B44)
     setStatus(ok ? "saved" : "unsaved");
   }, [flushLocal]);
 
   // Debounced autosave on edits; skips only the initial mount.
   useEffect(() => {
     if (firstRun.current) { firstRun.current = false; return; }
+    if (Date.now() < suspendUntilRef.current) return; // deps set by a programmatic load — don't autosave them back (B19)
     if (!enabledRef.current || emptyRef.current()) return;
+    dirtyRef.current = true;                  // a real edit — the flush may need to write it (B44)
     flushLocal();                            // local mirror is immediate
     if (readyRef.current) setStatus("saving");
     const t = setTimeout(writeNow, DEBOUNCE_MS);
@@ -80,7 +91,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   useEffect(() => {
     const flush = () => {
       const snap = flushLocal();
-      if (snap && readyRef.current) upsertReview({ ...snap, updatedAt: Date.now() }).catch(() => {}); // best-effort flush; tab-close/unmount rejection mustn't surface
+      if (snap && readyRef.current && dirtyRef.current) upsertReview({ ...snap, updatedAt: Date.now() }).catch(() => {}); // best-effort, only when there's an unsaved edit — a mode toggle no longer re-upserts unchanged data (B44)
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
@@ -88,5 +99,5 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); flush(); };
   }, [flushLocal]);
 
-  return { status, setStatus, saveNow: writeNow };
+  return { status, setStatus, saveNow: writeNow, suspendSave };
 }

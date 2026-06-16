@@ -6,7 +6,7 @@
  * existing Supabase backend; reads the project list + status from the Site Planner's
  * sites (one source of truth) and the file index from doc_reviews. Self-contained.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, setProjectStatus, deleteReview, DISCIPLINES, STATUSES, STATUS_META } from "../lib/reviewStore.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c" };
@@ -25,7 +25,13 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
   const [dropTarget, setDropTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = async () => { setBusy(true); try { const [p, r] = await Promise.all([listProjects(), listReviews()]); setProjects(p); setReviews(r); } finally { setBusy(false); } };
+  const reqRef = useRef(0); // in-flight token so an overlapping / late refresh can't clobber newer state (B44)
+  const refresh = async () => {
+    const tok = ++reqRef.current;
+    setBusy(true);
+    try { const [p, r] = await Promise.all([listProjects(), listReviews()]); if (tok !== reqRef.current) return; setProjects(p); setReviews(r); }
+    finally { if (tok === reqRef.current) setBusy(false); }
+  };
   useEffect(() => { if (open && signedIn) refresh(); }, [open, signedIn]);
 
   // Group reviews by project then discipline (an "Unfiled" bucket for unlinked ones).
@@ -54,8 +60,16 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
     const files = [...(e.dataTransfer?.files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!files.length) return;
     setBusy(true);
-    try { for (const f of files) await fileNewReview({ projectId: projectId === UNFILED ? null : projectId, project: project === "Unfiled" ? "" : project, discipline, blob: f, fileName: f.name }); }
+    const failed = [];
+    try {
+      for (const f of files) {
+        const r = await fileNewReview({ projectId: projectId === UNFILED ? null : projectId, project: project === "Unfiled" ? "" : project, discipline, blob: f, fileName: f.name });
+        if (!r || !r.ok) failed.push(`${f.name} — couldn't file`);
+        else if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop it on open to view)`);
+      }
+    }
     finally { setBusy(false); refresh(); }
+    if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
   };
   const onStatus = async (e, projectId) => { const v = e.target.value; e.stopPropagation(); await setProjectStatus(projectId, v); refresh(); };
   const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file/review and its stored PDF?")) return; await deleteReview(id); refresh(); };
@@ -89,12 +103,14 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
                   <span style={{ fontSize: 11, color: PAL.muted, width: 10 }}>{isOpen ? "▾" : "▸"}</span>
                   <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                   <span style={{ fontSize: 10.5, color: PAL.muted }}>{p.fileCount}</span>
-                  {p.status
-                    ? <select value={p.status} onClick={(e) => e.stopPropagation()} onChange={(e) => onStatus(e, p.id)}
-                        title="Project status" style={{ fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", border: `1px solid ${STATUS_COLOR[p.status] || PAL.line}`, color: STATUS_COLOR[p.status] || PAL.ink, background: "#fff", borderRadius: 999, padding: "2px 6px", cursor: "pointer" }}>
-                        {STATUSES.map((s) => <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>)}
-                      </select>
-                    : <span style={{ fontSize: 10, color: PAL.muted, fontStyle: "italic" }}>no project</span>}
+                  {p.status == null
+                    ? <span style={{ fontSize: 10, color: PAL.muted, fontStyle: "italic" }}>no project</span>
+                    : (() => { const known = STATUSES.includes(p.status); return (
+                        <select value={known ? p.status : ""} onClick={(e) => e.stopPropagation()} onChange={(e) => onStatus(e, p.id)}
+                          title={known ? "Project status" : "Status unknown — pick one to set it"} style={{ fontSize: 10.5, fontWeight: 700, fontFamily: "inherit", border: `1px solid ${STATUS_COLOR[p.status] || PAL.line}`, color: STATUS_COLOR[p.status] || PAL.ink, background: "#fff", borderRadius: 999, padding: "2px 6px", cursor: "pointer" }}>
+                          {!known && <option value="" disabled>Status?</option>}
+                          {STATUSES.map((s) => <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>)}
+                        </select>); })()}
                 </div>
 
                 {isOpen && (

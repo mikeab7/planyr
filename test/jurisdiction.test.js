@@ -142,7 +142,7 @@ describe("polylineDistMeters — nearest-segment distance", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("identifySource — rides the SWR cache (B75)", () => {
+describe("identifySource — rides the SWR cache (B96)", () => {
   it("normalizes features and serves a repeat lookup from cache (no refetch)", async () => {
     const fetchJson = fakeFetch({ [CITY]: () => [{ attributes: { city_name: "Houston" } }] });
     const cache = freshCache();
@@ -176,7 +176,7 @@ describe("identifySource — rides the SWR cache (B75)", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("identifyJurisdiction (B72) — city / ETJ / county", () => {
+describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
   const base = {
     [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" } }],
     [CITY]: (url) => url.includes("esriGeometryPolygon")
@@ -266,7 +266,7 @@ describe("countyAtPoint (B13/B36) — point-in-county primitive", () => {
 });
 
 // ----------------------------------------------------------------------------
-describe("identifyRoadAuthority (B73) — nearest segment / parcel frontage", () => {
+describe("identifyRoadAuthority (B94) — nearest segment / parcel frontage", () => {
   it("point mode: returns the NEAREST segment's authority among several", async () => {
     const fetchJson = fakeFetch({
       [ROAD]: () => [

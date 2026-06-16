@@ -1,13 +1,13 @@
-/* Jurisdiction + road-authority identify (B72 / B73) — ONE generic, registry-driven
- * ArcGIS-REST connector that rides the browser-local SWR cache (B75).
+/* Jurisdiction + road-authority identify (B93 / B94) — ONE generic, registry-driven
+ * ArcGIS-REST connector that rides the browser-local SWR cache (B96).
  *
  * What it answers, on explicit request (a click or "check this parcel" — NEVER
  * auto-loaded on every parcel):
- *   B72 — which jurisdictions a point/parcel falls in: incorporated city (or
+ *   B93 — which jurisdictions a point/parcel falls in: incorporated city (or
  *         "unincorporated"), ETJ, and county. The whole parcel is tested (a polygon
  *         intersect, not just the centroid), so a boundary straddle returns EVERY
  *         jurisdiction it touches rather than forcing one answer.
- *   B73 — who maintains the road fronting a clicked point: State (TxDOT) / county /
+ *   B94 — who maintains the road fronting a clicked point: State (TxDOT) / county /
  *         city / federal — a nearest-segment query against the TxDOT roadway lines.
  *
  * Design rules (from the backlog):
@@ -15,7 +15,7 @@
  *    registry ROW (endpoint URL, layer, field map, query kind), never new code.
  *  - Every source names its fields differently; the field map normalizes each into
  *    one internal shape so the UI is source-agnostic.
- *  - Reuse existing GIS infra: the same SWR cache (B75), the same honest status +
+ *  - Reuse existing GIS infra: the same SWR cache (B96), the same honest status +
  *    visible data-age, the same EPSG:4326 lon/lat boundary as the parcel identify.
  *  - Screening-only: results always carry a source + age and a "verify with the
  *    jurisdiction" note; ETJ especially is volatile. Never a legal determination.
@@ -198,7 +198,7 @@ function ringKey(ring) {
   return ring.length + "_" + [minx, miny, maxx, maxy].map((n) => n.toFixed(4)).join(",");
 }
 
-/* Identify one source against a point or ring, riding the SWR cache (B75). Returns
+/* Identify one source against a point or ring, riding the SWR cache (B96). Returns
  * { cached, stale, fresh } like the cache itself: `cached` is the last-good copy to
  * show NOW (may be stale; its age is carried), `fresh` resolves to the revalidated
  * copy (or keeps last-good on a failed refresh, error surfaced not thrown). The
@@ -225,7 +225,7 @@ export function identifySource(source, geom, opts = {}) {
   };
 }
 
-// ---- nearest-segment distance (B73) ----
+// ---- nearest-segment distance (B94) ----
 const M_PER_DEG_LAT = 111320;
 function segDistM(ax, ay, bx, by) {
   // distance from origin (0,0) to segment AB, all in metres
@@ -262,7 +262,7 @@ function humanize(e) {
 }
 
 // ---------------------------------------------------------------------------
-// B72 — jurisdiction identify (city / ETJ / county) at a point or across a parcel.
+// B93 — jurisdiction identify (city / ETJ / county) at a point or across a parcel.
 // Pass `ring` (the parcel's lon/lat outer ring) to test the WHOLE parcel so a
 // boundary straddle lists every jurisdiction it touches. Awaits fresh data (the
 // cache makes a repeat/just-reloaded lookup instant and survives a source outage).
@@ -316,7 +316,7 @@ export async function countyAtPoint(lng, lat, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// B73 — road maintenance authority. Two modes:
+// B94 — road maintenance authority. Two modes:
 //   • click (lng,lat)      → the NEAREST segment within tolerance.
 //   • parcel frontage (ring)→ EVERY distinct road fronting the parcel (a lot can
 //     front a state highway + a county road + a city street, each a different

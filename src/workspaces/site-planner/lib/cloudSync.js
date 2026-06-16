@@ -9,11 +9,17 @@ import { supabase } from "./supabase.js";
 // Don't push a huge embedded screenshot dataURL into a DB row — keep the underlay
 // placement but drop the inline image (map-sourced underlays use a URL, not a
 // dataURL, so those are preserved). Geometry/metrics are unaffected.
+const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
 function slimForCloud(model) {
-  const u = model && model.underlay;
-  if (u && typeof u.src === "string" && u.src.startsWith("data:"))
-    return { ...model, underlay: { ...u, src: null, strippedForCloud: true } };
-  return model;
+  if (!model) return model;
+  let m = model;
+  const u = m.underlay;
+  if (u && isDataUrl(u.src)) m = { ...m, underlay: { ...u, src: null, strippedForCloud: true } };
+  // Site-plan overlays (B72) carry a big PNG dataURL raster — keep the placement /
+  // transform but drop the inline image for the cloud row (re-add it on another device).
+  if (Array.isArray(m.sheetOverlays) && m.sheetOverlays.some((o) => o && isDataUrl(o.src)))
+    m = { ...m, sheetOverlays: m.sheetOverlays.map((o) => (o && isDataUrl(o.src) ? { ...o, src: null, strippedForCloud: true } : o)) };
+  return m;
 }
 
 export async function cloudUpsert(uid, model) {

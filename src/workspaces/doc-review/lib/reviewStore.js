@@ -151,7 +151,7 @@ export async function listProjects() {
   for (const r of data) {
     const id = r.group_id;
     if (!id || byId.has(id)) continue; // newest row wins for the name/status
-    byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "active" });
+    byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown" }); // don't claim "active" when status is missing or the read fell back to the no-status query (B35)
   }
   return [...byId.values()];
 }
@@ -164,8 +164,12 @@ export async function setProjectStatus(projectId, status) {
   if (!uid) return { ok: false };
   const { data, error } = await supabase.from("sites").select("data").eq("group_id", projectId);
   if (error || !data) return { ok: false };
-  for (const r of data) { if (r.data) await cloudUpsert(uid, { ...r.data, status, updatedAt: Date.now() }); }
-  return { ok: true };
+  // Write each plan in the group in parallel and report partial failure, rather than a
+  // serial loop that returned ok:true even if one plan kept its old status (B56c).
+  const rows = data.filter((r) => r.data);
+  const results = await Promise.allSettled(rows.map((r) => cloudUpsert(uid, { ...r.data, status, updatedAt: Date.now() })));
+  const failed = results.filter((x) => x.status === "rejected" || !(x.value && x.value.ok)).length;
+  return { ok: failed === 0, failed, total: rows.length };
 }
 
 // File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
@@ -177,6 +181,10 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   const up = await uploadSource(srcId, blob, projectId, discipline);
   const docDate = new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
+  // A non-oversize upload failure (network / RLS / transient 5xx) still files the work layer, but
+  // the bytes weren't stored — surface it so the caller can warn, rather than silently filing a
+  // document that can't be opened until it's re-dropped (storageKey stays null → re-drop on load).
+  const uploadFailed = !up.ok && !up.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate,
@@ -184,7 +192,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error };
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf" };
 }
 
 /* --------------------------- source PDFs (Storage) -------------------------- */

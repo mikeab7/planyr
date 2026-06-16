@@ -15,7 +15,7 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 3;
+export const SITE_MODEL_VERSION = 4;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance"];                    // title metes-and-bounds tracts / corridors
@@ -39,10 +39,15 @@ const DEFAULT_STATUS = "pursuit";       // a brand-new site
 const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
 const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates this feature, so
-// it's presumed live → "active". Every new record (no prior version) is stamped 3
+// it's presumed live → "active". Every new record (no prior version) is stamped 4
 // here and falls through to "pursuit". (saveSite re-normalizes through this, so the
 // status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
+// Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
+// expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
+// Coerce every collection so one malformed record can't crash the planner on load.
+const arr = (v) => (Array.isArray(v) ? v : []);
+const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
@@ -64,19 +69,22 @@ export function createSiteModel(p = {}) {
     // a fresh record (no prior version) starts in "pursuit".
     status: normStatus(p.status, isLegacyRecord(p) ? LEGACY_STATUS : DEFAULT_STATUS),
     // inputs
-    parcels: p.parcels || [],
+    parcels: arr(p.parcels),
     underlay: p.underlay || null,
-    settings: p.settings || {},
+    // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
+    // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
+    sheetOverlays: arr(p.sheetOverlays),
+    settings: obj(p.settings),
     // drawn layout + shapes (kept flat; selectors classify markups)
-    els: p.els || p.elements || [],
-    markups: p.markups || [],
-    measures: p.measures || [],
-    callouts: p.callouts || [],
+    els: Array.isArray(p.els) ? p.els : arr(p.elements),
+    markups: arr(p.markups),
+    measures: arr(p.measures),
+    callouts: arr(p.callouts),
     // elevation references (newly persisted; empty for legacy records)
-    elevation: { crossSections: (p.elevation && p.elevation.crossSections) || [] },
+    elevation: { crossSections: arr(p.elevation && p.elevation.crossSections) },
     // constraint metadata. `liveLayers` is RESERVED for future per-site layer
     // memory — populated later; today layer state is a global app preference.
-    constraints: { liveLayers: (p.constraints && p.constraints.liveLayers) || [] },
+    constraints: { liveLayers: arr(p.constraints && p.constraints.liveLayers) },
   };
 }
 
@@ -89,6 +97,8 @@ const byKind = (markups, kinds) => (markups || []).filter((m) => kinds.includes(
 
 export const parcelsOf = (m) => m.parcels || [];
 export const elementsOf = (m) => m.els || [];
+// Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
+export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Deal stage, always one of STATUSES (defaults to "pursuit" if somehow unset).
 export const statusOf = (m) => normStatus(m && m.status, DEFAULT_STATUS);
 
