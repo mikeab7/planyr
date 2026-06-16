@@ -97,6 +97,14 @@ export default function App() {
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
+  // Cross-tab freshness: when ANOTHER tab changes the site store, refresh this tab's finder list
+  // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
+  // whole-store clobber; this keeps the list in sync). Only reacts to the sites keys.
+  useEffect(() => {
+    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refreshSites(); };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
   const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
 
   // Open a saved site from the map.

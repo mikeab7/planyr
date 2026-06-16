@@ -1031,7 +1031,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const r = svgRef.current.getBoundingClientRect();
     return { x: (cx - r.left - view.offX) / view.ppf, y: (cy - r.top - view.offY) / view.ppf };
   }, [view]);
-  const snap = useCallback((v) => (settings.snap ? Math.round(v / settings.gridSize) * settings.gridSize : Math.round(v * 100) / 100), [settings]);
+  const snap = useCallback((v) => {
+    const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
+    return settings.snap ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
+  }, [settings]);
   const snapPt = useCallback((p) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
   // Snap to the nearest parcel boundary within ~5 ft (or ~10 px); used by Split.
   const snapToBoundary = useCallback((p) => {
@@ -4156,6 +4159,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
                       }}
                       placeholder="Type, Enter to save"
+                      maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
@@ -4641,7 +4645,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                         <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter(Boolean).map((w) => (
+                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
                           <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
                         ))}
                       </div>
@@ -5751,10 +5755,13 @@ function NumInput({ value, onCommit, min, max, style, placeholder }) {
   const commit = () => {
     editing.current = false;
     const n = parseFloat(draft);
-    if (isNaN(n)) { setDraft(value == null ? "" : String(value)); return; }
+    // Reject NaN AND ±Infinity: parseFloat("1e999")/"Infinity" are NOT NaN, and Math.max(min, Infinity)
+    // is Infinity, so a min-clamp can't catch it — a non-finite value poisons geometry to NaN and then
+    // persists as null (JSON.stringify(Infinity) === null). The default 1e7 cap also bounds the absurd.
+    if (!Number.isFinite(n)) { setDraft(value == null ? "" : String(value)); return; }
     let v = n;
     if (min != null) v = Math.max(min, v);
-    if (max != null) v = Math.min(max, v);
+    v = Math.min(max != null ? max : 1e7, v);
     setDraft(String(v));
     if (v !== value) onCommit(v);
   };

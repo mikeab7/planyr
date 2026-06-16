@@ -316,6 +316,29 @@ delete B37a, etc.). The verified **net-new** items are fixed here on branch
 ### B86 — Split tool corrupts area on concave parcels `[Site Planner]` (bug) — high
 `[x]` Fixed 2026-06-16 (complements B31). `splitPolygon` keys off the extreme-`t` crossings, so a straight cut across a concave parcel (4+ crossings) can yield overlapping/omitting halves whose areas don't sum to the original → wrong siteSqft + every downstream yield. Added an **area-conservation + self-intersection guard** in `performSplit`: if the two pieces don't conserve area (±2%) or come out self-intersecting, the cut is rejected with "that cut crosses the parcel ambiguously — try a straight cut between two opposite edges," instead of saving corrupted geometry. (A full polygon-clipping rewrite for multi-piece concave cuts stays deferred per B31.)
 
+#### UI fuzz / adversarial-input sub-pass (same session, B87–B92)
+
+A researched fuzz pass (boundary/overflow, type-confusion, concurrency, special-chars) found a
+fresh cluster — fixed here.
+
+### B87 — `Infinity` / scientific-notation in a numeric field bypasses the min-clamp → NaN geometry, persisted as null `[Site Planner]` (bug) — high
+`[x]` Fixed 2026-06-16. `NumInput.commit` rejected only `isNaN`, but `parseFloat("1e999")`/`"Infinity"` return `Infinity` (not NaN) and `Math.max(min, Infinity)===Infinity`, so a non-finite value slipped through — Grid=Infinity made `snap` return NaN (every new coord NaN), a size=Infinity drew nothing, and `JSON.stringify` then persisted NaN/Infinity as **null** (permanent corruption). Now requires `Number.isFinite(n)` and applies a default `1e7` upper cap when no explicit `max`; `snap` also guards a non-finite/≤0 grid (falls back to 10). Closes the persist-as-null source (B91).
+
+### B88 — Type confusion: a record whose `parcels`/`els` isn't an array crashes the whole app `[Site Planner]` (bug) — medium
+`[x]` Fixed 2026-06-16. `createSiteModel` kept any truthy value (`p.parcels || []`), so a tampered/legacy/bad-sync record with a non-array collection flowed into `parcels.reduce(...)` → `TypeError` → blank app on load. Now coerces every collection (`Array.isArray(...) ? ... : []`) and `settings` to an object. Added a unit test (40 tests pass). (The B68 error boundary already contained the blank-screen; this stops the throw so the site actually loads.)
+
+### B89 — "Travel widths" free-text feeds road geometry → NaN roads `[Site Planner]` (bug) — medium
+`[x]` Fixed 2026-06-16. The road-width preset list `.split(",")` of the free-text field offered any token (e.g. `abc`) as a selectable width; drawing with it did `+"abc" = NaN` → a NaN road persisted as null. The preset list now keeps only finite, positive numeric tokens.
+
+### B90 — No cross-tab reconciliation: a second tab's finder list goes stale `[Site Planner]` (bug) — medium→low
+`[x]` Fixed 2026-06-16. Added a `window` `storage` listener that refreshes the finder list when another tab changes the site store. **Re-scoped on inspection:** the audit's "whole-store clobber" doesn't actually reproduce — `saveSite`/`deleteSite` already read-modify-write the latest store per call, so a second tab editing a *different* site can't wipe the first's work; the real symptom was a stale list, which this fixes (logged-in tabs now also pick up each other's cloud-cache writes).
+
+### B91 — NaN/Infinity coordinates persist as `null` (corruption amplifier) `[Site Planner]` (bug) — low
+`[x]` Addressed-at-source 2026-06-16. The non-finite *sources* are now closed (B87 NumInput/snap, B89 road widths, plus the B78/B79 freeze guards), so no path feeds a non-finite coordinate into a save. A deep on-save geometry sanitizer was deliberately NOT added — rewriting stored points risks corrupting valid geometry, worse than the rare amplified case it would catch.
+
+### B92 — Unbounded text/emoji/RTL in annotations bloats the SVG/record `[Site Planner]` (bug) — low
+`[x]` Fixed 2026-06-16. Callout/text annotations now cap at `maxLength={2000}`. (Injection was already safe — XSS payloads render escaped.)
+
 > **Triaged but NOT changed (still open / deferred, by decision):** building bump-outs aren't clamped when the host shrinks (medium, geometry — risk-deferred); `deleteSite` cloud delete stays fire-and-forget (zombie only if the delete fails — B-class edge); over-quota save still drops the underlay and reports success (graceful-degradation, minor); `currentSite` pointer global-not-per-user (low). County straddle/out-of-coverage messaging stays under **B13/B36**; metes curve + dash-DMS under **B25/B26**; bundle size / Anthropic-SDK / Mapillary-token / Nominatim / deploy-churn remain LOW/infra.
 
 ---
