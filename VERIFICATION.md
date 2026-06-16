@@ -237,6 +237,23 @@ was never clicked" quietly ships broken.
 - **If it fails:** this is the one **CRITICAL** class — if saved work still vanishes, flag it immediately
   (note the exact step + the browser console), don't just log-and-move-on.
 
+### V14 — Draw-tool rail: scrolls to the bottom on desktop + denser rows (B117 / B118) ⏳
+- **Added** 2026-06-16 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner on a normal laptop-height window (a ~13–15″ screen is the case
+  that overflowed — not a tall external monitor). Look at the dark right-hand tool rail (**Tools / Site
+  elements / Shapes / Measure / Annotate**). (1) **Reach the bottom (B117):** scroll the rail → expect it to
+  scroll cleanly all the way to the last row, so the **Shapes** group and **Measure / Annotate** below it are
+  reachable; nothing is stranded off-screen with no scrollbar. (2) **Density (B118):** the two-line buttons
+  (Building / Car Parking / Road / Paving / Trailer Parking / Detention Pond, plus Measure) read tighter —
+  less vertical padding and the small grey sub-label ("single-load", "drive / court", "24′ travel",
+  "back-in storage", "detention basin") one step smaller — and the whole **Site elements** group should now
+  fit without scrolling on a standard laptop.
+- **Expect:** every tool in the rail is reachable at any window height; the rail reads as one consistent,
+  denser column with rows still comfortably clickable (~40px); the **▾** preset menus (dock layout / parking
+  rows / road width / measure mode) still open and pick correctly. The phone layout (narrow width, B113) is
+  unchanged — the rail still slides in as an overlay there.
+- **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

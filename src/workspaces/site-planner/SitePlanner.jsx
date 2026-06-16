@@ -3788,7 +3788,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "6px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? "#fff" : PAL.chromeInk,
@@ -4971,7 +4971,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
         <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px",
-          overflowY: narrow ? "auto" : "visible",
+          overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,
           transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
@@ -5008,8 +5008,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={id} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("building")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="building" /> Building</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{dockLabel}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="building" /> Building</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{dockLabel}</span>
                     </button>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
                   </div>
@@ -5033,8 +5033,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={id} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Car Parking</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="parking" /> Car Parking</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
                     </button>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
                   </div>
@@ -5057,8 +5057,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div key={id} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="road" /> Road</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="road" /> Road</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
                   </div>
@@ -5083,8 +5083,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
             return (
               <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id={id} /> {t.label}</span>
-                {sub && <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{sub}</span>}
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id={id} /> {t.label}</span>
+                {sub && <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{sub}</span>}
               </button>
             );
           })}
@@ -5102,8 +5102,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="measure" /> Measure</span>
-                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureModeLabel(measureMode)}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="measure" /> Measure</span>
+                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{measureModeLabel(measureMode)}</span>
               </button>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
             </div>
