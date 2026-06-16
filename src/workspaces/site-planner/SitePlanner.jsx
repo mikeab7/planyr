@@ -127,6 +127,12 @@ const TOOLS = [
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
 const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
+// Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
+// or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
+// element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
+const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
 // Snap an angle to the nearest 45° (for Shift-constrained drawing).
@@ -202,6 +208,23 @@ const centroid = (pts) => {
   let x = 0, y = 0;
   pts.forEach((p) => { x += p.x; y += p.y; });
   return { x: x / pts.length, y: y / pts.length };
+};
+// Proper segment crossing (excludes shared endpoints / collinear touches). Used to
+// reject self-intersecting "bow-tie" outlines, whose shoelace area is silently wrong.
+const segsCross = (p1, p2, p3, p4) => {
+  const o = (a, b, c) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+  const o1 = o(p1, p2, p3), o2 = o(p1, p2, p4), o3 = o(p3, p4, p1), o4 = o(p3, p4, p2);
+  return !!o1 && !!o2 && !!o3 && !!o4 && o1 !== o2 && o3 !== o4;
+};
+// Does a closed ring cross itself? O(n²), fine for hand-drawn shapes (few vertices).
+const polySelfIntersects = (pts) => {
+  const n = pts.length;
+  if (n < 4) return false;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if ((i + 1) % n === j || (j + 1) % n === i) continue; // adjacent / wrap edges share a vertex
+    if (segsCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
+  }
+  return false;
 };
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // Measure records are {mode, pts}. Old records were {a,b} — normalize both.
@@ -342,6 +365,9 @@ function carStalls(w, h, s) {
   const ai = s.aisle;
   const slantDx = ang === 90 ? 0 : rowDepth / Math.tan(rad); // lean across the depth
   const mod = rowDepth * 2 + ai;
+  // Degenerate-config guard: a 0 stall-depth+aisle (mod) or 0 stall-width (pitch) makes
+  // mods/perRow Infinity → an unbounded band loop that hard-freezes the tab. Bail to empty.
+  if (!(mod > 0) || !(pitch > 0)) return { count: 0, bands: [], aisles: [], pitch: pitch > 0 ? pitch : 0, rowDepth, angle: ang };
   const perRow = Math.max(0, Math.floor((w - slantDx) / pitch));
   const mods = Math.max(0, Math.floor(h / mod));
   let count = 0;
@@ -370,7 +396,7 @@ function carStalls(w, h, s) {
 // drive lane (~60′) so tractors can back trailers in — not a solid pack.
 function trailerStalls(w, h, s) {
   const tl = s.trailerL, tw = s.trailerW, ai = Math.max(0, s.trailerAisle || 0);
-  const perRow = Math.max(0, Math.floor(w / tw));
+  const perRow = tw > 0 ? Math.max(0, Math.floor(w / tw)) : 0;
   // Single striped row (e.g. trailer parking flush against a wall): one band
   // filling the strip depth, columns every tw.
   if (s.single) {
@@ -378,6 +404,8 @@ function trailerStalls(w, h, s) {
     return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
   }
   const mod = tl * 2 + ai;
+  // Same freeze guard as carStalls: 0 trailer-length + 0 aisle would loop forever.
+  if (!(mod > 0)) return { count: 0, bands: [], aisles: [], cols: perRow, tw, tl };
   const mods = Math.max(0, Math.floor(h / mod));
   let count = 0;
   const bands = [], aisles = [];
@@ -645,10 +673,23 @@ const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) 
 // silently "fixing" it.
 const countyAcres = (attrs) => {
   if (!attrs) return null;
-  const acresKey = Object.keys(attrs).find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
-  if (acresKey) return { acres: +attrs[acresKey], source: acresKey };
-  const areaKey = Object.keys(attrs).find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && !isNaN(+attrs[k]) && +attrs[k] > 0);
-  if (areaKey) return { acres: +attrs[areaKey] / 43560, source: areaKey, fromArea: true };
+  const keys = Object.keys(attrs);
+  const num = (k) => +attrs[k];
+  const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
+  // 1) An explicit, already-in-acres field.
+  const acresKey = keys.find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
+  if (acresKey) return { acres: num(acresKey), source: acresKey };
+  // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
+  //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
+  //    so we don't misread square-metres as square-feet (the old regex matched neither, then
+  //    divided a m² value by 43560 → ~10.76× too small, flagging every correct lot as wrong).
+  const unitOf = (areaK) => { const want = (areaK + "_unit").toLowerCase(); const uk = keys.find((k) => k.toLowerCase() === want); return uk ? String(attrs[uk]) : ""; };
+  const areaAcresKey = keys.find((k) => /(gis_?area|legal_?area)$/i.test(k) && ok(k) && /acre/i.test(unitOf(k)));
+  if (areaAcresKey) return { acres: num(areaAcresKey), source: areaAcresKey };
+  // 3) Last resort: a projected Shape area. Assume EPSG:2278 US-ft² (÷43560); the caller flags a
+  //    ~10.76× gap as a likely square-metre projection rather than silently trusting it.
+  const areaKey = keys.find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && ok(k));
+  if (areaKey) return { acres: num(areaKey) / 43560, source: areaKey, fromArea: true };
   return null;
 };
 
@@ -1135,13 +1176,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "split" && splitPath.length >= 2) { e.preventDefault(); finishSplit(); return; }
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       if (e.key === "Enter" && tool === "measure" && measDraft.length >= 2) { e.preventDefault(); finishMeasure(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -1184,7 +1225,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const cutSel = () => { if (sel?.kind === "el") { copySel(); deleteSel(); } };
   const pasteClip = () => {
     if (!clip.current) return;
-    const { attachedTo, ...src } = clip.current; // a pasted copy starts unattached
+    const src = detachClone(clip.current); // a pasted copy starts standalone (no host/court links)
     const off = (settings.gridSize || 10) * 2; // nudge the copy so it's visible
     const el = src.points
       ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
@@ -1197,7 +1238,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const duplicateEl = (id) => {
     const src = els.find((x) => x.id === id);
     if (!src) return;
-    const { attachedTo, ...rest } = src;
+    const rest = detachClone(src);
     const off = settings.gridSize || 10;
     const el = rest.points
       ? { ...rest, id: uid(), points: rest.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
@@ -1310,7 +1351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "calibrate") {
       // Calibration points are NOT grid-snapped — we want to land exactly on
       // the screenshot feature the user is clicking.
-      if (!underlay) return;
+      if (!underlay) { setOverlapWarn("Calibrate needs an underlay — drop an aerial/screenshot first (Aerial ▾)."); setTimeout(() => setOverlapWarn(""), 5000); return; }
       if (!calib || calib.b) { setCalib({ a: fp }); setCalibInput(""); }
       else setCalib((c) => ({ a: c.a, b: fp }));
       return;
@@ -1364,9 +1405,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSplitPath([]);
   };
   // Commit the in-progress polyline / area measurement.
+  // Warn (but still accept) when a freshly-closed outline crosses itself or has ~zero area,
+  // so a silently-wrong shoelace area can't slip into the yield math unnoticed.
+  const flashPolyWarn = (pts, label) => {
+    if (polySelfIntersects(pts)) { setOverlapWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`); setTimeout(() => setOverlapWarn(""), 7000); }
+    else if (polyArea(pts) < 1) { setOverlapWarn(`${label} has almost no area — check the outline.`); setTimeout(() => setOverlapWarn(""), 6000); }
+  };
   const finishMeasure = () => {
     if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); }
+    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); flashPolyWarn(measDraft, "Measured area"); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -1384,6 +1431,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? splitPolygon(pc.points, pts[0], pts[1])
         : splitPolygonPath(pc.points, pts);
       if (halves) {
+        // Concave-cut guard: if the two pieces don't conserve the original area (they overlap or
+        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a warning
+        // instead of saving corrupted geometry that throws off every downstream yield number.
+        const whole = polyArea(pc.points), sum = polyArea(halves[0]) + polyArea(halves[1]);
+        if (polySelfIntersects(halves[0]) || polySelfIntersects(halves[1]) || Math.abs(sum - whole) > whole * 0.02 + 1) {
+          setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
+          setTimeout(() => setOverlapWarn(""), 7000);
+          return;
+        }
         pushHistory();
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
         const a = { id: uid(), points: halves[0], locked: true, ...inherit };
@@ -1858,6 +1914,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       const pc = { id: uid(), points: draftPoly, locked: true };
       setParcels((a) => [...a, pc]);
+      flashPolyWarn(draftPoly, "Parcel");
       requestFit();
     }
     setDraftPoly(null);
@@ -1868,6 +1925,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const el = { id: uid(), type: draftElPoly.type, points: draftElPoly.pts, rot: 0 };
       setEls((a) => [...a, el]);
       setSel({ kind: "el", id: el.id });
+      flashPolyWarn(draftElPoly.pts, "Element");
     }
     setDraftElPoly(null);
     setTool("select");
@@ -1910,7 +1968,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const applyCalibration = () => {
     const knownFt = +calibInput;
-    if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0)) return;
+    if (!underlay || !calib?.a || !calib?.b || !(knownFt > 0) || !(underlay.ftPerPx > 0)) return;
     // A map-sourced underlay is already georeferenced and its two axes can legitimately
     // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
     // would mis-size it, so calibration is disabled for from-map underlays (B57a).
@@ -2976,7 +3034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const gridLines = () => {
     const out = [];
     const minF = p2fStatic(0, 0), maxF = p2fStatic(size.w, size.h);
-    const step = settings.gridSize;
+    const step = Math.max(0.1, +settings.gridSize || 10); // guard: a 0/negative grid size would loop forever
     const major = step * 10;
     const startX = Math.floor(minF.x / step) * step, endX = Math.ceil(maxF.x / step) * step;
     const startY = Math.floor(minF.y / step) * step, endY = Math.ceil(maxF.y / step) * step;
@@ -3455,10 +3513,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
   const anchorEncumbrance = (pob) => {
     const { calls } = pobMode;
+    if (!calls || !calls.length) { setOverlapWarn("No bearings were recognized in that description — check the metes-and-bounds format."); setTimeout(() => setOverlapWarn(""), 7000); setPobMode(null); return; }
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { setPobMode(null); setOverlapWarn(""); return; }
+    if (!ring || ring.length < 3) { setOverlapWarn("Couldn't form a shape from those calls — check the description."); setTimeout(() => setOverlapWarn(""), 6000); setPobMode(null); return; }
     const gap = misclosure(path);
     const mk = {
       id: uid(), kind: "encumbrance",
@@ -3557,6 +3616,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const runXSection = async (p0, p1) => {
     if (!origin) { setOverlapWarn("Cross-section needs a located site (a real-world origin)."); setTimeout(() => setOverlapWarn(""), 6000); return; }
     const lenFt = _hyp(p0, p1);
+    if (!(lenFt > 1)) { setOverlapWarn("Cross-section line is too short — draw a longer line."); setTimeout(() => setOverlapWarn(""), 5000); setXsecMode(false); setXsecPts([]); return; }
     setXsec({ p0, p1, lenFt, busy: true, stats: null });
     setXsecMode(false); setXsecPts([]);
     try {
@@ -4850,8 +4910,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </>
                   ) : (
                     <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   <Field label="Rotation (°)">
@@ -5131,14 +5191,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ca = countyAcres(selParcel.attrs);
                 if (!ca || !ca.acres) return null;
                 const mine = polyArea(selParcel.points) / SQFT_PER_ACRE;
-                const diff = Math.abs(mine - ca.acres) / ca.acres;
-                const tenx = ca.fromArea && (diff > 0.6) && Math.abs(mine - ca.acres / 10.7639) / (ca.acres / 10.7639) < 0.1;
-                const [color, mark] = tenx ? ["#b45309", "▲"] : diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
+                // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
+                // multiplying it back by that factor matches our geometry, treat it as m² and use the
+                // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
+                const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
+                const county = m2 ? ca.acres * 10.7639 : ca.acres;
+                const diff = Math.abs(mine - county) / county;
+                const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["#6b6557", "≈"] : ["#b45309", "▲"];
                 return (
                   <div style={{ fontSize: 11, color, marginBottom: 8, lineHeight: 1.5, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "6px 9px" }}>
-                    <b>{mark} Geometry check</b> · county {f2(ca.acres)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                    {tenx && <div style={{ marginTop: 2 }}>Shape area looks like m² — verify projection.</div>}
-                    {!tenx && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
+                    <b>{mark} Geometry check</b> · county {f2(county)} ac vs {f2(mine)} ac ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
+                    {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
+                    {!m2 && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
                   </div>
                 );
               })()}

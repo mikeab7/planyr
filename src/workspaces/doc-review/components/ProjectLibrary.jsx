@@ -60,8 +60,16 @@ export default function ProjectLibrary({ open, onClose, onOpenReview, signedIn =
     const files = [...(e.dataTransfer?.files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!files.length) return;
     setBusy(true);
-    try { for (const f of files) await fileNewReview({ projectId: projectId === UNFILED ? null : projectId, project: project === "Unfiled" ? "" : project, discipline, blob: f, fileName: f.name }); }
+    const failed = [];
+    try {
+      for (const f of files) {
+        const r = await fileNewReview({ projectId: projectId === UNFILED ? null : projectId, project: project === "Unfiled" ? "" : project, discipline, blob: f, fileName: f.name });
+        if (!r || !r.ok) failed.push(`${f.name} — couldn't file`);
+        else if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop it on open to view)`);
+      }
+    }
     finally { setBusy(false); refresh(); }
+    if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
   };
   const onStatus = async (e, projectId) => { const v = e.target.value; e.stopPropagation(); await setProjectStatus(projectId, v); refresh(); };
   const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file/review and its stored PDF?")) return; await deleteReview(id); refresh(); };

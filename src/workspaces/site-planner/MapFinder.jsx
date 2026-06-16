@@ -442,7 +442,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const ring = largestRingLngLat(feat);
       if (!ring) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const attrs = feat.attributes || {};
-      const key = String(attrs.OBJECTID ?? attrs.objectid ?? `${ring[0][0].toFixed(6)},${ring[0][1].toFixed(6)}`);
+      // Namespace by county: OBJECTIDs are only unique within one CAD layer, so a multi-county
+      // assembly could otherwise collide (two lots sharing an id would toggle each other off).
+      const oid = attrs.OBJECTID ?? attrs.objectid ?? `${ring[0][0].toFixed(6)},${ring[0][1].toFixed(6)}`;
+      const key = `${county}:${oid}`;
       const map = mapRef.current;
       if (hilitesRef.current[key]) {
         // toggle off

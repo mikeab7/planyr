@@ -131,7 +131,7 @@ export default function App() {
     const group = groupOf(src);
     const id = newId();
     saveSite({ id, groupId: group, site: src.site || src.name, name: `Plan ${nextPlanNo(group)}`,
-      origin: src.origin || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
+      origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
     pushSiteToCloud(id).catch(() => {});
     refreshSites();
     goPlan(id);

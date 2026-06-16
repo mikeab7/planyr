@@ -181,6 +181,10 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   const up = await uploadSource(srcId, blob, projectId, discipline);
   const docDate = new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
+  // A non-oversize upload failure (network / RLS / transient 5xx) still files the work layer, but
+  // the bytes weren't stored — surface it so the caller can warn, rather than silently filing a
+  // document that can't be opened until it's re-dropped (storageKey stays null → re-drop on load).
+  const uploadFailed = !up.ok && !up.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate,
@@ -188,7 +192,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error };
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf" };
 }
 
 /* --------------------------- source PDFs (Storage) -------------------------- */
