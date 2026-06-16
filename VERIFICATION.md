@@ -256,6 +256,7 @@ was never clicked" quietly ships broken.
 
 ### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) ⏳ — HIGH PRIORITY
 - **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **▶ Full step-by-step script:** **`PERSISTENCE_TEST_SCRIPT.md`** (T1–T11, with paste-in Console helpers and a results table) — run that end-to-end and record the outcome back here. The summary below is the short form.
 - **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
   site because sync kept whichever whole copy was saved last — so a copy with fewer buildings could overwrite
   a fuller one (a stale tab, a second device, a hiccup mid-load). B126 makes sync **merge** the two copies
