@@ -158,6 +158,24 @@ was never clicked" quietly ships broken.
 - **Increment 2a (multi-page sheet picker) also landed** — verify the "Pick a sheet" dialog lists all
   pages and attaches the chosen one.
 
+### V10 — Snap defaults OFF; toggle + Alt hold-to-suppress (B114) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** (0) Open **any** site — incl. an existing one made before this change — and confirm the
+  toolbar pill reads **`Snap off`** (grey dot) and dragging a road up against trailer parking does
+  **not** stick to its edge (it lands where you drop it). (1) Press **S** (cursor on the canvas, not
+  in a text field) → pill flips to **`Snap 10′`** (green dot); now the road flush-snaps to the edge.
+  (2) **Hold Alt** and drag it to a deliberate ~15-ft gap and drop — with snap on, Alt still places
+  it freely for that one move; release Alt and snapping is back. (3) Click the toolbar **Snap** pill —
+  same toggle as S. (4) Turn snap on, **switch to another site / reload the page** → snap stays **on**
+  (the choice persists); turn it off → stays off. (5) With snap on, resize a box / rotate it (grid /
+  15° steps) vs. Alt-held (smooth/free).
+- **Expect:** Snap starts **OFF for every site** (free movement is the default, even on old sites that
+  had snap baked in). The **S** key, the pill, and the Setup checkbox all toggle one **global**
+  preference that persists across sites/reloads. Alt suppresses snapping for just that one drag and
+  re-enables on release; "off" fully disables grid snap, neighbour flush-snap, resize-to-grid and
+  rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
+- **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

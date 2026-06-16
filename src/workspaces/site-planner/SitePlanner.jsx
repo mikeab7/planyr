@@ -110,7 +110,7 @@ const ToolIcon = ({ id, size = 15 }) => (
 );
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); hold Alt to bypass snap & place freely • toggle snap with S • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
@@ -709,8 +709,16 @@ const ensureIdAbove = (ids) => {
   });
 };
 
+// Snap is a global drafting preference (a tool mode), NOT a per-site attribute —
+// default OFF so elements move freely; the choice persists across sites/reloads once
+// turned on. We still mirror it into `settings.snap` so every read site is unchanged,
+// but the per-site saved value is ignored on load/import in favour of this pref.
+const SNAP_PREF_KEY = "planarfit:snap";
+const loadSnapPref = () => { try { return localStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; } };
+const saveSnapPref = (on) => { try { localStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
+
 const DEFAULT_SETTINGS = {
-  gridSize: 10, snap: true,
+  gridSize: 10, snap: false,
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -767,7 +775,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
-  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
+  // snap comes from the global pref (a tool mode), never the per-site saved value.
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
+  const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
@@ -1010,6 +1020,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
@@ -1130,7 +1141,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [view]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
-    return settings.snap ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
+    const on = settings.snap && !altSnapOffRef.current; // global toggle, minus a held-Alt bypass for the current move
+    return on ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
   }, [settings]);
   const snapPt = useCallback((p) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
   // Snap to the nearest parcel boundary within ~5 ft (or ~10 px); used by Split.
@@ -1263,6 +1275,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
+      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
       // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
       if (e.key === " " || e.code === "Space") {
         if (document.activeElement && document.activeElement.tagName === "BUTTON") return; // let Space activate a focused button
@@ -1365,6 +1378,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ pointer handlers (svg root) ------------ */
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
 
     if (printMode) { // in print-placement: background drag pans only (frame has its own handles)
@@ -1765,6 +1779,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   const onMove = (e) => {
+    altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
     setCursor(fp);
     if (roadStart && tool === "road" && roadWidth !== "free") { // live fixed-width road preview
@@ -1773,6 +1788,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const d = drag.current;
     if (!d) return;
+    const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "pan") {
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
@@ -1867,7 +1883,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const cands = els.filter((x) => !ids.has(x.id) && !x.points && rootIdOf(x.id) !== d.id);
             const res = alignSnap(gel, ncx, ncy, cands, Math.min(40, 24 / view.ppf));
             if (res) { ncx = res.cx; ncy = res.cy; newRot = res.rot; hint = { id: res.hostId, x: res.hintX, y: res.hintY }; }
-          } else if (settings.snap && gbox) { // ambient flush-snap along world axes (does NOT bond)
+          } else if (snapOn && gbox) { // ambient flush-snap along world axes (does NOT bond)
             const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
@@ -1911,8 +1927,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const opp = d.opp; // fixed opposite corner (world feet)
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
       let nw = Math.abs(local.x), nh = Math.abs(local.y);
-      nw = Math.max(settings.gridSize, settings.snap ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
-      nh = Math.max(settings.gridSize, settings.snap ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
+      nw = Math.max(settings.gridSize, snapOn ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
+      nh = Math.max(settings.gridSize, snapOn ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
       // opposite stays fixed; new center is the midpoint of opp and the dragged corner
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
@@ -1927,7 +1943,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const { nx, ny, opp } = d; // outward local normal of the dragged edge
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      const snapDim = (v) => Math.max(settings.gridSize, settings.snap ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      const snapDim = (v) => Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
       const nw = nx !== 0 ? snapDim(local.x) : el.w;
       const nh = ny !== 0 ? snapDim(local.y) : el.h;
       const half = rot2(nx * nw, ny * nh, el.rot);
@@ -1943,7 +1959,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const prim = d.start.find((s) => s.id === d.id);
       if (prim && prim.rot !== undefined) { // snap the grabbed element to 15°, carry the rest along
         let target = prim.rot + delta;
-        target = settings.snap ? Math.round(target / 15) * 15 : Math.round(target);
+        target = snapOn ? Math.round(target / 15) * 15 : Math.round(target);
         delta = target - prim.rot;
       }
       setEls((a) => a.map((el) => {
@@ -2999,7 +3015,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pushHistory();
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
         setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
-        setSettings((s) => ({ ...s, ...(d.settings || {}) }));
+        setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
@@ -4119,10 +4135,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="dbtn" style={dIcon} onClick={redo} disabled={!futureRef.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
           <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
         </div>
-        <button className="dbtn" style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
+        <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+          onClick={() => setSnap(!settings.snap)} title="Snap to grid & flush against neighbours — click or press S to toggle; hold Alt while dragging to place freely">
           <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          Snap {settings.gridSize}′
+          {settings.snap ? `Snap ${settings.gridSize}′` : "Snap off"}
         </button>
         {vSep}
         {/* single save/sync badge — folds in the cloud connection state (synced /
@@ -5703,7 +5719,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "standards" && (<>
           <Section title="Site defaults">
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.snap} onChange={(e) => setSettings((s) => ({ ...s, snap: e.target.checked }))} /> Snap to grid</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
@@ -5760,13 +5776,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
               {[
-                ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
+                ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
                 ["Ctrl/⌘ D", "Duplicate"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
                 ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
                 ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
-                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["?", "This panel"],
+                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
               ].map(([k, v], i) => v === "" ? (
                 <div key={i} style={{ gridColumn: "1 / -1", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.muted, marginTop: i ? 12 : 0, marginBottom: 2 }}>{k}</div>
               ) : (
