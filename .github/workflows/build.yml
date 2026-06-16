@@ -1,0 +1,46 @@
+name: Build
+
+# Builds the Vite app as the "it builds" status check (lint + test + build) on every
+# pull request into main and on pushes to main. This is the check that gates merges
+# into main (see the branch-protection rule) — it does NOT publish anything.
+#
+# Production is served by Cloudflare Pages via its own GitHub App connection (there is
+# no Cloudflare workflow file in this repo). The old GitHub Pages deploy job was
+# retired once Cloudflare became production — one host, one deploy.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (fails the build on a dangling/undefined identifier)
+        run: npm run lint
+      - name: Test (pure-logic smoke tests)
+        run: npm test
+      - name: Build
+        run: npm run build
+        env:
+          # Supabase connection (Phase 1). Set these as repository secrets:
+          # Settings → Secrets and variables → Actions. Safe to be absent — the app
+          # runs fine un-configured (the cloud chip just shows "Cloud off").
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
