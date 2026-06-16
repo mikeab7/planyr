@@ -4,7 +4,7 @@ import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, clearCloudCache } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -56,15 +56,29 @@ export default function App() {
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
+  // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
+  // rest track the one-time, non-destructive copy-up of legacy (logged-out) sites.
+  const [signedInUid, setSignedInUid] = useState(null);
+  const [migrating, setMigrating] = useState(false);
+  const [migrateMsg, setMigrateMsg] = useState("");
+  const [hideMigrate, setHideMigrate] = useState(false);
 
   // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
   // sites into their local cache and make that the active store (cloud is home);
   // logged out → back to the legacy localStorage store. Reset the view on a real
   // switch so we never show one account's pointer against another's data.
   const applyUser = async (u, event) => {
-    const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     const uid = (u && u.id) || null;
+    // supabase-js re-emits SIGNED_IN on tab focus / token refresh. When it's the SAME
+    // user already active, nothing actually changed — skip the re-pull + view reset that
+    // would otherwise bounce an open plan back to the map a couple minutes later (the
+    // B124 "work disappears on its own" churn). A real switch (different user) or a
+    // sign-out still runs in full.
+    if (uid && uid === prevUid.current && event !== "SIGNED_OUT") return;
+    const seq = ++applySeq.current; // capture before the await; a newer auth event bumps it
     setActiveUser(uid);
+    setSignedInUid(uid);     // null when logged out → the on-device-sites prompt only shows when signed in
+    setMigrateMsg(""); setHideMigrate(false); // reset the prompt on any real auth switch
     if (uid) {
       setCloudLoading(true);
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
@@ -78,7 +92,11 @@ export default function App() {
       else { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     } else {
-      if (prevUid.current) clearCloudCache(prevUid.current); // don't leave cloud data cached after logout
+      // Deliberately DON'T wipe the per-user cloud cache here. supabase-js also emits
+      // SIGNED_OUT for a transient token-refresh failure, and clearing the cache on that
+      // made signed-in work vanish (B124). The cache is keyed per-uid and only read while
+      // that user is active (logged out, the app reads the legacy store), so leaving it is
+      // not a leak — and it's preserved if the "sign-out" was a momentary refresh blip.
       setCloudError("");
       if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
       refreshSites();
@@ -97,6 +115,23 @@ export default function App() {
   }, []);
 
   const refreshSites = () => setSites(loadSitesList());
+  // Bring the user's on-device (logged-out) sites into their cloud account — a one-time,
+  // non-destructive copy-up. Originals are kept; any cloud copy that's already newer is left
+  // alone. After it runs we re-pull + refresh so the list reflects the consolidated account.
+  const bringLocalSitesIn = async () => {
+    if (!signedInUid || migrating) return;
+    setMigrating(true); setMigrateMsg("");
+    try {
+      const r = await importLegacyIntoCloud(signedInUid);
+      await pullCloud(signedInUid).catch(() => {});
+      refreshSites();
+      const parts = [];
+      if (r.copied) parts.push(`${r.copied} site${r.copied === 1 ? "" : "s"} brought into your account`);
+      if (r.failed) parts.push(`${r.failed} couldn't reach the cloud (kept on this device — will retry on your next edit)`);
+      setMigrateMsg(parts.length ? parts.join("; ") + "." : "Nothing new to bring in — your account is already up to date.");
+    } finally { setMigrating(false); }
+  };
+  const pendingLegacy = signedInUid ? pendingLegacyCount(signedInUid) : 0;
   // Cross-tab freshness: when ANOTHER tab changes the site store, refresh this tab's finder list
   // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
   // whole-store clobber; this keeps the list in sync). Only reacts to the sites keys.
@@ -251,6 +286,28 @@ export default function App() {
         <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+
+      {/* "Bring my on-device sites into my account" — shows only when signed in AND there
+          are logged-out (legacy) sites not yet in the cloud account. The copy-up is
+          non-destructive (originals kept); this is the bridge between the two stores. */}
+      {mode === "map" && signedInUid && !hideMigrate && (pendingLegacy > 0 || migrateMsg) && (
+        <div role="status" style={{ position: "fixed", top: cloudError ? 92 : 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          {migrateMsg ? (
+            <span style={{ flex: 1 }}>{migrateMsg}</span>
+          ) : (
+            <span style={{ flex: 1 }}>
+              You have <b>{pendingLegacy}</b> site{pendingLegacy === 1 ? "" : "s"} saved on <b>this device</b> that {pendingLegacy === 1 ? "isn't" : "aren't"} in your account yet.
+            </span>
+          )}
+          {!migrateMsg && (
+            <button onClick={bringLocalSitesIn} disabled={migrating} title="Copy your on-device sites into your cloud account — keeps the originals, nothing is deleted"
+              style={{ flex: "none", cursor: migrating ? "default" : "pointer", background: migrating ? "#3b5bbf" : "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+              {migrating ? "Bringing them in…" : "Bring them into my account"}
+            </button>
+          )}
+          <button onClick={() => { setHideMigrate(true); setMigrateMsg(""); }} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
