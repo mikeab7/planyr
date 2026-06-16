@@ -176,7 +176,21 @@ was never clicked" quietly ships broken.
   rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
 - **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
 
-### V11 — Site Planner measurement tools: Length / Polylength / Area (B115) ⏳
+### V11 — Phone layout (B113) + "Cloud off" affordance (B111) ⏳
+- **Why ⏳:** verified headless at 390×844 (`planner-mobile.png`, `planner-mobile-tools.png`,
+  `planner-mobile-panel.png`) but real touch + rotation want a live click-through.
+- **Steps (B113, on a phone or a ~390px-wide window):** open a site in the planner. The canvas
+  should fill the width (not a sliver). Tap the orange **"✎ Tools"** button (bottom-right) → the tool
+  palette **slides in from the right**; pick a tool → it **auto-closes** so you can draw; tap the dim
+  backdrop to dismiss it. Tap a left-rail button (Yield/Parcel/…) → its panel **overlays** the canvas;
+  tap the same button to close. Rotate to landscape and back. The top header should **scroll
+  sideways**, not wrap onto two lines.
+- **Expect:** at desktop width everything is exactly as before (the mobile styles are width-gated).
+- **Steps (B111):** load a build with **no Supabase env** (cloud unconfigured). The top-right account
+  corner should show a muted **"⊘ Cloud off"** pill (not empty); click it → a popover explains work is
+  saved on this device only. (A configured build still shows the normal Sign in / account button.)
+
+### V12 — Site Planner measurement tools: Length / Polylength / Area (B116) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
 - **Steps:** Open a site in the Site Planner. Right rail → **Measure** (the `▾` opens the mode menu:
   **Length / Polylength / Area**). (1) **Length:** click two points → expect a teal line labeled the
@@ -192,7 +206,7 @@ was never clicked" quietly ships broken.
   labels return to normal (teal) and read true feet.
 - **Expect:** all three modes draw, label, select, and delete; labels persist across reopen + reload
   (signed in); the amber/⚠ uncalibrated warning behaves as above. This shipped code-verified +
-  build-green (B115 was already implemented in `SitePlanner.jsx`; only the mode names were aligned to
+  build-green (B116 was already implemented in `SitePlanner.jsx`; only the mode names were aligned to
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
