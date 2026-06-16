@@ -613,7 +613,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           {err
             ? err
             : !selectMode
-              ? "Drag to move the map. Hit “+ Select parcels” (top-right) to start adding lots."
+              ? "Drag to move the map, then hit “＋ Select parcels” below to start adding lots."
               : zoom != null && zoom < PARCEL_MINZOOM
                 ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
                 : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}

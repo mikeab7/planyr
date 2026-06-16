@@ -4802,7 +4802,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
                         <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
                         {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
+                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
                         ))}
                       </div>
                     </>
@@ -5486,13 +5486,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }} onClick={() => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: {} })); }}>Reset all to built-in</button>
           </Section>
 
-          {/* legend */}
+          {/* legend — colour + the H2 texture cue, so the key carries the
+              colour-blind-safe secondary signal too (B97) */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", padding: "11px 13px", background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" }}>
             {Object.keys(TYPE).map((k) => {
               const st = typeStyle(k, settings);
+              const pat = st.pattern || (st.hatch ? "hatch" : st.water ? "water" : null);
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b6557" }}>
-                  <span style={{ width: 11, height: 11, background: st.fill, border: `1px solid ${st.stroke}`, borderRadius: 3, display: "inline-block" }} />{TYPE[k].label.split(" / ")[0]}
+                  <svg width="13" height="13" style={{ display: "block", flex: "none" }} aria-hidden="true">
+                    <rect x="0.5" y="0.5" width="12" height="12" rx="2.5" fill={st.fill} stroke={st.stroke} strokeWidth="1" />
+                    {pat === "hatch" && [13, 8, 18].map((d, i) => <line key={i} x1={0} y1={d} x2={d} y2={0} stroke={st.stroke} strokeWidth="0.8" opacity="0.55" />)}
+                    {pat === "trailer" && [0, -5, 5].map((o, i) => <line key={i} x1={o} y1={0} x2={o + 13} y2={13} stroke={st.stroke} strokeWidth="0.8" opacity="0.6" />)}
+                    {pat === "water" && [4.5, 8.5].map((y, i) => <line key={i} x1={2} y1={y} x2={11} y2={y} stroke={st.stroke} strokeWidth="0.8" opacity="0.5" />)}
+                    {pat === "sidewalk" && [3.5, 9.5].flatMap((cx) => [3.5, 9.5].map((cy) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={0.9} fill="#9c998d" opacity="0.6" />))}
+                  </svg>{TYPE[k].label.split(" / ")[0]}
                 </div>
               );
             })}
