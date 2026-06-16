@@ -806,6 +806,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
   const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
   const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
+  const [pagePick, setPagePick] = useState(null); // multi-page PDF awaiting a sheet choice (B67 increment 2)
   const drawingFileRef = useRef(null);
   const drawingPushTimer = useRef(null);
   // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
@@ -817,20 +818,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clearTimeout(drawingPushTimer.current);
     drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
   };
+  // Build + persist + open a drawing record from a rasterized page/image.
+  const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount) => {
+    const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+      name, kind, page: raster.page || 1, pageCount: pageCount || 1,
+      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
+      markups: [], createdAt: Date.now(), updatedAt: Date.now() };
+    persistDrawings([...parcelDrawings, rec]);
+    setOpenDrawingId(rec.id);
+  };
   const onAttachDrawing = async (parcelId, file) => {
     if (!file || !parcelId) return;
     if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    const baseName = (file.name || "Drawing").replace(/\.[^.]+$/, "");
     try {
       const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
-      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // only page 1's raster is needed (page picker = follow-on)
-      const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
-        name: (file.name || "Drawing").replace(/\.[^.]+$/, ""), kind: isPdfFile(file) ? "pdf" : "image",
-        page: r.page || 1, pageCount: r.pageCount || 1, intrinsic: { w: r.imgW, h: r.imgH }, src: r.src,
-        markups: [], createdAt: Date.now(), updatedAt: Date.now() };
-      persistDrawings([...parcelDrawings, rec]);
-      setOpenDrawingId(rec.id);
+      // Multi-page PDF → let the user pick the sheet (keep the PDF alive to re-rasterize).
+      if (r.pdf && r.pageCount > 1) { setPagePick({ parcelId, pdf: r.pdf, pageCount: r.pageCount, name: baseName, first: r }); return; }
+      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // single page — first raster is all we need
+      addDrawingFromRaster(parcelId, baseName, isPdfFile(file) ? "pdf" : "image", r, r.pageCount || 1);
     } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
   };
+  // Page-picker: rasterize the chosen sheet of a multi-page PDF, then attach it (B67 increment 2).
+  const pickPage = async (n) => {
+    const pp = pagePick; if (!pp) return;
+    setPagePick(null);
+    try {
+      const raster = pp.first && pp.first.page === n ? pp.first : await rasterizePage(pp.pdf, n);
+      addDrawingFromRaster(pp.parcelId, `${pp.name} — p.${n}`, "pdf", raster, pp.pageCount);
+    } catch (_) { setOverlapWarn("Couldn't render that page — try another."); }
+    finally { try { pp.pdf.destroy(); } catch (_) {} }
+  };
+  const cancelPagePick = () => { if (pagePick) { try { pagePick.pdf.destroy(); } catch (_) {} setPagePick(null); } };
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
   const deleteDrawing = (id) => { persistDrawings(parcelDrawings.filter((d) => d.id !== id)); if (openDrawingId === id) setOpenDrawingId(null); };
@@ -5728,6 +5747,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!d) return null;
         return <ParcelDrawing drawing={d} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
       })()}
+      {/* Multi-page PDF sheet picker (B67 increment 2) */}
+      {pagePick && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }} onClick={cancelPagePick}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink }}>Pick a sheet</div>
+            <div style={{ fontSize: 12, color: PAL.chromeMuted, margin: "5px 0 12px" }}>“{pagePick.name}” has {pagePick.pageCount} pages — choose which one to attach as the backdrop.</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {Array.from({ length: pagePick.pageCount }, (_, i) => i + 1).map((n) => (
+                <button key={n} onClick={() => pickPage(n)} title={`Attach page ${n}`}
+                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>{n}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
         const calls = parseCalls(mbText);
