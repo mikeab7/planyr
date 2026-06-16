@@ -1,12 +1,12 @@
 name: Verification reminder
 
-# A gentle monthly nudge to run VERIFICATION.md (the live-browser test checklist).
+# A gentle every-other-day nudge to run VERIFICATION.md (the live-browser test checklist).
 # Idempotent: if a "verification due" issue is already open it just bumps it with a
 # comment rather than opening a duplicate. Runs from `main` only (scheduled workflows
 # always do). Trigger manually any time via the Actions tab → Run workflow.
 on:
   schedule:
-    - cron: "0 14 1 * *" # 14:00 UTC on the 1st of each month
+    - cron: "0 14 */2 * *" # 14:00 UTC every other day (odd days of the month)
   workflow_dispatch:
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
           script: |
             const owner = context.repo.owner, repo = context.repo.repo;
             const body = [
-              "Monthly reminder: open **VERIFICATION.md** and run any ⏳ unverified or due items",
+              "Reminder: open **VERIFICATION.md** and run any ⏳ unverified or due items",
               "on https://planyr.io, then record the result in that file.",
               "",
               "- Browser items (V1–V6): click them through on the live app.",
@@ -37,7 +37,7 @@ jobs:
             if (open.length) {
               await github.rest.issues.createComment({
                 owner, repo, issue_number: open[0].number,
-                body: "⏰ Still open after another month — " + body,
+                body: "⏰ Still open — " + body,
               });
               core.info(`Bumped existing issue #${open[0].number}`);
             } else {
