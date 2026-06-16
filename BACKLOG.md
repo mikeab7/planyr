@@ -399,13 +399,15 @@ fresh cluster — fixed here.
 ## 🎨 UI/UX & parcel-interaction overhaul — 2026-06-16 (product walkthrough)
 
 Filed from a product walkthrough of the map + planner chrome and the parcel-interaction
-model. Provisional **NEW-1…NEW-8** minted **B93–B100** here. Deduped against existing
-items — **B10** (two-header consolidation + product switcher) already shipped for the
-*planner* context bar and explicitly left "a single physical row is a later polish," so
-**B93** is that remaining polish for the *map* view (net-new, not a re-file); the rest have
-no existing Open counterpart. All eight are `[ ]` Open.
+model. Provisional **NEW-1…NEW-8** were minted B93–B100, but **B93–B96 collided** with the
+same-day GIS batch (PR #46, which had already shipped code under B93–B96); per the dedupe
+protocol they are **renumbered B104–B107** here (B97–B100 were unique and keep their IDs; the
+GIS batch keeps B93–B96). Deduped against existing items — **B10** (two-header consolidation +
+product switcher) already shipped for the *planner* context bar and explicitly left "a single
+physical row is a later polish," so **B104** is that remaining polish for the *map* view
+(net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
-### B93 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
+### B104 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
 `[ ]` **Repro:** the map view shows two stacked header bars — a black account bar on top (the
 shell header) and a white search/actions bar below (the MapFinder header) — with the brand/module
 lockup ("Site Planyr") appearing on both. **Expected:** a single header holding the logo, the
@@ -413,12 +415,12 @@ lockup ("Site Planyr") appearing on both. **Expected:** a single header holding 
 Drop the redundant second "Site Planyr" lockup and reclaim the vertical space for the map.
 > Dedup: the map-view counterpart to **B10** (done — the *planner* context bar got the
 > brand-dedup + product switcher, but its done-note explicitly deferred "a single physical row"
-> as "later polish"). B93 is that remaining single-row polish for the **MapFinder** header.
+> as "later polish"). B104 is that remaining single-row polish for the **MapFinder** header.
 > Mind the **B66** stacking-context fix (shell header vs. workspace z-index floor) when collapsing
 > the bars so the product-switcher dropdown still paints above the map. (If the rendered mark truly
 > reads "Site Planr", that's also a **B3** spelling regression to fix in passing.)
 
-### B94 — Remove the "Drag to move the map" hint card `[Site Planner / map]` (task)
+### B105 — Remove the "Drag to move the map" hint card `[Site Planner / map]` (task)
 `[ ]` The persistent bottom-left note ("Drag to move the map. Hit '+ Select parcels'…") is noise
 once you know the app. **Remove the persistent card.** If first-run guidance is still wanted, show it
 as a **one-time, dismissible** hint (a small bubble that appears the first time, then goes away)
@@ -428,7 +430,7 @@ rather than a permanent fixture.
 > interacts with that shared slot — coordinate so a one-time hint and transient layer-error toasts
 > don't fight over the same corner.
 
-### B95 — Redesign the Sites panel (collapsible, safer delete, see-all) `[Site Planner / map]` (feature)
+### B106 — Redesign the Sites panel (collapsible, safer delete, see-all) `[Site Planner / map]` (feature)
 `[ ]` Rework the saved-sites panel:
 - **Collapsible** — collapsed = a slim tab/handle (optionally showing the site count); expanded =
   the full list. **Persist** the open/closed state.
@@ -441,7 +443,7 @@ rather than a permanent fixture.
 > filters + pipeline counts). "Hide zero-count statuses / default all-sites" refines those existing
 > filters — extend them, don't fork a parallel panel. Status set + visuals stay per B7/B8.
 
-### B96 — Rework the left tool rail (order, polish, fits on one page) `[Site Planner]` (task)
+### B107 — Rework the left tool rail (order, polish, fits on one page) `[Site Planner]` (task)
 `[ ]` Reorder and polish the planner's left tool rail:
 - **Reorder with Yield at the top.** Suggested grouping: primary modes up top (**Yield, Parcel,
   Element**); utilities pinned to the bottom (**Aerial, Overlay, Setup**).
@@ -496,7 +498,7 @@ busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 > → bump `SITE_MODEL_VERSION`, extend `migrate`, expose via a selector; the self-intersection/area
 > guards from **B81/B86** feed the same totals, so keep them in step.
 
-<!-- Filed 2026-06-16 from a product walkthrough (provisional NEW-1…NEW-8 → minted B93–B100 here; deduped against B10/B7/B8/B53/B66, which already shipped — these are net-new UI/parcel-interaction work). -->
+<!-- Filed 2026-06-16 from a product walkthrough (provisional NEW-1…NEW-8 → minted B93–B100; B93–B96 later renumbered B104–B107 to resolve a same-day collision with the GIS batch — B97–B100 unchanged; deduped against B10/B7/B8/B53/B66, which already shipped — these are net-new UI/parcel-interaction work). -->
 
 ---
 
@@ -510,7 +512,7 @@ busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 
 ## ✅ Done
 
-> **ID note (2026-06-16):** these three were filed/implemented as B93–B95, but a concurrent `main` (PRs #46/#51) had blindly taken B93–B100 for different items. Per the dedupe protocol they're **renumbered B101–B103** here (content is unique — no overlap with main's GIS/UI-overhaul items); the implementing commit message still says "B93–B95" (the provisional numbers).
+> **ID note (2026-06-16):** these three were filed/implemented as B93–B95, but a concurrent `main` (PRs #46/#51) had blindly taken B93–B100 for different items. Per the dedupe protocol they're **renumbered B101–B103** here (content is unique — no overlap with main's GIS/UI-overhaul items); the implementing commit message still says "B93–B95" (the provisional numbers). The colliding UI batch (PR #51) was separately renumbered **B104–B107**, so B93–B107 are now unique and gapless (GIS keeps B93–B96).
 
 ### B101 — Remove the element-type color legend from the Setup/defaults page `[Site Planner / Setup]` (task)
 `[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`; filed provisionally as B93). Confirmed display-only first: element colors are *defined* in the "Element default colors" section (the color pickers writing `settings.typeStyles` via `setTypeStyle`) and in `TYPE`/`typeStyle`, which the canvas reads — the legend was just a swatch+label key. Removed the legend block only; color definitions untouched.
