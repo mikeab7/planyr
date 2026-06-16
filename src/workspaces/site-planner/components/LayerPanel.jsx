@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { STATEWIDE, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
+import { formatAge } from "../lib/gisCache.js";
 
 const MUTED = "#8a8473", LINE = "#e7e2d6", INK = "#2c2a26";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
@@ -22,17 +23,26 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
   const set = (k, patch) => setOverlays((o) => ({ ...o, [k]: { ...o[k], ...patch } }));
   const [tok, setTok] = useState(() => mapillaryToken());
   useEffect(() => subscribeMapillaryToken(setTok), []); // keep both LayerPanel copies in sync (B46)
+  // Tick every 30s so a cached layer's age keeps counting up while the panel is open
+  // (screening-only honesty — a stale boundary should never look current) (B75).
+  const [, forceTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => forceTick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
 
   const row = (k, cfg) => {
     const st = overlays[k];
     if (!st) return null;
     const ls = st.on ? layerStatus[k] : null;
     const meta = ls && STATUS[ls.state];
+    const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
     return (
       <div key={k} style={{ marginBottom: 5 }}>
         <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={st.on} onChange={(e) => set(k, { on: e.target.checked })} />
           <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
+          {age && (ls.state === "loaded" || ls.state === "empty") && (
+            <span title={`Cached copy — refreshed ${age}${ls.stale ? " · showing last-good while it refreshes" : ""}. Screening only; verify against the source.`}
+              style={{ fontSize: 9.5, color: ls.stale ? "#b45309" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
+          )}
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
               animation: ls.state === "loading" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />

@@ -1,0 +1,49 @@
+name: Verification reminder
+
+# A gentle monthly nudge to run VERIFICATION.md (the live-browser test checklist).
+# Idempotent: if a "verification due" issue is already open it just bumps it with a
+# comment rather than opening a duplicate. Runs from `main` only (scheduled workflows
+# always do). Trigger manually any time via the Actions tab → Run workflow.
+on:
+  schedule:
+    - cron: "0 14 1 * *" # 14:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or bump the verification-due issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner, repo = context.repo.repo;
+            const body = [
+              "Monthly reminder: open **VERIFICATION.md** and run any ⏳ unverified or due items",
+              "on https://planyr.io, then record the result in that file.",
+              "",
+              "- Browser items (V1–V6): click them through on the live app.",
+              "- 🌐 endpoint-liveness (V7): a quick `curl` probe, no browser needed.",
+              "",
+              "Close this issue once the due items are checked off.",
+            ].join("\n");
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", labels: "verification", per_page: 1,
+            });
+            if (open.length) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: open[0].number,
+                body: "⏰ Still open after another month — " + body,
+              });
+              core.info(`Bumped existing issue #${open[0].number}`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner, repo, title: "🔍 Verification due — run VERIFICATION.md",
+                labels: ["verification"], body,
+              });
+              core.info(`Opened issue #${created.number}`);
+            }

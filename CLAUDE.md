@@ -10,6 +10,12 @@ scaffolded). Last updated mid-2026.
 > **✅ Done**. (This is the product bug/feature backlog — distinct from the
 > "Deferred / maintenance backlog" section near the end of this file, which tracks
 > ops/infra cleanup.)
+>
+> **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
+> green but still need a click-through on planyr.io. On every run, also scan it and
+> **surface any item that's ⏳ unverified or due** (run it if you have a browser, else
+> remind Michael). This is how features that pass CI but were never clicked don't slip
+> through, and how recurring checks (e.g. GIS endpoint liveness) get a periodic nudge.
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
