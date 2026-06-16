@@ -100,27 +100,29 @@ function pinGlyphSvg(kind) {
 }
 
 /* Build a saved-site map pin reflecting its project status + active state.
- * Active sites are the live ember accent and slightly larger so they pop; the
- * rest carry their status color/shape and recede when completed/dead. */
+ * The pin ALWAYS carries its status color + glyph (so changing a site's status
+ * is reflected even while it's open), and recedes when completed/dead. The
+ * currently-open site is emphasized additively — an ember outline ring + a
+ * slightly larger size + full opacity — rather than by recoloring it, so the
+ * status cue is never lost (previously `active` overrode the fill to ember,
+ * which made e.g. a Complete open site still read as a hot ember pursuit pin). */
 function statusPinIcon(status, active) {
   const s = statusStyle(status);
-  const fill = active ? "#e8590c" : (s.hollow ? "#ffffff" : s.fill);
-  const stroke = active ? "#7c2d12" : s.stroke;
+  const fill = s.hollow ? "#ffffff" : s.fill;
+  const stroke = active ? "#e8590c" : s.stroke;
   const op = s.dim && !active ? 0.78 : 1;
   const scale = active ? 1.12 : 1;
   const w = Math.round(30 * scale), h = Math.round(40 * scale);
-  const glyph = active ? "" : pinGlyphSvg(s.glyph);
+  const glyph = pinGlyphSvg(s.glyph);
   // pursuit = dashed outline ring (its distinguishing shape cue); others solid.
-  const ringDash = !active && s.dashed ? ` stroke-dasharray="3.4 2.8"` : "";
-  const ringW = !active && s.dashed ? 2.4 : 2;
+  const ringDash = s.dashed ? ` stroke-dasharray="3.4 2.8"` : "";
+  const ringW = active ? 3 : (s.dashed ? 2.4 : 2);
   return L.divIcon({
     className: "",
     html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4)); opacity:${op};">
       <svg width="${w}" height="${h}" viewBox="0 0 30 40">
         <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${fill}" stroke="${stroke}" stroke-width="${ringW}"${ringDash}/>
-        ${active
-          ? `<rect x="9.5" y="8" width="6.5" height="11" fill="#fff" opacity=".95"/><rect x="17.6" y="8" width="3" height="6.5" fill="#fff" opacity=".55"/>`
-          : (glyph || `<circle cx="15" cy="13.5" r="4.4" fill="${s.hollow ? s.stroke : '#fff'}" opacity="${s.hollow ? 0.9 : 0.95}"/>`)}
+        ${glyph || `<circle cx="15" cy="13.5" r="4.4" fill="${s.hollow ? s.stroke : '#fff'}" opacity="${s.hollow ? 0.9 : 0.95}"/>`}
       </svg></div>`,
     iconSize: [w, h], iconAnchor: [Math.round(w / 2), h - 2], tooltipAnchor: [0, -(h - 6)],
   });
@@ -361,12 +363,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
       if (showPlans && site.parcels?.length) {
         const sty = statusStyle(status);
-        const lineColor = active ? "#e8590c" : sty.dot;
-        // parcel boundary — tinted to the project status (active stays ember)
+        // Boundary ALWAYS carries the project status color; the open site is
+        // emphasized with a heavier line (not by recoloring it to ember), so its
+        // status stays visible — consistent with the status pin.
+        const lineColor = sty.dot;
+        const lineWeight = active ? 3.25 : 2.25;
         site.parcels.forEach((p) => {
           if (!p.points?.length) return;
           const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
-            color: lineColor, weight: 2.25, dashArray: sty.dashed && !active ? "5 4" : "6 5",
+            color: lineColor, weight: lineWeight, dashArray: sty.dashed ? "5 4" : "6 5",
             fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
           });
           if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
