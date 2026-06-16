@@ -172,7 +172,12 @@ export async function probeService(url) {
         : { ok: true, error: null };
     }
   } catch (e) {
-    result = { ok: false, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
+    // The fetch threw — we couldn't even reach the service to health-check it (CORS,
+    // network, or timeout). Flag `unreachable` so a caller can still optimistically add
+    // an image layer: its f=image export renders via a CORS-exempt <img>, which loads
+    // even when a cross-origin fetch is refused. A truly-down service surfaces via the
+    // layer's own requesterror instead.
+    result = { ok: false, unreachable: true, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
   }
   result.ts = Date.now();
   _probeCache.set(key, result);
@@ -225,9 +230,13 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else {
         // image / feature service — probe health first
-        probeService(cfg.url).then(({ ok, error }) => {
+        probeService(cfg.url).then(({ ok, error, unreachable }) => {
           if (refs[k] !== "pending") return; // toggled off while probing
-          if (!ok) return fail(k, cfg, `${cfg.label}: ${error}`);
+          // A service that RESPONDED with an error truly failed → drop it. But if we
+          // merely couldn't reach it to check (CORS/network → `unreachable`), add the
+          // layer anyway: the f=image export renders via a CORS-exempt <img>, and a
+          // genuinely-down service still surfaces through the layer's own requesterror.
+          if (!ok && !unreachable) return fail(k, cfg, `${cfg.label}: ${error}`);
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriImage") {
