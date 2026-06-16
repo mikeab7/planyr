@@ -82,6 +82,14 @@ server/                   # placeholder README only — NOT built or deployed; b
 - **Land work via pull requests; require a passing build check to merge.** The GitHub
   Actions workflow runs the build on every PR (a green "it builds" check) and on
   pushes to `main`; the deploy job is gated to `main` only.
+- **"Commit" means take it LIVE — the whole chain, no stopping, no asking.** When the
+  owner says "commit" (or "ship it", "make it live"), do _all_ of: stage → `git commit`
+  → push the branch → open the PR into `main` → merge it (enable auto-merge if a check
+  must go green first). Merging to `main` is what ships it. Do **not** stop at a local
+  commit, and do **not** ask "want me to open the PR?" — opening and merging the PR is
+  part of what "commit" already authorized. The only acceptable stop short of live is a
+  hard blocker (merge conflict, red required check, protection that rejects the merge) —
+  report _that_, not a request for permission.
 - **Deploy = GitHub Pages (production).** Because the suite is one app with an in-app
   workspace switcher, "seeing both live" is one URL — you switch tabs inside it.
 - **Cloudflare Pages is optional and deferred.** Its only job is per-branch preview
