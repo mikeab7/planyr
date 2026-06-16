@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
   statusOf, parcelsOf, utilitiesOf, annotationsOf,
-  constraintsOf, setbacksOf, developableArea,
+  constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -18,6 +18,15 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
 
   it("accepts the legacy `elements` field as `els` (lossless back-compat)", () => {
     expect(createSiteModel({ elements: [{ id: "a" }] }).els).toEqual([{ id: "a" }]);
+  });
+
+  // B67 parcel-attached drawings: additive field, coerced + filterable by parcel.
+  it("parcelDrawings: defaults to [], is coerced from non-arrays, and parcelDrawingsOf filters by parcel", () => {
+    expect(createSiteModel().parcelDrawings).toEqual([]);
+    expect(createSiteModel({ parcelDrawings: "bad" }).parcelDrawings).toEqual([]); // type-confusion guard
+    const m = createSiteModel({ parcelDrawings: [{ id: "d1", parcelId: "p1" }, { id: "d2", parcelId: "p2" }] });
+    expect(parcelDrawingsOf(m).length).toBe(2);
+    expect(parcelDrawingsOf(m, "p1").map((d) => d.id)).toEqual(["d1"]);
   });
 
   // B7/B8 lifecycle status defaulting — single source of truth, easy to regress.

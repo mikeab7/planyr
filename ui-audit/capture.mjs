@@ -36,10 +36,21 @@ const parcel = {
   id: "pc1", locked: false,
   points: [{ x: -440, y: -160 }, { x: 440, y: -160 }, { x: 440, y: 300 }, { x: -440, y: 300 }],
 };
+// A tiny "site plan"-looking backdrop (SVG data URL) + a couple of pixel-relative
+// markups, so the B67 parcel-drawing modal can be screenshotted without a real PDF.
+const planSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600'><rect width='800' height='600' fill='#fff'/><rect x='40' y='40' width='720' height='520' fill='none' stroke='#333' stroke-width='2'/><rect x='110' y='110' width='320' height='190' fill='none' stroke='#333' stroke-width='1.5'/><text x='140' y='210' font-family='sans-serif' font-size='22' fill='#333'>BUILDING A</text><line x1='40' y1='400' x2='760' y2='400' stroke='#999' stroke-dasharray='6 4'/><text x='250' y='560' font-family='sans-serif' font-size='26' font-weight='bold' fill='#333'>SITE PLAN — SCHIEL RD</text></svg>`;
+const drawing = {
+  id: "dwg1", parcelId: "pc1", name: "Schiel Rd - Survey", kind: "image", page: 1, pageCount: 1,
+  intrinsic: { w: 800, h: 600 }, src: "data:image/svg+xml," + encodeURIComponent(planSvg),
+  markups: [
+    { id: "m1", type: "rect", color: "#dc2626", pts: [{ x: 0.13, y: 0.17 }, { x: 0.55, y: 0.52 }] },
+    { id: "m2", type: "text", color: "#2563eb", pts: [{ x: 0.16, y: 0.6 }], text: "verify setback" },
+  ], createdAt: Date.now(), updatedAt: Date.now(),
+};
 const demoSite = {
   id: DEMO_ID, groupId: DEMO_ID, site: "UI Audit Demo", name: "Plan 1",
   origin: null, county: null, parcels: [parcel], els, measures: [], callouts: [],
-  markups: [], settings: {}, underlay: null, updatedAt: Date.now(),
+  markups: [], settings: {}, underlay: null, parcelDrawings: [drawing], updatedAt: Date.now(),
 };
 
 const seedScript = (current) => `(() => {
@@ -71,6 +82,14 @@ const SHOTS = [
   { name: "planner-setup.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Setup"]').click({ timeout: 5000 }); } },
   { name: "planner-yield.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Yield"]').click({ timeout: 5000 }); } },
   { name: "planner-parcel-panel.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Parcel"]').click({ timeout: 5000 }); } },
+  { name: "parcel-drawing.png", seed: true, prep: async (p) => {
+      await fitFirst(p);
+      await p.locator('button[title="Parcel"]').click({ timeout: 5000 });          // open Parcel panel
+      await p.locator('button:has-text("Parcel 1")').first().click({ timeout: 5000 }); // select the parcel
+      await p.waitForTimeout(300);
+      await p.locator('button:has-text("Schiel Rd")').first().click({ timeout: 5000 }); // open the markup modal
+      await p.waitForTimeout(600);
+    } },
   { name: "planner-overlay-panel.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Overlay"]').click({ timeout: 5000 }); } },
   { name: "planner-parking-menu.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('[aria-label="Parking presets"]').click({ timeout: 5000 }); } },
   { name: "planner-road-menu.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('[aria-label="Road presets"]').click({ timeout: 5000 }); } },

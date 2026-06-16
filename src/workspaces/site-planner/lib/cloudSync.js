@@ -19,6 +19,11 @@ function slimForCloud(model) {
   // transform but drop the inline image for the cloud row (re-add it on another device).
   if (Array.isArray(m.sheetOverlays) && m.sheetOverlays.some((o) => o && isDataUrl(o.src)))
     m = { ...m, sheetOverlays: m.sheetOverlays.map((o) => (o && isDataUrl(o.src) ? { ...o, src: null, strippedForCloud: true } : o)) };
+  // Parcel-attached drawings (B67) — same deal: the backdrop raster is a regenerable
+  // local cache, so keep the markups + intrinsic dims but drop the inline image for the
+  // cloud row (re-attach on another device until Storage-backing lands).
+  if (Array.isArray(m.parcelDrawings) && m.parcelDrawings.some((d) => d && isDataUrl(d.src)))
+    m = { ...m, parcelDrawings: m.parcelDrawings.map((d) => (d && isDataUrl(d.src) ? { ...d, src: null, strippedForCloud: true } : d)) };
   return m;
 }
 

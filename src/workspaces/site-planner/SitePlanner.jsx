@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayPdf, downloadOverlayBytes } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
@@ -799,6 +800,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
+  // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
+  const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
+  const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
+  const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
+  const drawingFileRef = useRef(null);
+  const drawingPushTimer = useRef(null);
+  // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
+  // autosave owns), then debounce the cloud push. Keeps this collection off the main
+  // autosave path so it needs no new wiring through every flush/snapshot site.
+  const persistDrawings = (next) => {
+    setParcelDrawings(next);
+    if (siteId) saveSite({ id: siteId, parcelDrawings: next });
+    clearTimeout(drawingPushTimer.current);
+    drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
+  };
+  const onAttachDrawing = async (parcelId, file) => {
+    if (!file || !parcelId) return;
+    if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    try {
+      const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
+      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // only page 1's raster is needed (page picker = follow-on)
+      const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+        name: (file.name || "Drawing").replace(/\.[^.]+$/, ""), kind: isPdfFile(file) ? "pdf" : "image",
+        page: r.page || 1, pageCount: r.pageCount || 1, intrinsic: { w: r.imgW, h: r.imgH }, src: r.src,
+        markups: [], createdAt: Date.now(), updatedAt: Date.now() };
+      persistDrawings([...parcelDrawings, rec]);
+      setOpenDrawingId(rec.id);
+    } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
+  };
+  const updateDrawingMarks = (id, markups) =>
+    persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
+  const deleteDrawing = (id) => { persistDrawings(parcelDrawings.filter((d) => d.id !== id)); if (openDrawingId === id) setOpenDrawingId(null); };
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
@@ -5299,6 +5332,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </Section>
           )}
+          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
+              up on an immutable backdrop. */}
+          {leftPanel === "parcel" && selParcel && (() => {
+            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
+            return (
+              <Section title="Attached drawings">
+                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
+                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
+                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
+                {mine.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                    {mine.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "#fff" }}>
+                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
+                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
+                        </button>
+                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
+                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
           {/* appraisal-district property data for the selected parcel */}
           {leftPanel === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
@@ -5550,6 +5610,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
         </div>
       )}
+      {/* Parcel-attached drawing markup modal (B67) */}
+      {openDrawingId && (() => {
+        const d = parcelDrawings.find((x) => x.id === openDrawingId);
+        if (!d) return null;
+        return <ParcelDrawing drawing={d} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
+      })()}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
         const calls = parseCalls(mbText);
