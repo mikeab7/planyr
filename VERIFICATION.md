@@ -176,6 +176,26 @@ was never clicked" quietly ships broken.
   rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
 - **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
 
+### V11 — Site Planner measurement tools: Length / Polylength / Area (B115) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner. Right rail → **Measure** (the `▾` opens the mode menu:
+  **Length / Polylength / Area**). (1) **Length:** click two points → expect a teal line labeled the
+  real distance in feet (e.g. `462′`). (2) **Polylength:** click several points along a path, then
+  **double-click or Enter** to finish → expect the running path length in feet. (3) **Area:** click
+  points around a region, close by clicking the first dot (or double-click) → expect a filled polygon
+  labeled **`<sf> sf · <ac> ac · <perim>′ perim`** (e.g. `12,300 sf · 0.28 ac · 462′ perim`). Then
+  with **Select**, click a measurement to select it and use the **×** to delete it. Press **Esc**
+  mid-draw → the in-progress measurement cancels.
+- **Calibration path:** drop an **aerial/screenshot** underlay but do **not** calibrate it → with the
+  Measure tool active, expect the **"⚠ Underlay isn't calibrated — distances may be wrong"** banner and
+  measurement labels rendered in **amber with a ⚠**. Calibrate the underlay (Aerial ▾ → Calibrate) →
+  labels return to normal (teal) and read true feet.
+- **Expect:** all three modes draw, label, select, and delete; labels persist across reopen + reload
+  (signed in); the amber/⚠ uncalibrated warning behaves as above. This shipped code-verified +
+  build-green (B115 was already implemented in `SitePlanner.jsx`; only the mode names were aligned to
+  Length/Polylength/Area) — this step confirms it in the running app.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

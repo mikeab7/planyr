@@ -122,7 +122,7 @@ const TOOLS = [
   { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
-  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
+  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
   { id: "mrect", label: "Rectangle", hint: "Markup rectangle (R): drag a box. Hold Shift for a square" },
@@ -132,6 +132,11 @@ const TOOLS = [
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
 const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+// Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
+// internal mode value stays line/polyline/area (persisted in localStorage), so this is
+// label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
+const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"]];
+const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
@@ -5052,7 +5057,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={{ display: "flex", gap: 2 }}>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
                 <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="measure" /> Measure</span>
-                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureMode}</span>
+                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureModeLabel(measureMode)}</span>
               </button>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
             </div>
@@ -5061,7 +5066,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
                 <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
                   <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-                  {[["line", "Line"], ["polyline", "Polyline"], ["area", "Area"]].map(([k, label]) => (
+                  {MEASURE_MODES.map(([k, label]) => (
                     <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
                   ))}
                 </div>
