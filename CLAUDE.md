@@ -41,6 +41,10 @@ doesn't write code. This is a standing rule, not a one-off.
   or a thing is risky, say so in plain terms.
 - If I seem confused, it usually means the explanation had too much jargon — re-explain
   in simpler terms, don't just repeat.
+- **Whenever we discuss merging, shipping, or "making it live," end by stating plainly
+  whether there's anything left for _me_ to do** — e.g. "nothing on your end, it's done"
+  or "the one thing I need from you is X." Don't leave me to ask. (Browser click-throughs
+  in `VERIFICATION.md` are the Claude cohort's job, never mine — those never count as my to-do.)
 
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
