@@ -17,7 +17,7 @@ const COLORS = ["#dc2626", "#ea580c", "#2563eb", "#16a34a", "#7c3aed", "#111827"
 const uid = () => "k" + Math.random().toString(36).slice(2, 9);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-export default function ParcelDrawing({ drawing, onSave, onClose }) {
+export default function ParcelDrawing({ drawing, onSave, onClose, loading = false }) {
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const [tool, setTool] = useState("select");      // select | pen | line | rect | text
@@ -174,7 +174,9 @@ export default function ParcelDrawing({ drawing, onSave, onClose }) {
           </>
         ) : (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#cbd5e1", fontSize: 13, textAlign: "center", padding: 24 }}>
-            The drawing image isn't on this device.<br />Re-attach it from the original file to view &amp; mark it up; your markups are saved.
+            {loading
+              ? "Loading the drawing from the cloud…"
+              : <span>The drawing image isn't on this device.<br />Re-attach it from the original file to view &amp; mark it up; your markups are saved.</span>}
           </div>
         )}
       </div>

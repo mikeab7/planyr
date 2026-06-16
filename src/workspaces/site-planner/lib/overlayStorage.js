@@ -41,6 +41,25 @@ export async function uploadOverlayFile(siteId, overlayId, file) {
   return error ? null : { key };
 }
 
+// Parcel-attached drawings (B67 increment 2b) — same bucket + uid-first RLS, distinct path.
+export const parcelDrawingKey = (uid, siteId, drawingId, ext = "pdf") =>
+  `${uid}/parcel-drawings/${siteId || "unfiled"}/${drawingId}.${ext}`;
+
+/* Upload a parcel drawing's original PDF/PNG/JPG so its backdrop can be rebuilt on another
+ * device; returns { key, ext } or null (no client / not signed in / oversize / unsupported /
+ * error → caller keeps the local raster, nothing regresses). */
+export async function uploadParcelDrawingFile(siteId, drawingId, file) {
+  if (!supabase || !file || file.size > MAX_BYTES) return null;
+  const kind = fileKind(file);
+  if (!kind) return null;
+  const user = await getUser();
+  const uid = user && user.id;
+  if (!uid) return null;
+  const key = parcelDrawingKey(uid, siteId, drawingId, kind.ext);
+  const { error } = await supabase.storage.from(BUCKET).upload(key, file, { contentType: kind.contentType, upsert: true });
+  return error ? null : { key, ext: kind.ext };
+}
+
 /* Download stored overlay bytes as an ArrayBuffer (ready for loadPdf), or null. */
 export async function downloadOverlayBytes(key) {
   if (!supabase || !key) return null;

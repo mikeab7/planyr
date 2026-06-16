@@ -143,10 +143,16 @@ was never clicked" quietly ships broken.
   drawings list under the parcel; markups **persist** across reopen + reload (signed in, same
   device). `ui-audit/screens/parcel-drawing.png` shows the modal headless (an SVG stand-in, not a
   real PDF) — this step confirms it with a real file, including the page-picker.
-- **Known limit (NOT a bug — increment 2b):** after a **re-login on another device** the backdrop
-  shows a "re-attach to view — markups saved" placeholder (the raster is local-only until Storage
-  backing lands; the markups always persist). *(Increment 2a — the multi-page sheet picker — landed
-  2026-06-16; verify it lists + attaches the right page.)*
+- **Cross-device (increment 2b, landed 2026-06-16) — please test:** signed in, attach a drawing on
+  device A; on **device B** (or after clearing local cache) open the same site + drawing → the
+  backdrop should **rebuild from cloud Storage** ("Loading the drawing from the cloud…", then it
+  appears with its markups). The source file is uploaded to the private `doc-review-files` bucket at
+  `<uid>/parcel-drawings/<siteId>/<drawingId>.<ext>`; on reopen without a local raster it re-fetches +
+  re-rasterizes the stored sheet. Deleting a drawing removes its stored object. **Fallback:** logged
+  out / >50 MB / upload error → keeps the local raster + the old "re-attach" placeholder cross-device
+  (markups always persist), so nothing regresses.
+- **Increment 2a (multi-page sheet picker) also landed** — verify the "Pick a sheet" dialog lists all
+  pages and attaches the chosen one.
 
 ---
 
