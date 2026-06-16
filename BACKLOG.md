@@ -421,10 +421,11 @@ Drop the redundant second "Site Planyr" lockup and reclaim the vertical space fo
 > reads "Site Planr", that's also a **B3** spelling regression to fix in passing.)
 
 ### B105 — Remove the "Drag to move the map" hint card `[Site Planner / map]` (task)
-`[ ]` The persistent bottom-left note ("Drag to move the map. Hit '+ Select parcels'…") is noise
-once you know the app. **Remove the persistent card.** If first-run guidance is still wanted, show it
-as a **one-time, dismissible** hint (a small bubble that appears the first time, then goes away)
-rather than a permanent fixture.
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). The persistent bottom-left card is
+gone; replaced by a **one-time, dismissible** first-run bubble (same copy + an ✕, remembered in
+`localStorage` `planarfit:mapHintDismissed:v1`). Split the old shared box into three states so they no
+longer fight over the corner (the B21 cross-ref): an **error toast** (only when `err`), **contextual
+selection guidance** (only while `selectMode` is on), and the **first-run hint** (idle, until dismissed).
 > Cross-ref: **B21** notes the bottom-left slot is shared between this click-guidance and error
 > toasts (a background layer error masks the guidance). Removing/relocating the persistent card
 > interacts with that shared slot — coordinate so a one-time hint and transient layer-error toasts
@@ -444,7 +445,13 @@ rather than a permanent fixture.
 > filters — extend them, don't fork a parallel panel. Status set + visuals stay per B7/B8.
 
 ### B107 — Rework the left tool rail (order, polish, fits on one page) `[Site Planner]` (task)
-`[ ]` Reorder and polish the planner's left tool rail:
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). **Reordered** `leftTabs` to the spec —
+primary modes on top (**Yield, Parcel, Element**), utilities pinned below (**Aerial, Overlay, Setup**).
+The selected-tab highlight was **already** the requested light treatment (a 3px ember accent bar + a
+subtle `rgba(232,89,12,0.14)` fill, not a heavy brown block), and the 6-tab column already fits the
+viewport, so no style change was needed there. ⏳ If a live look still reads "heavy," that's a quick
+follow-up — flagging since this wasn't browser-verified. Original spec retained below.
+Reorder and polish the planner's left tool rail:
 - **Reorder with Yield at the top.** Suggested grouping: primary modes up top (**Yield, Parcel,
   Element**); utilities pinned to the bottom (**Aerial, Overlay, Setup**).
 - **Lighten the selected-tool highlight** — an accent bar or subtle fill, not the heavy brown block —
