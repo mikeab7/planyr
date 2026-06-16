@@ -510,6 +510,17 @@ busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 
 ## ✅ Done
 
+> **ID note (2026-06-16):** these three were filed/implemented as B93–B95, but a concurrent `main` (PRs #46/#51) had blindly taken B93–B100 for different items. Per the dedupe protocol they're **renumbered B101–B103** here (content is unique — no overlap with main's GIS/UI-overhaul items); the implementing commit message still says "B93–B95" (the provisional numbers).
+
+### B101 — Remove the element-type color legend from the Setup/defaults page `[Site Planner / Setup]` (task)
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`; filed provisionally as B93). Confirmed display-only first: element colors are *defined* in the "Element default colors" section (the color pickers writing `settings.typeStyles` via `setTypeStyle`) and in `TYPE`/`typeStyle`, which the canvas reads — the legend was just a swatch+label key. Removed the legend block only; color definitions untouched.
+
+### B102 — Roads defaults: show "ft" units + rename "Travel widths" → "Road widths" `[Site Planner / Setup — Roads]` (bug)
+`[x]` Done 2026-06-16 (filed provisionally as B94). Labels are now "Curb width (ft)" and "Road widths (ft)" (matching the panel's other `(ft)` labels). Label-only change — the persisted `roadCurb`/`roadWidths` setting keys and the travel+curb geometry are unchanged. (The per-element "Travel width (ft)" field on a *selected road* is left as-is — there it's accurately the drivable width excluding curbs.)
+
+### B103 — Uniform polygon completion across ALL drawing tools `[Site Planner / drawing]` (bug)
+`[x]` Done 2026-06-16 (filed provisionally as B95). One shared `finishActiveDrawing()` now drives BOTH Enter and double-click (`onBgDouble`), so finish/auto-close is identical across parcel, every area element (building/paving/parking/trailer/pond/sidewalk/landscape + custom polygons), measure, split, markup poly/polyline, and trace — Enter previously had no handler for parcel / element-polygon / mpolygon. Added `removeLastVertex()` so Backspace/Delete undoes the last placed vertex mid-draw (before the delete-selection fallback); Esc-cancel already existed. Road free-draw still finishes as an open path (no forced closing segment). Each finisher keeps its own min-point guard, so Enter/double-click no-ops instead of cancelling a too-short draft; `draftPoly`/`draftElPoly` added to the keydown effect deps so the handler reads the current draft.
+
 ### B1 — Sign-up form: missing fields `[auth]` (bug)
 `[x]` Sign-up must collect **First name**, **Last name**, and **Organization/Company**. These fields are currently absent.
 > Done 2026-06-14 (PR #10). First/Last/Organization added to the sign-up form, stored in Supabase `user_metadata` via `signUp` `options.data`; the signed-in account view now greets by name + org.
