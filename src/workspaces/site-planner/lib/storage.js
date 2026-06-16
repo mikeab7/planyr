@@ -8,7 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate } from "./siteModel.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList } from "./cloudSync.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -20,29 +20,36 @@ export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // Pure merge of the local cache with the cloud's records (exported for tests).
-// CRITICAL (B124 data-loss fix): build from the LOCAL cache first, so a site the cloud
-// did NOT return is PRESERVED — never silently dropped. The old code built the cache from
-// the cloud list alone, so any local record absent from the cloud (its push hadn't landed
-// yet — slow network, a stale session, or a brand-new site) was wiped on the next pull;
-// the resume then couldn't find the open site and bounced to the map ("my work vanished").
-// Cloud copies overlay newer-wins (cloud wins ties so a genuine cross-device edit lands).
-// `toPush` = ids the cloud is missing or has an OLDER copy of → re-push them so flaky/offline
-// pushes actually reach the cloud instead of being stranded on one device.
-// (Trade-off: a single device can't tell "never pushed" from "deleted on another device",
-// so a cross-device delete may reappear once. For a single user that's effectively never,
-// and reappearing is recoverable; silently losing work is not. A per-record synced-marker
-// is the fully-correct follow-up — see BACKLOG B124.)
+// CRITICAL (B124/B126 data-loss fix): build from the LOCAL cache first (so a site the
+// cloud didn't return is PRESERVED, never dropped — B124), and reconcile a site present
+// in BOTH copies with a CONTENT MERGE (mergeSiteContent), not whole-record newer-wins.
+// The old newer-wins let a thinner copy silently erase a fuller one — a building added
+// in one copy vanished when a copy with fewer buildings happened to be saved last (a
+// stale tab, a second device, a hiccup mid-load). The union keeps every building present
+// in EITHER copy; scalar/meta come from the newer side. (B126)
+// `toPush` = ids the cloud is missing, has an OLDER copy of, or now has LESS content than
+// the merged result — re-push so a building kept from the local side actually reaches the
+// cloud instead of being stranded on one device.
+// (Trade-off: a delete made in only one copy can reappear once if a stale copy still has
+// it — recoverable by deleting again; silently losing work is not. Per-item tombstones
+// are the fully-correct follow-up. The new local version history makes any surprise
+// recoverable in the meantime — see BACKLOG B126.)
 export function mergePulledSites(existing, cloudModels) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
   const cloudAt = {};
+  const cloudCount = {};
   for (const m of (cloudModels || [])) {
     const n = createSiteModel(m); if (!n.id) continue;
     cloudAt[n.id] = n.updatedAt || 0;
+    cloudCount[n.id] = contentCount(n);
     const local = map[n.id];
-    if (!local || (local.updatedAt || 0) <= (n.updatedAt || 0)) map[n.id] = n; // cloud same/newer wins
+    map[n.id] = local ? mergeSiteContent(local, n) : n; // content-union — never drop drawn work
   }
-  const toPush = Object.keys(map).filter((id) => !(id in cloudAt) || (map[id].updatedAt || 0) > cloudAt[id]);
+  const toPush = Object.keys(map).filter((id) =>
+    !(id in cloudAt) ||
+    (map[id].updatedAt || 0) > cloudAt[id] ||
+    contentCount(map[id]) > (cloudCount[id] || 0));
   return { map, toPush };
 }
 
@@ -161,6 +168,63 @@ export function saveAutosave(state) {
     }
   }
 }
+
+/* ---- Local version history (automatic backups) ---------------------------
+ * Every save snapshots the PRIOR stored version of a site into a small, local-only ring
+ * buffer, so a bad/thin overwrite is always recoverable — the data-loss safety net
+ * (B126). Snapshots are slimmed (big inline rasters dropped — geometry is what we
+ * protect; images re-drop) and capped per site. Never pushed to the cloud. */
+const HISTORY_KEY = "planarfit:sites:history:v1";
+const HISTORY_PER_SITE = 15;
+const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
+// Drop big inline image rasters from a snapshot (keep placement + every bit of geometry).
+function slimForHistory(m) {
+  let s = m;
+  if (s.underlay && isDataUrl(s.underlay.src)) s = { ...s, underlay: { ...s.underlay, src: null, strippedForCloud: true } };
+  if (Array.isArray(s.sheetOverlays) && s.sheetOverlays.some((o) => o && isDataUrl(o.src)))
+    s = { ...s, sheetOverlays: s.sheetOverlays.map((o) => (o && isDataUrl(o.src) ? { ...o, src: null, strippedForCloud: true } : o)) };
+  if (Array.isArray(s.parcelDrawings) && s.parcelDrawings.some((d) => d && isDataUrl(d.src)))
+    s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && isDataUrl(d.src) ? { ...d, src: null, strippedForCloud: true } : d)) };
+  return s;
+}
+const historyAll = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch (_) { return {}; } };
+function writeHistoryAll(h) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); return true; }
+  catch (_) { // over quota — keep only the newest few per site and retry
+    try { const t = {}; for (const [id, list] of Object.entries(h)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); return true; }
+    catch (_2) { return false; }
+  }
+}
+// Shape signature — counts of each drawn collection. A content DROP always changes it
+// (fewer items), so the pre-drop version is always captured; an identical-shape save
+// (e.g. a pure move) is de-duped so the ring stays meaningful.
+const sigOf = (m) => [m.els, m.markups, m.measures, m.callouts, m.parcels, m.sheetOverlays, m.parcelDrawings]
+  .map((a) => (a && a.length) || 0).join("/");
+const mainBuildingCount = (m) =>
+  (Array.isArray(m.els) ? m.els : []).filter((e) => e && e.type === "building" && !e.attachedTo && !e.dogEar).length;
+// Snapshot a version (the record about to be overwritten) into the ring buffer.
+export function snapshotVersion(model) {
+  if (!model || !model.id) return;
+  const m = createSiteModel(model);
+  if (!contentCount(m) && !m.underlay) return; // never snapshot an empty record
+  const all = historyAll();
+  const list = all[m.id] || [];
+  const sig = sigOf(m);
+  if (list[0] && list[0].sig === sig) return; // same shape as the newest snapshot → skip churn
+  list.unshift({ at: m.updatedAt || Date.now(), sig, buildings: mainBuildingCount(m), name: m.name || null, site: m.site || null, model: slimForHistory(m) });
+  all[m.id] = list.slice(0, HISTORY_PER_SITE);
+  writeHistoryAll(all);
+}
+// Versions available to restore for a site (newest first; lightweight metadata only).
+export function listVersions(id) {
+  return (historyAll()[id] || []).map((v) => ({ at: v.at, buildings: v.buildings, sig: v.sig }));
+}
+// The full saved snapshot for one version (normalized Site Model), or null.
+export function getVersion(id, at) {
+  const v = (historyAll()[id] || []).find((x) => x.at === at);
+  return v ? createSiteModel(v.model) : null;
+}
+export function clearHistory(id) { const all = historyAll(); if (id && id in all) { delete all[id]; writeHistoryAll(all); } }
 
 export const storage = {
   async list(prefix = "") {
@@ -291,7 +355,9 @@ export function loadSite(id) { const rec = id ? readSites()[id] : null; return r
 export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
-  const merged = { ...(sites[partial.id] || {}), ...partial };
+  const existing = sites[partial.id];
+  if (existing) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126)
+  const merged = { ...(existing || {}), ...partial };
   sites[partial.id] = { ...createSiteModel(merged), updatedAt: Date.now() };
   return writeSites(sites);
 }
