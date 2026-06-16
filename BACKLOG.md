@@ -463,13 +463,28 @@ Reorder and polish the planner's left tool rail:
 > at the bottom.
 
 ### B97 — Compact the right Layers / Utility Evidence panel so it fits on one page `[Site Planner]` (bug)
-`[ ]` **Repro:** the Layers + Utility Evidence list is tall enough to overflow, pushing lower items
+`[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`). The three groups in the shared
+`LayerPanel` — **Map layers**, **Utility evidence**, and the **jurisdiction** group — are now
+**collapsible** (click the header; state persists per device in `localStorage`), each header showing an
+"N on" count so you can collapse what you're not using and keep the whole panel on one page. Also
+tightened the group header/row spacing. Applies on both the map and the planner (shared component).
+⏳ Not browser-verified — if it still overflows when everything's expanded, the next lever is a fixed
+max-height + inner scroll on the open groups. Original spec:
 off-screen and forcing a scroll. **Expected:** reduce row height, padding, and section spacing so every
 layer and tool fits without scrolling. If the list keeps growing, make the two sections (**Layers** /
 **Utility Evidence**) **collapsible**. Single-page, no-scroll is the bar.
 
 ### B98 — Stop the parcel popup from firing on every click; declutter it `[Site Planner / map]` (bug)
-`[ ]` **Repro:** clicking inside a parcel opens the parcel popup, but while drawing/measuring you click
+`[x]` Verified already satisfied + completed by B99/B100 (2026-06-16). The behavioral asks were already
+met in the code: **(1)** `startMoveParcel` early-returns unless `tool === "select"` (SitePlanner.jsx),
+so clicking a parcel while a draw/measure tool is active goes to the **tool**, not the parcel — it does
+NOT fire while drawing. **(2)** Parcel info already shows in the **left side panel** (opened on
+select-tool click), not a re-appearing popover; the map uses hover **tooltips** + click-to-open-site
+(no Leaflet `bindPopup` on parcels). **(3)** "Trim to essentials": the panel leads with area + geometry
+check + **Active/Lock** (added in B99/B100), and the full county appraisal fields are already behind an
+"all fields" expand. So no risky rework was warranted; the residual is cosmetic ordering best judged in a
+live view. (If a specific popover is still observed on the live site, reopen with a repro — couldn't find
+one in the code.) Original spec:
 inside parcels constantly, so it fires far too often and gets in the way; the on-parcel overlay is also
 busy/unclear (line + vertex handles + length labels all at once). **Expected:**
 - When a **draw/measure tool is active**, clicks go to the **tool** and do **NOT** open the popup.
