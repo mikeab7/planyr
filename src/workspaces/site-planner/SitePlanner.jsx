@@ -716,7 +716,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -3936,8 +3936,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           Snap {settings.gridSize}′
         </button>
         {vSep}
-        {/* autosave indicator */}
-        <span style={{ fontSize: 11, color: saveStatus === "unsaved" ? "#fbbf24" : PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : saveStatus === "unsaved" ? "Unsaved" : "Saved ✓"}</span>
+        {/* single save/sync badge — folds in the cloud connection state (synced /
+            syncing / offline / error), replacing the old separate "Cloud ✓" pill (B10/E2) */}
+        {(() => {
+          const cloudActive = isCloudActive();
+          const connOk = cloud?.state === "connected";
+          let label, dot, color = PAL.chromeMuted, spin = false, tip;
+          if (saveStatus === "saving") {
+            label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
+          } else if (saveStatus === "unsaved") {
+            color = "#fbbf24"; dot = "#f59e0b";
+            label = cloudActive && !connOk ? "Offline" : "Unsaved";
+            tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
+          } else if (cloudActive && connOk) {
+            label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
+          } else if (cloudActive) {
+            label = "Offline"; color = "#fbbf24"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
+          } else {
+            label = "Saved ✓"; dot = "#9b9482"; tip = "Saved on this device. Sign in to sync across your devices.";
+          }
+          return (
+            <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flex: "none", animation: spin ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+              {label}
+            </span>
+          );
+        })()}
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <div style={{ position: "relative" }}>

@@ -225,6 +225,7 @@ export default function App() {
             siteId={activeSiteId}
             overlays={overlays}
             setOverlays={setOverlays}
+            cloud={cloud}
             layerStatus={layerStatus}
             setLayerStatus={setLayerStatus}
             sites={sites}
@@ -253,24 +254,9 @@ export default function App() {
         </div>
       )}
 
-      {/* PHASE 1 Supabase connection indicator (diagnostic; no data read/written) */}
-      {(() => {
-        const meta = {
-          checking: { dot: "#f59e0b", label: "Cloud…" },
-          connected: { dot: "#15803d", label: "Cloud ✓" },
-          "not-configured": { dot: "#9b9482", label: "Cloud off" },
-          "bad-key": { dot: "#b91c1c", label: "Cloud key" },
-          error: { dot: "#b91c1c", label: "Cloud err" },
-        }[cloud.state] || { dot: "#9b9482", label: "Cloud" };
-        return (
-          <div title={cloud.message || "Supabase connection (Phase 1 — no data synced yet)"}
-            style={{ position: "fixed", right: 6, bottom: 22, zIndex: 4000, display: "flex", alignItems: "center", gap: 5,
-              background: "rgba(25,22,19,0.82)", color: "#ece7db", borderRadius: 99, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 2px 8px rgba(0,0,0,0.25)", pointerEvents: "auto" }}>
-            <span style={{ width: 7, height: 7, borderRadius: 99, background: meta.dot, animation: cloud.state === "checking" ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-            {meta.label}
-          </div>
-        );
-      })()}
+      {/* The cloud/connection state is now folded into the planner header's single
+          save/sync badge (synced / syncing / offline / error) — see SitePlanner.
+          On the map, signed-in state is shown by the shell account control. */}
     </>
   );
 }
