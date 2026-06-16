@@ -197,6 +197,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
+  // First-run-only map hint (B105): the old persistent "Drag to move" card is now a one-time,
+  // dismissible bubble. Remembered in localStorage so it never returns once dismissed.
+  const [showMapHint, setShowMapHint] = useState(() => { try { return !localStorage.getItem("planarfit:mapHintDismissed:v1"); } catch (_) { return true; } });
+  const dismissMapHint = () => { setShowMapHint(false); try { localStorage.setItem("planarfit:mapHintDismissed:v1", "1"); } catch (_) {} };
   const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
   const [hidden, setHidden] = useState(() => new Set()); // statuses filtered out of the map
@@ -618,16 +622,27 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           </div>
         </div>
 
-        {/* instruction / error */}
-        <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: err ? PAL.accent : PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
-          {err
-            ? err
-            : !selectMode
-              ? "Drag to move the map. Hit “+ Select parcels” (top-right) to start adding lots."
-              : zoom != null && zoom < PARCEL_MINZOOM
-                ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
-                : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
-        </div>
+        {/* error toast (bottom-left) — surfaced only when there's an error */}
+        {err && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+            {err}
+          </div>
+        )}
+        {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
+        {!err && selectMode && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+            {zoom != null && zoom < PARCEL_MINZOOM
+              ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
+              : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
+          </div>
+        )}
+        {/* first-run-only, dismissible hint — replaces the old persistent "Drag to move" card (B105) */}
+        {!err && !selectMode && showMapHint && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 360, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <span>Drag to move the map. Hit “＋ Select parcels” to start adding lots.</span>
+            <button onClick={dismissMapHint} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
+          </div>
+        )}
 
         {/* selection card */}
         {selected.length > 0 && (

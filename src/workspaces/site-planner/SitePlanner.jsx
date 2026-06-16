@@ -3607,9 +3607,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
   const leftTabs = [
-    { id: "props", glyph: "✎", label: "Element" },
-    { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "yield", glyph: "∑", label: "Yield" },
+    { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
     { id: "standards", glyph: "⚙", label: "Setup" },
