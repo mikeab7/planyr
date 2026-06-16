@@ -45,6 +45,62 @@ export async function pullCloud(uid) {
   return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
+
+// Read the on-device (logged-out / "legacy") store DIRECTLY, regardless of who's
+// signed in. Read-only. Used to surface "you have sites saved on this device that
+// aren't in your account yet" and to copy them up. Normalized Site Models, newest
+// first. (The signed-in store is the per-user cloud cache; these two never auto-merge,
+// which is why local-only work can look "missing" once you sign in.)
+export function legacySitesList() {
+  let obj = {};
+  try { obj = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  return Object.values(obj).map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+// One-time, NON-DESTRUCTIVE consolidation: copy every on-device (legacy) site into the
+// signed-in user's cloud store (local cache + Supabase). The originals are KEPT in the
+// legacy store — nothing is moved or deleted — so a partial failure can never lose work.
+// A site already in the cloud is overwritten only when the local copy is strictly newer
+// (the same newer-wins rule pullCloud uses). Each site is staged into the cloud cache so
+// it shows immediately; a failed push is reported (count) and re-pushes on the next edit.
+// Returns { copied, skipped, failed }.
+export async function importLegacyIntoCloud(uid) {
+  if (!uid) return { copied: 0, skipped: 0, failed: 0, error: "not signed in" };
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const ids = Object.keys(legacy);
+  if (!ids.length) return { copied: 0, skipped: 0, failed: 0 };
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  let copied = 0, skipped = 0, failed = 0;
+  for (const id of ids) {
+    const local = createSiteModel(legacy[id]);
+    if (!local.id) { skipped++; continue; }
+    const existing = cloud[local.id];
+    if (existing && (existing.updatedAt || 0) >= (local.updatedAt || 0)) { skipped++; continue; } // cloud already same/newer
+    cloud[local.id] = local;                  // stage into the cloud cache so it's visible right away
+    const r = await cloudUpsert(uid, local);  // and persist to Supabase
+    if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
+  }
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return { copied, skipped, failed };
+}
+
+// How many on-device (legacy) sites are NOT yet represented in the signed-in user's
+// cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
+export function pendingLegacyCount(uid) {
+  if (!uid) return 0;
+  let legacy = {}, cloud = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  let n = 0;
+  for (const [id, rec] of Object.entries(legacy)) {
+    const cur = cloud[id];
+    const lAt = (rec && rec.updatedAt) || 0;
+    if (!cur || (cur.updatedAt || 0) < lAt) n++;
+  }
+  return n;
+}
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {
