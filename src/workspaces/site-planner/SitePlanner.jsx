@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
-import { uploadOverlayPdf, downloadOverlayBytes } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -2043,8 +2043,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
-      if (isPdfFile(file) && isCloudActive()) { // back the PDF up to Storage for cross-device reload (B72)
-        uploadOverlayPdf(siteId, id, file).then((res) => {
+      if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
+        uploadOverlayFile(siteId, id, file).then((res) => {
           if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
         }).catch(() => {});
       }
@@ -2101,6 +2101,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
     setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
     setSelOverlay((s) => (s === id ? null : s));
   };
@@ -2187,9 +2189,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (async () => {
       for (const o of missing) {
         try {
-          const bytes = await downloadOverlayBytes(o.storageKey);
-          const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
-          if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
+            const bytes = await downloadOverlayBytes(o.storageKey);
+            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+            if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          } else { // image: its raster IS the source — restore the src directly (dims already known)
+            const src = await downloadOverlayDataUrl(o.storageKey);
+            if (!cancelled && src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src } : x)));
+          }
         } finally { overlayFetching.current.delete(o.id); }
       }
     })();
