@@ -69,3 +69,16 @@ export async function openOverlayFile(file) {
   const { src, w, h } = await loadAndDownscaleImage(file); // PNG/JPG path (reuses the aerial loader)
   return { src, imgW: w, imgH: h, page: 1, pageCount: 1, pdf: null, detectedScale: null, sheet: null };
 }
+
+/* Rebuild an overlay's raster from stored PDF bytes (cross-device reload, B72): rasterize
+ * the stored page. Returns { src, imgW, imgH, pageCount } or null. */
+export async function rasterizeStoredPdf(bytes, page = 1) {
+  try {
+    const { loadPdf } = await import("../../doc-review/lib/pdf.js");
+    const pdf = await loadPdf(bytes);
+    const r = await rasterizePage(pdf, page);
+    const out = { src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: pdf.numPages };
+    try { pdf.destroy(); } catch (_) {}
+    return out;
+  } catch (_) { return null; }
+}

@@ -3,7 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { openOverlayFile, rasterizePage, isPdfFile } from "./lib/overlayPdf.js";
+import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import { uploadOverlayPdf, downloadOverlayBytes } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -798,6 +799,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [overlayBusy, setOverlayBusy] = useState(false);
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+  const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup
@@ -2028,6 +2030,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      if (isPdfFile(file) && isCloudActive()) { // back the PDF up to Storage for cross-device reload (B72)
+        uploadOverlayPdf(siteId, id, file).then((res) => {
+          if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
+        }).catch(() => {});
+      }
     } catch (err) {
       alert(humanizeError(err));
     } finally {
@@ -2130,6 +2137,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Free any held PDF docs when the planner unmounts (cf. B39).
   useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
+  // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
+  // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
+  useEffect(() => {
+    const missing = sheetOverlays.filter((o) => o.storageKey && !o.src && !overlayFetching.current.has(o.id));
+    if (!missing.length) return;
+    let cancelled = false;
+    missing.forEach((o) => overlayFetching.current.add(o.id));
+    (async () => {
+      for (const o of missing) {
+        try {
+          const bytes = await downloadOverlayBytes(o.storageKey);
+          const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+          if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+        } finally { overlayFetching.current.delete(o.id); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sheetOverlays]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -3986,7 +4011,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<>
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>Re-add “{o.name}” — image not synced to this device</text>
+                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
                     </>)}
                     {isSel && tool === "select" && (
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
@@ -4444,6 +4469,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>
               );
             })()}
+
+            {/* During overlay trace/align, capture EVERY click as a calibration point —
+                a transparent top layer so a click on the overlay/parcels/elements places
+                a point instead of starting a move or selection (fixes "Align doesn't work"). */}
+            {ovCalib && (
+              <rect x={0} y={0} width={size.w} height={size.h} fill="transparent" pointerEvents="all"
+                style={{ cursor: "crosshair" }}
+                onPointerDown={(e) => { if (e.button === 0) { e.stopPropagation(); onOvCalibClick(p2f(e.clientX, e.clientY)); } }} />
+            )}
           </svg>
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
