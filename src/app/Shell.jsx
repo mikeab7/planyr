@@ -26,6 +26,7 @@ export default function Shell() {
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
+  const [cloudNote, setCloudNote] = useState(false); // B111: "cloud off" explainer popover (unconfigured builds)
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -79,7 +80,7 @@ export default function Shell() {
         </div>
         <div style={{ flex: 1 }} />
         {/* global account control (top-right) */}
-        {supabaseConfigured() && (
+        {supabaseConfigured() ? (
           <button onClick={() => { setRecovery(false); setAuthOpen(true); }} title={user ? `Signed in as ${user.email}` : "Sign in or create an account"}
             style={{ display: "flex", alignItems: "center", gap: 7, maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
               border: `1px solid ${PAL.line}`, background: "rgba(255,255,255,0.06)", color: PAL.ink }}>
@@ -89,6 +90,28 @@ export default function Shell() {
             </span>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user ? who : "Sign in"}</span>
           </button>
+        ) : (
+          // B111: cloud not configured for this build. Never leave the account corner empty —
+          // show a "Cloud off" pill that, on click, explains work is saved on this device only
+          // (signing in / cross-device sync need the cloud connection configured).
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setCloudNote((o) => !o)} aria-haspopup="dialog" aria-expanded={cloudNote}
+              title="Cloud sync isn't set up — your work is saved on this device only"
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+                border: `1px solid ${PAL.line}`, background: "rgba(255,255,255,0.04)", color: PAL.muted }}>
+              <span style={{ width: 20, height: 20, borderRadius: 99, flex: "none", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 800, color: PAL.muted, background: "rgba(255,255,255,0.08)" }}>⊘</span>
+              <span style={{ whiteSpace: "nowrap" }}>Cloud off</span>
+            </button>
+            {cloudNote && (
+              <>
+                <div onClick={() => setCloudNote(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div role="dialog" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41, width: 256, padding: "11px 13px", borderRadius: 10, background: "#fff", color: "#2c2a26", border: "1px solid #e7e2d6", boxShadow: "0 12px 30px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Cloud sync is off</div>
+                  <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "#6b6557" }}>Your work is saved on <b>this device only</b> (in this browser). Signing in and syncing across your devices need the cloud connection to be set up for this site.</p>
+                </div>
+              </>
+            )}
+          </div>
         )}
       </header>
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>

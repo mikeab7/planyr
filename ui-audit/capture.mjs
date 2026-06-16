@@ -100,6 +100,8 @@ const SHOTS = [
   { name: "planner-file-menu.png", seed: true, prep: async (p) => { await fitFirst(p); await p.locator('button:has-text("File ▾")').click({ timeout: 5000 }); } },
   { name: "planner-shortcuts.png", seed: true, prep: async (p) => { await p.locator('[title="Keyboard shortcuts (?)"]').click({ timeout: 5000 }); } },
   { name: "planner-mobile.png", seed: true, viewport: { width: 390, height: 844 }, prep: fitFirst },
+  { name: "planner-mobile-tools.png", seed: true, viewport: { width: 390, height: 844 }, prep: async (p) => { await fitFirst(p); await p.locator('button:has-text("Tools")').first().click({ timeout: 5000 }); } },
+  { name: "planner-mobile-panel.png", seed: true, viewport: { width: 390, height: 844 }, prep: async (p) => { await fitFirst(p); await p.locator('button[title="Yield"]').click({ timeout: 5000 }); } },
   { name: "map.png", seed: false },
   { name: "map-sites.png", rawSeed: mapSitesSeed },
   { name: "doc-review.png", seed: false, prep: async (p) => {
