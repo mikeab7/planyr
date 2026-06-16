@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -765,6 +765,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
+  const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
+  const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
   // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
@@ -3121,6 +3123,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
+  // Version history (automatic local backups, B126): open the dialog with this plan's
+  // saved snapshots, and restore one into the canvas (which then autosaves as the newest
+  // version — and the thinner state it replaces is itself snapshotted, so a restore is
+  // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
+  const openVersionHistory = () => { setVersionList(listVersions(siteId)); setVersionsOpen(true); closeHdrMenus(); };
+  const restoreVersion = (at) => {
+    const v = getVersion(siteId, at);
+    if (!v) return;
+    pushHistory();
+    setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
+    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays);
+    setSel(null); setMulti([]); setVersionsOpen(false);
+  };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
@@ -4148,6 +4163,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
                       <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
                     </div>
+                    <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
+                      title="Restore an earlier automatically-saved version of this plan">
+                      <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -5843,6 +5862,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+      {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {versionsOpen && (
+        <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
+              <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.5, marginBottom: 12 }}>
+              Automatic backups of this plan, saved on this device. Restore one to bring it back — your current version is backed up too, so a restore can be undone. (Aerials / backdrop images may need re-dropping.)
+            </div>
+            {versionList.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: PAL.muted, padding: "10px 0" }}>No earlier versions saved yet. As you edit, recent versions are backed up here automatically.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {versionList.map((v) => {
+                  const d = new Date(v.at);
+                  const when = isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                  return (
+                    <div key={v.at} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 9 }}>
+                      <span style={{ fontSize: 12.5, color: PAL.ink }}>
+                        <span style={{ fontWeight: 650 }}>{when}</span>
+                        <span style={{ color: PAL.muted }}> · {v.buildings} building{v.buildings === 1 ? "" : "s"}</span>
+                      </span>
+                      <button style={{ ...chip, flex: "none" }} onClick={() => restoreVersion(v.at)} title="Replace the canvas with this saved version">Restore</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

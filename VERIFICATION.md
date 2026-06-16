@@ -254,6 +254,28 @@ was never clicked" quietly ships broken.
   unchanged — the rail still slides in as an overlay there.
 - **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
 
+### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
+  site because sync kept whichever whole copy was saved last — so a copy with fewer buildings could overwrite
+  a fuller one (a stale tab, a second device, a hiccup mid-load). B126 makes sync **merge** the two copies
+  (every building in either is kept) and adds **automatic local backups** you can restore from.
+- **Steps (signed in, on planyr.io):**
+  1. **Merge keeps both (two-tab test — the headline):** open the same site in **two browser tabs**. In tab A
+     add **building X**; in tab B (don't reload it) add **building Y**. Let both reach **"Synced ✓"**.
+     **Reload both tabs** → **both X and Y are present** in each — neither tab's copy erased the other's.
+  2. **Version history restore:** **Plan ▾ → Version history…** → a dialog lists earlier automatic backups
+     (timestamp · N buildings). Click **Restore** on an earlier one → the canvas returns to that version and
+     re-saves. Re-open Version history → the version you just replaced is now **also** listed (a restore is
+     itself reversible).
+  3. **De-dupe sanity:** make a few edits that change the building/element count → each appears as its own
+     version; a pure move (no count change) does **not** spam a new version.
+- **Expect:** a building drawn in any copy is **never lost to a sync**; the count never silently drops; Version
+  history lists and restores prior versions, reversibly. (Backdrop aerials/images may need re-dropping after a
+  restore — geometry is always restored in full.)
+- **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
+  immediately with the exact step + browser console; do **not** log-and-move-on.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
