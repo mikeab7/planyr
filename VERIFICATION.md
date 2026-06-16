@@ -210,6 +210,33 @@ was never clicked" quietly ships broken.
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **Why this matters:** this is the fix for the owner-reported data-loss scare — work vanishing on its
+  own a couple minutes after a reload. Root cause: `pullCloud` rebuilt the local cache from the cloud
+  list **alone** and silently dropped any not-yet-synced local site; the resume then couldn't find the
+  open site and bounced to the map. Confirm in a real browser that saved work is now durable.
+- **Steps (signed in, on planyr.io):**
+  1. Sign in. Open or create a site, add a **building**; wait for the header badge to read **"Synced ✓"**.
+  2. **Reload** → you **resume straight into the planner** on that site (NOT bounced to the map) and the
+     building is still there.
+  3. **Switch to another browser tab for ~2–3 minutes, then return** (refocus the Planyr tab) → the site
+     + building must **still be there** and you are **not** bounced to the map. (This is the exact
+     "disappears on its own" trigger — a background re-sign-in event firing the cloud re-pull.)
+  4. **Forced not-yet-synced repro (DevTools):** Network tab → **Offline**. Add another building → a
+     **loud red banner** ("your last change didn't reach the cloud … **Retry now**") appears and the badge
+     reads Offline/Unsaved. **Reload while still offline** → the building is **still there** (not dropped).
+     Go back **Online** → it syncs (badge → "Synced ✓") and the red banner clears.
+  5. **On-device → account bridge:** while **signed out**, create a site (saved on this device only).
+     **Sign in** → a blue banner "You have N site(s) saved on **this device** that aren't in your account
+     yet" appears; click **"Bring them into my account"** → the site joins the account list and the banner
+     clears. The signed-out copy is **kept** (non-destructive).
+- **Expect:** work **never disappears on its own**; reload resumes the open site; a failed cloud save is
+  **loud** (red banner + Retry), never silent; the on-device import copies sites into the account without
+  deleting the originals. No data is lost across reload, tab-refocus, offline, or sign-in/out.
+- **If it fails:** this is the one **CRITICAL** class — if saved work still vanishes, flag it immediately
+  (note the exact step + the browser console), don't just log-and-move-on.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
