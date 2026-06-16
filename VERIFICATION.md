@@ -154,6 +154,22 @@ was never clicked" quietly ships broken.
 - **Increment 2a (multi-page sheet picker) also landed** — verify the "Pick a sheet" dialog lists all
   pages and attaches the chosen one.
 
+### V10 — Snap toggle + Alt hold-to-suppress (B114) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site with a couple of elements. (1) Drag a road up against trailer parking —
+  it flush-snaps to the edge. (2) Now **hold Alt** and drag it to a deliberate ~15-ft gap behind
+  the parking and drop — it should NOT snap; it lands exactly where you let go. (3) Press **S**
+  (cursor on the canvas, not in a text field) — the toolbar pill flips **`Snap 10′` ↔ `Snap off`**
+  (dot green↔grey); with it **off**, normal drags place freely (no grid, no flush). (4) Click the
+  toolbar **Snap** pill — same toggle. (5) Resize a box and rotate it with snap on (grid / 15°
+  steps) vs. Alt-held or snap-off (smooth/free).
+- **Expect:** Alt suppresses snapping for just that one drag and re-enables on release; the **S**
+  key and the pill both toggle the persistent setting; "off" fully disables grid snap, neighbour
+  flush-snap, resize-to-grid and rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green
+  +) — Alt/the toggle don't change that deliberate gesture. State is obvious from the pill at all
+  times (and the setting persists across reload, per-site).
+- **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
