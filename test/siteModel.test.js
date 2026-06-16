@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
-  statusOf, parcelsOf, utilitiesOf, annotationsOf,
+  statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
   constraintsOf, setbacksOf, developableArea,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
@@ -62,6 +62,14 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
 
   it("developableArea is still the reserved stub (returns null, not a fabricated number)", () => {
     expect(developableArea(createSiteModel()).available).toBeNull();
+  });
+
+  // B100: only ACTIVE parcels drive the calcs; a missing `active` means active (back-compat),
+  // so existing sites count every parcel until one is explicitly toggled off.
+  it("activeParcelsOf excludes only explicitly-inactive parcels", () => {
+    const m = createSiteModel({ parcels: [{ id: "a" }, { id: "b", active: true }, { id: "c", active: false }] });
+    expect(parcelsOf(m).map((p) => p.id)).toEqual(["a", "b", "c"]); // all retained on the model
+    expect(activeParcelsOf(m).map((p) => p.id)).toEqual(["a", "b"]); // c (active:false) excluded
   });
 
   // Type-confusion guard: a tampered/legacy/bad-sync record with a non-array collection must NOT

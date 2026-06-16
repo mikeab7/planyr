@@ -96,6 +96,9 @@ export const migrate = (record) => createSiteModel(record || {});
 const byKind = (markups, kinds) => (markups || []).filter((m) => kinds.includes(m.kind));
 
 export const parcelsOf = (m) => m.parcels || [];
+// Parcels counted in the yield/area math: a parcel is ACTIVE unless explicitly flagged inactive
+// (`active === false`). Missing = active, so existing sites are unaffected (B100).
+export const activeParcelsOf = (m) => (m.parcels || []).filter((p) => p.active !== false);
 export const elementsOf = (m) => m.els || [];
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
 export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
