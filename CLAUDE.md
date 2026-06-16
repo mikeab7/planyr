@@ -23,10 +23,13 @@ explain everything in plain English — the way you'd explain it to a smart pers
 doesn't write code. This is a standing rule, not a one-off.
 - **Lead with what it means for me or the product** — what I'll see, do, or get — not
   how it's built.
-- **No bare jargon or acronyms.** Don't make me decode terms like SWR, blob store,
-  raster, IndexedDB, dynamicMapLayer, RLS, etc. If a technical word is genuinely
-  unavoidable, give its plain meaning in the same breath — e.g. "caching (remembering
-  the last copy so it loads fast)".
+- **No bare jargon, but teach me a little.** Never leave me to decode a term cold. DO
+  deliberately drop in the occasional real technical term so I build up the vocabulary
+  over time — just always pair it with its plain meaning the first time it appears,
+  e.g. "a service worker (a small background helper in your browser that quietly keeps
+  copies of things so they load instantly next time)" or "caching (remembering the last
+  copy so it loads fast)". A term here and there with its meaning = good; a wall of
+  unexplained acronyms (SWR, blob store, raster, IndexedDB, RLS…) = not.
 - **When you offer options, describe each by what actually happens for me and the real
   trade-off**, not by the technique. Make the difference between options concrete
   ("this one makes the wetlands map itself pop up instantly, even when the county
