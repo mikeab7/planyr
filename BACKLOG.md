@@ -413,6 +413,32 @@ product switcher) already shipped for the *planner* context bar and explicitly l
 physical row is a later polish," so **B104** is that remaining polish for the *map* view
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
+### B108 — [HAND-OFF] GIS overlays: NWI wetlands CORS + the cached-vector experiment — needs a real browser to finish `[Site Planner / GIS]` (bug/task)
+`[ ]` **Written for a future session that HAS a browser.** This session had none (CI container), and the GIS hosts are egress-blocked from it (`curl …?f=json` → HTTP 403 "Host not in allowlist: hazards.fema.gov / fwspublicservices.wim.usgs.gov"). So map *rendering* could only be judged from the owner's screenshots — which repeatedly misled me into saying "it works" when it didn't. **Do not trust a layer's green "loaded" status as proof of rendering: it is set the instant the layer is attached, BEFORE the image loads.** Only a human/browser confirms a visible overlay.
+
+**Symptom (owner-reported on planyr.io + the PR #60 preview):** toggling **Wetlands (NWI)** throws a layer error. First `network / CORS error` (the health *probe*), then after a fix `Could not parse response as JSON … CORS` (esri-leaflet's internal *metadata* fetch). **FEMA flood zones** seemed to load (green status; faint hatching in one screenshot) but its *visible* rendering was never actually confirmed — the owner's pushback ("what makes you think it's working?") is the honest state.
+
+**Root-cause analysis (UNVERIFIED in a browser — confirm before acting):**
+- NWI host `fwspublicservices.wim.usgs.gov` appears to refuse cross-origin browser requests (CORS): both the `?f=json` health probe AND esri-leaflet's metadata/service-info fetch fail. Its `f=image` export *should* still paint via a CORS-exempt `<img>`, but esri's metadata `requesterror` fires regardless. FEMA host `hazards.fema.gov` appears CORS-clean.
+- The (now-deleted) `kind:"vector"` overlay never rendered. Strong suspicion: an esri raster/image layer must be added **directly to the map**, not nested inside an `L.layerGroup`. Reverted rather than debugged blind.
+
+**State of PR #60 (branch `claude/nice-dirac-029jok`, OPEN — not merged). Net diff vs `main`:**
+1. `probeService` returns `unreachable:true` on a CORS/network throw; `syncOverlayLayers` then adds the image layer anyway — a CORS-blocked *probe* no longer kills a layer.
+2. A layer `requesterror` no longer drops the layer or fires the red toast — just a quiet per-layer "failed" status; `'load'` flips it back to "loaded".
+FEMA/NWI are on the proven `dynamicMapLayer` (`f=image`) path. `lib/vectorLayers.js` (pure fetch/paging/style/decide engine, 31 tests, from #58) is on `main` but **UNWIRED groundwork**. `lint` 0 / `test` 136 / `build` green.
+
+**Questions a browser settles in minutes (DevTools → Network / Console):**
+1. Does **FEMA** draw a *visible* flood overlay on the preview? (Confirm/deny — ignore the "loaded" status.)
+2. Does the **NWI** `export?f=image` request fire, return 200, and produce an `<img>` *despite* the metadata `requesterror`? Or does esri block the export?
+3. NWI response headers — is `Access-Control-Allow-Origin` present on `/MapServer`, `/export`, `/0/query`? Is the block total or endpoint-specific? Did it change recently (the DONE list says wetlands once worked)?
+
+**Next steps (after browser triage):**
+- **FEMA:** if it renders, #60's two fixes are good → merge #60.
+- **NWI:** (a) swap to a CORS-clean wetlands endpoint (browser-test alternates — a USFWS ArcGIS Online hosted layer, a tiled service, etc.; edit `STATEWIDE.wetlands.url` in `lib/layers.js`); or (b) route via the `/server` proxy (the documented durable fix for flaky agency hosts — serves through our own origin, no CORS); or (c) leave it (screening-only).
+- **Vector engine (`lib/vectorLayers.js`):** if revived, render via **direct map-add** and browser-test. Remember these overlays are used at area-scale, where the server-rendered image is the right tool; vectors only pay off zoomed in tight. The deleted `vectorOverlay.js` is recoverable from git (branch commits `49e2a1b` / `2f89c19`).
+
+**Key files:** `lib/layers.js` (`STATEWIDE`, `syncOverlayLayers` dispatch, `probeService` `unreachable`, softened `requesterror`), `lib/vectorLayers.js` + `test/vectorLayers.test.js` (unwired engine), `VERIFICATION.md` V8/V9 (live-test items).
+
 ### B104 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
 `[ ]` **Repro:** the map view shows two stacked header bars — a black account bar on top (the
 shell header) and a white search/actions bar below (the MapFinder header) — with the brand/module
