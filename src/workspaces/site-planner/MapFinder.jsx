@@ -16,6 +16,7 @@ import {
 } from "./lib/arcgis.js";
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
+import { countyAtPoint } from "./lib/jurisdiction.js";
 
 const PAL = {
   panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
@@ -279,7 +280,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      lines / site plans stay on top. */
   useEffect(() => {
     const sync = () => syncOverlayLayers(mapRef.current, overlays, overlayRefs.current, {
-      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
     });
     sync();
@@ -457,6 +458,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         if (hilitesRef.current[key]) { try { map.removeLayer(hilitesRef.current[key]); } catch (_) {} } // drop a stale hilite before overwriting → no orphaned polygon if two clicks race (B22)
         hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
         setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+        // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
+        // for a Harris/FB lot when that county's own CAD didn't — relabel via a true
+        // point-in-county lookup. Non-blocking + additive: only patches the saved
+        // entry's county, never the select/hilite flow.
+        if (county === "chambers") {
+          countyAtPoint(latlng.lng, latlng.lat)
+            .then(({ key: ckey }) => { if (ckey && ckey !== "chambers") setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
+            .catch(() => {});
+        }
       }
     } catch (e) {
       setErr(humanizeError(e));

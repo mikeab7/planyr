@@ -12,11 +12,16 @@
  * only load once zoomed in (these sources are dense). All requests are CORS-ok.
  */
 import L from "leaflet";
+import { gisCache } from "./gisCache.js";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const MIN_ZOOM = 14;            // OSM power/hydrant data is dense — don't fetch zoomed out
 const MLY_MIN_ZOOM = 16;        // Mapillary bbox must be < 0.01° — high zoom only
-const _cache = new Map();       // key → elements (in-memory, per session)
+// Overpass results ride the shared browser-local SWR cache (B75): a view paints its
+// last-known-good copy instantly and refreshes in the background, and now SURVIVES a
+// reload (the old in-memory Map did not). TTL = how long a copy is "fresh" before a
+// background refresh fires; a stale copy is still shown immediately with its age.
+const OVERPASS_TTL = 30 * 60 * 1000; // 30 min
 
 const COL = {
   transmission: "#b91c1c", // ≥ power=line
@@ -77,26 +82,33 @@ export function overpassLayer(want, onStatus) {
   // Re-render at the new opacity so each feature keeps its RELATIVE fill (substations
   // faint, nodes solid) instead of being flattened to one uniform fillOpacity (B36b).
   group.setOpacity = (o) => { opacity = o; group.clearLayers(); renderOverpass(lastEls, group, opacity); };
+  // Render a result set and report status, carrying the data's age (`ts`) and whether
+  // it's a stale/last-good copy so the Layers panel can show "refreshed 3m ago" (B75).
+  const paint = (els, ts, opts = {}) => {
+    group.clearLayers(); renderOverpass(els, group, opacity); lastEls = els;
+    const msg = opts.note || (els.length ? null : "No OSM features in view");
+    onStatus && onStatus(els.length ? "loaded" : "empty", msg, { ts, stale: !!opts.stale });
+  };
   const refresh = async () => {
     if (!map) return;
     if (busy) { pending = true; return; } // a moveend arrived mid-fetch — serve the latest view after (B56d)
     if (map.getZoom() < MIN_ZOOM) { group.clearLayers(); lastEls = []; lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
     const bb = { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() };
-    const key = bboxKey(bb) + JSON.stringify(want);
+    const key = "overpass:" + bboxKey(bb) + ":" + JSON.stringify(want);
     if (key === lastKey) return;
     lastKey = key;
-    let els = _cache.get(key);
-    if (!els) {
-      busy = true; onStatus && onStatus("loading");
-      try { els = await fetchOverpass(bb, want); _cache.set(key, els); }
-      catch (e) { lastKey = null; onStatus && onStatus("failed", `OSM Overpass: ${e.message || "request failed"}`); els = null; }
-      finally { busy = false; }
-      if (els === null) { if (pending) { pending = false; refresh(); } return; }
-    }
-    group.clearLayers();
-    renderOverpass(els, group, opacity); lastEls = els;
-    onStatus && onStatus(els.length ? "loaded" : "empty", els.length ? null : "No OSM features in view");
+    // Stale-while-revalidate (B75): paint the cached copy NOW (its age is shown), then
+    // refresh in the background and swap fresh data in when it returns.
+    const { cached, stale, fresh } = gisCache.swr(key, () => fetchOverpass(bb, want), { ttl: OVERPASS_TTL });
+    if (cached) paint(cached.data, cached.ts, { stale });
+    else onStatus && onStatus("loading");
+    busy = true;
+    const r = await fresh;
+    busy = false;
+    if (r.updated) paint(r.data, r.ts);
+    else if (r.error && !cached) { lastKey = null; onStatus && onStatus("failed", `OSM Overpass: ${(r.error && r.error.message) || "request failed"}`); }
+    else if (r.error && cached) paint(cached.data, cached.ts, { stale: true, note: "Showing last-good — refresh failed" }); // keep last-known-good
     if (pending) { pending = false; refresh(); } // trailing-edge refresh for the view that moved during the fetch
   };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };

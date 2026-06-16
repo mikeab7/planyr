@@ -3,7 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
-import { openOverlayFile, rasterizePage, isPdfFile } from "./lib/overlayPdf.js";
+import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -25,6 +26,8 @@ import {
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
+import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
+import { formatAge } from "./lib/gisCache.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -798,6 +801,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [overlayBusy, setOverlayBusy] = useState(false);
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
+  const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
   const [ovCalib, setOvCalib] = useState(null);         // {id, kind:'trace'|'align', pts:[]} — canvas calibration in progress
 
   // county parcel lookup
@@ -904,7 +908,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!origin) return;
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
-      onStatus: (id, state, msg) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg } : null })),
+      onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
       onError: (cfg, msg) => { setOverlapWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`); setTimeout(() => setOverlapWarn(""), 6000); },
     });
     sync();
@@ -1677,6 +1681,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
+    if (d.mode === "ovScale") { // corner handle: uniform scale about the (fixed) center
+      const ftPerPx = Math.max(0.001, d.ftPerPx0 * (Math.hypot(fp.x - d.C.x, fp.y - d.C.y) / d.grabDist));
+      const W = d.imgW * ftPerPx, H = d.imgH * ftPerPx;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ftPerPx, x: d.C.x - W / 2, y: d.C.y - H / 2 } : o)));
+      return;
+    }
+    if (d.mode === "ovRotate") { // rotate handle: rotate about the center
+      const rotation = (((d.rot0 + (Math.atan2(fp.y - d.C.y, fp.x - d.C.x) - d.a0) * 180 / Math.PI) % 360) + 360) % 360;
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, rotation } : o)));
+      return;
+    }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
     if (d.mode === "printResize") {
       const aspect = printAspect();
@@ -2052,6 +2067,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
+        uploadOverlayFile(siteId, id, file).then((res) => {
+          if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
+        }).catch(() => {});
+      }
     } catch (err) {
       alert(humanizeError(err));
     } finally {
@@ -2069,6 +2089,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "moveSheetOverlay", id, fx: fp.x, fy: fp.y, ox: o.x, oy: o.y };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
+  // On-canvas resize (corner) + rotate handles for the selected overlay (B72 — completes
+  // the original spec). Both scale/rotate about the overlay center so they compose with any
+  // existing rotation; the panel sliders remain as an alternative.
+  const startScaleOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovScale", id, C, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const startRotateOverlay = (e, id) => {
+    if (e.button !== 0) return;
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.locked) return;
+    e.stopPropagation();
+    const fp = p2f(e.clientX, e.clientY);
+    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    setSel(null); setSelOverlay(id);
+    pushHistory();
+    drag.current = { mode: "ovRotate", id, C, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0 };
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
   // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
   const patchOverlay = (id, patch, hist = true) => {
     if (hist) pushHistory();
@@ -2078,6 +2125,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
     setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
     setSelOverlay((s) => (s === id ? null : s));
   };
@@ -2154,6 +2203,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Free any held PDF docs when the planner unmounts (cf. B39).
   useEffect(() => () => { overlayDocs.current.forEach((d) => { try { d.destroy(); } catch (_) {} }); overlayDocs.current.clear(); }, []);
+  // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
+  // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
+  useEffect(() => {
+    const missing = sheetOverlays.filter((o) => o.storageKey && !o.src && !overlayFetching.current.has(o.id));
+    if (!missing.length) return;
+    let cancelled = false;
+    missing.forEach((o) => overlayFetching.current.add(o.id));
+    (async () => {
+      for (const o of missing) {
+        try {
+          if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
+            const bytes = await downloadOverlayBytes(o.storageKey);
+            const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
+            if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+          } else { // image: its raster IS the source — restore the src directly (dims already known)
+            const src = await downloadOverlayDataUrl(o.storageKey);
+            if (!cancelled && src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src } : x)));
+          }
+        } finally { overlayFetching.current.delete(o.id); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sheetOverlays]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
   const onCountyChange = (key) => {
@@ -2829,13 +2901,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify (click any spot → county record without importing).
   const [identifyMode, setIdentifyMode] = useState(false);
-  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, addr } | { error }
+  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, lng, lat, addr } | { error }
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
+  // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
+  // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B96).
+  const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
+  const checkJurisdiction = async () => {
+    const r = identifyRes;
+    if (!r || r.busy || r.error || r.lng == null) return;
+    setJurInfo({ busy: true });
+    const [j, road] = await Promise.all([
+      identifyJurisdiction(r.lng, r.lat, { ring: r.ring }), // whole-parcel test → flags a straddle
+      identifyRoadAuthority(r.lng, r.lat, { ring: r.ring }), // parcel frontage → every fronting authority
+    ]);
+    setJurInfo({ j, road });
+  };
+  const jurRow = (label, value, ageMs) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "1px 0" }}>
+      <span style={{ color: PAL.muted }}>{label}</span>
+      <span style={{ color: PAL.ink, fontWeight: 600, textAlign: "right" }}>
+        {value}
+        {ageMs != null && <span style={{ color: PAL.muted, fontWeight: 400 }}> · {formatAge(ageMs)}</span>}
+      </span>
+    </div>
+  );
   const identifyAt = async (fp) => {
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later identify click supersedes this one (B53)
-    setIdentifyRes({ busy: true });
+    setJurInfo(null); setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
       if (!idLayerRef.current) {
@@ -2846,7 +2940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
       if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
       const ring = largestRingLngLat(feat);
-      setIdentifyRes({ attrs: feat.attributes || {}, ring, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+      setIdentifyRes({ attrs: feat.attributes || {}, ring, lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
   const addIdentifiedParcel = () => {
@@ -2857,7 +2951,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = { id: uid(), points, locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null };
     setParcels((a) => [...a, pc]);
     setSel({ kind: "parcel", id: pc.id });
-    setIdentifyRes(null); setIdentifyMode(false);
+    setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
   };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
@@ -4010,11 +4104,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<>
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>Re-add “{o.name}” — image not synced to this device</text>
+                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
                     </>)}
                     {isSel && tool === "select" && (
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
+                    {isSel && tool === "select" && !o.locked && !ovCalib && (<>
+                      {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
+                        <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                          style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
+                      ))}
+                      <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+                      <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                        style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
+                    </>)}
                   </g>
                 );
               })}
@@ -4468,6 +4571,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </g>
               );
             })()}
+
+            {/* During overlay trace/align, capture EVERY click as a calibration point —
+                a transparent top layer so a click on the overlay/parcels/elements places
+                a point instead of starting a move or selection (fixes "Align doesn't work"). */}
+            {ovCalib && (
+              <rect x={0} y={0} width={size.w} height={size.h} fill="transparent" pointerEvents="all"
+                style={{ cursor: "crosshair" }}
+                onPointerDown={(e) => { if (e.button === 0) { e.stopPropagation(); onOvCalibClick(p2f(e.clientX, e.clientY)); } }} />
+            )}
           </svg>
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
@@ -5205,7 +5317,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* identify any parcel from the county GIS (no import unless you add it) */}
               <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
                 {origin ? (
-                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); }}>
+                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); setJurInfo(null); }}>
                     {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
                   </button>
                 ) : (
@@ -5223,6 +5335,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             </div>
                           ))}
                           {identifyRes.ring && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
+                            {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
+                          </button>
+                          {jurInfo && !jurInfo.busy && (
+                            <div style={{ marginTop: 7, borderTop: "1px dashed #ece4d4", paddingTop: 6 }}>
+                              {jurInfo.error ? <span style={{ color: "#b45309" }}>{jurInfo.error}</span> : <>
+                                {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
+                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : "not in Houston ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
+                                {jurInfo.j.straddle && <div style={{ color: "#b45309", marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
+                                <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
+                              </>}
+                            </div>
+                          )}
                         </>}
                   </div>
                 )}
