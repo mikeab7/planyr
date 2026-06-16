@@ -138,6 +138,10 @@ was never clicked" quietly ships broken.
   **"Pick a sheet"** dialog should list every page — choose one. Draw with **Pen / Line / Box /
   Text**, recolour, **Select** + **Delete**, **zoom (wheel) + pan (drag in Select)**, click
   **Done**, reopen the drawing, then **reload the page**.
+- **Richer markup (increment 2c) — also verify:** in **Select**, **drag an existing markup** to
+  reposition it (cursor shows move); **double-click a Text** markup to edit it. Click **Scale**,
+  draw a line along a known dimension, enter its length in feet → then **Measure**: draw lines and
+  confirm they label the **real length in feet** (teal chip); the scale + markups persist on reload.
 - **Expect:** the **chosen** sheet rasterizes as an **immutable backdrop** (named "<file> — p.N");
   markups stay **locked to the drawing** through zoom/pan (stored pixel-relative); multiple
   drawings list under the parcel; markups **persist** across reopen + reload (signed in, same
