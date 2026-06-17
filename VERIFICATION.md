@@ -10,32 +10,49 @@ was never clicked" quietly ships broken.
 > **This is the runtime counterpart to `BACKLOG.md`.** An item can be `[x]` done in the
 > backlog and still ⏳ unverified here — the code landed; the click-through hasn't.
 
-> ## ⚠️ Testing policy (2026-06-16, standing — read this)
+> ## ⚠️ Testing policy (updated 2026-06-17 — read this)
 > **Michael does NOT click through to test things himself. Ever.** Don't wait on him, don't ask
-> him to verify, don't end a turn expecting him to go look. Live verification is **delegated to the
-> Claude cohort** (browser-capable Claude sessions running `/verify` or `/run`). The working rhythm:
-> - After a change is **CI-green + build-green**, the **default is to move on.** Log anything that
->   needs a real browser as an item below for the cohort to pick up — that's all the follow-up needed.
-> - **Do NOT surface "these N are unverified" to Michael as a to-do for him.** File them here instead.
+> him to verify, don't end a turn expecting him to go look.
+> **Claude self-verifies in a headless browser — in the same session, no separate "cohort."**
+> A headless Chromium is available in the environment (see "🤖 Self-verification" below), so a
+> session that ships a UI change should **drive the live app itself** and record the result rather
+> than file the click-through for someone else. The working rhythm:
+> - After a change is **CI-green + build-green**, **run the headless-browser check yourself**, then
+>   record the outcome here (✅/❌ + date). Don't punt it.
+> - **Only if no browser is reachable** (rare), log the item below and move on — never block on Michael.
+> - **Do NOT surface "these N are unverified" to Michael as a to-do for him.**
 > - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
 >   (blank screen), or a shipped feature is visibly crashing in production. Everything else: note it
 >   here, keep moving.
+>
+> ### 🤖 Self-verification — how (proven 2026-06-17 against planyr.io + per-branch preview URLs)
+> Write a short Playwright script and run it with Node:
+> - Browsers live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the module is the global
+>   `/opt/node22/lib/node_modules/playwright` (require it by absolute path).
+> - The sandbox egress proxy intercepts TLS, so launch with `args:['--ignore-certificate-errors']`
+>   **and** `newContext({ ignoreHTTPSErrors: true })`, or `page.goto` throws `ERR_CERT_AUTHORITY_INVALID`.
+> - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
+>   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
+>   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
+> - Enter the planner via **"Start blank"**; drive the SVG canvas with `page.mouse` (CDP mouse events
+>   fire React's pointer handlers); `page.screenshot({clip})` then read the PNG back to eyeball it.
 
 ---
 
 ## How to use this — Claude Code / coworkers, read on every run
 
-1. **Scan the 🔲 list below.** This is the **Claude cohort's** queue — items here are waiting for a
-   browser-capable session to verify. Per the testing policy above, do **not** hand this list to
-   Michael as his to-do; only escalate a **critical** (won't build / won't render / crashing) issue.
-2. **If you have a browser** (the `/verify` or `/run` skill, or any runtime): run the
-   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a
-   note), set `Last checked`, and bump `Next check` by the `Cadence`. This is the cohort's job.
-3. **If you have no browser:** **just leave the item logged here for the cohort and move on** — don't
-   block on Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app
-   is the entire point of this file.
-4. **Endpoint-liveness items (tagged 🌐) are the exception** — they're a `curl`/REST probe,
-   runnable from any session *without* a browser. Run those when due.
+1. **Scan the 🔲 list below** — items waiting to be confirmed in the running app. Per the testing
+   policy above, do **not** hand this list to Michael as his to-do; only escalate a **critical**
+   (won't build / won't render / crashing) issue.
+2. **Verify it yourself in a headless browser** (see "🤖 Self-verification" above): run the
+   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a note),
+   set `Last checked`, and bump `Next check` by the `Cadence`. Prefer doing this in the same session
+   that shipped the change.
+3. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
+   Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app is the
+   entire point of this file.
+4. **Endpoint-liveness items (tagged 🌐) are the exception** — a `curl`/REST probe, runnable
+   without a browser. Run those when due.
 5. Keep it honest: a ❌ stays ❌ with the date and what broke until it's re-fixed and re-run.
 
 `CLAUDE.md` points every session here, so this list is consulted automatically.
@@ -365,8 +382,8 @@ was never clicked" quietly ships broken.
     returns **HTTP 500 across its whole catalog** (confirmed three ways). PR #60's resilience held up — the
     app stays alive and shows a quiet per-layer "failed" dot; no alarming toast, no dropped-layer cascade.
     The message text is now honest ("service is not responding…") instead of esri's misleading CORS line.
-- **RESOLVED by B130 / V25 (2026-06-17):** rather than wait for `fwspublicservices` to recover, NWI was pointed
-  at the live sibling raster host `fwsprimary.wim.usgs.gov` and **verified rendering in a real browser** — see V25.
+- **RESOLVED by B133 / V26 (2026-06-17):** rather than wait for `fwspublicservices` to recover, NWI was pointed
+  at the live sibling raster host `fwsprimary.wim.usgs.gov` and **verified rendering in a real browser** — see V26.
   (The old `fwspublicservices` host is still 500; this trigger is superseded.)
 
 ### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳
@@ -428,17 +445,34 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (export-only, no data risk) — log ❌ here with what looked wrong (overlay missing
   when checked, handles printing, or wrong position / scale / rotation / opacity).
 
-### V25 — NWI wetlands restored from the live `fwsprimary` raster host (B130) ✅
+### V25 — Detention pond expansion: lock-as-existing baseline + storage gained (B132) ⏳
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Steps:** Open a site, draw a **Detention Pond** (rectangle or click-points irregular). Select it → the right
+  panel's **Detention storage** section now ends with a **"Lock as existing pond"** button. (1) Click it → a toast
+  confirms the lock and a faint **dashed ghost** of the current outline appears under the pond. (2) Drag a corner /
+  edit a vertex to **enlarge** the footprint (and/or raise **Total depth**) → an **"Expansion vs. existing"** box
+  shows **Existing storage**, **Proposed storage**, and a green **"Storage gained +X.XX ac-ft"** (plus cf) that
+  updates live as you drag. (3) **Shrink** the pond below the baseline → the line flips to red **"Storage lost"**.
+  (4) **Clear** → ghost and the comparison box disappear; depth/freeboard/slope are retained. (5) Save, reload the
+  site → the locked baseline (ghost + numbers) persists. (6) **Rotate** the pond before locking, then enlarge → the
+  ghost stays aligned to the real (rotated) original outline, not offset.
+- **Expect:** the gain equals proposed − existing computed with the SAME depth/slope method (so it's apples-to-
+  apples); ghost lands exactly on the original outline for both rectangle and irregular ponds, rotated or not;
+  numbers and ghost survive reload; "screening only — confirm with your civil engineer" caveat shown.
+- **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
+  offset/rotated, gain number not updating, baseline lost on reload).
+
+### V26 — NWI wetlands restored from the live `fwsprimary` raster host (B133) ✅
 - **Added** 2026-06-17 · **Cadence** once (bugfix acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright — esri-leaflet imageMapLayer over Sheldon Lake) · **Next check** —
 - **Result 2026-06-17 — VERIFIED in a real browser.** Follow-up to B129 / V20 (the NWI outage). The old
   `fwspublicservices` host is **still HTTP 500**; the live data the official USFWS Wetlands Mapper draws sits on the
   sibling host **fwsprimary.wim.usgs.gov**, but at a different path **and as a pre-rendered RASTER ImageServer**
   (`/server/rest/services/Wetlands_Raster/ImageServer`), not the old dynamic vector MapServer — so the fix is an
-  esri **imageMapLayer** (`kind:"esriImage"`, like 3DEP), **not** the one-line host swap B130 assumed.
+  esri **imageMapLayer** (`kind:"esriImage"`, like 3DEP), **not** the one-line host swap the hand-off assumed.
   - **Renders.** esri-leaflet's `imageMapLayer` paints the standard NWI symbology (navy open water = Sheldon Lake,
     greens = vegetated wetlands) over Sheldon Lake at zoom 14 — screenshot `gis-verify/wetlands-fwsprimary-verified.png`.
   - **Network 200.** the `exportImage` request → HTTP **200 `image/png`**; the service metadata fetch → **200** JSON.
-  - **CORS-clean cross-site (B130's flagged 403 risk DISPROVEN).** the host **reflects any Origin** in
+  - **CORS-clean cross-site (the flagged 403 risk DISPROVEN).** the host **reflects any Origin** in
     `Access-Control-Allow-Origin` (verified for `https://planyr.io`, localhost, and an arbitrary origin), so it loads
     from our origin with no refusal. The earlier out-of-band 403 did not reproduce.
   - **Reproduce:** `node gis-verify/wetlands-verify.mjs` (serves `gis-verify/wetlands-verify.html` from the repo
@@ -453,4 +487,29 @@ was never clicked" quietly ships broken.
 ---
 
 ## ✅ Verified / ❌ Failed — history
-_Move items here with the date and who/what checked them. Nothing yet._
+_Move items here with the date and who/what checked them._
+
+### V24 — Parking "Split rows/aisles": double-loaded modules, not single rows (B130) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (first run of the
+  in-session self-verification flow above) · **Cadence** once
+- **Steps:** Loaded the branch-preview build (= the code now on `main`) and **planyr.io** in headless
+  Chromium → "Start blank" → planner → drew a Car Parking field with the mouse → selected it → read
+  the panel + button text → clicked **"Split rows/aisles"** → zoomed in and screenshotted the striping.
+- **Result ✅:**
+  - Button reads **"Split rows/aisles"**; the old **"Split into rows"** label is gone.
+  - Panel reports the right defaults — **510 stalls @ 9′×18′, 90°, 24′ aisle**.
+  - Zoomed view shows the **double-loaded** pattern: stall rows pair around one **shared dashed drive
+    aisle** (an aisle every *other* gap), not one aisle per row.
+  - App loads cleanly (HTTP 200) on both planyr.io and the preview; the split runs without errors.
+  - Backed by 10 unit tests (`test/parking.test.js`) on the split math.
+- **Not covered (tracked in `BACKLOG.md` B130, still open):** free-field longest-edge auto-orientation;
+  the fuller curb rule. Sign-in paths untested (proxy blocks auth — logged-out run).
+
+### V25 — Parking B130 follow-ons: free-field orientation + full-perimeter curb (B130) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
+- **Steps:** "Start blank" → planner → zoomed in → drew a **tall** Car Parking field (item 2), drew an **isolated** field and split it (item 3); screenshotted at high zoom.
+- **Result ✅:**
+  - **Item 2:** a tall-drawn field runs its stall rows + dashed aisles along the **long (vertical) edge** (double-loaded), not short stacked rows.
+  - **Item 3:** an isolated pad shows a grey **6″ curb band around the full perimeter** (confirmed at high zoom on a corner); a split field stays **continuous with no curbs at the internal seams**.
+  - Backed by 6 unit tests (`edgeAbutsPaving`) · lint 0 · 191 tests · build green.
+- **Decision recorded:** no curb against the bare building face (B70 stands; owner-confirmed 2026-06-17). Sign-in paths untested (proxy blocks auth — logged-out run).

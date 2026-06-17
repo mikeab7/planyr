@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -490,17 +490,26 @@ function sidewalkBetween(el, host, allEls) {
   });
 }
 // Curbed edges (LOCAL frame) — the single source feeding both the drawn band and
-// the area math. Terminal curb on the far edge of every paved section; a
-// transition curb where a sidewalk sits behind it; both depth ends for a free field.
+// the area math. B130 rule: a 6" curb wraps the WHOLE perimeter wherever pavement
+// meets non-paving (dirt, landscape, a dead-end aisle), and is skipped wherever
+// pavement meets pavement — a drive-aisle opening, continuous paving, or the
+// internal seam between two abutting pads (e.g. split modules). The bare building
+// face stays curb-free (B70) unless a sidewalk sits between (a transition curb).
 function curbEdgesOf(el, allEls) {
   if (el.points || !CURB_TYPES.includes(el.type)) return [];
   const w = curbWidthOf(el), host = curbHost(el, allEls);
-  if (!host) // free-standing: both depth ends are terminal (no building side to spare)
-    return [{ axis: "y", sign: 1, length: el.w, width: w }, { axis: "y", sign: -1, length: el.w, width: w }];
-  const oe = outwardCurbEdge(el, allEls);
-  if (!oe) return [];
-  const edges = [{ ...oe, width: w }];                               // terminal (far/back) edge
-  if (sidewalkBetween(el, host, allEls)) edges.push({ axis: oe.axis, sign: -oe.sign, length: oe.length, width: w }); // sidewalk transition
+  const oe = host ? outwardCurbEdge(el, allEls) : null;             // edge AWAY from the host
+  const swalk = host ? sidewalkBetween(el, host, allEls) : false;
+  const edges = [];
+  for (const c of [
+    { axis: "y", sign: 1, length: el.w }, { axis: "y", sign: -1, length: el.w },
+    { axis: "x", sign: 1, length: el.h }, { axis: "x", sign: -1, length: el.h },
+  ]) {
+    const hostSide = oe && c.axis === oe.axis && c.sign === -oe.sign;
+    if (hostSide && !swalk) continue;                              // B70: bare building face → no curb
+    if (edgeAbutsPaving(el, c.axis, c.sign, allEls)) continue;     // meets pavement (opening / seam) → no curb
+    edges.push({ ...c, width: w });
+  }
   return edges;
 }
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
@@ -2027,7 +2036,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const curb = +settings.roadCurb || CURB;
         const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
         const buildingExtra = draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {};
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra, ...buildingExtra };
+        // B130: a free-drawn parking field runs its stall rows along the LONGER edge.
+        // carStalls treats w as row-length and h as depth, so when the drawn box is
+        // deeper than it is long, swap the two and rotate 90° — identical footprint on
+        // screen, but the rows (and the double-loaded modules) lie along the long side.
+        let w = draftRect.w, h = draftRect.h, rot = 0;
+        if (draftRect.type === "parking" && h > w) { w = draftRect.h; h = draftRect.w; rot = 90; }
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w, h, rot, ...roadExtra, ...buildingExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -5483,6 +5498,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       Footprint is top-of-bank; basin tapers at {slope}:1 to the bottom. Prismoidal volume — screening only.
                       {r.aBottom === 0 && " Basin tapers to a point before full depth — reduce depth or slope."}
                     </div>
+                    {/* Expansion vs. existing: lock today's pond as a baseline, then enlarge
+                        it (drag banks out / deepen) to read the storage gained. Baseline
+                        freezes its own footprint + depth/slope so the delta is apples-to-apples. */}
+                    {(() => {
+                      const base = det.baseline;
+                      if (!base) {
+                        return (
+                          <div style={{ marginTop: 10 }}>
+                            <button style={{ ...chip, width: "100%", fontWeight: 600 }} onClick={() => {
+                              pushHistory();
+                              setSelEl({ det: { ...det, depth, freeboard: fb, slope, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), depth, freeboard: fb, slope } } });
+                              flashWarn("Locked as the existing pond — now expand it to see the storage gained.", 4500);
+                            }}>Lock as existing pond</button>
+                            <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>
+                              Capture today's pond as the baseline, then drag the banks out (or deepen it). You'll see the original outline ghosted and the added detention.
+                            </div>
+                          </div>
+                        );
+                      }
+                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
+                      const inc = r.vol - baseVol;
+                      return (
+                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Expansion vs. existing</span>
+                            <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} onClick={() => { pushHistory(); const { baseline, ...rest } = det; setSelEl({ det: { ...rest, depth, freeboard: fb, slope } }); }}>Clear</button>
+                          </div>
+                          <div style={{ background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
+                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
+                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13.5, color: inc >= 0 ? "#15803d" : "#b3361b", fontWeight: 750 }}>{inc >= 0 ? "+" : ""}{f2(inc / 43560)} ac-ft</span>
+                            </div>
+                            {pondRow("", `${inc >= 0 ? "+" : ""}${f0(inc)} cf`)}
+                          </div>
+                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
+                            Existing (dashed ghost) and proposed use the same depth / slope method, so the difference is the added detention. Screening only — confirm with your civil engineer.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -6143,6 +6201,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
+  // feet, drawn dashed so the user sees what the pond grew from. Same path for the
+  // polygon and rect branches (the rect branch counter-rotates it back to world).
+  const ghostRing = el.type === "pond" && el.det?.baseline?.ring?.length >= 3 ? el.det.baseline.ring : null;
+  const ghostPath = ghostRing ? ghostRing.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
@@ -6152,6 +6216,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+        {ghostPath && ghostEl("ghost")}
       </g>
     );
   }
@@ -6164,6 +6229,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
+  // Counter-rotate the baseline ghost: its ring is already in world feet, but this
+  // branch's group rotates everything by el.rot — undo that so the ghost lands true.
+  if (ghostPath) parts.push(<g key="ghost" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}>{ghostEl("g")}</g>);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));
