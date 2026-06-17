@@ -337,8 +337,8 @@ was never clicked" quietly ships broken.
   sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅
 - **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
   (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
   **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
@@ -350,7 +350,13 @@ was never clicked" quietly ships broken.
   must never detach or mis-link anything.
 - **Expect:** every visible building label updates in one pass on delete; non-building elements
   (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
-  their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
+  their own number.
+- **Result ✅ (2026-06-17, self-verified headless Chromium on the built artifact):** drew three buildings
+  → labelled **Building 1 / 2 / 3** in placement order; selected the **middle** one (Building 2) and
+  deleted it → the former **Building 3 renumbered to Building 2** (same 156,735 sf / 457′×343′ — identity
+  unchanged), leaving a contiguous {1, 2} with no gap. Screenshot eyeballed; the static 4-line stack
+  (name / sf / dims) rendered correctly too. (Attached-piece identity on renumber wasn't separately driven,
+  but identity is keyed on the stable `el.id`, which the delete leaves untouched.)
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
 ### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
