@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -58,5 +58,18 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
   it("empty / missing input yields an empty map", () => {
     expect(layoutLabels([]).size).toBe(0);
     expect(layoutLabels(null).size).toBe(0);
+  });
+
+  it("buildingLabelLines (B123): name → sf → (incl. N bump-outs) → dims; parenthetical only with bump-outs", () => {
+    expect(buildingLabelLines({ name: "Building 1", sqft: "198,000 sf", bumpCount: 2, dims: "300′ × 638′" }))
+      .toEqual(["Building 1", "198,000 sf", "(incl. 2 bump-outs)", "300′ × 638′"]);
+    expect(buildingLabelLines({ name: "Building 3", sqft: "90,000 sf", bumpCount: 0, dims: "300′ × 300′" }))
+      .toEqual(["Building 3", "90,000 sf", "300′ × 300′"]); // no parenthetical line when no bump-outs
+    expect(buildingLabelLines({ name: "Building 2", sqft: "50,000 sf", bumpCount: 1, dims: "200′ × 250′" })[2])
+      .toBe("(incl. 1 bump-out)"); // singular
+    // Drop order: feeding the stack to the LOD keeps name + sf and drops the dimensions
+    // (and the parenthetical) first — so square footage outlives the dimensions on zoom-out.
+    const stack = buildingLabelLines({ name: "Building 1", sqft: "198,000 sf", bumpCount: 2, dims: "300′ × 638′" });
+    expect(fitLines(stack, 10, 25)).toEqual(["Building 1", "198,000 sf"]);
   });
 });

@@ -32,7 +32,7 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers } from "./lib/siteModel.js";
-import { layoutLabels } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
@@ -3405,15 +3405,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
-      lines = [bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0]];
-      if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
-      else if (el.type === "building" && !poly && !el.dogEar) {
-        // include attached dog-ear / bump-out area in the on-plan building SF
+      const name = bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0];
+      if (el.type === "building" && !poly && !el.dogEar) {
+        // B123: the building label is a 4-line stack — name / sf / (incl. N bump-outs) /
+        // dims. sf is its own line and sits high in the drop order (lib/labelLayout), so it
+        // survives zoom-out far longer than the dimensions; the parenthetical shows only
+        // when the building has bump-outs (whose area is folded into the on-plan sf).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines.push(`${f0(area + ba)} sf${bumps.length ? ` (+${bumps.length} bump-out${bumps.length > 1 ? "s" : ""})` : ""}`);
-      } else lines.push(`${f0(area)} sf`);
-      lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+        lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+      } else {
+        lines = [name];
+        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
+        else lines.push(`${f0(area)} sf`);
+        lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
+      }
     }
     // Vertical room for the stack = the shape's SMALLER on-screen dimension (rotation-robust),
     // so a label can't spill past a narrow strip; the engine drops lines that don't fit.

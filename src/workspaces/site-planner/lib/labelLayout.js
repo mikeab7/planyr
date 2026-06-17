@@ -61,3 +61,16 @@ export const layoutLabels = (items, opts = {}) => {
   }
   return out;
 };
+
+// B123 — the building label as a priority-ordered stack (highest priority first, matching
+// fitLines/layoutLabels which drop from the END): name → square footage → "(incl. N
+// bump-outs)" → dimensions. So on zoom-out the dimensions drop first, then the bump-out
+// note, leaving the square footage and finally just the name — i.e. the square footage
+// survives far longer than it did when the whole label just shrank. The parenthetical
+// line appears only when the building actually has bump-outs.
+export const buildingLabelLines = ({ name, sqft, bumpCount = 0, dims }) => {
+  const out = [name, sqft];
+  if (bumpCount > 0) out.push(`(incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""})`);
+  if (dims) out.push(dims);
+  return out;
+};
