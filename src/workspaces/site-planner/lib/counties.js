@@ -246,14 +246,21 @@ export const COUNTIES_MAP = {
 // hit-test aligned with what's drawn. It's appended AFTER the bbox matches so a
 // county's own CAD still answers first (more authoritative, richer fields) and the
 // statewide layer only catches clicks the county CAD didn't; the answering county
-// is then corrected via `countyAtPoint` (B36a). Falls back to ALL configured
-// counties only if the point is outside every bbox and no statewide source exists.
+// is then corrected via `countyAtPoint` (B36a).
+//
+// NOTE on the first element: a second caller (MapFinder's Layers-panel jurisdiction
+// resolver) reads candidate[0]. The out-of-bbox branch below therefore returns ALL
+// counties in config order (harris first) — byte-identical to the pre-B130 fallback
+// — so that default still lands on Harris when the view is away from every county;
+// the statewide source is among them, so a click still gets its coverage there too.
+// The statewide append only AUGMENTS the in-bbox case (where Fort Bend lives — it
+// matches harris+fortbend but not the chambers bbox), so candidate[0] is unchanged.
 export function candidateCountiesForPoint(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP);
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
     .map(([k]) => k);
+  if (!within.length) return entries.map(([k]) => k); // outside every bbox → try all (harris-first; incl. the statewide source)
   const statewide = entries.filter(([, c]) => c.statewide).map(([k]) => k).filter((k) => !within.includes(k));
-  const ordered = [...within, ...statewide];
-  return ordered.length ? ordered : entries.map(([k]) => k);
+  return [...within, ...statewide];
 }

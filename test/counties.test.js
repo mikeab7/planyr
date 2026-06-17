@@ -40,10 +40,16 @@ describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
     expect(cand).toContain("chambers"); // fallback present, but harris answers first
   });
 
-  it("a point outside every county bbox still includes the statewide source", () => {
-    // Far West Texas — outside all three configured county bboxes, but TxGIO covers it.
+  it("a point outside every county bbox returns ALL counties, harris-first (jurisdiction default preserved)", () => {
+    // Far West Texas — outside all three configured county bboxes. The Layers-panel
+    // jurisdiction resolver reads candidate[0], so this must stay harris-first (the
+    // documented away-from-Houston default), while still including the statewide
+    // source so a click out there still has coverage. (Guards the B130 regression
+    // where an out-of-bbox point briefly returned statewide-only → flipped the
+    // default to "chambers".)
     const cand = candidateCountiesForPoint(31.7619, -106.485); // El Paso
+    expect(cand[0]).toBe("harris");
     expect(cand).toContain("chambers");
-    expect(cand.length).toBeGreaterThan(0);
+    expect(cand).toEqual(Object.keys(COUNTIES_MAP));
   });
 });
