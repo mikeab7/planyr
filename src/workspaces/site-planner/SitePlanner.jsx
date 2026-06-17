@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
+import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -1046,6 +1047,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); };
   }, [siteId]); // eslint-disable-line
+  // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
+  // background storage event never yanks the canvas out from under an active edit.
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft); });
+  // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
+  // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
+  // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
+  useEffect(() => {
+    if (!siteId) return undefined;
+    const onStore = (e) => {
+      if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      if (busyRef.current) return;
+      const stored = loadSite(siteId);
+      if (!stored) return;
+      const live = liveRef.current || {};
+      const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
+      const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
+      const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
+      if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
+      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays);
+    };
+    window.addEventListener("storage", onStore);
+    return () => window.removeEventListener("storage", onStore);
+  }, [siteId]);
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +

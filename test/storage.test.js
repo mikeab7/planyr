@@ -133,3 +133,38 @@ describe("version history — every save backs up the prior version (B126)", () 
     expect(contentCount({ els: [bld("a")], parcels: [{ id: "p" }] })).toBe(2);
   });
 });
+
+// B127 — a stale tab's save must FOLD into the store (never thin it), while a single tab's
+// own delete must still stick. The guard: saveSite merges only when the stored record is
+// newer than what this tab last loaded/wrote (another tab advanced it in between).
+describe("saveSite — cross-tab stale-write guard (B127)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("a stale save (store advanced by another tab) folds in — never thins", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] }); // this tab last saw 3
+    // simulate ANOTHER tab advancing the same site to 5 buildings with a newer timestamp
+    const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    raw.s.els = [bld("a"), bld("b"), bld("c"), bld("d"), bld("e")];
+    raw.s.updatedAt = (raw.s.updatedAt || 0) + 100000;
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(raw));
+    // this (stale) tab now saves its old 3-building copy on top — must NOT erase d & e
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });
+    expect(loadSite("s").els.map((e) => e.id).sort()).toEqual(["a", "b", "c", "d", "e"]);
+  });
+
+  it("a single tab's own delete still sticks (the guard is not over-eager)", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });
+    saveSite({ id: "s", els: [bld("a"), bld("b")] }); // deleted c in the SAME tab
+    expect(loadSite("s").els.map((e) => e.id).sort()).toEqual(["a", "b"]);
+  });
+});

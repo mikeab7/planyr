@@ -351,14 +351,34 @@ export function renameSiteGroup(groupId, site) {
 // loadSite returns the canonical Site Model (migrated/normalized); saveSite merges
 // the partial onto the existing record and normalizes it back through the schema,
 // so storage is a thin persistence layer over the model.
-export function loadSite(id) { const rec = id ? readSites()[id] : null; return rec ? migrate(rec) : null; }
+// Per-TAB memory of the updatedAt this tab last loaded/wrote per site. Lets saveSite tell
+// "I'm the current writer" (replace — so deletes stick) from "another tab advanced the store
+// since I last synced" (fold my change in — so a stale tab can't thin it, B127). Each browser
+// tab is its own JS module instance, so this map is naturally per-tab.
+const lastSeenAt = {};
+export function loadSite(id) {
+  const rec = id ? readSites()[id] : null;
+  if (!rec) return null;
+  const m = migrate(rec);
+  lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
+  return m;
+}
 export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
   const existing = sites[partial.id];
+  let merged = { ...(existing || {}), ...partial };
+  // Cross-tab guard (B127): if the stored record is NEWER than what THIS tab last saw, another
+  // tab wrote in between — fold our change ON TOP of the store's content (union) instead of a
+  // blind overwrite, so a stale tab can't drop the other tab's work. A single-tab writer always
+  // matches (no fold → plain replace → deletes still stick).
+  if (existing && (existing.updatedAt || 0) > (lastSeenAt[partial.id] || 0)) {
+    merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
+  }
   if (existing) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126)
-  const merged = { ...(existing || {}), ...partial };
-  sites[partial.id] = { ...createSiteModel(merged), updatedAt: Date.now() };
+  const model = { ...createSiteModel(merged), updatedAt: Date.now() };
+  sites[partial.id] = model;
+  lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);
 }
 export function deleteSite(id) {
