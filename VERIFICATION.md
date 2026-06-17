@@ -353,19 +353,23 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
   that vanished when it had room, or a pile that remained).
 
-### V20 — GIS layers survive a CORS-blocked health-check (B129 / PR #60) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
-- **Why ⏳:** the fix is pure `layers.js` logic (lint/test/build green) but the payoff is a real-browser
-  CORS behavior that can't be exercised headless.
-- **Steps:** On planyr.io (or a preview), open the map and toggle **FEMA flood zones**, then
-  **Wetlands (NWI)**. Watch the per-layer status dots and the browser console.
-- **Expect:** a layer whose health-*probe* is refused cross-origin (the NWI host has done this) **no longer
-  dies with a red "network / CORS error" banner** — the picture still paints via its CORS-exempt `<img>`
-  export, and a transient `requesterror` shows only a **quiet per-layer "failed" dot** that flips back to
-  "loaded" when the image lands. A genuinely-down service still shows the quiet failed dot. **No layer is
-  dropped, and no alarming toast fires, just because a metadata/probe fetch was CORS-blocked.**
-- **If it fails / deeper triage:** see **B129** — the open hand-off for the remaining NWI-CORS question and
-  the (reverted) cached-vector experiment, both of which need a browser to settle.
+### V20 — GIS layers survive a CORS-blocked health-check (B129 / PR #60) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright on planyr.io) · **Next check** —
+- **Result 2026-06-17 — VERIFIED in a real browser.** See the full evidence in **B129** (now Done):
+  - **FEMA flood zones — renders.** `/export?f=image` → HTTP 200 `image/png`; the `<img>` paints the
+    standard NFHL symbology (teal Zone AE / orange floodway / red boundaries) along the bayous; host is
+    CORS-clean (`Access-Control-Allow-Origin` on metadata, `/export`, and the OPTIONS preflight). **Caveat:**
+    NFHL 27/28 are source-gated to `minScale ~1:36,112`, so flood zones only draw at ~zoom 14+; at
+    city-wide zoom the export is a blank transparent PNG (expected, not a failure).
+  - **Wetlands (NWI) — does NOT render, but the cause is an agency OUTAGE, not CORS.** The USFWS host
+    returns **HTTP 500 across its whole catalog** (confirmed three ways). PR #60's resilience held up — the
+    app stays alive and shows a quiet per-layer "failed" dot; no alarming toast, no dropped-layer cascade.
+    The message text is now honest ("service is not responding…") instead of esri's misleading CORS line.
+- **Re-check trigger (🌐, no browser needed):** if `curl -s -o /dev/null -w '%{http_code}'
+  "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer?f=json"`
+  returns **200** again (USFWS restored the service), do a quick browser pass to confirm NWI paints at
+  zoom 14+ over a known wetland (e.g. Addicks/Barker). Until then, a 500 there is the agency outage, not a
+  regression.
 
 ### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
