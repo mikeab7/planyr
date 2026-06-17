@@ -3498,33 +3498,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
-    // Vertical room for the stack = the shape's SMALLER on-screen dimension (rotation-robust),
-    // so a label can't spill past a narrow strip; the engine drops lines that don't fit.
-    let span;
+    // Shape's on-screen bounding half-extents (rotation-aware for rects). halfH drives the
+    // level-of-detail height fit; when a label is wider than 2·halfW the engine pulls it
+    // outside the shape with a leader line instead of overflowing a narrow / small shape.
+    let halfW, halfH;
     if (poly) {
       let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
       for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
-      span = Math.min(hi - lo, hi2 - lo2);
-    } else span = Math.min(el.w, el.h);
-    labelCands.push({ el, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, maxH: span * view.ppf });
+      halfW = ((hi - lo) / 2) * view.ppf; halfH = ((hi2 - lo2) / 2) * view.ppf;
+    } else {
+      const rad = ((el.rot || 0) * Math.PI) / 180, cw = Math.abs(Math.cos(rad)), sw = Math.abs(Math.sin(rad));
+      halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
+      halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
+    }
+    labelCands.push({ el, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH });
   }
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.el.id, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, maxH: d.maxH })),
+    labelCands.map((d) => ({ id: d.el.id, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH })),
     { pad: 2 },
   );
   const labelEls = labelCands.map((d) => {
-    const lines = labelShow.get(d.el.id);
-    if (!lines) return null; // hidden this frame to avoid overprinting a higher-priority label
-    const c = d.c;
-    // Element fills are solid, so labels need no chip — just contrasting text.
-    const top = c.y - (lines.length * lh) / 2, first = top + fs * 0.82;
-    const ink = labelInk(elStyle(d.el, settings).fill);
+    const place = labelShow.get(d.el.id);
+    if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
+    const { lines, x, y, leader } = place;
+    const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
+    // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
+    // so ink it dark with a white halo to read over any background (B121 round 2b).
+    const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
     return (
       <g key={`lbl${d.el.id}`} pointerEvents="none">
-        {d.el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
-        <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
-          fontFamily="ui-monospace, Menlo, monospace" fill={ink} style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
-          {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
+        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
+        {d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
+        <text x={x} y={first} textAnchor="middle" fontSize={fs}
+          fontFamily="ui-monospace, Menlo, monospace" fill={ink}
+          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * ls : undefined} paintOrder={leader ? "stroke" : undefined}
+          style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
+          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
         </text>
       </g>
     );
