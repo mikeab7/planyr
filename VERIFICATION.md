@@ -61,8 +61,8 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1 — Jurisdiction & road-authority identify (B93 / B94) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V1 — Jurisdiction & road-authority identify (B93 / B94) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅ · **Next check** done
 - **Steps:** On planyr.io open a georeferenced site (or bring a parcel in from the map).
   Right panel → **🔍 Identify parcel** → click a lot → **⚖︎ Jurisdiction & road authority**.
 - **Expect:** County / City (or "Unincorporated") / ETJ / Road maint. rows each render with
@@ -76,9 +76,17 @@ was never clicked" quietly ships broken.
   the production endpoints): downtown Houston → **Houston / Harris**, not in ETJ, road
   **City**; Spring → **unincorporated + Houston ETJ + Harris**; Sugar Land → **Fort Bend**.
   Field maps, normalization, the ETJ constant and county-key mapping are all correct
-  against live data. **Still ⏳ for the browser layer only** — CORS from the planyr.io
-  origin + the on-screen Identify-panel render — which needs a real browser (preview
-  https://claude-festive-davinci-0oco2.planyr.pages.dev, or planyr.io).
+  against live data. **The browser layer was the only ⏳ — now ✅ too.**
+- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). (1) **CORS/data
+  from the planyr.io origin:** ran the feature's four GIS queries in-page for a downtown-Houston
+  point — county `services.arcgis.com` → **200 "Harris"**, city `feature.geographic.texas.gov`
+  (TxGIO) → **200 "Houston"**, ETJ COHGIS → **200, 0 features** (in-city, correctly not in ETJ),
+  road TxDOT → **200, maint-agency 4 = City**. No CORS block from the production origin. (2)
+  **On-screen render end-to-end:** brought a Houston Heights parcel in from the map → planner →
+  **🔍 Identify parcel** → clicked the lot → **⚖︎ Jurisdiction & road authority** → the panel
+  rendered **County: Harris · City: Houston · ETJ: not in Houston ETJ · Road maint.: City**, each
+  with a data-age ("just now") and the "Screening only — verify with the jurisdiction" disclaimer.
+  Screenshot evidence captured. The B93/B94 feature is shipped + working in the live app.
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
