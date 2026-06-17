@@ -553,6 +553,14 @@ was never clicked" quietly ships broken.
 - **Expect:** every step above; gain = proposed − existing via the same depth/slope math; zero console/page errors.
 - **Result 2026-06-17 — ✅ PASS.** All steps observed in the running app (screenshots captured); zero console/page errors. Residual: a **signed-in** pass that the baseline/ghost survive a cloud reload (sandbox runs logged-out) — low risk, it rides on the existing `el.det` persistence.
 
+### V32 — Pond acre labels (B140) + measurement vertex editing (B141) + text-box hit area (B142) ✅
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview build)
+- **Steps (driven) + result — ✅ PASS, zero console/page errors:**
+  - **B140:** draw a Detention Pond → on-canvas label reads **"3.60 ac · 156,730 sf"** (acres + sf, was sf-only). Enter Expand mode + push banks out → label becomes **"3.60 ac · 156,730 sf" / "+1.18 ac · +51,599 sf"** (existing total + added increment).
+  - **B141:** Measure ▾ → Area → draw a region (**166,530 sf · 3.82 ac · 1,644′ perim**) → Select it → draggable vertex squares + edge **＋** handles appear; dragging one vertex recomputed it to **257,958 sf · 5.92 ac · 2,202′ perim**.
+  - **B142:** create a text box, type, Enter → Select tool → click empty (deselects: stroke 1.4, panel gone) → click the box (**reselects**: stroke 2, "Text box" panel opens); clicking the text glyphs also selects. `pointerEvents="all"` makes a no/transparent-fill box clickable across its whole area.
+- **Note:** the B142 *default-fill* case already worked before the fix (could not reproduce the original "nothing happens"); the fix hardens the no-fill case. A **signed-in** reload pass for the pond label persistence still rides on existing `el.det` persistence.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
