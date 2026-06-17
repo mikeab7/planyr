@@ -29,6 +29,7 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
+import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -505,16 +506,8 @@ function curbEdgesOf(el, allEls) {
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
 const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
 
-/* ----------------------- polygon split (parcels) ------------------- */
-// Intersection of segment p->q with the infinite line through A,B (if within pq).
-function segLineIntersect(p, q, A, B) {
-  const rx = q.x - p.x, ry = q.y - p.y, sx = B.x - A.x, sy = B.y - A.y;
-  const denom = rx * sy - ry * sx;
-  if (Math.abs(denom) < 1e-9) return null;
-  const t = ((A.x - p.x) * sy - (A.y - p.y) * sx) / denom;
-  if (t < -1e-9 || t > 1 + 1e-9) return null;
-  return { x: p.x + t * rx, y: p.y + t * ry };
-}
+/* ----------------------- geometry helpers -------------------------- */
+// Parcel split geometry (straight + bent cuts) lives in lib/polygonSplit.js, imported above.
 // Closest point on segment a-b to point p (used for snapping to a boundary).
 function nearestPointOnSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -522,75 +515,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-// Split a polygon along an open polyline cut (>=2 vertices). The first and last
-// vertices are projected onto the nearest polygon edge (the entry/exit points);
-// interior vertices bend the cut across the interior. Returns [ringA, ringB] or null.
-function splitPolygonPath(points, path) {
-  const n = points.length;
-  if (path.length < 2) return null;
-  // nearest polygon edge (+ projected point) for an endpoint
-  const projectToEdge = (pt) => {
-    let best = null;
-    for (let i = 0; i < n; i++) {
-      const proj = nearestPointOnSeg(pt, points[i], points[(i + 1) % n]);
-      const d = (proj.x - pt.x) ** 2 + (proj.y - pt.y) ** 2;
-      if (!best || d < best.d) best = { edge: i, point: proj, d };
-    }
-    return best;
-  };
-  const inHit = projectToEdge(path[0]);
-  const outHit = projectToEdge(path[path.length - 1]);
-  if (!inHit || !outHit || inHit.edge === outHit.edge) return null;
-  const interior = path.slice(1, -1); // oriented path[0] -> path[last]
-  let a1, a2, midPath;
-  if (inHit.edge < outHit.edge) { a1 = inHit; a2 = outHit; midPath = interior; }
-  else { a1 = outHit; a2 = inHit; midPath = interior.slice().reverse(); }
-  const polyA = [a1.point];
-  for (let k = a1.edge + 1; k <= a2.edge; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point, ...midPath.slice().reverse());
-  const polyB = [a2.point];
-  for (let k = a2.edge + 1; k <= a1.edge + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point, ...midPath);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
-}
-
-// Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
-function splitPolygon(points, A, B) {
-  const n = points.length;
-  const dx = B.x - A.x, dy = B.y - A.y, denom2 = dx * dx + dy * dy || 1;
-  const hits = [];
-  for (let i = 0; i < n; i++) {
-    const inter = segLineIntersect(points[i], points[(i + 1) % n], A, B);
-    if (inter) hits.push({ i, point: inter, t: ((inter.x - A.x) * dx + (inter.y - A.y) * dy) / denom2 });
-  }
-  if (hits.length < 2) return null;
-  hits.sort((u, v) => u.t - v.t);
-  let lo = hits[0], hi = hits[hits.length - 1];
-  if (lo.i === hi.i) {
-    // The extreme-t crossings landed on the same edge (degenerate — e.g. the cut grazes
-    // a vertex) while valid interior crossings exist; fall back to the widest-t pair on
-    // DISTINCT edges instead of silently no-op'ing the split (B31).
-    let best = -1, pair = null;
-    for (let p = 0; p < hits.length; p++) for (let q = p + 1; q < hits.length; q++) {
-      if (hits[p].i === hits[q].i) continue;
-      const span = Math.abs(hits[q].t - hits[p].t);
-      if (span > best) { best = span; pair = [hits[p], hits[q]]; }
-    }
-    if (!pair) return null;
-    [lo, hi] = pair;
-  }
-  const a1 = lo.i < hi.i ? lo : hi, a2 = lo.i < hi.i ? hi : lo;
-  const polyA = [a1.point];
-  for (let k = a1.i + 1; k <= a2.i; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point);
-  const polyB = [a2.point];
-  for (let k = a2.i + 1; k <= a1.i + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
 }
 
 /* ----------------------- polygon union (combine) ------------------- */
@@ -1577,7 +1501,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
   // polyline of >=2 points. Two points cut along the infinite line through them
-  // (the original behaviour); 3+ points bend the cut through the interior.
+  // (a straight cut — concave lots can yield more than two pieces); 3+ points
+  // bend the cut through the interior.
   const performSplit = (path) => {
     // Drop consecutive coincident points (a finishing double-click adds the last twice).
     const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
@@ -1586,25 +1511,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
       : parcels;
     for (const pc of ordered) {
-      const halves = pts.length === 2
-        ? splitPolygon(pc.points, pts[0], pts[1])
-        : splitPolygonPath(pc.points, pts);
-      if (halves) {
-        // Concave-cut guard: if the two pieces don't conserve the original area (they overlap or
-        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a warning
-        // instead of saving corrupted geometry that throws off every downstream yield number.
-        const whole = polyArea(pc.points), sum = polyArea(halves[0]) + polyArea(halves[1]);
-        if (polySelfIntersects(halves[0]) || polySelfIntersects(halves[1]) || Math.abs(sum - whole) > whole * 0.02 + 1) {
+      const pieces = pts.length === 2
+        ? splitPolygonByLine(pc.points, pts[0], pts[1])
+        : splitPolygonByPath(pc.points, pts);
+      if (pieces) {
+        // Backstop guard: if the pieces don't conserve the original area (they overlap or
+        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a
+        // warning instead of saving corrupted geometry that throws off every downstream
+        // yield number. A clean straight cut through a concave lot now produces all the
+        // real pieces (e.g. 3 for a U-shaped lot), which this still accepts.
+        const whole = polyArea(pc.points), sum = pieces.reduce((s, r) => s + polyArea(r), 0);
+        if (pieces.some(polySelfIntersects) || Math.abs(sum - whole) > whole * 0.02 + 1) {
           setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
           setTimeout(() => setOverlapWarn(""), 7000);
           return;
         }
         pushHistory();
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const a = { id: uid(), points: halves[0], locked: true, ...inherit };
-        const b = { id: uid(), points: halves[1], locked: true, ...inherit };
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
-        setSel({ kind: "parcel", id: a.id });
+        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, ...inherit }));
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
+        setSel({ kind: "parcel", id: made[0].id });
         return;
       }
     }
