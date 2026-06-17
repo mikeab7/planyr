@@ -98,6 +98,83 @@ export function createSiteModel(p = {}) {
 // just (re)normalizing is sufficient and lossless.)
 export const migrate = (record) => createSiteModel(record || {});
 
+/* ----------------------- cross-copy reconciliation -----------------------
+ * Combining TWO independent copies of the same site (the local cache + the cloud, or
+ * two devices) WITHOUT dropping drawn work. This is the data-loss cure: the old sync
+ * kept whichever whole record was saved last, so a thinner copy could erase a fuller
+ * one. These helpers union the copies by element id instead, so a building present in
+ * EITHER copy is always kept. */
+
+// Union two collections of objects by `id`: `primary` wins on id conflicts, then any
+// item from `secondary` whose id isn't already present is appended. Items with no id
+// are de-duped by value so none are lost or doubled.
+function unionById(primary, secondary) {
+  const out = [];
+  const ids = new Set();
+  const vals = new Set();
+  const take = (it) => {
+    if (!it || typeof it !== "object") return;
+    if (it.id != null) { if (ids.has(it.id)) return; ids.add(it.id); out.push(it); }
+    else { const k = JSON.stringify(it); if (vals.has(k)) return; vals.add(k); out.push(it); }
+  };
+  arr(primary).forEach(take);
+  arr(secondary).forEach((it) => { if (it && it.id != null && ids.has(it.id)) return; take(it); });
+  return out;
+}
+
+// If the chosen copy lost an inline image (it was stripped for the cloud) but the other
+// copy still has the real raster, carry it back — so a merge can't blank a drawing/aerial.
+function healSrc(chosen, other) {
+  const otherById = {};
+  for (const o of arr(other)) if (o && o.id != null) otherById[o.id] = o;
+  return arr(chosen).map((n) => {
+    if (n && n.id != null && (!n.src || n.strippedForCloud)) {
+      const o = otherById[n.id];
+      if (o && o.src && !o.strippedForCloud) return { ...n, src: o.src, strippedForCloud: false };
+    }
+    return n;
+  });
+}
+
+// Reconcile two copies of the SAME site without ever dropping drawn work: scalar/meta
+// fields come from the NEWER copy; every drawn collection is UNIONED by id, so a
+// building (or markup, parcel, measure, overlay, cross-section) in EITHER copy survives.
+// Trade-off: a delete made in only one copy can be undone if a stale copy still has the
+// item (recoverable — just delete again); we accept that over silently losing work.
+// Per-item tombstones are the fully-correct future hardening.
+export function mergeSiteContent(a, b) {
+  const A = createSiteModel(a || {});
+  const B = createSiteModel(b || {});
+  const newer = (A.updatedAt || 0) >= (B.updatedAt || 0) ? A : B;
+  const older = newer === A ? B : A;
+  const merged = {
+    ...newer,
+    parcels: unionById(newer.parcels, older.parcels),
+    els: unionById(newer.els, older.els),
+    markups: unionById(newer.markups, older.markups),
+    measures: unionById(newer.measures, older.measures),
+    callouts: unionById(newer.callouts, older.callouts),
+    sheetOverlays: healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays),
+    parcelDrawings: healSrc(unionById(newer.parcelDrawings, older.parcelDrawings), older.parcelDrawings),
+    elevation: { crossSections: unionById(
+      newer.elevation && newer.elevation.crossSections,
+      older.elevation && older.elevation.crossSections) },
+  };
+  // single-object underlay: keep the newer placement, but don't blank a real image with a stripped one
+  if (newer.underlay && (!newer.underlay.src || newer.underlay.strippedForCloud) &&
+      older.underlay && older.underlay.src && !older.underlay.strippedForCloud) {
+    merged.underlay = { ...newer.underlay, src: older.underlay.src, strippedForCloud: false };
+  }
+  return createSiteModel(merged);
+}
+
+// Cheap "how much drawn work is here" tally — used to tell when a merge produced MORE
+// than a copy had (so the fuller, merged result gets pushed back rather than stranded).
+export const contentCount = (m) =>
+  arr(m && m.els).length + arr(m && m.markups).length + arr(m && m.measures).length +
+  arr(m && m.callouts).length + arr(m && m.parcels).length +
+  arr(m && m.sheetOverlays).length + arr(m && m.parcelDrawings).length;
+
 /* --------------------------- selectors --------------------------- */
 const byKind = (markups, kinds) => (markups || []).filter((m) => kinds.includes(m.kind));
 

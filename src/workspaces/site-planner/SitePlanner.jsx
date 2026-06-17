@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
+import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -13,6 +14,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
   getLayerInfo,
@@ -31,6 +33,7 @@ import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers } from "./lib/siteModel.js";
 import { layoutLabels } from "./lib/labelLayout.js";
+import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -507,16 +510,8 @@ function curbEdgesOf(el, allEls) {
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
 const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
 
-/* ----------------------- polygon split (parcels) ------------------- */
-// Intersection of segment p->q with the infinite line through A,B (if within pq).
-function segLineIntersect(p, q, A, B) {
-  const rx = q.x - p.x, ry = q.y - p.y, sx = B.x - A.x, sy = B.y - A.y;
-  const denom = rx * sy - ry * sx;
-  if (Math.abs(denom) < 1e-9) return null;
-  const t = ((A.x - p.x) * sy - (A.y - p.y) * sx) / denom;
-  if (t < -1e-9 || t > 1 + 1e-9) return null;
-  return { x: p.x + t * rx, y: p.y + t * ry };
-}
+/* ----------------------- geometry helpers -------------------------- */
+// Parcel split geometry (straight + bent cuts) lives in lib/polygonSplit.js, imported above.
 // Closest point on segment a-b to point p (used for snapping to a boundary).
 function nearestPointOnSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -524,75 +519,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-// Split a polygon along an open polyline cut (>=2 vertices). The first and last
-// vertices are projected onto the nearest polygon edge (the entry/exit points);
-// interior vertices bend the cut across the interior. Returns [ringA, ringB] or null.
-function splitPolygonPath(points, path) {
-  const n = points.length;
-  if (path.length < 2) return null;
-  // nearest polygon edge (+ projected point) for an endpoint
-  const projectToEdge = (pt) => {
-    let best = null;
-    for (let i = 0; i < n; i++) {
-      const proj = nearestPointOnSeg(pt, points[i], points[(i + 1) % n]);
-      const d = (proj.x - pt.x) ** 2 + (proj.y - pt.y) ** 2;
-      if (!best || d < best.d) best = { edge: i, point: proj, d };
-    }
-    return best;
-  };
-  const inHit = projectToEdge(path[0]);
-  const outHit = projectToEdge(path[path.length - 1]);
-  if (!inHit || !outHit || inHit.edge === outHit.edge) return null;
-  const interior = path.slice(1, -1); // oriented path[0] -> path[last]
-  let a1, a2, midPath;
-  if (inHit.edge < outHit.edge) { a1 = inHit; a2 = outHit; midPath = interior; }
-  else { a1 = outHit; a2 = inHit; midPath = interior.slice().reverse(); }
-  const polyA = [a1.point];
-  for (let k = a1.edge + 1; k <= a2.edge; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point, ...midPath.slice().reverse());
-  const polyB = [a2.point];
-  for (let k = a2.edge + 1; k <= a1.edge + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point, ...midPath);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
-}
-
-// Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
-function splitPolygon(points, A, B) {
-  const n = points.length;
-  const dx = B.x - A.x, dy = B.y - A.y, denom2 = dx * dx + dy * dy || 1;
-  const hits = [];
-  for (let i = 0; i < n; i++) {
-    const inter = segLineIntersect(points[i], points[(i + 1) % n], A, B);
-    if (inter) hits.push({ i, point: inter, t: ((inter.x - A.x) * dx + (inter.y - A.y) * dy) / denom2 });
-  }
-  if (hits.length < 2) return null;
-  hits.sort((u, v) => u.t - v.t);
-  let lo = hits[0], hi = hits[hits.length - 1];
-  if (lo.i === hi.i) {
-    // The extreme-t crossings landed on the same edge (degenerate — e.g. the cut grazes
-    // a vertex) while valid interior crossings exist; fall back to the widest-t pair on
-    // DISTINCT edges instead of silently no-op'ing the split (B31).
-    let best = -1, pair = null;
-    for (let p = 0; p < hits.length; p++) for (let q = p + 1; q < hits.length; q++) {
-      if (hits[p].i === hits[q].i) continue;
-      const span = Math.abs(hits[q].t - hits[p].t);
-      if (span > best) { best = span; pair = [hits[p], hits[q]]; }
-    }
-    if (!pair) return null;
-    [lo, hi] = pair;
-  }
-  const a1 = lo.i < hi.i ? lo : hi, a2 = lo.i < hi.i ? hi : lo;
-  const polyA = [a1.point];
-  for (let k = a1.i + 1; k <= a2.i; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point);
-  const polyB = [a2.point];
-  for (let k = a2.i + 1; k <= a1.i + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
 }
 
 /* ----------------------- polygon union (combine) ------------------- */
@@ -767,6 +693,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
+  // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
+  // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
+  const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
+    roadAnchor = useRef(null), measureAnchor = useRef(null),
+    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null);
+  const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
+  const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
   // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
@@ -1060,6 +993,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
+  // True ONLY when a cloud write actually failed while signed in (not the normal logged-out
+  // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
+  // cloud save is never silent again (B125). Cleared on the next successful save.
+  const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -1077,11 +1014,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved")).catch(() => setSaveStatus("unsaved"));
-      else setSaveStatus("saved");
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
+  // Manual "Retry now" for the loud cloud-save-failure banner (B125).
+  const retryCloudSave = () => {
+    if (!siteId) return;
+    setSaveStatus("saving");
+    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
@@ -1106,6 +1049,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); };
   }, [siteId]); // eslint-disable-line
+  // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
+  // background storage event never yanks the canvas out from under an active edit.
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft); });
+  // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
+  // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
+  // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
+  useEffect(() => {
+    if (!siteId) return undefined;
+    const onStore = (e) => {
+      if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      if (busyRef.current) return;
+      const stored = loadSite(siteId);
+      if (!stored) return;
+      const live = liveRef.current || {};
+      const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
+      const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
+      const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
+      if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
+      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays);
+    };
+    window.addEventListener("storage", onStore);
+    return () => window.removeEventListener("storage", onStore);
+  }, [siteId]);
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
@@ -1567,7 +1535,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
   // polyline of >=2 points. Two points cut along the infinite line through them
-  // (the original behaviour); 3+ points bend the cut through the interior.
+  // (a straight cut — concave lots can yield more than two pieces); 3+ points
+  // bend the cut through the interior.
   const performSplit = (path) => {
     // Drop consecutive coincident points (a finishing double-click adds the last twice).
     const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
@@ -1576,25 +1545,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
       : parcels;
     for (const pc of ordered) {
-      const halves = pts.length === 2
-        ? splitPolygon(pc.points, pts[0], pts[1])
-        : splitPolygonPath(pc.points, pts);
-      if (halves) {
-        // Concave-cut guard: if the two pieces don't conserve the original area (they overlap or
-        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a warning
-        // instead of saving corrupted geometry that throws off every downstream yield number.
-        const whole = polyArea(pc.points), sum = polyArea(halves[0]) + polyArea(halves[1]);
-        if (polySelfIntersects(halves[0]) || polySelfIntersects(halves[1]) || Math.abs(sum - whole) > whole * 0.02 + 1) {
+      const pieces = pts.length === 2
+        ? splitPolygonByLine(pc.points, pts[0], pts[1])
+        : splitPolygonByPath(pc.points, pts);
+      if (pieces) {
+        // Backstop guard: if the pieces don't conserve the original area (they overlap or
+        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a
+        // warning instead of saving corrupted geometry that throws off every downstream
+        // yield number. A clean straight cut through a concave lot now produces all the
+        // real pieces (e.g. 3 for a U-shaped lot), which this still accepts.
+        const whole = polyArea(pc.points), sum = pieces.reduce((s, r) => s + polyArea(r), 0);
+        if (pieces.some(polySelfIntersects) || Math.abs(sum - whole) > whole * 0.02 + 1) {
           setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
           setTimeout(() => setOverlapWarn(""), 7000);
           return;
         }
         pushHistory();
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const a = { id: uid(), points: halves[0], locked: true, ...inherit };
-        const b = { id: uid(), points: halves[1], locked: true, ...inherit };
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
-        setSel({ kind: "parcel", id: a.id });
+        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, ...inherit }));
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
+        setSel({ kind: "parcel", id: made[0].id });
         return;
       }
     }
@@ -2644,8 +2614,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const along = ny !== 0 ? b.w : b.h;
     const half = (nx !== 0 ? b.w : b.h) / 2;
     const off = rot2(nx * (half + swDepth + parkDepth / 2), ny * (half + swDepth + parkDepth / 2), b.rot);
+    // First stall row hugs the building face, drive aisle on the OUTSIDE (B119): the
+    // strip's inner (local y=0) edge sits against the wall and carStalls lays the first
+    // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
+    // the building). growParking then extends rows outward, away from the wall.
     const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
     addBuildingEls([el], b.id);
   };
   // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
@@ -3113,6 +3087,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
+  // Version history (automatic local backups, B126): open the dialog with this plan's
+  // saved snapshots, and restore one into the canvas (which then autosaves as the newest
+  // version — and the thinner state it replaces is itself snapshotted, so a restore is
+  // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
+  const openVersionHistory = () => { setVersionList(listVersions(siteId)); setVersionsOpen(true); closeHdrMenus(); };
+  const restoreVersion = (at) => {
+    const v = getVersion(siteId, at);
+    if (!v) return;
+    pushHistory();
+    setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
+    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays);
+    setSel(null); setMulti([]); setVersionsOpen(false);
+  };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
@@ -3808,7 +3795,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "6px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? "#fff" : PAL.chromeInk,
@@ -4112,65 +4099,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 2 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
             {/* SITE ▾ — switch / rename location */}
-            <div style={{ position: "relative" }}>
+            <div ref={siteAnchor} style={{ position: "relative" }}>
               <button className="dbtn" style={hdrTab(12.5, "#fff", 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
               </button>
-              {siteMenu && (
-                <>
-                  <div onClick={() => setSiteMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                  <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 284, maxHeight: 460, overflowY: "auto", padding: 10 }}>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
-                    <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
-                    {siteReps.map((s) => {
-                      const cur = planGroup(s) === groupId;
-                      return (
-                        <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
-                          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
-                            {cur && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                      <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
-                    </div>
-                  </div>
-                </>
-              )}
+              <AnchoredMenu open={siteMenu} onClose={() => setSiteMenu(false)} anchorRef={siteAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
+                <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
+                {siteReps.map((s) => {
+                  const cur = planGroup(s) === groupId;
+                  return (
+                    <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
+                      <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
+                        {cur && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+                <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                  <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
+                </div>
+              </AnchoredMenu>
             </div>
             <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
             {/* PLAN ▾ — switch / rename / add layout */}
-            <div style={{ position: "relative" }}>
+            <div ref={planAnchor} style={{ position: "relative" }}>
               <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
               </button>
-              {planMenu && (
-                <>
-                  <div onClick={() => setPlanMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                  <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 284, maxHeight: 460, overflowY: "auto", padding: 10 }}>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
-                    <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
-                    {plansHere.map((s) => (
-                      <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => (s.id === siteId ? setPlanMenu(false) : handleOpenSite(s.id))}>
-                        <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
-                          {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                        </span>
-                      </button>
-                    ))}
-                    <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                      <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
-                      <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
-                    </div>
-                  </div>
-                </>
-              )}
+              <AnchoredMenu open={planMenu} onClose={() => setPlanMenu(false)} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
+                <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
+                {plansHere.map((s) => (
+                  <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => (s.id === siteId ? setPlanMenu(false) : handleOpenSite(s.id))}>
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
+                      {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                    </span>
+                  </button>
+                ))}
+                <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                  <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
+                  <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
+                </div>
+                <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
+                  title="Restore an earlier automatically-saved version of this plan">
+                  <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
+                </button>
+              </AnchoredMenu>
             </div>
           </span>
         </div>
@@ -4215,26 +4196,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </span>
           );
         })()}
+        {/* LOUD cloud-save-failure banner (B125) — a failed cloud write is no longer a
+            silent tiny badge. Honest: the work is safe on this device and will retry. */}
+        {cloudSaveFailed && (
+          <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+            <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+            <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
+            <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          </div>
+        )}
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <div style={{ position: "relative" }}>
+          <div ref={exportAnchor} style={{ position: "relative" }}>
             <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>File ▾</button>
-            {exportMenu && (
-              <>
-                <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 220 }}>
-                  <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
-                  <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
-                  <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-                    onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
-                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
-                </div>
-              </>
-            )}
+            <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+              <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
+              <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+              <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+              <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+              <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+              <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+              <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
+            </AnchoredMenu>
           </div>
         </div>
       </div>
@@ -4982,7 +4967,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
         <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px",
-          overflowY: narrow ? "auto" : "visible",
+          overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,
           transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
@@ -4992,21 +4977,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
-          <div style={{ position: "relative" }}>
+          <div ref={boundaryAnchor} style={{ position: "relative" }}>
             <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
-            {toolMenu && (
-              <>
-                <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
-                  <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-                  <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-                  <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
-                    <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
-                    <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
-                  </div>
-                </div>
-              </>
-            )}
+            <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
+              <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
+              <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
+                <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
+              </div>
+            </AnchoredMenu>
           </div>
 
           {railHdr("Site elements")}
@@ -5016,75 +4996,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             if (id === "building") {
               const dockLabel = { single: "single-load", cross: "cross-dock", none: "no docks" }[buildingDock];
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={buildingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("building")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="building" /> Building</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{dockLabel}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="building" /> Building</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{dockLabel}</span>
                     </button>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
                   </div>
-                  {buildingMenu && (
-                    <>
-                      <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 200 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
-                        {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                          <button key={k} style={menuItem(buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={buildingMenu} onClose={() => setBuildingMenu(false)} anchorRef={buildingAnchor} placement="left" width={200} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
+                    {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                      <button key={k} style={menuItem(buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
             if (id === "parking") {
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Car Parking</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="parking" /> Car Parking</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
                     </button>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
                   </div>
-                  {parkingMenu && (
-                    <>
-                      <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
-                        {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
-                          <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={parkingMenu} onClose={() => setParkingMenu(false)} anchorRef={parkingAnchor} placement="left" width={248} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
+                    {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
+                      <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
             if (id === "road") {
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="road" /> Road</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="road" /> Road</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
                   </div>
-                  {roadMenu && (
-                    <>
-                      <div onClick={() => setRoadMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
-                        <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={roadMenu} onClose={() => setRoadMenu(false)} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
+                    <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
+                    {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
+                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
@@ -5094,8 +5059,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
             return (
               <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id={id} /> {t.label}</span>
-                {sub && <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{sub}</span>}
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id={id} /> {t.label}</span>
+                {sub && <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{sub}</span>}
               </button>
             );
           })}
@@ -5110,25 +5075,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {railHdr("Measure")}
 
           {/* measure with line / polyline / area modes */}
-          <div style={{ position: "relative" }}>
+          <div ref={measureAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="measure" /> Measure</span>
-                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureModeLabel(measureMode)}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="measure" /> Measure</span>
+                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{measureModeLabel(measureMode)}</span>
               </button>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
             </div>
-            {measureMenu && (
-              <>
-                <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-                  {MEASURE_MODES.map(([k, label]) => (
-                    <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
-                  ))}
-                </div>
-              </>
-            )}
+            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="left" width={230} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
+              {MEASURE_MODES.map(([k, label]) => (
+                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
+              ))}
+            </AnchoredMenu>
           </div>
 
           {railHdr("Annotate")}
@@ -5854,6 +5814,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+      {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {versionsOpen && (
+        <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
+              <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.5, marginBottom: 12 }}>
+              Automatic backups of this plan, saved on this device. Restore one to bring it back — your current version is backed up too, so a restore can be undone. (Aerials / backdrop images may need re-dropping.)
+            </div>
+            {versionList.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: PAL.muted, padding: "10px 0" }}>No earlier versions saved yet. As you edit, recent versions are backed up here automatically.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {versionList.map((v) => {
+                  const d = new Date(v.at);
+                  const when = isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                  return (
+                    <div key={v.at} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 9 }}>
+                      <span style={{ fontSize: 12.5, color: PAL.ink }}>
+                        <span style={{ fontWeight: 650 }}>{when}</span>
+                        <span style={{ color: PAL.muted }}> · {v.buildings} building{v.buildings === 1 ? "" : "s"}</span>
+                      </span>
+                      <button style={{ ...chip, flex: "none" }} onClick={() => restoreVersion(v.at)} title="Replace the canvas with this saved version">Restore</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

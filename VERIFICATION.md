@@ -210,7 +210,117 @@ was never clicked" quietly ships broken.
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V13 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **Why this matters:** this is the fix for the owner-reported data-loss scare — work vanishing on its
+  own a couple minutes after a reload. Root cause: `pullCloud` rebuilt the local cache from the cloud
+  list **alone** and silently dropped any not-yet-synced local site; the resume then couldn't find the
+  open site and bounced to the map. Confirm in a real browser that saved work is now durable.
+- **Steps (signed in, on planyr.io):**
+  1. Sign in. Open or create a site, add a **building**; wait for the header badge to read **"Synced ✓"**.
+  2. **Reload** → you **resume straight into the planner** on that site (NOT bounced to the map) and the
+     building is still there.
+  3. **Switch to another browser tab for ~2–3 minutes, then return** (refocus the Planyr tab) → the site
+     + building must **still be there** and you are **not** bounced to the map. (This is the exact
+     "disappears on its own" trigger — a background re-sign-in event firing the cloud re-pull.)
+  4. **Forced not-yet-synced repro (DevTools):** Network tab → **Offline**. Add another building → a
+     **loud red banner** ("your last change didn't reach the cloud … **Retry now**") appears and the badge
+     reads Offline/Unsaved. **Reload while still offline** → the building is **still there** (not dropped).
+     Go back **Online** → it syncs (badge → "Synced ✓") and the red banner clears.
+  5. **On-device → account bridge:** while **signed out**, create a site (saved on this device only).
+     **Sign in** → a blue banner "You have N site(s) saved on **this device** that aren't in your account
+     yet" appears; click **"Bring them into my account"** → the site joins the account list and the banner
+     clears. The signed-out copy is **kept** (non-destructive).
+- **Expect:** work **never disappears on its own**; reload resumes the open site; a failed cloud save is
+  **loud** (red banner + Retry), never silent; the on-device import copies sites into the account without
+  deleting the originals. No data is lost across reload, tab-refocus, offline, or sign-in/out.
+- **If it fails:** this is the one **CRITICAL** class — if saved work still vanishes, flag it immediately
+  (note the exact step + the browser console), don't just log-and-move-on.
+
+### V14 — Draw-tool rail: scrolls to the bottom on desktop + denser rows (B117 / B118) ⏳
+- **Added** 2026-06-16 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner on a normal laptop-height window (a ~13–15″ screen is the case
+  that overflowed — not a tall external monitor). Look at the dark right-hand tool rail (**Tools / Site
+  elements / Shapes / Measure / Annotate**). (1) **Reach the bottom (B117):** scroll the rail → expect it to
+  scroll cleanly all the way to the last row, so the **Shapes** group and **Measure / Annotate** below it are
+  reachable; nothing is stranded off-screen with no scrollbar. (2) **Density (B118):** the two-line buttons
+  (Building / Car Parking / Road / Paving / Trailer Parking / Detention Pond, plus Measure) read tighter —
+  less vertical padding and the small grey sub-label ("single-load", "drive / court", "24′ travel",
+  "back-in storage", "detention basin") one step smaller — and the whole **Site elements** group should now
+  fit without scrolling on a standard laptop.
+- **Expect:** every tool in the rail is reachable at any window height; the rail reads as one consistent,
+  denser column with rows still comfortably clickable (~40px); the **▾** preset menus (dock layout / parking
+  rows / road width / measure mode) still open and pick correctly. The phone layout (narrow width, B113) is
+  unchanged — the rail still slides in as an overlay there.
+- **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
+
+### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **▶ Full step-by-step script:** **`PERSISTENCE_TEST_SCRIPT.md`** (T1–T11, with paste-in Console helpers and a results table) — run that end-to-end and record the outcome back here. The summary below is the short form.
+- **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
+  site because sync kept whichever whole copy was saved last — so a copy with fewer buildings could overwrite
+  a fuller one (a stale tab, a second device, a hiccup mid-load). B126 makes sync **merge** the two copies
+  (every building in either is kept) and adds **automatic local backups** you can restore from.
+- **Steps (signed in, on planyr.io):**
+  1. **Merge keeps both (two-tab test — the headline):** open the same site in **two browser tabs**. In tab A
+     add **building X**; in tab B (don't reload it) add **building Y**. Let both reach **"Synced ✓"**.
+     **Reload both tabs** → **both X and Y are present** in each — neither tab's copy erased the other's.
+  2. **Version history restore:** **Plan ▾ → Version history…** → a dialog lists earlier automatic backups
+     (timestamp · N buildings). Click **Restore** on an earlier one → the canvas returns to that version and
+     re-saves. Re-open Version history → the version you just replaced is now **also** listed (a restore is
+     itself reversible).
+  3. **De-dupe sanity:** make a few edits that change the building/element count → each appears as its own
+     version; a pure move (no count change) does **not** spam a new version.
+- **Expect:** a building drawn in any copy is **never lost to a sync**; the count never silently drops; Version
+  history lists and restores prior versions, reversibly. (Backdrop aerials/images may need re-dropping after a
+  restore — geometry is always restored in full.)
+- **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
+  immediately with the exact step + browser console; do **not** log-and-move-on.
+- **Update 2026-06-16 (B127):** the first run found **no data loss** but one rough edge — two open tabs
+  could **disagree until reload** (the durable store briefly held the thinner copy). That's now **fixed**:
+  a stale tab's save **folds into** the store (never thins it) and open tabs **live-sync** via `storage`
+  events. **Re-run T5/T6 to confirm:** (a) after the two-tab divergent edits, **both tabs converge while
+  still open** (no reload needed), and (b) the durable `sites:v1` always holds the **union** (never the
+  thinner copy), so any reload shows the full set.
+
+### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ⏳
+- **Added** 2026-06-17 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Why:** the Measure mode menu (and the other rail/header flyouts) used to paint **behind / clipped by** the
+  tool rail after B117 made the rail scroll (`overflow:auto`). Fix = render every such menu in a **portal** at the
+  document root (`src/shared/ui/AnchoredMenu.jsx`), so it escapes the rail's clipping + stacking context. Needs a
+  real browser to confirm it now floats above everything and still picks correctly.
+- **Steps (planyr.io, desktop):** Open a site in the Site Planner.
+  1. **Measure ▾** (the caret next to the Measure tool's mode label) → the menu opens **fully visible**, above the
+     rail **and** above the map's +/– zoom-control rail to its left; **Length / Polylength / Area** are all clickable
+     and selecting one updates the tool's sub-label. (This is the exact NEW-3 repro.)
+  2. Repeat for the other rail flyouts — **Boundary ▾**, **Building ▾** (dock layout), **Car Parking ▾** (rows),
+     **Road ▾** (width): each opens to the left of the rail, fully on-screen, nothing clipped; picking an option works.
+  3. Header menus — **Site ▾**, **Plan ▾**, **File ▾**: each opens below its button, fully visible above the canvas;
+     typing in the Site/Plan **name field** still works (focus lands in the input); **File ▾ → Import JSON…** still
+     opens the file picker.
+  4. **Click-away + scroll:** clicking anywhere off an open menu closes it; with a menu open, the rail can't be left in
+     a half-open state. On a **short laptop-height window**, the menus still land on-screen (clamped into the viewport),
+     not cut off at the top/bottom.
+  5. **Phone width (~390px):** open the slide-in tool rail (✎ Tools) → Measure ▾ still opens above everything and is
+     usable.
+- **Expect:** no dropdown is ever clipped or hidden behind the rail / zoom rail; all open above the map; every option
+  selects; placement + widths look the same as before (just no longer cut off).
+- **If it fails:** not critical (no data risk) — log ❌ here with the menu, window size, and what was clipped/mispositioned.
+
+### V17 — Parking hugs the building: orientation + outward growth (B119 / B120) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site, draw a **building**, select it, and add a **parking** row on one side (the
+  per-side "add parking" control). (1) **Orientation (B119):** the **first stall row should sit directly
+  against the building face**, with the **24′ drive aisle on the outside** (not the aisle against the
+  wall). (2) **Growth (B120):** press the parking **＋** repeatedly — the field should grow **outward,
+  away from the building**, one row at a time, depth reading **42 → 60 → 102 → 120 → 162 → 180′**
+  (double-loads the aisle before adding a new one); **−** reverses it. (3) The element panel's **"Drive
+  aisle on the far side"** checkbox should start **checked** and still flip the layout if unticked.
+- **Expect:** stalls hug the wall, aisle outboard, field grows away from the building, +/− steps match the
+  sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
 - **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
   (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
@@ -226,7 +336,7 @@ was never clicked" quietly ships broken.
   their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V14 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
+### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
 - **Steps:** Open a site and lay out adjacent elements (a big building, a narrow trailer strip beside it,
   a detention pond, a couple of sidewalks). (1) **Zoomed in:** each element shows its full centred label

@@ -8,7 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate } from "./siteModel.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList } from "./cloudSync.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -19,13 +19,45 @@ let activeUser = null;
 export function setActiveUser(uid) { activeUser = uid || null; }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
+// Pure merge of the local cache with the cloud's records (exported for tests).
+// CRITICAL (B124/B126 data-loss fix): build from the LOCAL cache first (so a site the
+// cloud didn't return is PRESERVED, never dropped — B124), and reconcile a site present
+// in BOTH copies with a CONTENT MERGE (mergeSiteContent), not whole-record newer-wins.
+// The old newer-wins let a thinner copy silently erase a fuller one — a building added
+// in one copy vanished when a copy with fewer buildings happened to be saved last (a
+// stale tab, a second device, a hiccup mid-load). The union keeps every building present
+// in EITHER copy; scalar/meta come from the newer side. (B126)
+// `toPush` = ids the cloud is missing, has an OLDER copy of, or now has LESS content than
+// the merged result — re-push so a building kept from the local side actually reaches the
+// cloud instead of being stranded on one device.
+// (Trade-off: a delete made in only one copy can reappear once if a stale copy still has
+// it — recoverable by deleting again; silently losing work is not. Per-item tombstones
+// are the fully-correct follow-up. The new local version history makes any surprise
+// recoverable in the meantime — see BACKLOG B126.)
+export function mergePulledSites(existing, cloudModels) {
+  const map = {};
+  for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
+  const cloudAt = {};
+  const cloudCount = {};
+  for (const m of (cloudModels || [])) {
+    const n = createSiteModel(m); if (!n.id) continue;
+    cloudAt[n.id] = n.updatedAt || 0;
+    cloudCount[n.id] = contentCount(n);
+    const local = map[n.id];
+    map[n.id] = local ? mergeSiteContent(local, n) : n; // content-union — never drop drawn work
+  }
+  const toPush = Object.keys(map).filter((id) =>
+    !(id in cloudAt) ||
+    (map[id].updatedAt || 0) > cloudAt[id] ||
+    contentCount(map[id]) > (cloudCount[id] || 0));
+  return { map, toPush };
+}
+
 // Pull the signed-in user's sites from the cloud into their local cache. Returns
 // { ok, count, error }; on a failed fetch it returns { ok:false } WITHOUT touching the
 // cache, so a transient/offline error can't wipe the user's last-known sites (B54). On
-// success it keeps a local copy that's strictly NEWER than the cloud's — an edit made
-// in the last moment before close that the debounced push didn't land (B18). That merge
-// is intentionally limited to records the cloud STILL returns, so a record deleted on
-// another device is not resurrected; the next edit re-pushes the kept-local copy.
+// success it MERGES (see mergePulledSites): local-only work is kept + re-pushed, never
+// dropped (B124); cloud edits overlay newer-wins.
 export async function pullCloud(uid) {
   let models;
   try {
@@ -35,16 +67,70 @@ export async function pullCloud(uid) {
   }
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const map = {};
-  for (const m of models) {
-    const norm = createSiteModel(m); if (!norm.id) continue;
-    const local = existing[norm.id];
-    map[norm.id] = (local && (local.updatedAt || 0) > (norm.updatedAt || 0)) ? createSiteModel(local) : norm;
-  }
+  const { map, toPush } = mergePulledSites(existing, models);
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
+  // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
+  for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
   return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
+
+// Read the on-device (logged-out / "legacy") store DIRECTLY, regardless of who's
+// signed in. Read-only. Used to surface "you have sites saved on this device that
+// aren't in your account yet" and to copy them up. Normalized Site Models, newest
+// first. (The signed-in store is the per-user cloud cache; these two never auto-merge,
+// which is why local-only work can look "missing" once you sign in.)
+export function legacySitesList() {
+  let obj = {};
+  try { obj = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  return Object.values(obj).map(migrate).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+// One-time, NON-DESTRUCTIVE consolidation: copy every on-device (legacy) site into the
+// signed-in user's cloud store (local cache + Supabase). The originals are KEPT in the
+// legacy store — nothing is moved or deleted — so a partial failure can never lose work.
+// A site already in the cloud is overwritten only when the local copy is strictly newer
+// (the same newer-wins rule pullCloud uses). Each site is staged into the cloud cache so
+// it shows immediately; a failed push is reported (count) and re-pushes on the next edit.
+// Returns { copied, skipped, failed }.
+export async function importLegacyIntoCloud(uid) {
+  if (!uid) return { copied: 0, skipped: 0, failed: 0, error: "not signed in" };
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const ids = Object.keys(legacy);
+  if (!ids.length) return { copied: 0, skipped: 0, failed: 0 };
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  let copied = 0, skipped = 0, failed = 0;
+  for (const id of ids) {
+    const local = createSiteModel(legacy[id]);
+    if (!local.id) { skipped++; continue; }
+    const existing = cloud[local.id];
+    if (existing && (existing.updatedAt || 0) >= (local.updatedAt || 0)) { skipped++; continue; } // cloud already same/newer
+    cloud[local.id] = local;                  // stage into the cloud cache so it's visible right away
+    const r = await cloudUpsert(uid, local);  // and persist to Supabase
+    if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
+  }
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return { copied, skipped, failed };
+}
+
+// How many on-device (legacy) sites are NOT yet represented in the signed-in user's
+// cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
+export function pendingLegacyCount(uid) {
+  if (!uid) return 0;
+  let legacy = {}, cloud = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  let n = 0;
+  for (const [id, rec] of Object.entries(legacy)) {
+    const cur = cloud[id];
+    const lAt = (rec && rec.updatedAt) || 0;
+    if (!cur || (cur.updatedAt || 0) < lAt) n++;
+  }
+  return n;
+}
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {
@@ -82,6 +168,63 @@ export function saveAutosave(state) {
     }
   }
 }
+
+/* ---- Local version history (automatic backups) ---------------------------
+ * Every save snapshots the PRIOR stored version of a site into a small, local-only ring
+ * buffer, so a bad/thin overwrite is always recoverable — the data-loss safety net
+ * (B126). Snapshots are slimmed (big inline rasters dropped — geometry is what we
+ * protect; images re-drop) and capped per site. Never pushed to the cloud. */
+const HISTORY_KEY = "planarfit:sites:history:v1";
+const HISTORY_PER_SITE = 15;
+const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
+// Drop big inline image rasters from a snapshot (keep placement + every bit of geometry).
+function slimForHistory(m) {
+  let s = m;
+  if (s.underlay && isDataUrl(s.underlay.src)) s = { ...s, underlay: { ...s.underlay, src: null, strippedForCloud: true } };
+  if (Array.isArray(s.sheetOverlays) && s.sheetOverlays.some((o) => o && isDataUrl(o.src)))
+    s = { ...s, sheetOverlays: s.sheetOverlays.map((o) => (o && isDataUrl(o.src) ? { ...o, src: null, strippedForCloud: true } : o)) };
+  if (Array.isArray(s.parcelDrawings) && s.parcelDrawings.some((d) => d && isDataUrl(d.src)))
+    s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && isDataUrl(d.src) ? { ...d, src: null, strippedForCloud: true } : d)) };
+  return s;
+}
+const historyAll = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch (_) { return {}; } };
+function writeHistoryAll(h) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); return true; }
+  catch (_) { // over quota — keep only the newest few per site and retry
+    try { const t = {}; for (const [id, list] of Object.entries(h)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); return true; }
+    catch (_2) { return false; }
+  }
+}
+// Shape signature — counts of each drawn collection. A content DROP always changes it
+// (fewer items), so the pre-drop version is always captured; an identical-shape save
+// (e.g. a pure move) is de-duped so the ring stays meaningful.
+const sigOf = (m) => [m.els, m.markups, m.measures, m.callouts, m.parcels, m.sheetOverlays, m.parcelDrawings]
+  .map((a) => (a && a.length) || 0).join("/");
+const mainBuildingCount = (m) =>
+  (Array.isArray(m.els) ? m.els : []).filter((e) => e && e.type === "building" && !e.attachedTo && !e.dogEar).length;
+// Snapshot a version (the record about to be overwritten) into the ring buffer.
+export function snapshotVersion(model) {
+  if (!model || !model.id) return;
+  const m = createSiteModel(model);
+  if (!contentCount(m) && !m.underlay) return; // never snapshot an empty record
+  const all = historyAll();
+  const list = all[m.id] || [];
+  const sig = sigOf(m);
+  if (list[0] && list[0].sig === sig) return; // same shape as the newest snapshot → skip churn
+  list.unshift({ at: m.updatedAt || Date.now(), sig, buildings: mainBuildingCount(m), name: m.name || null, site: m.site || null, model: slimForHistory(m) });
+  all[m.id] = list.slice(0, HISTORY_PER_SITE);
+  writeHistoryAll(all);
+}
+// Versions available to restore for a site (newest first; lightweight metadata only).
+export function listVersions(id) {
+  return (historyAll()[id] || []).map((v) => ({ at: v.at, buildings: v.buildings, sig: v.sig }));
+}
+// The full saved snapshot for one version (normalized Site Model), or null.
+export function getVersion(id, at) {
+  const v = (historyAll()[id] || []).find((x) => x.at === at);
+  return v ? createSiteModel(v.model) : null;
+}
+export function clearHistory(id) { const all = historyAll(); if (id && id in all) { delete all[id]; writeHistoryAll(all); } }
 
 export const storage = {
   async list(prefix = "") {
@@ -208,12 +351,34 @@ export function renameSiteGroup(groupId, site) {
 // loadSite returns the canonical Site Model (migrated/normalized); saveSite merges
 // the partial onto the existing record and normalizes it back through the schema,
 // so storage is a thin persistence layer over the model.
-export function loadSite(id) { const rec = id ? readSites()[id] : null; return rec ? migrate(rec) : null; }
+// Per-TAB memory of the updatedAt this tab last loaded/wrote per site. Lets saveSite tell
+// "I'm the current writer" (replace — so deletes stick) from "another tab advanced the store
+// since I last synced" (fold my change in — so a stale tab can't thin it, B127). Each browser
+// tab is its own JS module instance, so this map is naturally per-tab.
+const lastSeenAt = {};
+export function loadSite(id) {
+  const rec = id ? readSites()[id] : null;
+  if (!rec) return null;
+  const m = migrate(rec);
+  lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
+  return m;
+}
 export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
-  const merged = { ...(sites[partial.id] || {}), ...partial };
-  sites[partial.id] = { ...createSiteModel(merged), updatedAt: Date.now() };
+  const existing = sites[partial.id];
+  let merged = { ...(existing || {}), ...partial };
+  // Cross-tab guard (B127): if the stored record is NEWER than what THIS tab last saw, another
+  // tab wrote in between — fold our change ON TOP of the store's content (union) instead of a
+  // blind overwrite, so a stale tab can't drop the other tab's work. A single-tab writer always
+  // matches (no fold → plain replace → deletes still stick).
+  if (existing && (existing.updatedAt || 0) > (lastSeenAt[partial.id] || 0)) {
+    merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
+  }
+  if (existing) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126)
+  const model = { ...createSiteModel(merged), updatedAt: Date.now() };
+  sites[partial.id] = model;
+  lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);
 }
 export function deleteSite(id) {
