@@ -634,4 +634,14 @@ _Move items here with the date and who/what checked them._
 - **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
 - **Steps:** "Start blank" → Road tool (free draw) → dragged a road rectangle → selected it → read the red dimension → dragged the bottom-right corner handle straight down to widen the road → re-read the dimension.
 - **Result ✅:** the red travel-width callout updated **live from 170′ → 428′** as the road was widened (before the fix it read a frozen `travelW` and stayed at 170′), and the value is a clean integer (1′ steps). Backed by the `roadTravelWidth` unit test · lint 0 · 205 tests · build green.
-- **Not covered:** the interactive move/edit of the callout (B146 increment 2) isn't built yet; a signed-in cloud-reload pass is untested (logged-out run).
+- **Not covered:** a signed-in cloud-reload pass is untested (logged-out run). *(Increment 2 — the interactive move/edit — is now built + verified; see V36.)*
+
+### V36 — Interactive dimension callouts: drag to move + click road number to edit width (B146 increment 2) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once (feature acceptance)
+- **Steps:** "Start blank" → drew a building, selected it, grabbed its red dimension and dragged it up out of the shape; then drew a road, selected it, clicked the red travel-width **number** and accepted the prompt with a new value.
+- **Result ✅:**
+  - **Auto-declutter:** the dimension number renders OUTBOARD of its line, clear of the centred "Building N / sf / dims" label (no more red number printing over the sq-ft).
+  - **Drag-to-move:** the building's **"314′"** dimension dragged freely up out of the shape, leaving a **dashed red leader** pointing back to the edge it measures; the offset persists on the element.
+  - **Click-to-edit road width:** clicking the road's **"199′"** number opened the prompt (seeded "199"); entering **30** resized the road to a **30′** travel width and the callout updated to "30′".
+  - lint 0 · 223 tests · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered / polish:** the width editor is a native `prompt()` (an inline on-canvas input is a future nicety); signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence).
