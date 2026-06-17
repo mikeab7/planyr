@@ -10,17 +10,30 @@ was never clicked" quietly ships broken.
 > **This is the runtime counterpart to `BACKLOG.md`.** An item can be `[x]` done in the
 > backlog and still ⏳ unverified here — the code landed; the click-through hasn't.
 
+> ## ⚠️ Testing policy (2026-06-16, standing — read this)
+> **Michael does NOT click through to test things himself. Ever.** Don't wait on him, don't ask
+> him to verify, don't end a turn expecting him to go look. Live verification is **delegated to the
+> Claude cohort** (browser-capable Claude sessions running `/verify` or `/run`). The working rhythm:
+> - After a change is **CI-green + build-green**, the **default is to move on.** Log anything that
+>   needs a real browser as an item below for the cohort to pick up — that's all the follow-up needed.
+> - **Do NOT surface "these N are unverified" to Michael as a to-do for him.** File them here instead.
+> - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
+>   (blank screen), or a shipped feature is visibly crashing in production. Everything else: note it
+>   here, keep moving.
+
 ---
 
 ## How to use this — Claude Code / coworkers, read on every run
 
-1. **Scan the 🔲 list below.** Surface to the user every item that is **⏳ unverified** or
-   **due** (today is on/after its `Next check`). A one-line "these N are due" is enough.
+1. **Scan the 🔲 list below.** This is the **Claude cohort's** queue — items here are waiting for a
+   browser-capable session to verify. Per the testing policy above, do **not** hand this list to
+   Michael as his to-do; only escalate a **critical** (won't build / won't render / crashing) issue.
 2. **If you have a browser** (the `/verify` or `/run` skill, or any runtime): run the
    **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a
-   note), set `Last checked`, and bump `Next check` by the `Cadence`.
-3. **If you have no browser:** just *remind*. Do **not** mark anything ✅ from reading the
-   code — confirming-in-the-running-app is the entire point of this file.
+   note), set `Last checked`, and bump `Next check` by the `Cadence`. This is the cohort's job.
+3. **If you have no browser:** **just leave the item logged here for the cohort and move on** — don't
+   block on Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app
+   is the entire point of this file.
 4. **Endpoint-liveness items (tagged 🌐) are the exception** — they're a `curl`/REST probe,
    runnable from any session *without* a browser. Run those when due.
 5. Keep it honest: a ❌ stays ❌ with the date and what broke until it's re-fixed and re-run.
@@ -89,6 +102,25 @@ was never clicked" quietly ships broken.
 - **Expect:** No repeated white flash between frames (the paper backdrop holds). A partial
   fix shipped UNVERIFIED; if it persists, re-enable zoom animation / double-buffer next.
 
+### V8 — UI/UX overhaul batch: parcel state + chrome (B97–B107) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- Shipped code-verified + build-green, NOT browser-checked. Cohort to confirm each in the running app:
+  - **B100 active/inactive** — in the planner, select a parcel → Parcel panel → **◯ Inactive**; expect it
+    to render **dimmed + dashed**, drop out of Site area / coverage / FAR / detention, and the Yield panel
+    to read "Excludes 1 inactive parcel." Toggle back to **✓ Active** restores it. New parcels start Active.
+  - **B99 lock** — the always-on 🔒 badge is gone from the saved-parcel list; Lock/Unlock still works from
+    the Parcel panel and a locked parcel can't be dragged/reshaped.
+  - **B97 layers panel** — on map + planner, the **Map layers / Utility evidence / jurisdiction** group
+    headers collapse on click (chevron + "N on" count), state persists across reload; panel fits without
+    scrolling.
+  - **B106 sites panel** — "Your sites · N" header collapses (persists); per-row **crosshair + delete
+    reveal on hover** (no always-on ✕); delete still asks to confirm; zero-count status chips are hidden.
+  - **B104 map header** — only **one** "Site Planyr" brand shows (shell header); the map bar reads
+    "Find a site" + search + Start blank, no duplicate lockup.
+  - **B105 hint** — the "Drag to move the map" card appears once, dismisses with ✕, and stays gone on reload.
+  - **B107 left tabs** — order reads **Yield · Parcel · Element · Aerial · Overlay · Setup**.
+- **If any fails:** none are critical (no data risk) — log ❌ here with what looked wrong; fixes are small.
+
 ### V7 — 🌐 GIS endpoint liveness (no browser needed) ✅
 - **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (all 4 → HTTP 200 + fields: county 12 / city 11 / etj 6 / road 133) · **Next check** 2026-07-16
 - **Steps (any session, curl):** probe each source root for HTTP 200 + JSON:
@@ -99,33 +131,241 @@ was never clicked" quietly ships broken.
 - **Expect:** all 200 with a `fields` array. County/city GIS hosts move occasionally — if one
   404s/moves, re-point its row in `src/workspaces/site-planner/lib/jurisdiction.js`.
 
-### V8 — Cached vector FEMA/NWI layers draw + image fallback (B96 follow-on, piece 2) ⏳
+### V9 — Attach & mark up a drawing on a parcel (B67) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
-- **Steps:** On planyr.io, zoom to a Houston-area site (zoom ≥ 12). In the Layers panel toggle
-  **FEMA flood zones**, then **Wetlands (NWI)**. Pan to a nearby view and back; then zoom out.
-- **Expect:** flood zones draw as **colored polygons** (NOT a flat picture) — floodway dark red,
-  high-risk SFHA blue, 500-yr orange, minimal-risk faint; hovering shows e.g. "Zone AE · … —
-  screening only". Wetlands draw colored by type. The panel shows a **data age** ("refreshed
-  just now/Nm ago"). Returning to a prior view **repaints instantly** (browser-cached). **Zoom
-  out / cover a big area** → it swaps to the standard FEMA/NWI **image** with a note (the
-  fallback). **KEY CHECK (CORS, the main unknown):** if polygons never appear and it always
-  shows the picture saying "couldn't load the data", then the agency `/query` endpoints block
-  cross-origin fetches from planyr.io — the vector path isn't viable for that host (the image
-  fallback still protects the user); report it. Also confirm a FEMA polygon's zone label looks
-  right — if zones are blank/mis-bucketed, FEMA may have renumbered NFHL sublayer 28 (fix the
-  index in `lib/vectorLayers.js` `VECTOR_SOURCES` + `imageFallback.layers`). Tuning: if the first
-  pull at z12 is slow or partial, bump `minVectorZoom` in `VECTOR_SOURCES`.
+- **Steps:** Open a site, select a **parcel** → Parcel panel → **"＋ Attach a drawing (PDF / JPG)"**
+  → pick a real **multi-page** engineering PDF (then also a JPEG). For the multi-page PDF a
+  **"Pick a sheet"** dialog should list every page — choose one. Draw with **Pen / Line / Box /
+  Text**, recolour, **Select** + **Delete**, **zoom (wheel) + pan (drag in Select)**, click
+  **Done**, reopen the drawing, then **reload the page**.
+- **Richer markup (increment 2c) — also verify:** in **Select**, **drag an existing markup** to
+  reposition it (cursor shows move); **double-click a Text** markup to edit it. Click **Scale**,
+  draw a line along a known dimension, enter its length in feet → then **Measure**: draw lines and
+  confirm they label the **real length in feet** (teal chip); the scale + markups persist on reload.
+- **Expect:** the **chosen** sheet rasterizes as an **immutable backdrop** (named "<file> — p.N");
+  markups stay **locked to the drawing** through zoom/pan (stored pixel-relative); multiple
+  drawings list under the parcel; markups **persist** across reopen + reload (signed in, same
+  device). `ui-audit/screens/parcel-drawing.png` shows the modal headless (an SVG stand-in, not a
+  real PDF) — this step confirms it with a real file, including the page-picker.
+- **Cross-device (increment 2b, landed 2026-06-16) — please test:** signed in, attach a drawing on
+  device A; on **device B** (or after clearing local cache) open the same site + drawing → the
+  backdrop should **rebuild from cloud Storage** ("Loading the drawing from the cloud…", then it
+  appears with its markups). The source file is uploaded to the private `doc-review-files` bucket at
+  `<uid>/parcel-drawings/<siteId>/<drawingId>.<ext>`; on reopen without a local raster it re-fetches +
+  re-rasterizes the stored sheet. Deleting a drawing removes its stored object. **Fallback:** logged
+  out / >50 MB / upload error → keeps the local raster + the old "re-attach" placeholder cross-device
+  (markups always persist), so nothing regresses.
+- **Increment 2a (multi-page sheet picker) also landed** — verify the "Pick a sheet" dialog lists all
+  pages and attaches the chosen one.
 
-### V9 — 🌐 FEMA/NWI `/query` endpoint + field liveness ⏳ (egress-gated here)
-- **Added** 2026-06-16 · **Cadence** monthly · **Last checked** 2026-06-16 (⚠️ **egress-blocked** from the
-  Claude container — `hazards.fema.gov` + `fwspublicservices.wim.usgs.gov` are not on this
-  environment's network allowlist; add them to probe server-side, or verify via V8 in a browser) · **Next check** 2026-07-16
-- **Steps (curl, once the two hosts are allowlisted):** confirm the sublayer indices + fields:
-  - FEMA `https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28?f=json`
-  - NWI `https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0?f=json`
-- **Expect:** 200 + `name` = "Flood Hazard Zones" with fields **FLD_ZONE/ZONE_SUBTY/SFHA_TF**
-  (FEMA 28), and "Wetlands" with **WETLAND_TYPE/ATTRIBUTE** (NWI 0). A renumber → one-line edit
-  in `VECTOR_SOURCES` (`lib/vectorLayers.js`) + `imageFallback.layers`.
+### V10 — Snap defaults OFF; toggle + Alt hold-to-suppress (B114) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** (0) Open **any** site — incl. an existing one made before this change — and confirm the
+  toolbar pill reads **`Snap off`** (grey dot) and dragging a road up against trailer parking does
+  **not** stick to its edge (it lands where you drop it). (1) Press **S** (cursor on the canvas, not
+  in a text field) → pill flips to **`Snap 10′`** (green dot); now the road flush-snaps to the edge.
+  (2) **Hold Alt** and drag it to a deliberate ~15-ft gap and drop — with snap on, Alt still places
+  it freely for that one move; release Alt and snapping is back. (3) Click the toolbar **Snap** pill —
+  same toggle as S. (4) Turn snap on, **switch to another site / reload the page** → snap stays **on**
+  (the choice persists); turn it off → stays off. (5) With snap on, resize a box / rotate it (grid /
+  15° steps) vs. Alt-held (smooth/free).
+- **Expect:** Snap starts **OFF for every site** (free movement is the default, even on old sites that
+  had snap baked in). The **S** key, the pill, and the Setup checkbox all toggle one **global**
+  preference that persists across sites/reloads. Alt suppresses snapping for just that one drag and
+  re-enables on release; "off" fully disables grid snap, neighbour flush-snap, resize-to-grid and
+  rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
+- **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
+
+### V11 — Phone layout (B113) + "Cloud off" affordance (B111) ⏳
+- **Why ⏳:** verified headless at 390×844 (`planner-mobile.png`, `planner-mobile-tools.png`,
+  `planner-mobile-panel.png`) but real touch + rotation want a live click-through.
+- **Steps (B113, on a phone or a ~390px-wide window):** open a site in the planner. The canvas
+  should fill the width (not a sliver). Tap the orange **"✎ Tools"** button (bottom-right) → the tool
+  palette **slides in from the right**; pick a tool → it **auto-closes** so you can draw; tap the dim
+  backdrop to dismiss it. Tap a left-rail button (Yield/Parcel/…) → its panel **overlays** the canvas;
+  tap the same button to close. Rotate to landscape and back. The top header should **scroll
+  sideways**, not wrap onto two lines.
+- **Expect:** at desktop width everything is exactly as before (the mobile styles are width-gated).
+- **Steps (B111):** load a build with **no Supabase env** (cloud unconfigured). The top-right account
+  corner should show a muted **"⊘ Cloud off"** pill (not empty); click it → a popover explains work is
+  saved on this device only. (A configured build still shows the normal Sign in / account button.)
+
+### V12 — Site Planner measurement tools: Length / Polylength / Area (B116) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner. Right rail → **Measure** (the `▾` opens the mode menu:
+  **Length / Polylength / Area**). (1) **Length:** click two points → expect a teal line labeled the
+  real distance in feet (e.g. `462′`). (2) **Polylength:** click several points along a path, then
+  **double-click or Enter** to finish → expect the running path length in feet. (3) **Area:** click
+  points around a region, close by clicking the first dot (or double-click) → expect a filled polygon
+  labeled **`<sf> sf · <ac> ac · <perim>′ perim`** (e.g. `12,300 sf · 0.28 ac · 462′ perim`). Then
+  with **Select**, click a measurement to select it and use the **×** to delete it. Press **Esc**
+  mid-draw → the in-progress measurement cancels.
+- **Calibration path:** drop an **aerial/screenshot** underlay but do **not** calibrate it → with the
+  Measure tool active, expect the **"⚠ Underlay isn't calibrated — distances may be wrong"** banner and
+  measurement labels rendered in **amber with a ⚠**. Calibrate the underlay (Aerial ▾ → Calibrate) →
+  labels return to normal (teal) and read true feet.
+- **Expect:** all three modes draw, label, select, and delete; labels persist across reopen + reload
+  (signed in); the amber/⚠ uncalibrated warning behaves as above. This shipped code-verified +
+  build-green (B116 was already implemented in `SitePlanner.jsx`; only the mode names were aligned to
+  Length/Polylength/Area) — this step confirms it in the running app.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **Why this matters:** this is the fix for the owner-reported data-loss scare — work vanishing on its
+  own a couple minutes after a reload. Root cause: `pullCloud` rebuilt the local cache from the cloud
+  list **alone** and silently dropped any not-yet-synced local site; the resume then couldn't find the
+  open site and bounced to the map. Confirm in a real browser that saved work is now durable.
+- **Steps (signed in, on planyr.io):**
+  1. Sign in. Open or create a site, add a **building**; wait for the header badge to read **"Synced ✓"**.
+  2. **Reload** → you **resume straight into the planner** on that site (NOT bounced to the map) and the
+     building is still there.
+  3. **Switch to another browser tab for ~2–3 minutes, then return** (refocus the Planyr tab) → the site
+     + building must **still be there** and you are **not** bounced to the map. (This is the exact
+     "disappears on its own" trigger — a background re-sign-in event firing the cloud re-pull.)
+  4. **Forced not-yet-synced repro (DevTools):** Network tab → **Offline**. Add another building → a
+     **loud red banner** ("your last change didn't reach the cloud … **Retry now**") appears and the badge
+     reads Offline/Unsaved. **Reload while still offline** → the building is **still there** (not dropped).
+     Go back **Online** → it syncs (badge → "Synced ✓") and the red banner clears.
+  5. **On-device → account bridge:** while **signed out**, create a site (saved on this device only).
+     **Sign in** → a blue banner "You have N site(s) saved on **this device** that aren't in your account
+     yet" appears; click **"Bring them into my account"** → the site joins the account list and the banner
+     clears. The signed-out copy is **kept** (non-destructive).
+- **Expect:** work **never disappears on its own**; reload resumes the open site; a failed cloud save is
+  **loud** (red banner + Retry), never silent; the on-device import copies sites into the account without
+  deleting the originals. No data is lost across reload, tab-refocus, offline, or sign-in/out.
+- **If it fails:** this is the one **CRITICAL** class — if saved work still vanishes, flag it immediately
+  (note the exact step + the browser console), don't just log-and-move-on.
+
+### V14 — Draw-tool rail: scrolls to the bottom on desktop + denser rows (B117 / B118) ⏳
+- **Added** 2026-06-16 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner on a normal laptop-height window (a ~13–15″ screen is the case
+  that overflowed — not a tall external monitor). Look at the dark right-hand tool rail (**Tools / Site
+  elements / Shapes / Measure / Annotate**). (1) **Reach the bottom (B117):** scroll the rail → expect it to
+  scroll cleanly all the way to the last row, so the **Shapes** group and **Measure / Annotate** below it are
+  reachable; nothing is stranded off-screen with no scrollbar. (2) **Density (B118):** the two-line buttons
+  (Building / Car Parking / Road / Paving / Trailer Parking / Detention Pond, plus Measure) read tighter —
+  less vertical padding and the small grey sub-label ("single-load", "drive / court", "24′ travel",
+  "back-in storage", "detention basin") one step smaller — and the whole **Site elements** group should now
+  fit without scrolling on a standard laptop.
+- **Expect:** every tool in the rail is reachable at any window height; the rail reads as one consistent,
+  denser column with rows still comfortably clickable (~40px); the **▾** preset menus (dock layout / parking
+  rows / road width / measure mode) still open and pick correctly. The phone layout (narrow width, B113) is
+  unchanged — the rail still slides in as an overlay there.
+- **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
+
+### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) ⏳ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **▶ Full step-by-step script:** **`PERSISTENCE_TEST_SCRIPT.md`** (T1–T11, with paste-in Console helpers and a results table) — run that end-to-end and record the outcome back here. The summary below is the short form.
+- **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
+  site because sync kept whichever whole copy was saved last — so a copy with fewer buildings could overwrite
+  a fuller one (a stale tab, a second device, a hiccup mid-load). B126 makes sync **merge** the two copies
+  (every building in either is kept) and adds **automatic local backups** you can restore from.
+- **Steps (signed in, on planyr.io):**
+  1. **Merge keeps both (two-tab test — the headline):** open the same site in **two browser tabs**. In tab A
+     add **building X**; in tab B (don't reload it) add **building Y**. Let both reach **"Synced ✓"**.
+     **Reload both tabs** → **both X and Y are present** in each — neither tab's copy erased the other's.
+  2. **Version history restore:** **Plan ▾ → Version history…** → a dialog lists earlier automatic backups
+     (timestamp · N buildings). Click **Restore** on an earlier one → the canvas returns to that version and
+     re-saves. Re-open Version history → the version you just replaced is now **also** listed (a restore is
+     itself reversible).
+  3. **De-dupe sanity:** make a few edits that change the building/element count → each appears as its own
+     version; a pure move (no count change) does **not** spam a new version.
+- **Expect:** a building drawn in any copy is **never lost to a sync**; the count never silently drops; Version
+  history lists and restores prior versions, reversibly. (Backdrop aerials/images may need re-dropping after a
+  restore — geometry is always restored in full.)
+- **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
+  immediately with the exact step + browser console; do **not** log-and-move-on.
+- **Update 2026-06-16 (B127):** the first run found **no data loss** but one rough edge — two open tabs
+  could **disagree until reload** (the durable store briefly held the thinner copy). That's now **fixed**:
+  a stale tab's save **folds into** the store (never thins it) and open tabs **live-sync** via `storage`
+  events. **Re-run T5/T6 to confirm:** (a) after the two-tab divergent edits, **both tabs converge while
+  still open** (no reload needed), and (b) the durable `sites:v1` always holds the **union** (never the
+  thinner copy), so any reload shows the full set.
+
+### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ⏳
+- **Added** 2026-06-17 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Why:** the Measure mode menu (and the other rail/header flyouts) used to paint **behind / clipped by** the
+  tool rail after B117 made the rail scroll (`overflow:auto`). Fix = render every such menu in a **portal** at the
+  document root (`src/shared/ui/AnchoredMenu.jsx`), so it escapes the rail's clipping + stacking context. Needs a
+  real browser to confirm it now floats above everything and still picks correctly.
+- **Steps (planyr.io, desktop):** Open a site in the Site Planner.
+  1. **Measure ▾** (the caret next to the Measure tool's mode label) → the menu opens **fully visible**, above the
+     rail **and** above the map's +/– zoom-control rail to its left; **Length / Polylength / Area** are all clickable
+     and selecting one updates the tool's sub-label. (This is the exact NEW-3 repro.)
+  2. Repeat for the other rail flyouts — **Boundary ▾**, **Building ▾** (dock layout), **Car Parking ▾** (rows),
+     **Road ▾** (width): each opens to the left of the rail, fully on-screen, nothing clipped; picking an option works.
+  3. Header menus — **Site ▾**, **Plan ▾**, **File ▾**: each opens below its button, fully visible above the canvas;
+     typing in the Site/Plan **name field** still works (focus lands in the input); **File ▾ → Import JSON…** still
+     opens the file picker.
+  4. **Click-away + scroll:** clicking anywhere off an open menu closes it; with a menu open, the rail can't be left in
+     a half-open state. On a **short laptop-height window**, the menus still land on-screen (clamped into the viewport),
+     not cut off at the top/bottom.
+  5. **Phone width (~390px):** open the slide-in tool rail (✎ Tools) → Measure ▾ still opens above everything and is
+     usable.
+- **Expect:** no dropdown is ever clipped or hidden behind the rail / zoom rail; all open above the map; every option
+  selects; placement + widths look the same as before (just no longer cut off).
+- **If it fails:** not critical (no data risk) — log ❌ here with the menu, window size, and what was clipped/mispositioned.
+
+### V17 — Parking hugs the building: orientation + outward growth (B119 / B120) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site, draw a **building**, select it, and add a **parking** row on one side (the
+  per-side "add parking" control). (1) **Orientation (B119):** the **first stall row should sit directly
+  against the building face**, with the **24′ drive aisle on the outside** (not the aisle against the
+  wall). (2) **Growth (B120):** press the parking **＋** repeatedly — the field should grow **outward,
+  away from the building**, one row at a time, depth reading **42 → 60 → 102 → 120 → 162 → 180′**
+  (double-loads the aisle before adding a new one); **−** reverses it. (3) The element panel's **"Drive
+  aisle on the far side"** checkbox should start **checked** and still flip the layout if unticked.
+- **Expect:** stalls hug the wall, aisle outboard, field grows away from the building, +/− steps match the
+  sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
+  (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
+  **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
+  re-label **immediately** as "Building 2" (numbers stay contiguous 1…N, no gap). Add another → it
+  appends as the next number. A site with a **single** building still reads "Building 1".
+- **Identity check (the important one):** give a building attached **parking** or a **bump-out**, then
+  delete a *lower-numbered* building so this one renumbers. Confirm the attached pieces stay attached and
+  nothing re-points — attachment binds to the hidden stable id, not the visible number, so a renumber
+  must never detach or mis-link anything.
+- **Expect:** every visible building label updates in one pass on delete; non-building elements
+  (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
+  their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site and lay out adjacent elements (a big building, a narrow trailer strip beside it,
+  a detention pond, a couple of sidewalks). (1) **Zoomed in:** each element shows its full centred label
+  (name + sf/count + dimensions) as before. (2) **Zoom out:** labels should *thin out*, not pile up — the
+  dimensions line drops first, then the area line, leaving the name; the **narrow trailer strip** should
+  drop to just its name (or hide) rather than spilling a 3-line label past its ~50′ width. (3) **Crowd
+  test:** push several labelled elements close together and confirm their centred labels no longer
+  overprint into an unreadable stack — a lower-priority label yields (shrinks or disappears) to the
+  bigger / building label rather than stacking on top. Zoom back in → the hidden labels return.
+- **Expect:** no two centred element-name labels overprint at any zoom; buildings / bigger elements keep
+  their labels; nothing crashes; non-labelled elements (paving / parking / roads) are unaffected.
+- **Known-not-yet (increment 2 — do NOT fail for these):** the **red edge-dimension ticks** ("300′",
+  "638′") are still a separate layer and may overlap the centred names; no leader lines yet. Tracked under B121.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
+  that vanished when it had room, or a pile that remained).
+
+### V20 — GIS layers survive a CORS-blocked health-check (B129 / PR #60) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Why ⏳:** the fix is pure `layers.js` logic (lint/test/build green) but the payoff is a real-browser
+  CORS behavior that can't be exercised headless.
+- **Steps:** On planyr.io (or a preview), open the map and toggle **FEMA flood zones**, then
+  **Wetlands (NWI)**. Watch the per-layer status dots and the browser console.
+- **Expect:** a layer whose health-*probe* is refused cross-origin (the NWI host has done this) **no longer
+  dies with a red "network / CORS error" banner** — the picture still paints via its CORS-exempt `<img>`
+  export, and a transient `requesterror` shows only a **quiet per-layer "failed" dot** that flips back to
+  "loaded" when the image lands. A genuinely-down service still shows the quiet failed dot. **No layer is
+  dropped, and no alarming toast fires, just because a metadata/probe fetch was CORS-blocked.**
+- **If it fails / deeper triage:** see **B129** — the open hand-off for the remaining NWI-CORS question and
+  the (reverted) cached-vector experiment, both of which need a browser to settle.
 
 ---
 

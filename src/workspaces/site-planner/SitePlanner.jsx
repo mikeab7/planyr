@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
+import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
-import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
+import ParcelDrawing from "./components/ParcelDrawing.jsx";
+import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
@@ -12,6 +14,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
 import {
   getLayerInfo,
@@ -28,6 +31,9 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
+import { buildingNumbers } from "./lib/siteModel.js";
+import { layoutLabels } from "./lib/labelLayout.js";
+import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -109,19 +115,19 @@ const ToolIcon = ({ id, size = 15 }) => (
 );
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); Alt-drop to place free • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
-  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: Shift+V (press V for Select)" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); hold Alt to bypass snap & place freely • toggle snap with S • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
+  { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
   { id: "text", label: "Text", hint: "Text box (T): click where the text goes and type — no leader line. Same size / align / colour / bold / italic options. Drag to move, double-click to edit" },
   { id: "building", label: "Building", hint: "Drag for a rectangle, or click points for an irregular footprint (click the 1st point / double-click to close)" },
   { id: "paving", label: "Paving", hint: "Drag for a rectangle, or click points for an irregular paving / drive / truck court (double-click to close)" },
-  { id: "parking", label: "Parking", hint: "Pick a row preset from Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
-  { id: "trailer", label: "Trailer", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
-  { id: "pond", label: "Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
+  { id: "parking", label: "Car Parking", hint: "Pick a row preset from Car Parking ▾ (single 42′ / double 60′) and drag to set the length, or use Free draw for any rectangle / click points for an irregular field; stalls auto-count" },
+  { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
+  { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
-  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Line (two-point distance), Polyline (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
+  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
   { id: "mrect", label: "Rectangle", hint: "Markup rectangle (R): drag a box. Hold Shift for a square" },
@@ -131,6 +137,11 @@ const TOOLS = [
 ];
 const DRAW_TYPES = ["building", "paving", "road", "parking", "trailer", "pond"];
 const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
+// Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
+// internal mode value stays line/polyline/area (persisted in localStorage), so this is
+// label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
+const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"]];
+const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
@@ -499,16 +510,8 @@ function curbEdgesOf(el, allEls) {
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
 const curbAreaOf = (el, allEls) => (el.points ? 0 : curbEdgesOf(el, allEls).reduce((s, e) => s + e.length * e.width, 0));
 
-/* ----------------------- polygon split (parcels) ------------------- */
-// Intersection of segment p->q with the infinite line through A,B (if within pq).
-function segLineIntersect(p, q, A, B) {
-  const rx = q.x - p.x, ry = q.y - p.y, sx = B.x - A.x, sy = B.y - A.y;
-  const denom = rx * sy - ry * sx;
-  if (Math.abs(denom) < 1e-9) return null;
-  const t = ((A.x - p.x) * sy - (A.y - p.y) * sx) / denom;
-  if (t < -1e-9 || t > 1 + 1e-9) return null;
-  return { x: p.x + t * rx, y: p.y + t * ry };
-}
+/* ----------------------- geometry helpers -------------------------- */
+// Parcel split geometry (straight + bent cuts) lives in lib/polygonSplit.js, imported above.
 // Closest point on segment a-b to point p (used for snapping to a boundary).
 function nearestPointOnSeg(p, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -516,75 +519,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-// Split a polygon along an open polyline cut (>=2 vertices). The first and last
-// vertices are projected onto the nearest polygon edge (the entry/exit points);
-// interior vertices bend the cut across the interior. Returns [ringA, ringB] or null.
-function splitPolygonPath(points, path) {
-  const n = points.length;
-  if (path.length < 2) return null;
-  // nearest polygon edge (+ projected point) for an endpoint
-  const projectToEdge = (pt) => {
-    let best = null;
-    for (let i = 0; i < n; i++) {
-      const proj = nearestPointOnSeg(pt, points[i], points[(i + 1) % n]);
-      const d = (proj.x - pt.x) ** 2 + (proj.y - pt.y) ** 2;
-      if (!best || d < best.d) best = { edge: i, point: proj, d };
-    }
-    return best;
-  };
-  const inHit = projectToEdge(path[0]);
-  const outHit = projectToEdge(path[path.length - 1]);
-  if (!inHit || !outHit || inHit.edge === outHit.edge) return null;
-  const interior = path.slice(1, -1); // oriented path[0] -> path[last]
-  let a1, a2, midPath;
-  if (inHit.edge < outHit.edge) { a1 = inHit; a2 = outHit; midPath = interior; }
-  else { a1 = outHit; a2 = inHit; midPath = interior.slice().reverse(); }
-  const polyA = [a1.point];
-  for (let k = a1.edge + 1; k <= a2.edge; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point, ...midPath.slice().reverse());
-  const polyB = [a2.point];
-  for (let k = a2.edge + 1; k <= a1.edge + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point, ...midPath);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
-}
-
-// Split a simple polygon by the line through A,B. Returns [ringA, ringB] or null.
-function splitPolygon(points, A, B) {
-  const n = points.length;
-  const dx = B.x - A.x, dy = B.y - A.y, denom2 = dx * dx + dy * dy || 1;
-  const hits = [];
-  for (let i = 0; i < n; i++) {
-    const inter = segLineIntersect(points[i], points[(i + 1) % n], A, B);
-    if (inter) hits.push({ i, point: inter, t: ((inter.x - A.x) * dx + (inter.y - A.y) * dy) / denom2 });
-  }
-  if (hits.length < 2) return null;
-  hits.sort((u, v) => u.t - v.t);
-  let lo = hits[0], hi = hits[hits.length - 1];
-  if (lo.i === hi.i) {
-    // The extreme-t crossings landed on the same edge (degenerate — e.g. the cut grazes
-    // a vertex) while valid interior crossings exist; fall back to the widest-t pair on
-    // DISTINCT edges instead of silently no-op'ing the split (B31).
-    let best = -1, pair = null;
-    for (let p = 0; p < hits.length; p++) for (let q = p + 1; q < hits.length; q++) {
-      if (hits[p].i === hits[q].i) continue;
-      const span = Math.abs(hits[q].t - hits[p].t);
-      if (span > best) { best = span; pair = [hits[p], hits[q]]; }
-    }
-    if (!pair) return null;
-    [lo, hi] = pair;
-  }
-  const a1 = lo.i < hi.i ? lo : hi, a2 = lo.i < hi.i ? hi : lo;
-  const polyA = [a1.point];
-  for (let k = a1.i + 1; k <= a2.i; k++) polyA.push(points[k % n]);
-  polyA.push(a2.point);
-  const polyB = [a2.point];
-  for (let k = a2.i + 1; k <= a1.i + n; k++) polyB.push(points[k % n]);
-  polyB.push(a1.point);
-  if (polyA.length < 3 || polyB.length < 3) return null;
-  return [polyA, polyB];
 }
 
 /* ----------------------- polygon union (combine) ------------------- */
@@ -708,8 +642,16 @@ const ensureIdAbove = (ids) => {
   });
 };
 
+// Snap is a global drafting preference (a tool mode), NOT a per-site attribute —
+// default OFF so elements move freely; the choice persists across sites/reloads once
+// turned on. We still mirror it into `settings.snap` so every read site is unchanged,
+// but the per-site saved value is ignored on load/import in favour of this pref.
+const SNAP_PREF_KEY = "planarfit:snap";
+const loadSnapPref = () => { try { return localStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; } };
+const saveSnapPref = (on) => { try { localStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
+
 const DEFAULT_SETTINGS = {
-  gridSize: 10, snap: true,
+  gridSize: 10, snap: false,
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -718,7 +660,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -751,8 +693,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
+  // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
+  // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
+  const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
+    roadAnchor = useRef(null), measureAnchor = useRef(null),
+    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null);
+  const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
+  const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
+  // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
+  // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
+  // right tool palette collapses behind a toggle. matchMedia keeps it in sync with
+  // rotate/resize. The desktop layout is untouched (every mobile style is `narrow ?`-gated).
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  const [mobileTools, setMobileTools] = useState(false); // right tool rail open as an overlay (narrow only)
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
@@ -760,11 +721,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
+  const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
+  const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
-  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}) }));
+  // snap comes from the global pref (a tool mode), never the per-site saved value.
+  const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
+  const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
 
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
@@ -799,6 +764,94 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
+  // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
+  const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
+  const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
+  const [drawingTargetParcel, setDrawingTargetParcel] = useState(null); // parcel the file-picker is filing onto
+  const [pagePick, setPagePick] = useState(null); // multi-page PDF awaiting a sheet choice (B67 increment 2)
+  const [rehydratingId, setRehydratingId] = useState(null); // drawing whose backdrop is being re-fetched from Storage
+  const drawingFileRef = useRef(null);
+  const drawingPushTimer = useRef(null);
+  const parcelDrawingsRef = useRef(parcelDrawings);
+  useEffect(() => { parcelDrawingsRef.current = parcelDrawings; }, [parcelDrawings]);
+  // Persist parcelDrawings via a saveSite MERGE (preserves the live parcels/els the
+  // autosave owns), then debounce the cloud push. Keeps this collection off the main
+  // autosave path so it needs no new wiring through every flush/snapshot site.
+  const persistDrawings = (next) => {
+    setParcelDrawings(next);
+    if (siteId) saveSite({ id: siteId, parcelDrawings: next });
+    clearTimeout(drawingPushTimer.current);
+    drawingPushTimer.current = setTimeout(() => { if (isCloudActive() && siteId) pushSiteToCloud(siteId).catch(() => {}); }, 800);
+  };
+  // Back a freshly-attached drawing with its source file in Storage (B67 increment 2b), so
+  // its backdrop rebuilds on another device. Background + fallback-safe: logged-out / oversize
+  // / error just keeps the local raster (storageKey stays unset → "re-attach on load").
+  const uploadDrawingSource = async (recId, file) => {
+    if (!file) return;
+    const res = await uploadParcelDrawingFile(siteId, recId, file).catch(() => null);
+    if (!res) return;
+    persistDrawings(parcelDrawingsRef.current.map((d) => (d.id === recId ? { ...d, storageKey: res.key, ext: res.ext } : d)));
+  };
+  // Build + persist + open a drawing record from a rasterized page/image; back it with the source.
+  const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount, file) => {
+    const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+      name, kind, page: raster.page || 1, pageCount: pageCount || 1,
+      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
+      markups: [], createdAt: Date.now(), updatedAt: Date.now() };
+    persistDrawings([...parcelDrawings, rec]);
+    setOpenDrawingId(rec.id);
+    if (file) uploadDrawingSource(rec.id, file);
+    return rec;
+  };
+  const onAttachDrawing = async (parcelId, file) => {
+    if (!file || !parcelId) return;
+    if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    const baseName = (file.name || "Drawing").replace(/\.[^.]+$/, "");
+    try {
+      const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
+      // Multi-page PDF → let the user pick the sheet (keep the PDF + File alive to re-rasterize + upload).
+      if (r.pdf && r.pageCount > 1) { setPagePick({ parcelId, pdf: r.pdf, pageCount: r.pageCount, name: baseName, first: r, file }); return; }
+      if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // single page — first raster is all we need
+      addDrawingFromRaster(parcelId, baseName, isPdfFile(file) ? "pdf" : "image", r, r.pageCount || 1, file);
+    } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
+  };
+  // Page-picker: rasterize the chosen sheet of a multi-page PDF, then attach it (B67 increment 2a).
+  const pickPage = async (n) => {
+    const pp = pagePick; if (!pp) return;
+    setPagePick(null);
+    try {
+      const raster = pp.first && pp.first.page === n ? pp.first : await rasterizePage(pp.pdf, n);
+      addDrawingFromRaster(pp.parcelId, `${pp.name} — p.${n}`, "pdf", raster, pp.pageCount, pp.file);
+    } catch (_) { setOverlapWarn("Couldn't render that page — try another."); }
+    finally { try { pp.pdf.destroy(); } catch (_) {} }
+  };
+  const cancelPagePick = () => { if (pagePick) { try { pagePick.pdf.destroy(); } catch (_) {} setPagePick(null); } };
+  // Rehydrate a drawing's backdrop from Storage when it was opened without a local raster
+  // (cross-device: the cloud row's src was stripped, but storageKey + the source survive).
+  useEffect(() => {
+    if (!openDrawingId) return;
+    const d = parcelDrawingsRef.current.find((x) => x.id === openDrawingId);
+    if (!d || d.src || !d.storageKey) return;
+    let live = true;
+    setRehydratingId(d.id);
+    (async () => {
+      let src = null;
+      try {
+        if (d.kind === "pdf") { const bytes = await downloadOverlayBytes(d.storageKey); if (bytes) { const rr = await rasterizeStoredPdf(bytes, d.page || 1); src = rr && rr.src; } }
+        else { src = await downloadOverlayDataUrl(d.storageKey); }
+      } catch (_) { /* keep the placeholder */ }
+      if (live) { if (src) setParcelDrawings((cur) => cur.map((x) => (x.id === d.id ? { ...x, src } : x))); setRehydratingId(null); }
+    })();
+    return () => { live = false; };
+  }, [openDrawingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const updateDrawingMarks = (id, markups) =>
+    persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
+  const deleteDrawing = (id) => {
+    const gone = parcelDrawings.find((d) => d.id === id);
+    if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
+    persistDrawings(parcelDrawings.filter((d) => d.id !== id));
+    if (openDrawingId === id) setOpenDrawingId(null);
+  };
   const overlayFileRef = useRef(null);
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   const overlayFetching = useRef(new Set());            // ids currently downloading their raster from Storage (B72)
@@ -919,6 +972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
@@ -939,6 +993,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
+  // True ONLY when a cloud write actually failed while signed in (not the normal logged-out
+  // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
+  // cloud save is never silent again (B125). Cleared on the next successful save.
+  const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -956,11 +1014,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => setSaveStatus(c.ok ? "saved" : "unsaved")).catch(() => setSaveStatus("unsaved"));
-      else setSaveStatus("saved");
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
+  // Manual "Retry now" for the loud cloud-save-failure banner (B125).
+  const retryCloudSave = () => {
+    if (!siteId) return;
+    setSaveStatus("saving");
+    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
@@ -985,6 +1049,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); };
   }, [siteId]); // eslint-disable-line
+  // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
+  // background storage event never yanks the canvas out from under an active edit.
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft); });
+  // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
+  // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
+  // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
+  useEffect(() => {
+    if (!siteId) return undefined;
+    const onStore = (e) => {
+      if (e && e.key && !e.key.startsWith("planarfit:sites:")) return;
+      if (busyRef.current) return;
+      const stored = loadSite(siteId);
+      if (!stored) return;
+      const live = liveRef.current || {};
+      const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
+      const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
+      const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
+      if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
+      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays);
+    };
+    window.addEventListener("storage", onStore);
+    return () => window.removeEventListener("storage", onStore);
+  }, [siteId]);
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
@@ -1039,7 +1128,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [view]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
-    return settings.snap ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
+    const on = settings.snap && !altSnapOffRef.current; // global toggle, minus a held-Alt bypass for the current move
+    return on ? Math.round(v / gs) * gs : Math.round(v * 100) / 100;
   }, [settings]);
   const snapPt = useCallback((p) => ({ x: snap(p.x), y: snap(p.y) }), [snap]);
   // Snap to the nearest parcel boundary within ~5 ft (or ~10 px); used by Split.
@@ -1170,7 +1260,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
-      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool(e.shiftKey ? "pan" : "select"); return; }
+      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
+      if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
+      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
+      // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
+      if (e.key === " " || e.code === "Space") {
+        if (document.activeElement && document.activeElement.tagName === "BUTTON") return; // let Space activate a focused button
+        if (!spaceRef.current) { spaceRef.current = true; setSpacePan(true); }
+        e.preventDefault(); // arm hold-to-pan; also blocks the page from scrolling
+        return;
+      }
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) { e.preventDefault(); setShowShortcuts((s) => !s); return; }
       if ((e.key === "q" || e.key === "Q") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("callout"); return; }
       if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("text"); return; }
@@ -1188,8 +1287,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
     };
+    const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly]); // eslint-disable-line
 
   const deleteSel = () => {
@@ -1264,9 +1365,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ pointer handlers (svg root) ------------ */
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
 
     if (printMode) { // in print-placement: background drag pans only (frame has its own handles)
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (spaceRef.current) { // Space held → temporary hand-pan over whatever tool/mode is active (D4)
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       svgRef.current.setPointerCapture(e.pointerId);
@@ -1427,7 +1535,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
   // polyline of >=2 points. Two points cut along the infinite line through them
-  // (the original behaviour); 3+ points bend the cut through the interior.
+  // (a straight cut — concave lots can yield more than two pieces); 3+ points
+  // bend the cut through the interior.
   const performSplit = (path) => {
     // Drop consecutive coincident points (a finishing double-click adds the last twice).
     const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
@@ -1436,25 +1545,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
       : parcels;
     for (const pc of ordered) {
-      const halves = pts.length === 2
-        ? splitPolygon(pc.points, pts[0], pts[1])
-        : splitPolygonPath(pc.points, pts);
-      if (halves) {
-        // Concave-cut guard: if the two pieces don't conserve the original area (they overlap or
-        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a warning
-        // instead of saving corrupted geometry that throws off every downstream yield number.
-        const whole = polyArea(pc.points), sum = polyArea(halves[0]) + polyArea(halves[1]);
-        if (polySelfIntersects(halves[0]) || polySelfIntersects(halves[1]) || Math.abs(sum - whole) > whole * 0.02 + 1) {
+      const pieces = pts.length === 2
+        ? splitPolygonByLine(pc.points, pts[0], pts[1])
+        : splitPolygonByPath(pc.points, pts);
+      if (pieces) {
+        // Backstop guard: if the pieces don't conserve the original area (they overlap or
+        // omit a wedge) or come out self-intersecting, the cut was ambiguous — skip with a
+        // warning instead of saving corrupted geometry that throws off every downstream
+        // yield number. A clean straight cut through a concave lot now produces all the
+        // real pieces (e.g. 3 for a U-shaped lot), which this still accepts.
+        const whole = polyArea(pc.points), sum = pieces.reduce((s, r) => s + polyArea(r), 0);
+        if (pieces.some(polySelfIntersects) || Math.abs(sum - whole) > whole * 0.02 + 1) {
           setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
           setTimeout(() => setOverlapWarn(""), 7000);
           return;
         }
         pushHistory();
         const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        const a = { id: uid(), points: halves[0], locked: true, ...inherit };
-        const b = { id: uid(), points: halves[1], locked: true, ...inherit };
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? [a, b] : [p])));
-        setSel({ kind: "parcel", id: a.id });
+        const made = pieces.map((ring) => ({ id: uid(), points: ring, locked: true, ...inherit }));
+        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
+        setSel({ kind: "parcel", id: made[0].id });
         return;
       }
     }
@@ -1658,6 +1768,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   const onMove = (e) => {
+    altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
     setCursor(fp);
     if (roadStart && tool === "road" && roadWidth !== "free") { // live fixed-width road preview
@@ -1666,6 +1777,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     const d = drag.current;
     if (!d) return;
+    const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "pan") {
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
@@ -1760,7 +1872,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const cands = els.filter((x) => !ids.has(x.id) && !x.points && rootIdOf(x.id) !== d.id);
             const res = alignSnap(gel, ncx, ncy, cands, Math.min(40, 24 / view.ppf));
             if (res) { ncx = res.cx; ncy = res.cy; newRot = res.rot; hint = { id: res.hostId, x: res.hintX, y: res.hintY }; }
-          } else if (settings.snap && gbox) { // ambient flush-snap along world axes (does NOT bond)
+          } else if (snapOn && gbox) { // ambient flush-snap along world axes (does NOT bond)
             const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
@@ -1804,8 +1916,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const opp = d.opp; // fixed opposite corner (world feet)
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
       let nw = Math.abs(local.x), nh = Math.abs(local.y);
-      nw = Math.max(settings.gridSize, settings.snap ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
-      nh = Math.max(settings.gridSize, settings.snap ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
+      nw = Math.max(settings.gridSize, snapOn ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
+      nh = Math.max(settings.gridSize, snapOn ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
       // opposite stays fixed; new center is the midpoint of opp and the dragged corner
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
@@ -1820,7 +1932,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const { nx, ny, opp } = d; // outward local normal of the dragged edge
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      const snapDim = (v) => Math.max(settings.gridSize, settings.snap ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      const snapDim = (v) => Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
       const nw = nx !== 0 ? snapDim(local.x) : el.w;
       const nh = ny !== 0 ? snapDim(local.y) : el.h;
       const half = rot2(nx * nw, ny * nh, el.rot);
@@ -1836,7 +1948,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const prim = d.start.find((s) => s.id === d.id);
       if (prim && prim.rot !== undefined) { // snap the grabbed element to 15°, carry the rest along
         let target = prim.rot + delta;
-        target = settings.snap ? Math.round(target / 15) * 15 : Math.round(target);
+        target = snapOn ? Math.round(target / 15) * 15 : Math.round(target);
         delta = target - prim.rot;
       }
       setEls((a) => a.map((el) => {
@@ -2502,8 +2614,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const along = ny !== 0 ? b.w : b.h;
     const half = (nx !== 0 ? b.w : b.h) / 2;
     const off = rot2(nx * (half + swDepth + parkDepth / 2), ny * (half + swDepth + parkDepth / 2), b.rot);
+    // First stall row hugs the building face, drive aisle on the OUTSIDE (B119): the
+    // strip's inner (local y=0) edge sits against the wall and carStalls lays the first
+    // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
+    // the building). growParking then extends rows outward, away from the wall.
     const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
     addBuildingEls([el], b.id);
   };
   // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
@@ -2837,6 +2953,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
   };
+  // Active/Inactive is independent of lock (B100): inactive parcels drop out of every area
+  // calc but stay on the canvas (dimmed). Missing = active, so toggling off sets active:false.
+  const toggleParcelActive = (id) => {
+    pushHistory();
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, active: pc.active === false } : pc)));
+  };
   const toggleMarkupLock = (id) => {
     pushHistory();
     setMarkups((a) => a.map((m) => (m.id === id ? { ...m, locked: !m.locked } : m)));
@@ -2846,7 +2968,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Per-element striping/count config: a strip may override the global standards
   // (e.g. the 50′ × 12′ single-row trailer parking carries its own cfg).
   const cfgOf = (el) => (el.cfg ? { ...settings, ...el.cfg } : settings);
-  const siteSqft = parcels.reduce((s, p) => s + polyArea(p.points), 0);
+  // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
+  const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
   let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
@@ -2885,7 +3008,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         pushHistory();
         setParcels(d.parcels || []); setEls(d.els || []); setMeasures(d.measures || []);
         setCallouts(d.callouts || []); setMarkups(d.markups || []); // symmetric with exportJSON (was dropped → data loss / bleed-through)
-        setSettings((s) => ({ ...s, ...(d.settings || {}) }));
+        setSettings((s) => ({ ...s, ...(d.settings || {}), snap: s.snap })); // snap is a global pref, not imported
         setUnderlay(d.underlay || null);
         setSel(null);
         requestFit();
@@ -2964,6 +3087,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
+  // Version history (automatic local backups, B126): open the dialog with this plan's
+  // saved snapshots, and restore one into the canvas (which then autosaves as the newest
+  // version — and the thinner state it replaces is itself snapshotted, so a restore is
+  // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
+  const openVersionHistory = () => { setVersionList(listVersions(siteId)); setVersionsOpen(true); closeHdrMenus(); };
+  const restoreVersion = (at) => {
+    const v = getVersion(siteId, at);
+    if (!v) return;
+    pushHistory();
+    setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
+    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays);
+    setSel(null); setMulti([]); setVersionsOpen(false);
+  };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
@@ -3240,16 +3376,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
   const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
   const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
+  // B122: each standalone building shows a sequential "Building N" by placement order,
+  // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
+  const bldgNo = buildingNumbers(els);
+  const fs = 11 * ls, lh = 14.5 * ls, charW = fs * 0.6;
+  // B121: build each element's centred label as priority-ordered lines (name → area →
+  // dimensions, highest priority first), then hand them all to the shared LOD + collision
+  // engine (lib/labelLayout) so adjacent labels never overprint into an unreadable pile.
+  // The engine drops a label's lowest lines (dimensions first) to fit a narrow shape or
+  // dodge a neighbour, and hides it only as a last resort; bigger elements and buildings
+  // win the space. Zoomed in, shapes are large and spread out, so all lines show as before.
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
-  const labelEls = els.map((el) => {
-    if (NO_LABEL.includes(el.type) || el.noLabel) return null;
+  const labelCands = [];
+  for (const el of els) {
+    if (NO_LABEL.includes(el.type) || el.noLabel) continue;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
     const fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
     const dupKey = `${el.type}@${Math.round(fc.x / 12)},${Math.round(fc.y / 12)}`;
-    if (seenLabels.has(dupKey)) return null; // same type stacked at (nearly) the same spot
+    if (seenLabels.has(dupKey)) continue; // same type stacked at (nearly) the same spot
     seenLabels.add(dupKey);
-    const c = f2p(fc);
     let lines;
     if (el.type === "sidewalk" || el.type === "landscape") {
       // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
@@ -3258,7 +3404,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (el.type === "pond") {
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
-      lines = [TYPE[el.type].label.split(" / ")[0]];
+      const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
+      lines = [bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0]];
       if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
       else if (el.type === "building" && !poly && !el.dogEar) {
         // include attached dog-ear / bump-out area in the on-plan building SF
@@ -3268,13 +3415,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } else lines.push(`${f0(area)} sf`);
       lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
     }
-    const fs = 11 * ls, lh = 14.5 * ls;
+    // Vertical room for the stack = the shape's SMALLER on-screen dimension (rotation-robust),
+    // so a label can't spill past a narrow strip; the engine drops lines that don't fit.
+    let span;
+    if (poly) {
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
+      span = Math.min(hi - lo, hi2 - lo2);
+    } else span = Math.min(el.w, el.h);
+    labelCands.push({ el, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, maxH: span * view.ppf });
+  }
+  const labelShow = layoutLabels(
+    labelCands.map((d) => ({ id: d.el.id, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, maxH: d.maxH })),
+    { pad: 2 },
+  );
+  const labelEls = labelCands.map((d) => {
+    const lines = labelShow.get(d.el.id);
+    if (!lines) return null; // hidden this frame to avoid overprinting a higher-priority label
+    const c = d.c;
     // Element fills are solid, so labels need no chip — just contrasting text.
     const top = c.y - (lines.length * lh) / 2, first = top + fs * 0.82;
-    const ink = labelInk(elStyle(el, settings).fill);
+    const ink = labelInk(elStyle(d.el, settings).fill);
     return (
-      <g key={`lbl${el.id}`} pointerEvents="none">
-        {el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
+      <g key={`lbl${d.el.id}`} pointerEvents="none">
+        {d.el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
         <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink} style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
@@ -3607,9 +3771,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
   const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
   const leftTabs = [
-    { id: "props", glyph: "✎", label: "Element" },
-    { id: "parcel", glyph: "⬡", label: "Parcel" },
     { id: "yield", glyph: "∑", label: "Yield" },
+    { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
     { id: "standards", glyph: "⚙", label: "Setup" },
@@ -3631,7 +3795,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-side tool-rail buttons (dark chrome, icon + label, active = ember)
   const rbtn = (active) => ({
     display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
-    padding: "8px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
+    padding: "6px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
     color: active ? "#fff" : PAL.chromeInk,
@@ -3665,6 +3829,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (id !== "parking") setParkingMenu(false);
     if (id !== "road") setRoadMenu(false);
     if (id !== "measure") setMeasureMenu(false);
+    if (narrow) setMobileTools(false); // B113: picking a tool dismisses the phone overlay rail so you can draw
   };
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
@@ -3928,71 +4093,65 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       {/* top bar — dark graphite chrome */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", position: "relative", zIndex: 60 }}>
+      <div className="dark-scroll" style={{ display: "flex", alignItems: "center", gap: narrow ? 5 : 10, padding: narrow ? "0 8px" : "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 1px 0 rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", overflowX: narrow ? "auto" : "visible", position: "relative", zIndex: 60 }}>
         {onBackToMap && <button className="dbtn" style={{ ...dGhost, marginLeft: -4 }} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>}
         {/* B10: brand/module mark removed — it now lives once in the shell's product switcher. */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 2 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
             {/* SITE ▾ — switch / rename location */}
-            <div style={{ position: "relative" }}>
+            <div ref={siteAnchor} style={{ position: "relative" }}>
               <button className="dbtn" style={hdrTab(12.5, "#fff", 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
               </button>
-              {siteMenu && (
-                <>
-                  <div onClick={() => setSiteMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                  <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 284, maxHeight: 460, overflowY: "auto", padding: 10 }}>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
-                    <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
-                    {siteReps.map((s) => {
-                      const cur = planGroup(s) === groupId;
-                      return (
-                        <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
-                          <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
-                            {cur && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                      <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
-                    </div>
-                  </div>
-                </>
-              )}
+              <AnchoredMenu open={siteMenu} onClose={() => setSiteMenu(false)} anchorRef={siteAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
+                <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
+                {siteReps.map((s) => {
+                  const cur = planGroup(s) === groupId;
+                  return (
+                    <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
+                      <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
+                        {cur && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+                <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                  <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
+                </div>
+              </AnchoredMenu>
             </div>
             <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
             {/* PLAN ▾ — switch / rename / add layout */}
-            <div style={{ position: "relative" }}>
+            <div ref={planAnchor} style={{ position: "relative" }}>
               <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
               </button>
-              {planMenu && (
-                <>
-                  <div onClick={() => setPlanMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                  <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50, width: 284, maxHeight: 460, overflowY: "auto", padding: 10 }}>
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
-                    <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
-                    {plansHere.map((s) => (
-                      <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => (s.id === siteId ? setPlanMenu(false) : handleOpenSite(s.id))}>
-                        <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
-                          {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                        </span>
-                      </button>
-                    ))}
-                    <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                      <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
-                      <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
-                    </div>
-                  </div>
-                </>
-              )}
+              <AnchoredMenu open={planMenu} onClose={() => setPlanMenu(false)} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
+                <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
+                {plansHere.map((s) => (
+                  <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => (s.id === siteId ? setPlanMenu(false) : handleOpenSite(s.id))}>
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
+                      {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                    </span>
+                  </button>
+                ))}
+                <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                  <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
+                  <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
+                </div>
+                <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
+                  title="Restore an earlier automatically-saved version of this plan">
+                  <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
+                </button>
+              </AnchoredMenu>
             </div>
           </span>
         </div>
@@ -4005,40 +4164,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="dbtn" style={dIcon} onClick={redo} disabled={!futureRef.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
           <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
         </div>
-        <button className="dbtn" style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
-          onClick={() => setSettings((s) => ({ ...s, snap: !s.snap }))} title="Snap to the grid and flush against neighbouring elements">
+        <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+          onClick={() => setSnap(!settings.snap)} title="Snap to grid & flush against neighbours — click or press S to toggle; hold Alt while dragging to place freely">
           <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-          Snap {settings.gridSize}′
+          {settings.snap ? `Snap ${settings.gridSize}′` : "Snap off"}
         </button>
         {vSep}
-        {/* autosave indicator */}
-        <span style={{ fontSize: 11, color: saveStatus === "unsaved" ? "#fbbf24" : PAL.chromeMuted, fontWeight: 500, marginRight: 4, minWidth: 56, textAlign: "right" }}>{saveStatus === "saving" ? "Saving…" : saveStatus === "unsaved" ? "Unsaved" : "Saved ✓"}</span>
+        {/* single save/sync badge — folds in the cloud connection state (synced /
+            syncing / offline / error), replacing the old separate "Cloud ✓" pill (B10/E2) */}
+        {(() => {
+          const cloudActive = isCloudActive();
+          const connOk = cloud?.state === "connected";
+          let label, dot, color = PAL.chromeMuted, spin = false, tip;
+          if (saveStatus === "saving") {
+            label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
+          } else if (saveStatus === "unsaved") {
+            color = "#fbbf24"; dot = "#f59e0b";
+            label = cloudActive && !connOk ? "Offline" : "Unsaved";
+            tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
+          } else if (cloudActive && connOk) {
+            label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
+          } else if (cloudActive) {
+            label = "Offline"; color = "#fbbf24"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
+          } else {
+            label = "Saved ✓"; dot = "#9b9482"; tip = "Saved on this device. Sign in to sync across your devices.";
+          }
+          return (
+            <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flex: "none", animation: spin ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
+              {label}
+            </span>
+          );
+        })()}
+        {/* LOUD cloud-save-failure banner (B125) — a failed cloud write is no longer a
+            silent tiny badge. Honest: the work is safe on this device and will retry. */}
+        {cloudSaveFailed && (
+          <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+            <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
+            <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
+            <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+          </div>
+        )}
         {/* action cluster — one File ▾ */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <div style={{ position: "relative" }}>
+          <div ref={exportAnchor} style={{ position: "relative" }}>
             <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={() => setExportMenu((o) => !o)}>File ▾</button>
-            {exportMenu && (
-              <>
-                <div onClick={() => setExportMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 50, width: 220 }}>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
-                  <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
-                    onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
-                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
-                  <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-                  <button style={menuItem(false)} onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
-                </div>
-              </>
-            )}
+            <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+              <button style={menuItem(false)} title="Download this plan as a .json file you can re-import later" onClick={() => { setExportMenu(false); exportJSON(); }}>Export JSON</button>
+              <button style={menuItem(false)} title="Load a plan from a .json file (replaces the current canvas)" onClick={() => { setExportMenu(false); importRef.current?.click(); }}>Import JSON…</button>
+              <input ref={importRef} type="file" accept="application/json,.json" style={{ display: "none" }}
+                onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+              <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+              <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+              <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
+              <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
+            </AnchoredMenu>
           </div>
         </div>
       </div>
 
       {/* body */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
@@ -4047,7 +4234,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
@@ -4064,6 +4251,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </pattern>
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
+              </pattern>
+              {/* colour-blind-safe secondary cues for the paved surfaces (H2): trailer
+                  reads as a coarse diagonal (opposite lean to landscape), sidewalk as a
+                  fine concrete-scoring dot grid. */}
+              <pattern id="pat-trailer" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+                <line x1="0" y1="0" x2="0" y2="8" stroke="#b09a6c" strokeWidth="0.9" opacity="0.5" />
+              </pattern>
+              <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
+                <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
             </defs>
 
@@ -4168,9 +4364,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
+                const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
                   fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
                   stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                  strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                   style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                   pointerEvents="all"
                   onPointerDown={(e) => startMoveParcel(e, pc.id)}
@@ -4664,7 +4862,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {[
                   ["1", <>Pick a <b>parcel from the map</b> (‹ Map) to start from real county data,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
-                  ["3", <>or draw a boundary with the <b>Parcel</b> tool on the right.</>],
+                  ["3", <>or draw one with the <b>Boundary</b> tool (right rail).</>],
                 ].map(([n, body]) => (
                   <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
                     <span style={{ width: 17, height: 17, borderRadius: 99, background: "#f1ece1", color: "#6b6557", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
@@ -4758,28 +4956,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
         </div>
 
-        {/* right-side tool rail — dark chrome */}
-        <div className="dark-scroll" style={{ width: 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px", overflowY: "visible", position: "relative", zIndex: 30, boxShadow: "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
+        {/* phone-only floating button to summon the tool rail (B113) */}
+        {narrow && !mobileTools && (
+          <button onClick={() => setMobileTools(true)} title="Show the drawing tools"
+            style={{ position: "absolute", right: 12, bottom: 16, zIndex: 1190, display: "flex", alignItems: "center", gap: 6, padding: "11px 16px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, color: "#fff", background: PAL.ember, boxShadow: "0 6px 18px rgba(0,0,0,0.45)" }}>
+            ✎ Tools
+          </button>
+        )}
+        {/* right-side tool rail — dark chrome. On phones it overlays the canvas
+            (slide-in from the right) instead of permanently eating 168px (B113). */}
+        {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
+        <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "13px 11px",
+          overflowY: "auto", minHeight: 0,
+          position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
+          zIndex: narrow ? 1205 : 30,
+          transform: narrow && !mobileTools ? "translateX(100%)" : "none", transition: "transform 0.2s ease",
+          boxShadow: narrow ? "-10px 0 28px rgba(0,0,0,0.45)" : "inset 1px 0 0 rgba(0,0,0,0.3)" }}>
           {railHdr("Tools")}
           <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
-          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")}><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>⇧V</span></button>
+          <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
-          <div style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)}><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
-            {toolMenu && (
-              <>
-                <div onClick={() => setToolMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
-                  <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-                  <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
-                  <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
-                    <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
-                    <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
-                  </div>
-                </div>
-              </>
-            )}
+          <div ref={boundaryAnchor} style={{ position: "relative" }}>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
+              <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
+              <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
+                <b style={{ color: PAL.ink }}>Reshape:</b> pick <b>Select</b>, click the parcel, then drag its dots — the <b>＋</b> on an edge adds a corner, <b>Shift-click</b> a dot removes it.
+              </div>
+            </AnchoredMenu>
           </div>
 
           {railHdr("Site elements")}
@@ -4789,79 +4996,73 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             if (id === "building") {
               const dockLabel = { single: "single-load", cross: "cross-dock", none: "no docks" }[buildingDock];
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={buildingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("building")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="building" /> Building</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{dockLabel}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="building" /> Building</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{dockLabel}</span>
                     </button>
                     <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-label="Dock layout">▾</button>
                   </div>
-                  {buildingMenu && (
-                    <>
-                      <div onClick={() => setBuildingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 200 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
-                        {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
-                          <button key={k} style={menuItem(buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={buildingMenu} onClose={() => setBuildingMenu(false)} anchorRef={buildingAnchor} placement="left" width={200} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
+                    {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
+                      <button key={k} style={menuItem(buildingDock === k)} onClick={() => { setBuildingDock(k); selectTool("building"); setBuildingMenu(false); }}>{label}</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
             if (id === "parking") {
               const sd = settings.stallDepth, ai = settings.aisle;
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("parking")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="parking" /> Parking</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="parking" /> Car Parking</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{parkingRows === "free" ? "free draw" : parkingRows === "double" ? "double row" : "single row"}</span>
                     </button>
                     <button className={`rbtn${tool === "parking" ? " on" : ""}`} style={{ ...rbtn(tool === "parking"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-label="Parking presets">▾</button>
                   </div>
-                  {parkingMenu && (
-                    <>
-                      <div onClick={() => setParkingMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 248 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
-                        {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
-                          <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={parkingMenu} onClose={() => setParkingMenu(false)} anchorRef={parkingAnchor} placement="left" width={248} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Parking rows</div>
+                    {[["free", "Free draw (any size)"], ["single", `Single row (${sd}′ + ${ai}′ = ${sd + ai}′ deep)`], ["double", `Double row (${sd}′ + ${ai}′ + ${sd}′ = ${sd * 2 + ai}′ deep)`]].map(([k, label]) => (
+                      <button key={k} style={menuItem(tool === "parking" && parkingRows === k)} onClick={() => { setParkingRows(k); selectTool("parking"); setParkingMenu(false); }}>{label}</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
             if (id === "road") {
               return (
-                <div key={id} style={{ position: "relative" }}>
+                <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 2 }}>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("road")}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="road" /> Road</span>
-                      <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="road" /> Road</span>
+                      <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{roadWidth === "free" ? "free draw" : `${roadWidth}′ travel`}</span>
                     </button>
                     <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-label="Road presets">▾</button>
                   </div>
-                  {roadMenu && (
-                    <>
-                      <div onClick={() => setRoadMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                      <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
-                        <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
-                        {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
-                          <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ wide — drag the length</button>
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  <AnchoredMenu open={roadMenu} onClose={() => setRoadMenu(false)} anchorRef={roadAnchor} placement="left" width={230} panelStyle={menuPanel}>
+                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
+                    <button style={menuItem(tool === "road" && roadWidth === "free")} onClick={() => { setRoadWidth("free"); selectTool("road"); setRoadMenu(false); }}>Free draw (any size)</button>
+                    {(settings.roadWidths ?? "24, 26, 30, 36, 40").split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0).map((w) => (
+                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); selectTool("road"); setRoadMenu(false); }}>{w}′ travel — drag the length</button>
+                    ))}
+                  </AnchoredMenu>
                 </div>
               );
             }
-            return <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={rbtn(tool === id)} onClick={() => selectTool(id)}><ToolIcon id={id} /> {t.label}</button>;
+            // B93: give the preset-less site-element rows (paving/trailer/pond) the same
+            // two-line anatomy as Building/Road/Car Parking, so the rail reads as one
+            // uniform column (these just have no "▾" preset menu).
+            const sub = { paving: "drive / court", trailer: "back-in storage", pond: "detention basin" }[id];
+            return (
+              <button key={id} className={`rbtn${tool === id ? " on" : ""}`} style={{ ...rbtn(tool === id), flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool(id)}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id={id} /> {t.label}</span>
+                {sub && <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{sub}</span>}
+              </button>
+            );
           })}
 
           {railHdr("Shapes")}
@@ -4874,25 +5075,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {railHdr("Measure")}
 
           {/* measure with line / polyline / area modes */}
-          <div style={{ position: "relative" }}>
+          <div ref={measureAnchor} style={{ position: "relative" }}>
             <div style={{ display: "flex", gap: 2 }}>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("measure")}>
-                <span style={{ display: "flex", alignItems: "center", gap: 9 }}><ToolIcon id="measure" /> Measure</span>
-                <span style={{ fontSize: 9.5, opacity: 0.6, paddingLeft: 24 }}>{measureMode}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="measure" /> Measure</span>
+                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{measureModeLabel(measureMode)}</span>
               </button>
               <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-label="Measure modes">▾</button>
             </div>
-            {measureMenu && (
-              <>
-                <div onClick={() => setMeasureMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div className="menu" style={{ ...menuPanel, position: "absolute", top: 0, right: "calc(100% + 10px)", zIndex: 50, width: 230 }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-                  {[["line", "Line"], ["polyline", "Polyline"], ["area", "Area"]].map(([k, label]) => (
-                    <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
-                  ))}
-                </div>
-              </>
-            )}
+            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="left" width={230} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
+              {MEASURE_MODES.map(([k, label]) => (
+                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
+              ))}
+            </AnchoredMenu>
           </div>
 
           {railHdr("Annotate")}
@@ -4924,7 +5120,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* the open menu (collapsed by default) — drag its right edge to resize */}
           {leftPanel && (<>
-          <div style={{ width: leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px" }}>
+          <div style={{ width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "#efe9dd", overflowY: "auto", padding: "13px 13px 24px",
+            ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null) }}>
           {/* aerial underlay */}
           {leftPanel === "aerial" && (
           <Section title="Aerial underlay">
@@ -5291,7 +5488,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Parcel tool.</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Boundary tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {parcels.map((pc, i) => {
@@ -5300,7 +5497,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     return (
                       <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
                         style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.locked ? " 🔒" : ""}{picked ? " ✓" : ""}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
                         <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                       </button>
                     );
@@ -5356,6 +5553,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </Section>
           )}
+          {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
+              up on an immutable backdrop. */}
+          {leftPanel === "parcel" && selParcel && (() => {
+            const mine = parcelDrawings.filter((d) => d.parcelId === selParcel.id);
+            return (
+              <Section title="Attached drawings">
+                <button style={{ ...chip, width: "100%" }} onClick={() => { setDrawingTargetParcel(selParcel.id); drawingFileRef.current?.click(); }}>＋ Attach a drawing (PDF / JPG)</button>
+                <input ref={drawingFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }}
+                  onChange={(e) => { onAttachDrawing(drawingTargetParcel, e.target.files?.[0]); e.target.value = ""; }} />
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>An immutable backdrop you mark up on top of — saved with this parcel.</div>
+                {mine.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+                    {mine.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "#fff" }}>
+                        <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
+                          style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
+                        </button>
+                        <button onClick={() => { if (window.confirm(`Remove “${d.name}” and its markups?`)) deleteDrawing(d.id); }} title="Remove this drawing"
+                          style={{ border: "none", background: "transparent", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1 }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            );
+          })()}
           {/* appraisal-district property data for the selected parcel */}
           {leftPanel === "parcel" && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
@@ -5437,6 +5661,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
               <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
@@ -5496,6 +5721,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               ))}
             </div>
             {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
+            {parcels.some((p) => p.active === false) && (
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
+                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
+              </div>
+            )}
             {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
             {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
             {metricRow("FAR", f2(far), "(1-story)")}
@@ -5512,7 +5742,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {leftPanel === "standards" && (<>
           <Section title="Site defaults">
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.snap} onChange={(e) => setSettings((s) => ({ ...s, snap: e.target.checked }))} /> Snap to grid</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
@@ -5553,9 +5783,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </Section>
           </>)}
           </div>
-          {/* drag handle to resize the menu */}
-          <div onPointerDown={startLeftResize} title="Drag to resize"
-            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />
+          {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
+          {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
+            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />}
           </>)}
         </div>
       </div>
@@ -5569,13 +5799,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 26px" }}>
               {[
-                ["Tools", ""], ["V", "Select"], ["⇧V", "Pan (hand)"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
+                ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
                 ["Ctrl/⌘ D", "Duplicate"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
                 ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
                 ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
-                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["?", "This panel"],
+                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
               ].map(([k, v], i) => v === "" ? (
                 <div key={i} style={{ gridColumn: "1 / -1", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.muted, marginTop: i ? 12 : 0, marginBottom: 2 }}>{k}</div>
               ) : (
@@ -5583,6 +5813,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <kbd style={{ flex: "none" }}>{k}</kbd><span style={{ color: PAL.ink }}>{v}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
+      {versionsOpen && (
+        <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
+              <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.5, marginBottom: 12 }}>
+              Automatic backups of this plan, saved on this device. Restore one to bring it back — your current version is backed up too, so a restore can be undone. (Aerials / backdrop images may need re-dropping.)
+            </div>
+            {versionList.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: PAL.muted, padding: "10px 0" }}>No earlier versions saved yet. As you edit, recent versions are backed up here automatically.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {versionList.map((v) => {
+                  const d = new Date(v.at);
+                  const when = isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                  return (
+                    <div key={v.at} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 9 }}>
+                      <span style={{ fontSize: 12.5, color: PAL.ink }}>
+                        <span style={{ fontWeight: 650 }}>{when}</span>
+                        <span style={{ color: PAL.muted }}> · {v.buildings} building{v.buildings === 1 ? "" : "s"}</span>
+                      </span>
+                      <button style={{ ...chip, flex: "none" }} onClick={() => restoreVersion(v.at)} title="Replace the canvas with this saved version">Restore</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* Parcel-attached drawing markup modal (B67) */}
+      {openDrawingId && (() => {
+        const d = parcelDrawings.find((x) => x.id === openDrawingId);
+        if (!d) return null;
+        return <ParcelDrawing drawing={d} loading={rehydratingId === d.id} onSave={(marks) => updateDrawingMarks(d.id, marks)} onClose={() => setOpenDrawingId(null)} />;
+      })()}
+      {/* Multi-page PDF sheet picker (B67 increment 2) */}
+      {pagePick && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }} onClick={cancelPagePick}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink }}>Pick a sheet</div>
+            <div style={{ fontSize: 12, color: PAL.chromeMuted, margin: "5px 0 12px" }}>“{pagePick.name}” has {pagePick.pageCount} pages — choose which one to attach as the backdrop.</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+              {Array.from({ length: pagePick.pageCount }, (_, i) => i + 1).map((n) => (
+                <button key={n} onClick={() => pickPage(n)} title={`Attach page ${n}`}
+                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>{n}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -5825,7 +6112,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
-  const texFill = st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
