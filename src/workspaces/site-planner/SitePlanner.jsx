@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -490,17 +490,26 @@ function sidewalkBetween(el, host, allEls) {
   });
 }
 // Curbed edges (LOCAL frame) — the single source feeding both the drawn band and
-// the area math. Terminal curb on the far edge of every paved section; a
-// transition curb where a sidewalk sits behind it; both depth ends for a free field.
+// the area math. B130 rule: a 6" curb wraps the WHOLE perimeter wherever pavement
+// meets non-paving (dirt, landscape, a dead-end aisle), and is skipped wherever
+// pavement meets pavement — a drive-aisle opening, continuous paving, or the
+// internal seam between two abutting pads (e.g. split modules). The bare building
+// face stays curb-free (B70) unless a sidewalk sits between (a transition curb).
 function curbEdgesOf(el, allEls) {
   if (el.points || !CURB_TYPES.includes(el.type)) return [];
   const w = curbWidthOf(el), host = curbHost(el, allEls);
-  if (!host) // free-standing: both depth ends are terminal (no building side to spare)
-    return [{ axis: "y", sign: 1, length: el.w, width: w }, { axis: "y", sign: -1, length: el.w, width: w }];
-  const oe = outwardCurbEdge(el, allEls);
-  if (!oe) return [];
-  const edges = [{ ...oe, width: w }];                               // terminal (far/back) edge
-  if (sidewalkBetween(el, host, allEls)) edges.push({ axis: oe.axis, sign: -oe.sign, length: oe.length, width: w }); // sidewalk transition
+  const oe = host ? outwardCurbEdge(el, allEls) : null;             // edge AWAY from the host
+  const swalk = host ? sidewalkBetween(el, host, allEls) : false;
+  const edges = [];
+  for (const c of [
+    { axis: "y", sign: 1, length: el.w }, { axis: "y", sign: -1, length: el.w },
+    { axis: "x", sign: 1, length: el.h }, { axis: "x", sign: -1, length: el.h },
+  ]) {
+    const hostSide = oe && c.axis === oe.axis && c.sign === -oe.sign;
+    if (hostSide && !swalk) continue;                              // B70: bare building face → no curb
+    if (edgeAbutsPaving(el, c.axis, c.sign, allEls)) continue;     // meets pavement (opening / seam) → no curb
+    edges.push({ ...c, width: w });
+  }
   return edges;
 }
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
@@ -2027,7 +2036,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const curb = +settings.roadCurb || CURB;
         const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
         const buildingExtra = draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {};
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra, ...buildingExtra };
+        // B130: a free-drawn parking field runs its stall rows along the LONGER edge.
+        // carStalls treats w as row-length and h as depth, so when the drawn box is
+        // deeper than it is long, swap the two and rotate 90° — identical footprint on
+        // screen, but the rows (and the double-loaded modules) lie along the long side.
+        let w = draftRect.w, h = draftRect.h, rot = 0;
+        if (draftRect.type === "parking" && h > w) { w = draftRect.h; h = draftRect.w; rot = 90; }
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w, h, rot, ...roadExtra, ...buildingExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
