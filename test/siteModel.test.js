@@ -3,6 +3,7 @@ import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
   statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
+  buildingNumbers, isBuilding,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -93,5 +94,33 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(m.settings).toEqual({});
     // and the downstream that crashed (siteSqft = parcels.reduce(...)) is now safe:
     expect(() => m.parcels.reduce((s) => s, 0)).not.toThrow();
+  });
+
+  // B122 — buildings carry a sequential display number by placement order, derived from
+  // list position (never stored). Deleting one renumbers the rest 1…N while every stable
+  // id is untouched; dog-ear / bump-out pieces (type "building" + `dogEar`) are excluded.
+  it("buildingNumbers: contiguous 1…N by placement order, excludes dog-ears, renumbers on delete", () => {
+    const els = [
+      { id: "e1", type: "building" },
+      { id: "e2", type: "parking" },
+      { id: "e3", type: "building" },
+      { id: "e9", type: "building", dogEar: { side: "n", sign: 1 }, attachedTo: "e1" }, // bump-out, not a building
+      { id: "e4", type: "building" },
+    ];
+    expect(isBuilding(els[0])).toBe(true);
+    expect(isBuilding(els[3])).toBe(false); // dog-ear / bump-out is not a standalone building
+    const n = buildingNumbers(els);
+    expect(n.get("e1")).toBe(1);
+    expect(n.get("e3")).toBe(2);
+    expect(n.get("e4")).toBe(3);
+    expect(n.has("e2")).toBe(false); // non-building element
+    expect(n.has("e9")).toBe(false); // dog-ear excluded from numbering
+    // delete the FIRST building (e1) → the rest renumber contiguously; ids never change
+    const after = buildingNumbers(els.filter((e) => e.id !== "e1"));
+    expect(after.get("e3")).toBe(1);
+    expect(after.get("e4")).toBe(2);
+    // a single building is still "Building 1"; bad input yields an empty map
+    expect(buildingNumbers([{ id: "x", type: "building" }]).get("x")).toBe(1);
+    expect(buildingNumbers(null).size).toBe(0);
   });
 });

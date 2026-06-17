@@ -320,6 +320,39 @@ was never clicked" quietly ships broken.
   sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
+  (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
+  **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
+  re-label **immediately** as "Building 2" (numbers stay contiguous 1…N, no gap). Add another → it
+  appends as the next number. A site with a **single** building still reads "Building 1".
+- **Identity check (the important one):** give a building attached **parking** or a **bump-out**, then
+  delete a *lower-numbered* building so this one renumbers. Confirm the attached pieces stay attached and
+  nothing re-points — attachment binds to the hidden stable id, not the visible number, so a renumber
+  must never detach or mis-link anything.
+- **Expect:** every visible building label updates in one pass on delete; non-building elements
+  (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
+  their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
+### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site and lay out adjacent elements (a big building, a narrow trailer strip beside it,
+  a detention pond, a couple of sidewalks). (1) **Zoomed in:** each element shows its full centred label
+  (name + sf/count + dimensions) as before. (2) **Zoom out:** labels should *thin out*, not pile up — the
+  dimensions line drops first, then the area line, leaving the name; the **narrow trailer strip** should
+  drop to just its name (or hide) rather than spilling a 3-line label past its ~50′ width. (3) **Crowd
+  test:** push several labelled elements close together and confirm their centred labels no longer
+  overprint into an unreadable stack — a lower-priority label yields (shrinks or disappears) to the
+  bigger / building label rather than stacking on top. Zoom back in → the hidden labels return.
+- **Expect:** no two centred element-name labels overprint at any zoom; buildings / bigger elements keep
+  their labels; nothing crashes; non-labelled elements (paving / parking / roads) are unaffected.
+- **Known-not-yet (increment 2 — do NOT fail for these):** the **red edge-dimension ticks** ("300′",
+  "638′") are still a separate layer and may overlap the centred names; no leader lines yet. Tracked under B121.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
+  that vanished when it had room, or a pile that remained).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

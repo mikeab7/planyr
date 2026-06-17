@@ -31,6 +31,8 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
+import { buildingNumbers } from "./lib/siteModel.js";
+import { layoutLabels } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
@@ -3374,16 +3376,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
   const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
   const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
+  // B122: each standalone building shows a sequential "Building N" by placement order,
+  // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
+  const bldgNo = buildingNumbers(els);
+  const fs = 11 * ls, lh = 14.5 * ls, charW = fs * 0.6;
+  // B121: build each element's centred label as priority-ordered lines (name → area →
+  // dimensions, highest priority first), then hand them all to the shared LOD + collision
+  // engine (lib/labelLayout) so adjacent labels never overprint into an unreadable pile.
+  // The engine drops a label's lowest lines (dimensions first) to fit a narrow shape or
+  // dodge a neighbour, and hides it only as a last resort; bigger elements and buildings
+  // win the space. Zoomed in, shapes are large and spread out, so all lines show as before.
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
-  const labelEls = els.map((el) => {
-    if (NO_LABEL.includes(el.type) || el.noLabel) return null;
+  const labelCands = [];
+  for (const el of els) {
+    if (NO_LABEL.includes(el.type) || el.noLabel) continue;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
     const fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
     const dupKey = `${el.type}@${Math.round(fc.x / 12)},${Math.round(fc.y / 12)}`;
-    if (seenLabels.has(dupKey)) return null; // same type stacked at (nearly) the same spot
+    if (seenLabels.has(dupKey)) continue; // same type stacked at (nearly) the same spot
     seenLabels.add(dupKey);
-    const c = f2p(fc);
     let lines;
     if (el.type === "sidewalk" || el.type === "landscape") {
       // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
@@ -3392,7 +3404,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (el.type === "pond") {
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
-      lines = [TYPE[el.type].label.split(" / ")[0]];
+      const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
+      lines = [bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0]];
       if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
       else if (el.type === "building" && !poly && !el.dogEar) {
         // include attached dog-ear / bump-out area in the on-plan building SF
@@ -3402,13 +3415,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } else lines.push(`${f0(area)} sf`);
       lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
     }
-    const fs = 11 * ls, lh = 14.5 * ls;
+    // Vertical room for the stack = the shape's SMALLER on-screen dimension (rotation-robust),
+    // so a label can't spill past a narrow strip; the engine drops lines that don't fit.
+    let span;
+    if (poly) {
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
+      span = Math.min(hi - lo, hi2 - lo2);
+    } else span = Math.min(el.w, el.h);
+    labelCands.push({ el, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, maxH: span * view.ppf });
+  }
+  const labelShow = layoutLabels(
+    labelCands.map((d) => ({ id: d.el.id, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, maxH: d.maxH })),
+    { pad: 2 },
+  );
+  const labelEls = labelCands.map((d) => {
+    const lines = labelShow.get(d.el.id);
+    if (!lines) return null; // hidden this frame to avoid overprinting a higher-priority label
+    const c = d.c;
     // Element fills are solid, so labels need no chip — just contrasting text.
     const top = c.y - (lines.length * lh) / 2, first = top + fs * 0.82;
-    const ink = labelInk(elStyle(el, settings).fill);
+    const ink = labelInk(elStyle(d.el, settings).fill);
     return (
-      <g key={`lbl${el.id}`} pointerEvents="none">
-        {el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
+      <g key={`lbl${d.el.id}`} pointerEvents="none">
+        {d.el.locked && <text x={c.x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
         <text x={c.x} y={first} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink} style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={c.x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
