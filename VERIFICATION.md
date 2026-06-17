@@ -598,3 +598,9 @@ _Move items here with the date and who/what checked them._
   - The same shot incidentally confirmed **B122** numbering ("Building 1" / "Building 2") and **B123**'s stack (square footage on its own line) rendering correctly.
   - Backed by unit tests (leader placement + inside-stays-inside) · lint 0 · 204 tests · build green.
 - **Not covered (logged-out headless limits):** a very busy/crowded layout, and labels near the top viewport edge (the leader points up) — eyeball on a real dense plan when convenient. Sign-in paths untested (proxy blocks auth).
+
+### V32 — Road dimension tracks a resize; roads resize in 1′ steps (B141 increment 1) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
+- **Steps:** "Start blank" → Road tool (free draw) → dragged a road rectangle → selected it → read the red dimension → dragged the bottom-right corner handle straight down to widen the road → re-read the dimension.
+- **Result ✅:** the red travel-width callout updated **live from 170′ → 428′** as the road was widened (before the fix it read a frozen `travelW` and stayed at 170′), and the value is a clean integer (1′ steps). Backed by the `roadTravelWidth` unit test · lint 0 · 205 tests · build green.
+- **Not covered:** the interactive move/edit of the callout (B141 increment 2) isn't built yet; a signed-in cloud-reload pass is untested (logged-out run).

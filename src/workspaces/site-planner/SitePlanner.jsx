@@ -33,7 +33,7 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers } from "./lib/siteModel.js";
+import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
@@ -1980,9 +1980,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const opp = d.opp; // fixed opposite corner (world feet)
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      let nw = Math.abs(local.x), nh = Math.abs(local.y);
-      nw = Math.max(settings.gridSize, snapOn ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
-      nh = Math.max(settings.gridSize, snapOn ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
+      // Roads resize in 1′ increments (not the grid step) so a width dials to the exact foot.
+      const snapTo = (v) => el.type === "road" ? Math.max(1, Math.round(v)) : Math.max(settings.gridSize, snapOn ? Math.round(v / settings.gridSize) * settings.gridSize : Math.round(v));
+      let nw = snapTo(Math.abs(local.x)), nh = snapTo(Math.abs(local.y));
       // opposite stays fixed; new center is the midpoint of opp and the dragged corner
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
@@ -1997,7 +1997,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const { nx, ny, opp } = d; // outward local normal of the dragged edge
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      const snapDim = (v) => Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      const snapDim = (v) => el.type === "road" ? Math.max(1, Math.round(Math.abs(v))) : Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
       const nw = nx !== 0 ? snapDim(local.x) : el.w;
       const nh = ny !== 0 ? snapDim(local.y) : el.h;
       const half = rot2(nx * nw, ny * nh, el.rot);
@@ -4124,7 +4124,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
   const roadCurbOf = (el) => el.curb ?? (+settings.roadCurb || CURB);
-  const roadTravel = (el) => el.travelW ?? Math.max(0, Math.min(el.w, el.h) - 2 * roadCurbOf(el));
+  const roadTravel = (el) => roadTravelWidth(el.w, el.h, roadCurbOf(el)); // live geometry — tracks resizes (not a frozen travelW)
   const setRoadTravel = (el, travel) => {
     const curb = roadCurbOf(el), cross = Math.max(1, travel) + 2 * curb, crossIsH = el.h <= el.w;
     pushHistory();
@@ -6408,7 +6408,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // hides when zoomed out instead of shrinking onto the centred name labels.
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
-    const dimW = el.type === "road" ? (el.travelW ?? Math.max(0, fullMin - 2 * (el.curb ?? CURB))) : fullMin;
+    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB)) : fullMin;
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const dim = [];
