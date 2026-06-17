@@ -4681,6 +4681,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <circle cx={f2p(calloutDraft.tip).x} cy={f2p(calloutDraft.tip).y} r={4} fill={PAL.accent} />
               </>)}
               {/* inline callout text editor (overlays the box) */}
+              {/* B142b: full-canvas catcher so clicking ANYWHERE outside the editor finishes the
+                  text box (Bluebeam-style). Needed because the canvas pointerdown preventDefaults
+                  the textarea blur, which otherwise traps you in the editor. Sits under the textarea. */}
+              {editCallout && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditCallout(); }} />}
               {editCallout && (() => {
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
@@ -4696,10 +4700,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onDoubleClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
                         e.stopPropagation();
-                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitEditCallout(); }
-                        else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
+                        // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
+                        if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
                       }}
-                      placeholder="Type, Enter to save"
+                      placeholder="Type; click away or Esc to finish"
                       maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>

@@ -575,6 +575,11 @@ was never clicked" quietly ships broken.
   - **B142:** create a text box, type, Enter → Select tool → click empty (deselects: stroke 1.4, panel gone) → click the box (**reselects**: stroke 2, "Text box" panel opens); clicking the text glyphs also selects. `pointerEvents="all"` makes a no/transparent-fill box clickable across its whole area.
 - **Note:** the B142 *default-fill* case already worked before the fix (could not reproduce the original "nothing happens"); the fix hardens the no-fill case. A **signed-in** reload pass for the pond label persistence still rides on existing `el.det` persistence.
 
+### V33 — Text box: Enter = newline, click-away / Esc finishes (Bluebeam-style) (B143) ✅
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview)
+- **Steps + result — ✅ PASS, zero console errors:** Text tool → click to place → type "Line1", **Enter**, "Line2" → still editing, textarea value = "Line1\nLine2" (Enter now makes a newline, was commit). **Click away +80 px** → editor closes and commits **two lines** (previously you were stuck in the editor at any distance). New box → type → **Esc** → finishes, keeps the text. Place a box and click away **without typing** → the empty box is removed.
+- **Expect:** matches Bluebeam — text box is multi-line; you finish by clicking away or pressing Esc.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
