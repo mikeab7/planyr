@@ -36,6 +36,7 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
+import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -1832,6 +1833,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id });
   };
 
+  /* ------------ measurement vertex editing (B141: Bluebeam-style add/drag/delete) ------------
+     Mirrors the element-vertex handlers for the measures[] layer; area/perimeter recompute
+     live because the label is derived from the points. Legacy {a,b} records migrate to
+     {mode,pts} on first edit. */
+  const startMeasureVertex = (e, i, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = measures[i];
+    if (!m) return;
+    const pts = measPts(m), min = measMode(m) === "area" ? 3 : 2;
+    pushHistory();
+    if (e.shiftKey) { // shift-click deletes the vertex (keep the mode's minimum)
+      if (pts.length > min) setMeasures((arr) => arr.map((mm, k) => k === i ? { ...mm, mode: measMode(mm), pts: pts.filter((_, j) => j !== index) } : mm));
+      return;
+    }
+    setSel({ kind: "measure", i });
+    drag.current = { mode: "measureVertex", i, index };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const addMeasureVertex = (e, i, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    pushHistory();
+    setMeasures((arr) => arr.map((mm, k) => {
+      if (k !== i) return mm;
+      const pts = measPts(mm), p = pts[index], q = pts[(index + 1) % pts.length];
+      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+      const np = [...pts];
+      np.splice(index + 1, 0, mid);
+      return { ...mm, mode: measMode(mm), pts: np };
+    }));
+    setSel({ kind: "measure", i });
+  };
+
   const onMove = (e) => {
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
@@ -1973,6 +2008,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const sp = snapPt(fp);
       setEls((a) => a.map((x) => x.id === d.id && x.points
         ? { ...x, points: x.points.map((p, i) => (i === d.index ? sp : p)) } : x));
+      return;
+    }
+    if (d.mode === "measureVertex") { // B141: drag a measurement control point
+      const sp = snapPt(fp);
+      setMeasures((arr) => arr.map((mm, k) => k === d.i
+        ? { ...mm, mode: measMode(mm), pts: measPts(mm).map((p, j) => (j === d.index ? sp : p)) } : mm));
       return;
     }
     if (d.mode === "resize") {
@@ -3252,19 +3293,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
     // and the rasterized page — composited above the aerial backdrop in the same z-order.
     if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
-    // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
-    // north arrow (bottom-left), positioned in the export viewBox.
-    const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
-    const sx = x + w - sbPx - 28, sy2 = y + h - 30, na = x + 36, ny = y + h - 54;
+    // Sheet furniture for the export — a measurement-grade graphic scale bar
+    // (bottom-right) and a north arrow (top-left), both on a translucent
+    // legibility plate. Sized in OUTPUT units and anchored to the export FRAME
+    // (lib/sheetFurniture.js) so they sit fully inside a safe-area inset, never
+    // clip, and print at a fixed physical size on the page — unlike the screen
+    // overlays (data-export="skip", already removed above) which are sized for the
+    // live viewport. ftPerUnit = feet per viewBox user unit (one foot == view.ppf
+    // user units). The planner canvas is north-up, so the arrow points straight up.
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
-    furn.innerHTML =
-      [0, 1, 2, 3].map((i) => `<rect x="${sx + seg * i}" y="${sy2 - 3}" width="${seg}" height="6" fill="${i % 2 ? "#fff" : PAL.ink}" stroke="${PAL.ink}" stroke-width="1"/>`).join("") +
-      `<text x="${sx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">0</text>` +
-      `<text x="${sx + sbPx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">${sbFt}'</text>` +
-      `<circle cx="${na}" cy="${ny}" r="17" fill="#ffffff" stroke="${PAL.panelLine}" stroke-width="1"/>` +
-      `<path d="M${na} ${ny - 13} L${na + 5} ${ny + 6} L${na} ${ny + 1.5} L${na - 5} ${ny + 6} Z" fill="${PAL.ink}"/>` +
-      `<text x="${na}" y="${ny - 19}" text-anchor="middle" font-size="12" font-weight="700" fill="${PAL.ink}">N</text>`;
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
     clone.appendChild(furn);
     return { clone, w, h };
   };
@@ -3479,7 +3518,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const name = el.type === "landscape" ? "Landscape" : "Sidewalk";
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
-      lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
+      // B140: label shows acres + sf (was sf only). In expansion mode (B139) the label
+      // shows the existing TOTAL plus the ADDED area as a "+" increment, so the new total
+      // is inferable without a third line (mirrors the panel's "+ac-ft").
+      const base = el.det?.baseline;
+      if (base?.ring?.length >= 3) {
+        const exA = polyArea(base.ring), addA = area - exA, s = addA >= 0 ? "+" : "−", m = Math.abs(addA);
+        lines = ["Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`, `${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`];
+      } else {
+        lines = ["Detention Pond", `${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`];
+      }
     } else {
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
       const name = bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0];
@@ -3845,14 +3893,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     });
     return <g>{nodes}</g>;
-  })();
-
-  const scaleBarFt = (() => {
-    const targetPx = 120;
-    const raw = targetPx / view.ppf;
-    const steps = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
-    const ft = steps.reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a), steps[0]);
-    return { ft, px: ft * view.ppf };
   })();
 
   // Accuracy state — the single source of truth for measurement / acreage trust.
@@ -4610,6 +4650,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </>}
                     <rect x={bp.x - w / 2} y={bp.y - h / 2} width={w} height={h} rx={4}
                       fill={st.fill} stroke={border} strokeWidth={isSel ? 2 : 1.4}
+                      pointerEvents="all" /* B142: select across the whole box even when the fill is none/transparent (was only the painted area / thin border) */
                       style={{ cursor: tool === "select" ? "move" : "default" }}
                       onPointerDown={(e) => startMoveCallout(e, c.id, "box")}
                       onDoubleClick={(e) => { e.stopPropagation(); beginEditCallout(c.id); }} />
@@ -4631,6 +4672,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <circle cx={f2p(calloutDraft.tip).x} cy={f2p(calloutDraft.tip).y} r={4} fill={PAL.accent} />
               </>)}
               {/* inline callout text editor (overlays the box) */}
+              {/* B142b: full-canvas catcher so clicking ANYWHERE outside the editor finishes the
+                  text box (Bluebeam-style). Needed because the canvas pointerdown preventDefaults
+                  the textarea blur, which otherwise traps you in the editor. Sits under the textarea. */}
+              {editCallout && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditCallout(); }} />}
               {editCallout && (() => {
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
@@ -4646,10 +4691,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onDoubleClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
                         e.stopPropagation();
-                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitEditCallout(); }
-                        else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
+                        // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
+                        if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
                       }}
-                      placeholder="Type, Enter to save"
+                      placeholder="Type; click away or Esc to finish"
                       maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
@@ -4690,10 +4735,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           pointerEvents={tool === "select" ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
                       : <polyline points={ptsStr} fill="none" stroke="transparent" strokeWidth={14}
                           pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
-                    {isSel && (
-                      <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
-                        <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
-                        <text x={anchor.x} y={anchor.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
+                    {isSel && tool === "select" && (
+                      <g>
+                        {/* B141: add-vertex ＋ on each editable edge (area wraps closed; line/polyline don't) */}
+                        {pts.map((p, k) => {
+                          if (!isArea && k === pts.length - 1) return null;
+                          const q = pts[(k + 1) % pts.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+                          return (
+                            <g key={`mav${k}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMeasureVertex(e, i, k)}>
+                              <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={mcolor} strokeWidth={1.25} />
+                              <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={mcolor} strokeWidth={1.25} />
+                              <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={mcolor} strokeWidth={1.25} />
+                            </g>
+                          );
+                        })}
+                        {/* B141: draggable vertex dots — drag to reshape, Shift-click to delete */}
+                        {pts.map((p, k) => (
+                          <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+                            fill={mcolor} stroke={PAL.paper} strokeWidth={1.5}
+                            style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
+                        ))}
+                        {/* delete the whole measurement */}
+                        <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
+                          <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
+                          <text x={anchor.x} y={anchor.y - 22} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
+                        </g>
                       </g>
                     )}
                   </g>
@@ -4824,21 +4890,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </g>
             </g>
 
-            {/* graphic scale bar — alternating segments (sits above the status bar) */}
-            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 46})`} pointerEvents="none">
-              {[0, 1, 2, 3].map((i) => (
-                <rect key={i} x={(scaleBarFt.px / 4) * i} y={-3} width={scaleBarFt.px / 4} height={6}
-                  fill={i % 2 ? "#fff" : PAL.ink} stroke={PAL.ink} strokeWidth={1} />
-              ))}
-              <text x={0} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>0</text>
-              <text x={scaleBarFt.px} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>{f0(scaleBarFt.ft)}′</text>
-            </g>
-            {/* north arrow */}
-            <g data-export="skip" transform={`translate(28, ${size.h - 70})`} pointerEvents="none">
-              <circle cx="0" cy="0" r="17" fill="rgba(255,255,255,0.82)" stroke={PAL.panelLine} strokeWidth="1" />
-              <path d="M0 -13 L5 6 L0 1.5 L-5 6 Z" fill={PAL.ink} />
-              <text x="0" y="-19" textAnchor="middle" fontSize="11" fontWeight="700" fill={PAL.ink}>N</text>
-            </g>
+            {/* On-screen sheet furniture — the SAME measurement-grade scale bar
+                (bottom-right) and north arrow (bottom-left) the export uses, sized
+                for the screen via lib/sheetFurniture.js. data-export="skip" so the
+                export composites its own frame-anchored copy instead. The planner
+                canvas is north-up, so the arrow points straight up. */}
+            <g data-export="skip" fontFamily="Inter, system-ui, sans-serif" pointerEvents="none"
+              dangerouslySetInnerHTML={{ __html: buildScreenFurnitureSvg({ vw: size.w, vh: size.h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }) }} />
 
             {/* print-frame crop overlay (screen space) */}
             {printMode && printFrame && (() => {
