@@ -35,13 +35,18 @@ export const fitLines = (lines, lh, maxH) => {
 const widthOf = (lines, charW) =>
   Math.max(1, ...lines.map((t) => String(t).length)) * charW;
 
-// Greedy collision + LOD layout. Each item:
-//   { id, cx, cy, lines, lh, charW, maxH, importance }
-// Higher `importance` wins ties for space. Returns Map(id -> surviving lines[]) for the
-// labels that should render; an id absent from the map is hidden this frame (its element
-// still draws — only the centred text label is suppressed, and zooming in reveals it again).
+// Greedy collision + level-of-detail layout with a narrow-shape escape hatch (B121).
+// Each item: { id, cx, cy, lines, lh, charW, halfW, halfH, importance }
+//   - halfW/halfH: the shape's on-screen bounding half-extents (px). `maxH` is still accepted
+//     as a legacy alias for 2*halfH (halfW then defaults to ∞, i.e. never lead a label out).
+// Higher `importance` wins ties for space. Returns Map(id -> placement):
+//   { lines, x, y, leader } — x/y is the label's CENTRE; `leader` is null for a normal label
+// drawn inside its shape, or { x, y } (the shape centroid to draw a thin connector back to)
+// when the label was too wide to fit and got pulled OUTSIDE, above the shape. An id absent
+// from the map is hidden this frame (its element still draws; zooming in reveals it again).
 export const layoutLabels = (items, opts = {}) => {
   const pad = opts.pad == null ? 2 : opts.pad;
+  const gap = opts.gap == null ? 4 : opts.gap; // px between an outside label and its shape
   const placed = []; // boxes already committed this frame
   const out = new Map();
   // Most important first; stable id tiebreak so the result is deterministic (testable).
@@ -49,15 +54,23 @@ export const layoutLabels = (items, opts = {}) => {
     (a, b) => (b.importance - a.importance) || (String(a.id) < String(b.id) ? -1 : 1),
   );
   for (const it of ordered) {
-    let lines = fitLines(it.lines, it.lh, it.maxH); // start at the zoom/shape LOD
+    const halfH = it.halfH != null ? it.halfH : (it.maxH != null ? it.maxH / 2 : Infinity);
+    const halfW = it.halfW != null ? it.halfW : Infinity;
+    let lines = fitLines(it.lines, it.lh, halfH * 2); // LOD: drop lines to fit the shape height
     let chosen = null;
     while (lines.length >= 1) {
-      const box = boxOf(it.cx, it.cy, widthOf(lines, it.charW), lines.length * it.lh);
-      if (!placed.some((p) => boxesOverlap(p, box, pad))) { chosen = { box, lines }; break; }
-      if (lines.length === 1) break;          // can't shrink further → hide it
+      const w = widthOf(lines, it.charW), h = lines.length * it.lh;
+      // Fits inside the shape? Otherwise pull it out, centred above the shape, with a leader.
+      const inside = w <= halfW * 2 && h <= halfH * 2;
+      const spot = inside
+        ? { x: it.cx, y: it.cy, leader: null }
+        : { x: it.cx, y: it.cy - halfH - h / 2 - gap, leader: { x: it.cx, y: it.cy } };
+      const box = boxOf(spot.x, spot.y, w, h);
+      if (!placed.some((p) => boxesOverlap(p, box, pad))) { chosen = { box, lines, ...spot }; break; }
+      if (lines.length === 1) break;            // can't shrink further → hide it
       lines = lines.slice(0, lines.length - 1); // drop the lowest-priority remaining line, retry
     }
-    if (chosen) { placed.push(chosen.box); out.set(it.id, chosen.lines); }
+    if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader }); }
   }
   return out;
 };

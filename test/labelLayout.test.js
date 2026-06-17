@@ -25,8 +25,8 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
       { id: "a", cx: 0, cy: 0, lines: ["AA", "s", "d"], lh: 10, charW: 6, maxH: 1000, importance: 100 },
       { id: "b", cx: 500, cy: 500, lines: ["BB", "s", "d"], lh: 10, charW: 6, maxH: 1000, importance: 50 },
     ]);
-    expect(show.get("a")).toEqual(["AA", "s", "d"]);
-    expect(show.get("b")).toEqual(["BB", "s", "d"]);
+    expect(show.get("a").lines).toEqual(["AA", "s", "d"]);
+    expect(show.get("b").lines).toEqual(["BB", "s", "d"]);
   });
 
   it("on a hard collision the lower-importance label is hidden, not overprinted", () => {
@@ -34,7 +34,7 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
       { id: "lo", cx: 0, cy: 0, lines: ["LL", "s", "d"], lh: 10, charW: 6, maxH: 1000, importance: 1 },
       { id: "hi", cx: 0, cy: 0, lines: ["HH", "s", "d"], lh: 10, charW: 6, maxH: 1000, importance: 999 },
     ], { pad: 0 });
-    expect(show.get("hi")).toEqual(["HH", "s", "d"]); // higher importance wins the spot, full
+    expect(show.get("hi").lines).toEqual(["HH", "s", "d"]); // higher importance wins the spot, full
     expect(show.has("lo")).toBe(false);               // loser hidden rather than stacked on top
   });
 
@@ -44,15 +44,15 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
       { id: "hi", cx: 0, cy: 0, lines: ["A"], lh: 10, charW: 6, maxH: 1000, importance: 100 },
       { id: "lo", cx: 0, cy: 18, lines: ["B", "s", "d"], lh: 10, charW: 6, maxH: 1000, importance: 50 },
     ], { pad: 0 });
-    expect(show.get("hi")).toEqual(["A"]);
-    expect(show.get("lo")).toEqual(["B", "s"]); // dimensions line dropped to clear the neighbour
+    expect(show.get("hi").lines).toEqual(["A"]);
+    expect(show.get("lo").lines).toEqual(["B", "s"]); // dimensions line dropped to clear the neighbour
   });
 
   it("level-of-detail: a tight shape keeps only the name even with no neighbour", () => {
     const show = layoutLabels([
       { id: "x", cx: 0, cy: 0, lines: ["Name", "sf", "dims"], lh: 10, charW: 6, maxH: 15, importance: 1 },
     ]);
-    expect(show.get("x")).toEqual(["Name"]); // floor(15/10)=1 line fits the shape
+    expect(show.get("x").lines).toEqual(["Name"]); // floor(15/10)=1 line fits the shape
   });
 
   it("empty / missing input yields an empty map", () => {
@@ -78,5 +78,24 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(dimCalloutVisible(0.35)).toBe(true);                 // default working zoom → show
     expect(dimCalloutVisible(DIM_CALLOUT_MIN_PPF)).toBe(true);  // exactly at the threshold → show
     expect(dimCalloutVisible(0.1)).toBe(false);                 // zoomed out → hide (declutter)
+  });
+
+  it("leader line (B121 r2b): a label wider than its shape is pulled outside with a leader to the centroid", () => {
+    // tiny shape (halfW/halfH = 5px) but a ~60px-wide name → can't fit inside.
+    const show = layoutLabels([
+      { id: "small", cx: 100, cy: 100, lines: ["Building 3"], lh: 12, charW: 6, halfW: 5, halfH: 5, importance: 1 },
+    ]);
+    const p = show.get("small");
+    expect(p.lines).toEqual(["Building 3"]);          // name kept
+    expect(p.leader).toEqual({ x: 100, y: 100 });     // connector points back to the shape centroid
+    expect(p.y).toBeLessThan(100);                    // label sits ABOVE the shape
+    expect(p.x).toBe(100);                            // horizontally centred over it
+  });
+
+  it("a label that fits inside its shape stays inside with no leader", () => {
+    const show = layoutLabels([
+      { id: "big", cx: 0, cy: 0, lines: ["Building 1"], lh: 12, charW: 6, halfW: 200, halfH: 200, importance: 1 },
+    ]);
+    expect(show.get("big")).toMatchObject({ x: 0, y: 0, leader: null });
   });
 });

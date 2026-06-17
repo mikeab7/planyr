@@ -582,3 +582,13 @@ _Move items here with the date and who/what checked them._
   - **Item 3:** an isolated pad shows a grey **6″ curb band around the full perimeter** (confirmed at high zoom on a corner); a split field stays **continuous with no curbs at the internal seams**.
   - Backed by 6 unit tests (`edgeAbutsPaving`) · lint 0 · 191 tests · build green.
 - **Decision recorded:** no curb against the bare building face (B70 stands; owner-confirmed 2026-06-17). Sign-in paths untested (proxy blocks auth — logged-out run).
+
+### V31 — Leader lines: a label too wide for its shape is pulled outside with a connector (B121 round 2b) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
+- **Steps:** "Start blank" → planner → drew a **small** building (~131′×131′) and a **large** one (~686′×486′) with the Building tool; screenshotted the drawing area.
+- **Result ✅:**
+  - The **small** building's label ("Building 1 / 17,274 sf / 131′×131′") is lifted **outside, just above the square**, with a thin leader back to it and a white halo so it reads on the paper — it no longer overflows/crams the tiny shape.
+  - The **large** building keeps its label **inside, centred**, with no leader.
+  - The same shot incidentally confirmed **B122** numbering ("Building 1" / "Building 2") and **B123**'s stack (square footage on its own line) rendering correctly.
+  - Backed by unit tests (leader placement + inside-stays-inside) · lint 0 · 204 tests · build green.
+- **Not covered (logged-out headless limits):** a very busy/crowded layout, and labels near the top viewport edge (the leader points up) — eyeball on a real dense plan when convenient. Sign-in paths untested (proxy blocks auth).
