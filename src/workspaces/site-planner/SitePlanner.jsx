@@ -5483,6 +5483,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       Footprint is top-of-bank; basin tapers at {slope}:1 to the bottom. Prismoidal volume — screening only.
                       {r.aBottom === 0 && " Basin tapers to a point before full depth — reduce depth or slope."}
                     </div>
+                    {/* Expansion vs. existing: lock today's pond as a baseline, then enlarge
+                        it (drag banks out / deepen) to read the storage gained. Baseline
+                        freezes its own footprint + depth/slope so the delta is apples-to-apples. */}
+                    {(() => {
+                      const base = det.baseline;
+                      if (!base) {
+                        return (
+                          <div style={{ marginTop: 10 }}>
+                            <button style={{ ...chip, width: "100%", fontWeight: 600 }} onClick={() => {
+                              pushHistory();
+                              setSelEl({ det: { ...det, depth, freeboard: fb, slope, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), depth, freeboard: fb, slope } } });
+                              flashWarn("Locked as the existing pond — now expand it to see the storage gained.", 4500);
+                            }}>Lock as existing pond</button>
+                            <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>
+                              Capture today's pond as the baseline, then drag the banks out (or deepen it). You'll see the original outline ghosted and the added detention.
+                            </div>
+                          </div>
+                        );
+                      }
+                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
+                      const inc = r.vol - baseVol;
+                      return (
+                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Expansion vs. existing</span>
+                            <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} onClick={() => { pushHistory(); const { baseline, ...rest } = det; setSelEl({ det: { ...rest, depth, freeboard: fb, slope } }); }}>Clear</button>
+                          </div>
+                          <div style={{ background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
+                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
+                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13.5, color: inc >= 0 ? "#15803d" : "#b3361b", fontWeight: 750 }}>{inc >= 0 ? "+" : ""}{f2(inc / 43560)} ac-ft</span>
+                            </div>
+                            {pondRow("", `${inc >= 0 ? "+" : ""}${f0(inc)} cf`)}
+                          </div>
+                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
+                            Existing (dashed ghost) and proposed use the same depth / slope method, so the difference is the added detention. Screening only — confirm with your civil engineer.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -6143,6 +6186,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
+  // feet, drawn dashed so the user sees what the pond grew from. Same path for the
+  // polygon and rect branches (the rect branch counter-rotates it back to world).
+  const ghostRing = el.type === "pond" && el.det?.baseline?.ring?.length >= 3 ? el.det.baseline.ring : null;
+  const ghostPath = ghostRing ? ghostRing.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
@@ -6152,6 +6201,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+        {ghostPath && ghostEl("ghost")}
       </g>
     );
   }
@@ -6164,6 +6214,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
+  // Counter-rotate the baseline ghost: its ring is already in world feet, but this
+  // branch's group rotates everything by el.rot — undo that so the ghost lands true.
+  if (ghostPath) parts.push(<g key="ghost" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}>{ghostEl("g")}</g>);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));

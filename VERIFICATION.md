@@ -430,6 +430,23 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (export-only, no data risk) — log ❌ here with what looked wrong (overlay missing
   when checked, handles printing, or wrong position / scale / rotation / opacity).
 
+### V25 — Detention pond expansion: lock-as-existing baseline + storage gained (B132) ⏳
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Steps:** Open a site, draw a **Detention Pond** (rectangle or click-points irregular). Select it → the right
+  panel's **Detention storage** section now ends with a **"Lock as existing pond"** button. (1) Click it → a toast
+  confirms the lock and a faint **dashed ghost** of the current outline appears under the pond. (2) Drag a corner /
+  edit a vertex to **enlarge** the footprint (and/or raise **Total depth**) → an **"Expansion vs. existing"** box
+  shows **Existing storage**, **Proposed storage**, and a green **"Storage gained +X.XX ac-ft"** (plus cf) that
+  updates live as you drag. (3) **Shrink** the pond below the baseline → the line flips to red **"Storage lost"**.
+  (4) **Clear** → ghost and the comparison box disappear; depth/freeboard/slope are retained. (5) Save, reload the
+  site → the locked baseline (ghost + numbers) persists. (6) **Rotate** the pond before locking, then enlarge → the
+  ghost stays aligned to the real (rotated) original outline, not offset.
+- **Expect:** the gain equals proposed − existing computed with the SAME depth/slope method (so it's apples-to-
+  apples); ghost lands exactly on the original outline for both rectangle and irregular ponds, rotated or not;
+  numbers and ghost survive reload; "screening only — confirm with your civil engineer" caveat shown.
+- **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
+  offset/rotated, gain number not updating, baseline lost on reload).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
