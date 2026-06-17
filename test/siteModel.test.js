@@ -3,7 +3,7 @@ import {
   createSiteModel, migrate, SITE_MODEL_VERSION, STATUSES,
   statusOf, parcelsOf, activeParcelsOf, utilitiesOf, annotationsOf,
   constraintsOf, setbacksOf, developableArea, parcelDrawingsOf,
-  buildingNumbers, isBuilding,
+  buildingNumbers, isBuilding, roadTravelWidth,
 } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 describe("Site Model — schema, lifecycle status, selectors", () => {
@@ -122,5 +122,14 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     // a single building is still "Building 1"; bad input yields an empty map
     expect(buildingNumbers([{ id: "x", type: "building" }]).get("x")).toBe(1);
     expect(buildingNumbers(null).size).toBe(0);
+  });
+
+  // A road's dimension is derived from live geometry (cross − 2 curbs), so it tracks a resize
+  // instead of showing a frozen value. Orientation-independent and never negative.
+  it("roadTravelWidth derives travel width from current geometry", () => {
+    expect(roadTravelWidth(60, 25, 0.5)).toBe(24); // cross 25 − 2×0.5 curb
+    expect(roadTravelWidth(25, 60, 0.5)).toBe(24); // min(w,h), orientation-independent
+    expect(roadTravelWidth(60, 40, 0.5)).toBe(39); // a wider road reads wider (tracks the resize)
+    expect(roadTravelWidth(10, 1, 0.5)).toBe(0);   // clamped ≥ 0
   });
 });

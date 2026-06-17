@@ -33,9 +33,10 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers } from "./lib/siteModel.js";
+import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
+import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -2020,9 +2021,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const opp = d.opp; // fixed opposite corner (world feet)
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      let nw = Math.abs(local.x), nh = Math.abs(local.y);
-      nw = Math.max(settings.gridSize, snapOn ? Math.round(nw / settings.gridSize) * settings.gridSize : Math.round(nw));
-      nh = Math.max(settings.gridSize, snapOn ? Math.round(nh / settings.gridSize) * settings.gridSize : Math.round(nh));
+      // Roads resize in 1′ increments (not the grid step) so a width dials to the exact foot.
+      const snapTo = (v) => el.type === "road" ? Math.max(1, Math.round(v)) : Math.max(settings.gridSize, snapOn ? Math.round(v / settings.gridSize) * settings.gridSize : Math.round(v));
+      let nw = snapTo(Math.abs(local.x)), nh = snapTo(Math.abs(local.y));
       // opposite stays fixed; new center is the midpoint of opp and the dragged corner
       const half = rot2(d.sx * nw, d.sy * nh, el.rot);
       const newCenter = { x: opp.x + half.x / 2, y: opp.y + half.y / 2 };
@@ -2037,7 +2038,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const { nx, ny, opp } = d; // outward local normal of the dragged edge
       const local = rot2(fp.x - opp.x, fp.y - opp.y, -el.rot);
-      const snapDim = (v) => Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      const snapDim = (v) => el.type === "road" ? Math.max(1, Math.round(Math.abs(v))) : Math.max(settings.gridSize, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
       const nw = nx !== 0 ? snapDim(local.x) : el.w;
       const nh = ny !== 0 ? snapDim(local.y) : el.h;
       const half = rot2(nx * nw, ny * nh, el.rot);
@@ -3292,19 +3293,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
     // and the rasterized page — composited above the aerial backdrop in the same z-order.
     if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
-    // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
-    // north arrow (bottom-left), positioned in the export viewBox.
-    const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
-    const sx = x + w - sbPx - 28, sy2 = y + h - 30, na = x + 36, ny = y + h - 54;
+    // Sheet furniture for the export — a measurement-grade graphic scale bar
+    // (bottom-right) and a north arrow (top-left), both on a translucent
+    // legibility plate. Sized in OUTPUT units and anchored to the export FRAME
+    // (lib/sheetFurniture.js) so they sit fully inside a safe-area inset, never
+    // clip, and print at a fixed physical size on the page — unlike the screen
+    // overlays (data-export="skip", already removed above) which are sized for the
+    // live viewport. ftPerUnit = feet per viewBox user unit (one foot == view.ppf
+    // user units). The planner canvas is north-up, so the arrow points straight up.
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
-    furn.innerHTML =
-      [0, 1, 2, 3].map((i) => `<rect x="${sx + seg * i}" y="${sy2 - 3}" width="${seg}" height="6" fill="${i % 2 ? "#fff" : PAL.ink}" stroke="${PAL.ink}" stroke-width="1"/>`).join("") +
-      `<text x="${sx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">0</text>` +
-      `<text x="${sx + sbPx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">${sbFt}'</text>` +
-      `<circle cx="${na}" cy="${ny}" r="17" fill="#ffffff" stroke="${PAL.panelLine}" stroke-width="1"/>` +
-      `<path d="M${na} ${ny - 13} L${na + 5} ${ny + 6} L${na} ${ny + 1.5} L${na - 5} ${ny + 6} Z" fill="${PAL.ink}"/>` +
-      `<text x="${na}" y="${ny - 19}" text-anchor="middle" font-size="12" font-weight="700" fill="${PAL.ink}">N</text>`;
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
     clone.appendChild(furn);
     return { clone, w, h };
   };
@@ -3896,14 +3895,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{nodes}</g>;
   })();
 
-  const scaleBarFt = (() => {
-    const targetPx = 120;
-    const raw = targetPx / view.ppf;
-    const steps = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
-    const ft = steps.reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a), steps[0]);
-    return { ft, px: ft * view.ppf };
-  })();
-
   // Accuracy state — the single source of truth for measurement / acreage trust.
   const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
   const calibrationState =
@@ -4173,7 +4164,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
   const roadCurbOf = (el) => el.curb ?? (+settings.roadCurb || CURB);
-  const roadTravel = (el) => el.travelW ?? Math.max(0, Math.min(el.w, el.h) - 2 * roadCurbOf(el));
+  const roadTravel = (el) => roadTravelWidth(el.w, el.h, roadCurbOf(el)); // live geometry — tracks resizes (not a frozen travelW)
   const setRoadTravel = (el, travel) => {
     const curb = roadCurbOf(el), cross = Math.max(1, travel) + 2 * curb, crossIsH = el.h <= el.w;
     pushHistory();
@@ -4681,6 +4672,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <circle cx={f2p(calloutDraft.tip).x} cy={f2p(calloutDraft.tip).y} r={4} fill={PAL.accent} />
               </>)}
               {/* inline callout text editor (overlays the box) */}
+              {/* B142b: full-canvas catcher so clicking ANYWHERE outside the editor finishes the
+                  text box (Bluebeam-style). Needed because the canvas pointerdown preventDefaults
+                  the textarea blur, which otherwise traps you in the editor. Sits under the textarea. */}
+              {editCallout && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitEditCallout(); }} />}
               {editCallout && (() => {
                 const c = callouts.find((x) => x.id === editCallout.id);
                 if (!c) return null;
@@ -4696,10 +4691,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onDoubleClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => {
                         e.stopPropagation();
-                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitEditCallout(); }
-                        else if (e.key === "Escape") { e.preventDefault(); cancelEditCallout(); }
+                        // Bluebeam text box: Enter makes a new line; finish by clicking away or Esc.
+                        if (e.key === "Escape") { e.preventDefault(); commitEditCallout(); }
                       }}
-                      placeholder="Type, Enter to save"
+                      placeholder="Type; click away or Esc to finish"
                       maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
@@ -4895,21 +4890,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </g>
             </g>
 
-            {/* graphic scale bar — alternating segments (sits above the status bar) */}
-            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 46})`} pointerEvents="none">
-              {[0, 1, 2, 3].map((i) => (
-                <rect key={i} x={(scaleBarFt.px / 4) * i} y={-3} width={scaleBarFt.px / 4} height={6}
-                  fill={i % 2 ? "#fff" : PAL.ink} stroke={PAL.ink} strokeWidth={1} />
-              ))}
-              <text x={0} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>0</text>
-              <text x={scaleBarFt.px} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>{f0(scaleBarFt.ft)}′</text>
-            </g>
-            {/* north arrow */}
-            <g data-export="skip" transform={`translate(28, ${size.h - 70})`} pointerEvents="none">
-              <circle cx="0" cy="0" r="17" fill="rgba(255,255,255,0.82)" stroke={PAL.panelLine} strokeWidth="1" />
-              <path d="M0 -13 L5 6 L0 1.5 L-5 6 Z" fill={PAL.ink} />
-              <text x="0" y="-19" textAnchor="middle" fontSize="11" fontWeight="700" fill={PAL.ink}>N</text>
-            </g>
+            {/* On-screen sheet furniture — the SAME measurement-grade scale bar
+                (bottom-right) and north arrow (bottom-left) the export uses, sized
+                for the screen via lib/sheetFurniture.js. data-export="skip" so the
+                export composites its own frame-anchored copy instead. The planner
+                canvas is north-up, so the arrow points straight up. */}
+            <g data-export="skip" fontFamily="Inter, system-ui, sans-serif" pointerEvents="none"
+              dangerouslySetInnerHTML={{ __html: buildScreenFurnitureSvg({ vw: size.w, vh: size.h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }) }} />
 
             {/* print-frame crop overlay (screen space) */}
             {printMode && printFrame && (() => {
@@ -6479,7 +6466,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // hides when zoomed out instead of shrinking onto the centred name labels.
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
-    const dimW = el.type === "road" ? (el.travelW ?? Math.max(0, fullMin - 2 * (el.curb ?? CURB))) : fullMin;
+    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB)) : fullMin;
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const dim = [];
