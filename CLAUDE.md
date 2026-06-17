@@ -196,6 +196,11 @@ server/                   # placeholder README only — NOT built or deployed; b
   hasn't run yet, so saving never regresses.
 
 ## KEY DECISIONS (must persist)
+- **Brand spelling — Planyr (P-L-A-N-Y-R).** Human-readable text → **Planyr** (capital
+  P); package name + technical identifiers → lowercase `planyr`. Michael often
+  says/dictates "Planner" (or "Planner Fit") — read these as the brand **Planyr** (and
+  the old name **Planar_Fit**), not the literal word "planner." Don't reintroduce a
+  "Planner"/"Planar" spelling for the brand.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and
@@ -226,6 +231,10 @@ server/                   # placeholder README only — NOT built or deployed; b
   if/when selling becomes real.
 - Planner single-reducer rewrite (state-management refactor) — deliberately deferred.
 - AI corridor scan — parked.
+- **Rebrand the `planarfit:*` localStorage keys → `planyr:*`** (leftover from the
+  Planar_Fit→Planyr rename). Deferred because these are client-side storage keys:
+  renaming them in code without a migration would orphan every existing user's saved
+  sites/settings. Do it with a one-time read-old → write-new migration so nothing is lost.
 
 ## ROADMAP / NOT YET BUILT
 Two parallel tracks now.

@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -451,16 +452,10 @@ function estTrailers(area, s) {
 }
 
 /* --------------- parking row stepping (double-loading) ------------- */
-// A drive aisle is double-loaded when it has a stall row on BOTH sides, so a
-// field of n rows stacks as depth(n) = n·stallDepth + ⌈n/2⌉·aisle (one aisle per
-// pair of rows). "+"/"−" step exactly ONE row: a single-loaded bay (1 row + 1
-// aisle) becomes double-loaded (2 rows, same aisle) before a new aisle is added.
-function parkDepthForRows(n, sd, ai) { n = Math.max(1, Math.round(n)); return n * sd + Math.ceil(n / 2) * ai; }
-function parkRowsForDepth(h, sd, ai) {
-  const mod = 2 * sd + ai; if (mod <= 0) return 1;            // a double-loaded module
-  const m = Math.floor((h + 1e-6) / mod), rem = h - m * mod;  // full modules + leftover
-  return Math.max(1, 2 * m + (rem >= sd - 1e-6 ? 1 : 0));     // a leftover row is single-loaded
-}
+// parkDepthForRows / parkRowsForDepth / splitParkingPieces are pure (unit-tested
+// in test/parking.test.js) and imported from lib/parking.js. A drive aisle is
+// double-loaded when it has a stall row on BOTH sides: depth(n) = n·stallDepth +
+// ⌈n/2⌉·aisle (one aisle shared per pair of rows).
 
 /* ------------------------- curbs (derived) ------------------------- */
 // Curbs are auto-placed thin bands (not user geometry): a 6" mono curb is 0.5′ of
@@ -692,7 +687,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
-  const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B130); re-defaulted to on-screen visibility on entering print mode
+  const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -3188,7 +3183,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       im.setAttribute("opacity", underlay.opacity ?? 1);
       clone.insertBefore(im, bg.nextSibling);
     }
-    // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B130):
+    // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
     // off → drop every placed overlay raster (its editor chrome + any unsynced
     // placeholder already left via data-export="skip"); on → the cloned <image>s keep
     // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
@@ -3624,23 +3619,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for trailer-tire/dolly abuse. The property lives globally on any band; only
   // trailer parking surfaces the control for now.
   const setCurbW = (el, wv) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, curbW: wv } : x)); };
-  // Split a striped parking field into N independent row elements (each one stall
-  // row + its aisle), preserving position/rotation so each can be edited / dragged.
+  // Split a striped parking field into independent DOUBLE-LOADED module elements
+  // (each two stall rows sharing one drive aisle), plus a trailing single-loaded
+  // row only for a remainder that can't pair — never one row + a full aisle each
+  // (B130). Preserves position / rotation / total depth so each piece can be
+  // edited or dragged, and the field's stall count is unchanged.
   const splitParkingRows = (el) => {
     if (!el || el.points || el.type !== "parking") return;
     const cfg = cfgOf(el);
-    const count = parkRowsForDepth(el.h, cfg.stallDepth || settings.stallDepth, cfg.aisle ?? settings.aisle);
-    if (count < 2) return;
+    const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
+    const pieces = splitParkingPieces(el.h, sd, ai);  // module depths, summing to el.h
+    if (pieces.length < 2) return;                    // ≤ one module: nothing to split
     pushHistory();
-    const bandH = el.h / count;                       // even split into one element per row
-    const rows = [];
-    for (let i = 0; i < count; i++) {
-      const ly = -el.h / 2 + bandH * (i + 0.5);       // band centre in local depth
-      const off = rot2(0, ly, el.rot);
-      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: bandH, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+    let y = -el.h / 2;                                 // walk down the local depth axis
+    const newEls = [];
+    for (const ph of pieces) {
+      const off = rot2(0, y + ph / 2, el.rot);        // piece centre in local depth
+      newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: ph, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      y += ph;
     }
-    setEls((a) => [...a.filter((x) => x.id !== el.id), ...rows]);
-    setSel({ kind: "el", id: rows[0].id });
+    setEls((a) => [...a.filter((x) => x.id !== el.id), ...newEls]);
+    setSel({ kind: "el", id: newEls[0].id });
   };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
@@ -4320,7 +4319,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     pointerEvents={o.locked ? "none" : "auto"}
                     onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
                     {o.src ? (
-                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B130)
+                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131)
                       <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
@@ -4950,7 +4949,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={seg(printOrient === "landscape")} onClick={() => setPrintOrient("landscape")}>Landscape</button>
                   <button style={seg(printOrient === "portrait")} onClick={() => setPrintOrient("portrait")}>Portrait</button>
                 </span>
-                {/* B130 — include the placed site-plan overlay in the printout; only shown when one's loaded (no dead control) */}
+                {/* B131 — include the placed site-plan overlay in the printout; only shown when one's loaded (no dead control) */}
                 {overlayPrintable && (
                   <label title="Include the placed site-plan overlay in the printout — exactly as shown (scale, position, rotation, opacity)" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
                     <input type="checkbox" checked={printOverlay} onChange={(e) => setPrintOverlay(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
@@ -5401,8 +5400,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
-                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 2 &&
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split into rows</button>}
+                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 3 &&
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
                         </label>
@@ -6107,10 +6106,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                     </>
                   )}
-                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 2 && (
+                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
-                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
+                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>

@@ -22,14 +22,32 @@ export const STATEWIDE = {
   fema: {
     label: "FEMA flood zones",
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
-    layers: [27, 28], // flood hazard boundaries + zones (standard NFHL symbology)
-    note: null,
+    // NFHL sublayers 27 (Flood Hazard Boundaries) + 28 (Flood Hazard Zones), standard
+    // symbology. Both are scale-gated AT THE SOURCE (minScale ~1:36,112), so they only
+    // draw once zoomed in to roughly neighbourhood level (~zoom 14+); at city-wide zoom
+    // the export is a blank transparent PNG — that's expected, not a failure. Verified
+    // rendering in a real browser 2026-06-17: teal AE floodplain / orange floodway / red
+    // boundaries paint correctly along the bayous, and the host is CORS-clean (an
+    // Access-Control-Allow-Origin header is present on both metadata and /export).
+    layers: [27, 28],
+    note: "Flood zones appear once you zoom in to about street level — hidden at city-wide zoom.",
     opacity: 0.55,
   },
   wetlands: {
     label: "Wetlands (NWI)",
-    // Canonical USFWS endpoint. The old www.fws.gov host redirects here, which
-    // caused a double request every refresh — point straight at the real host.
+    // CANONICAL USFWS endpoint — do NOT swap this URL on a hunch. Verified 2026-06-17
+    // against the official USFWS "National Wetlands Inventory" ArcGIS web map: their own
+    // mapper points at this exact MapServer, so this is the right URL.
+    // When this layer errors, the cause is almost always an agency-side OUTAGE, NOT a CORS
+    // block: on 2026-06-17 the whole wetlandsmapservice site returned HTTP 500 across its
+    // entire catalog (metadata, /export, /query, even the REST root), confirmed three
+    // independent ways (sandbox curl, planyr.io in a real browser, and an out-of-band
+    // fetch). esri-leaflet's "could not parse JSON / CORS" message is a misleading
+    // catch-all — the real status is 500. There is no better endpoint to move to
+    // (www.fws.gov is an older mirror; state re-hosts aren't authoritative), so keep the
+    // canonical URL and surface an honest "service unavailable" until USFWS restores it.
+    // NB: the picture itself loads via a CORS-exempt <img>, so a healthy-but-CORS-blocked
+    // metadata fetch would still render — only a true 500/outage blanks the layer.
     url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
     layers: [0],
     note: "NWI is for screening only — not a jurisdictional determination.",
@@ -241,7 +259,14 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           // <img>. Surface a quiet per-layer status, but DON'T drop the layer or fire the
           // alarming toast; the 'load' event below flips it back to "loaded" if the image
           // lands. (A genuinely-down service simply shows its quiet "failed" dot.)
-          lyr.on("requesterror", (e) => onStatus && onStatus(k, "failed", `${cfg.label}: ${e && e.message ? e.message : "request error"}`));
+          // esri's own requesterror text wrongly fingers "CORS" / "could not parse JSON"
+          // even when the real cause is the agency host being down (a plain HTTP 500), so
+          // surface a plain, honest status instead of esri's misleading message (verified
+          // against NWI's 2026-06-17 outage). This is NOT necessarily fatal: the picture
+          // loads via a CORS-exempt <img>, and the 'load' handler below flips the dot back
+          // to "loaded" if it lands — so this message only persists for a service that is
+          // genuinely unavailable.
+          lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
           lyr.on("load", () => onStatus && onStatus(k, "loaded"));
           if (lyr.setOpacity) lyr.setOpacity(st.opacity);
           lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");

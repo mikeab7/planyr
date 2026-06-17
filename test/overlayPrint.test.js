@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { isOverlayPrintable, printableOverlays, hasPrintableOverlay } from "../src/workspaces/site-planner/lib/overlayPrint.js";
 
-// B130 — the "Print overlay" checkbox shows only when there's something to print, and
+// B131 — the "Print overlay" checkbox shows only when there's something to print, and
 // prints exactly the overlays that are visible on screen.
-describe("site-plan overlay print selection (B130)", () => {
+describe("site-plan overlay print selection (B131)", () => {
   const rendered = { id: "a", src: "data:image/png;base64,AAAA", opacity: 1 };
   const placeholder = { id: "b", storageKey: "uid/r/x.pdf" }; // synced ref, raster not fetched on this device → no src
   const oversize = { id: "c", name: "huge.pdf" };             // 50 MB+ file: work layer saved, raster absent → no src
