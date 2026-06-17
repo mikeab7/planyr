@@ -52,21 +52,26 @@ export const JURISDICTION_SOURCES = {
     sourceName: "TxGIO (statewide)",
     note: "Texas city limits (TxGIO). A point in no city reads as unincorporated. Screening only — verify with the city.",
   },
-  // ETJ is fragmented (no statewide layer): wired to the City of Houston's own GIS
-  // (COHGIS) ETJ — the priority metro. It is Houston-only, so a point outside
-  // Houston's ETJ reads "not in Houston ETJ" (it may still sit in another city's
-  // ETJ — add those as rows). The layer carries no per-feature city name, so the
-  // name is a constant. ETJ is volatile by law (SB2038 releases; annexations move
-  // it), so it is ALWAYS screening-only. Verified + calibrated 2026-06-15 (Aldine /
-  // Spring, unincorporated near Houston → in ETJ; downtown / in-city → not).
+  // ETJ is fragmented — there is NO statewide ETJ layer (confirmed: TxGIO publishes
+  // city limits + county, but no ETJ). H-GAC (the Houston-Galveston Area Council)
+  // publishes a single REGIONAL layer carrying every city's ETJ across the 13-county
+  // metro — Houston, Sugar Land, Missouri City, Pearland, Richmond, Katy, Baytown,
+  // Conroe, Texas City, … — keyed by a CITY field. Verified live 2026-06-17:
+  // Spring/Aldine → HOUSTON, SW of Sugar Land → RICHMOND, an in-city point → none
+  // (ETJ is the ring OUTSIDE city limits). AGOL-hosted (services.arcgis.com), so it's
+  // CORS-clean from the app origin like the county/road sources. ETJ is volatile
+  // (SB2038 lets owners petition out; annexations move it), so it stays screening-only.
+  // CITY values are upper-case in the source → `titleCaseName` normalizes them for
+  // display. Outside the H-GAC region (e.g. Dallas → NCTCOG) is not covered yet — add
+  // that council's ETJ layer as another source when a deal needs it.
   etj: {
     id: "etj", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    url: "https://services.arcgis.com/NummVBqZSIJKUeVR/arcgis/rest/services/COH_ETJ_view/FeatureServer/1",
-    fields: { name: null }, nameConst: "Houston",
+    url: "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/HGAC_City_ETJ_Boundaries/FeatureServer/0",
+    fields: { name: "CITY" }, titleCaseName: true,
     ttl: 7 * 24 * 3600 * 1000,
-    sourceName: "City of Houston GIS (COHGIS)",
-    coverage: "City of Houston only",
-    note: "City of Houston ETJ (COHGIS, reflects SB2038 releases). Houston metro only — add other cities' ETJ as registry rows. ETJ is volatile — screening only.",
+    sourceName: "H-GAC (Houston-Galveston Area Council)",
+    coverage: "13-county Houston-Galveston region",
+    note: "City ETJ across the H-GAC 13-county region. ETJ is volatile (SB2038 releases; annexations) — screening only; verify with the city.",
   },
   road: {
     id: "road", role: "road", label: "Road maintenance authority", kind: "line",
@@ -181,13 +186,18 @@ export function buildIdentifyParams(source, geom) {
   return p;
 }
 
+// Title-case an ALL-CAPS source value for display ("MISSOURI CITY" → "Missouri City").
+const titleCase = (s) => String(s).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+
 // Map a feature's raw attributes onto the source's internal keys (field map). Pure.
 export function normalizeFeature(source, attrs) {
   const out = { role: source.role };
   for (const [key, col] of Object.entries(source.fields)) out[key] = col ? (attrs?.[col] ?? null) : null;
-  // A single-jurisdiction layer (e.g. the Houston-only ETJ) carries no name column;
+  // A single-jurisdiction layer (one with no per-feature name column) carries no name;
   // every matched feature IS that jurisdiction, so fall back to the source constant.
   if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;
+  // Some sources publish the name ALL-CAPS (e.g. H-GAC ETJ `CITY`) → title-case it.
+  if (out.name != null && out.name !== "" && source.titleCaseName) out.name = titleCase(out.name);
   return out;
 }
 
