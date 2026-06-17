@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- B130 in-browser verification: render the NWI wetlands layer the SAME WAY the app
+     does — esri-leaflet imageMapLayer (kind:"esriImage") at the new fwsprimary raster
+     ImageServer — over Sheldon Lake, a known wetland. Proves the swap actually paints in
+     a real browser and that the exportImage request returns 200. Served from the repo
+     root so /node_modules/* resolves; uses the installed esri-leaflet 3.x (same as app). -->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>B130 — NWI wetlands (fwsprimary) browser verify</title>
+  <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
+  <script src="/node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="/node_modules/esri-leaflet/dist/esri-leaflet.js"></script>
+  <style>
+    html,body{margin:0;height:100%}
+    /* light grey so a transparent (no-wetland) area reads as grey, painted polygons pop */
+    #map{height:100%;width:100%;background:#dfe3e6}
+    #tag{position:absolute;z-index:9999;left:8px;top:8px;background:#fff;padding:4px 8px;
+         font:12px/1.4 sans-serif;border:1px solid #888;border-radius:4px}
+  </style>
+</head>
+<body>
+  <div id="tag">B130 verify — NWI raster @ fwsprimary · Sheldon Lake</div>
+  <div id="map"></div>
+  <script>
+    const NEW_URL = "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer";
+    window.__verify = { basemap: "pending", wetlands: "pending", wetlandsLoaded: false, errors: [] };
+
+    // Sheldon Lake State Park, NE Houston — a known wetland complex. Zoom 14 ≈ "street level".
+    const map = L.map("map", { zoomControl: false }).setView([29.87, -95.16], 14);
+
+    // Optional geographic context. Non-fatal if the basemap host isn't reachable from here —
+    // the wetlands raster is what we're verifying, and it sits on its own (CORS-clean) host.
+    try {
+      const bm = L.esri.basemapLayer("Imagery");
+      bm.on("load", () => { window.__verify.basemap = "loaded"; });
+      bm.on("requesterror", () => { window.__verify.basemap = "error"; });
+      bm.addTo(map);
+    } catch (e) { window.__verify.basemap = "ctor-error"; }
+
+    // EXACT app mechanism: esri imageMapLayer (the "esriImage" kind), default options
+    // (useCors:true, format jpgpng). App opacity is 0.55; bumped to 0.85 here only so the
+    // colours read clearly in a headless screenshot — rendering path is identical.
+    const wetlands = L.esri.imageMapLayer({ url: NEW_URL, opacity: 0.85 });
+    wetlands.on("load", () => { window.__verify.wetlands = "loaded"; window.__verify.wetlandsLoaded = true; });
+    wetlands.on("requesterror", (e) => { window.__verify.errors.push(String((e && e.message) || "requesterror")); });
+    wetlands.addTo(map);
+  </script>
+</body>
+</html>

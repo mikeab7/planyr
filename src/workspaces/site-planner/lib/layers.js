@@ -34,22 +34,26 @@ export const STATEWIDE = {
     opacity: 0.55,
   },
   wetlands: {
-    label: "Wetlands (NWI)",
-    // CANONICAL USFWS endpoint — do NOT swap this URL on a hunch. Verified 2026-06-17
-    // against the official USFWS "National Wetlands Inventory" ArcGIS web map: their own
-    // mapper points at this exact MapServer, so this is the right URL.
-    // When this layer errors, the cause is almost always an agency-side OUTAGE, NOT a CORS
-    // block: on 2026-06-17 the whole wetlandsmapservice site returned HTTP 500 across its
-    // entire catalog (metadata, /export, /query, even the REST root), confirmed three
-    // independent ways (sandbox curl, planyr.io in a real browser, and an out-of-band
-    // fetch). esri-leaflet's "could not parse JSON / CORS" message is a misleading
-    // catch-all — the real status is 500. There is no better endpoint to move to
-    // (www.fws.gov is an older mirror; state re-hosts aren't authoritative), so keep the
-    // canonical URL and surface an honest "service unavailable" until USFWS restores it.
-    // NB: the picture itself loads via a CORS-exempt <img>, so a healthy-but-CORS-blocked
-    // metadata fetch would still render — only a true 500/outage blanks the layer.
-    url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer",
-    layers: [0],
+    kind: "esriImage", label: "Wetlands (NWI)",
+    // NWI moved hosts mid-2026. The old vector endpoint
+    // (fwspublicservices.wim.usgs.gov/wetlandsmapservice/.../Wetlands/MapServer) went down
+    // 2026-06 with a hard HTTP 500 across its WHOLE catalog — metadata, /export, /query, even
+    // the REST root — an agency-side OUTAGE, not a CORS issue (B129). As of 2026-06-17 it is
+    // still 500. The live data that the official USFWS Wetlands Mapper actually draws lives on
+    // the sibling host fwsprimary.wim.usgs.gov — but at a DIFFERENT path AND as a pre-rendered
+    // RASTER image service, NOT the old dynamic vector MapServer (B130's "same path, different
+    // host" hunch was wrong on both counts): /server/rest/services/Wetlands_Raster/ImageServer.
+    // So this is an esri imageMapLayer (kind:"esriImage"), like 3DEP — NOT a dynamicMapLayer
+    // with layers:[0] (fwsprimary's vector MapServer/export returns an HTML interstitial and
+    // its /query 500s; only the raster renders). Verified 2026-06-17 in a real headless browser:
+    // esri-leaflet's imageMapLayer paints the standard NWI symbology (navy open water, greens
+    // for vegetated wetlands) over Sheldon Lake, the exportImage request returns HTTP 200
+    // image/png, and the host is CORS-clean for planyr.io (echoes Access-Control-Allow-Origin:
+    // https://planyr.io), so it loads cross-site fine. Like FEMA, it's source-scale-gated — zoom
+    // in (~14+) to see polygons. Raster = screening picture only, no click-identify (wetlands was
+    // never queried). If fwsprimary ever refuses or dies, the honest "service unavailable" path
+    // (B129) still applies; the durable fix is a /server proxy through our own origin.
+    url: "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer",
     note: "NWI is for screening only — not a jurisdictional determination.",
     opacity: 0.55,
   },
