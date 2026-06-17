@@ -277,6 +277,19 @@ was never clicked" quietly ships broken.
 - **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
   immediately with the exact step + browser console; do **not** log-and-move-on.
 
+### V16 — Parking hugs the building: orientation + outward growth (B119 / B120) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site, draw a **building**, select it, and add a **parking** row on one side (the
+  per-side "add parking" control). (1) **Orientation (B119):** the **first stall row should sit directly
+  against the building face**, with the **24′ drive aisle on the outside** (not the aisle against the
+  wall). (2) **Growth (B120):** press the parking **＋** repeatedly — the field should grow **outward,
+  away from the building**, one row at a time, depth reading **42 → 60 → 102 → 120 → 162 → 180′**
+  (double-loads the aisle before adding a new one); **−** reverses it. (3) The element panel's **"Drive
+  aisle on the far side"** checkbox should start **checked** and still flip the layout if unticked.
+- **Expect:** stalls hug the wall, aisle outboard, field grows away from the building, +/− steps match the
+  sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

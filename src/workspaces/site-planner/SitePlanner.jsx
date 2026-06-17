@@ -2654,8 +2654,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const along = ny !== 0 ? b.w : b.h;
     const half = (nx !== 0 ? b.w : b.h) / 2;
     const off = rot2(nx * (half + swDepth + parkDepth / 2), ny * (half + swDepth + parkDepth / 2), b.rot);
+    // First stall row hugs the building face, drive aisle on the OUTSIDE (B119): the
+    // strip's inner (local y=0) edge sits against the wall and carStalls lays the first
+    // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
+    // the building). growParking then extends rows outward, away from the wall.
     const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
-      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name, cfg: { flipDepth: true } };
+      rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
     addBuildingEls([el], b.id);
   };
   // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
