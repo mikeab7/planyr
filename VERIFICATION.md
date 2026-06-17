@@ -277,6 +277,30 @@ was never clicked" quietly ships broken.
 - **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
   immediately with the exact step + browser console; do **not** log-and-move-on.
 
+### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ⏳
+- **Added** 2026-06-17 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Why:** the Measure mode menu (and the other rail/header flyouts) used to paint **behind / clipped by** the
+  tool rail after B117 made the rail scroll (`overflow:auto`). Fix = render every such menu in a **portal** at the
+  document root (`src/shared/ui/AnchoredMenu.jsx`), so it escapes the rail's clipping + stacking context. Needs a
+  real browser to confirm it now floats above everything and still picks correctly.
+- **Steps (planyr.io, desktop):** Open a site in the Site Planner.
+  1. **Measure ▾** (the caret next to the Measure tool's mode label) → the menu opens **fully visible**, above the
+     rail **and** above the map's +/– zoom-control rail to its left; **Length / Polylength / Area** are all clickable
+     and selecting one updates the tool's sub-label. (This is the exact NEW-3 repro.)
+  2. Repeat for the other rail flyouts — **Boundary ▾**, **Building ▾** (dock layout), **Car Parking ▾** (rows),
+     **Road ▾** (width): each opens to the left of the rail, fully on-screen, nothing clipped; picking an option works.
+  3. Header menus — **Site ▾**, **Plan ▾**, **File ▾**: each opens below its button, fully visible above the canvas;
+     typing in the Site/Plan **name field** still works (focus lands in the input); **File ▾ → Import JSON…** still
+     opens the file picker.
+  4. **Click-away + scroll:** clicking anywhere off an open menu closes it; with a menu open, the rail can't be left in
+     a half-open state. On a **short laptop-height window**, the menus still land on-screen (clamped into the viewport),
+     not cut off at the top/bottom.
+  5. **Phone width (~390px):** open the slide-in tool rail (✎ Tools) → Measure ▾ still opens above everything and is
+     usable.
+- **Expect:** no dropdown is ever clipped or hidden behind the rail / zoom rail; all open above the map; every option
+  selects; placement + widths look the same as before (just no longer cut off).
+- **If it fails:** not critical (no data risk) — log ❌ here with the menu, window size, and what was clipped/mispositioned.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
