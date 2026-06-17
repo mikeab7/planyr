@@ -1879,6 +1879,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!d) return;
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
+    if (d.mode === "dimMove") { // B146: drag a selected element's dimension callout to reposition it
+      const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
+      setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: { x: d.base.x + loc.x, y: d.base.y + loc.y } } : x));
+      return;
+    }
     if (d.mode === "pan") {
       setView((v) => ({ ...v, offX: d.ox + (e.clientX - d.sx), offY: d.oy + (e.clientY - d.sy) }));
       return;
@@ -3021,6 +3026,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     drag.current = { mode: "resize", id, sx, sy, opp, kids: wallKids(el), hostClamp: hostClampOf(el), swShift: swShiftSnapshot(el) };
     svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // B146: a selected element's dimension callout is grab-and-drag to reposition (stored as a
+  // local-feet offset on the element); on a road, clicking the number edits the travel width.
+  const startDimMove = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
+    setSel({ kind: "el", id });
+    pushHistory();
+    drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const editDimWidth = (id) => {
+    const el = els.find((x) => x.id === id);
+    if (!el || el.type !== "road") return;
+    const v = window.prompt("Road travel width (feet):", String(Math.round(roadTravel(el))));
+    if (v == null) return;
+    const n = parseFloat(v);
+    if (Number.isFinite(n) && n > 0) setRoadTravel(el, n);
   };
   const startEdgeResize = (e, id, nx, ny) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -4512,7 +4537,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
@@ -6344,7 +6369,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth) {
   // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
   // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
   // defined" inside the els.map during render and blanked the whole page on any
@@ -6469,21 +6494,42 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB)) : fullMin;
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
+    const ox = (el.dimOffset?.x || 0) * ppf, oy = (el.dimOffset?.y || 0) * ppf; // B146: user reposition (local feet → px)
+    const moved = Math.abs(ox) + Math.abs(oy) > 2;
+    const dimSel = isSel && tool === "select"; // interactive (drag/edit) only when the element is selected
+    const isRoad = el.type === "road";
+    const numHandlers = dimSel && isRoad // road number: click to edit width (and don't start a drag)
+      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id); } }
+      : {};
     const dim = [];
     if (horizLong) { // short side is vertical (h)
       const x = tl.x + w * 0.18, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
-      dim.push(<line key="dl" x1={x} y1={y0} x2={x} y2={y1} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<line key="t0" x1={x - tick} y1={y0} x2={x + tick} y2={y0} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<line key="t1" x1={x - tick} y1={y1} x2={x + tick} y2={y1} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<text key="tx" x={x + 5} y={my} transform={`rotate(${-el.rot} ${x + 5} ${my})`} fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600">{txt}</text>);
+      if (moved) dim.push(<line key="ld" x1={x} y1={my} x2={x + ox} y2={my + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
+      const X = x + ox, Y0 = y0 + oy, Y1 = y1 + oy, MY = my + oy;
+      dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
+      dim.push(<line key="t0" x1={X - tick} y1={Y0} x2={X + tick} y2={Y0} stroke={RED} strokeWidth={1.25} />);
+      dim.push(<line key="t1" x1={X - tick} y1={Y1} x2={X + tick} y2={Y1} stroke={RED} strokeWidth={1.25} />);
+      if (dimSel) dim.push(<line key="grab" x1={X} y1={Y0} x2={X} y2={Y1} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
+      // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
+      dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
       const y = tl.y + h * 0.18, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
-      dim.push(<line key="dl" x1={x0} y1={y} x2={x1} y2={y} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<line key="t0" x1={x0} y1={y - tick} x2={x0} y2={y + tick} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<line key="t1" x1={x1} y1={y - tick} x2={x1} y2={y + tick} stroke={RED} strokeWidth={1.25} />);
-      dim.push(<text key="tx" x={mx} y={y - 5} transform={`rotate(${-el.rot} ${mx} ${y - 5})`} textAnchor="middle" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600">{txt}</text>);
+      if (moved) dim.push(<line key="ld" x1={mx} y1={y} x2={mx + ox} y2={y + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
+      const Y = y + oy, X0 = x0 + ox, X1 = x1 + ox, MX = mx + ox;
+      dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);
+      dim.push(<line key="t0" x1={X0} y1={Y - tick} x2={X0} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
+      dim.push(<line key="t1" x1={X1} y1={Y - tick} x2={X1} y2={Y + tick} stroke={RED} strokeWidth={1.25} />);
+      if (dimSel) dim.push(<line key="grab" x1={X0} y1={Y} x2={X1} y2={Y} stroke="transparent" strokeWidth={14} />); // fat invisible grab target
+      dim.push(<text key="tx" x={MX} y={Y - 6} transform={`rotate(${-el.rot} ${MX} ${Y - 6})`} textAnchor="middle" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" fontWeight="600" {...numHandlers}>{txt}</text>);
     }
-    parts.push(<g key="dim">{dim}</g>);
+    // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);
+    // otherwise it ignores pointers so a click falls through to select/move the element itself.
+    parts.push(
+      <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
+        onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
+        {dim}
+      </g>,
+    );
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
