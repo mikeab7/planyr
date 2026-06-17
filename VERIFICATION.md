@@ -445,7 +445,8 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (export-only, no data risk) — log ❌ here with what looked wrong (overlay missing
   when checked, handles printing, or wrong position / scale / rotation / opacity).
 
-### V25 — Detention pond expansion: lock-as-existing baseline + storage gained (B132) ⏳
+### V25 — Detention pond expansion: lock-as-existing baseline + storage gained (B132) ⚠️ SUPERSEDED by V30 / B139
+- ⚠️ **Superseded 2026-06-17 by V30 / B139.** The "Lock as existing pond" button this verified was replaced by the **"Expand this pond"** mode (B139) — that exact flow no longer exists. The detention math + dashed ghost it checked live on and were re-verified under V30. No action; kept for history.
 - **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
 - **Steps:** Open a site, draw a **Detention Pond** (rectangle or click-points irregular). Select it → the right
   panel's **Detention storage** section now ends with a **"Lock as existing pond"** button. (1) Click it → a toast
@@ -538,6 +539,12 @@ was never clicked" quietly ships broken.
   county CAD will answer first and TxGIO stays the fallback — either way the lot must select.
 - **If it fails:** if a clearly-outlined Fort Bend lot still won't select, that's a real regression — log ❌
   here with the coordinate; otherwise note what looked off (no data risk).
+
+### V30 — Detention pond "Expand this pond" mode (B139) ✅
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview build) · supersedes V25
+- **Steps (driven):** Start blank → draw a Detention Pond → select it. (1) Panel shows a primary **"Expand this pond"** button (no "Lock as existing pond"), footprint reads **Width / Length** (not Depth), and the generic lock now reads **"📌 Pin"**. (2) Click **Expand this pond** → enters mode ("EXPANDING · EXISTING LOCKED"), a dashed ghost appears, steppers **Push banks out (ft)** / **Dig deeper (ft)**, Existing/Proposed rows, **Storage gained +0.00 ac-ft**, Reset/Done. (3) Push banks out 40′ → footprint grows uniformly with the ghost inset evenly on all four sides → **+18.33 ac-ft**. (4) Dig deeper +6′ → **85.17 ac-ft**. (5) Reset to existing → gain 0, stepper 0. (6) Done → exits mode, "Expand this pond" returns, pond keeps the new size. (7) 📌 Pin → toggles to 📌 Unpin.
+- **Expect:** every step above; gain = proposed − existing via the same depth/slope math; zero console/page errors.
+- **Result 2026-06-17 — ✅ PASS.** All steps observed in the running app (screenshots captured); zero console/page errors. Residual: a **signed-in** pass that the baseline/ghost survive a cloud reload (sandbox runs logged-out) — low risk, it rides on the existing `el.det` persistence.
 
 ---
 
