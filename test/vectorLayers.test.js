@@ -270,8 +270,8 @@ describe("decideVectorOrImage — vector vs. flat-image fallback", () => {
     expect(decideVectorOrImage(VECTOR_SOURCES.fema, { zoom: 15, lastVectorError: new Error("boom") })).toBe("image");
   });
   it("image when zoomed out past minVectorZoom", () => {
-    expect(decideVectorOrImage(VECTOR_SOURCES.fema, { zoom: 11 })).toBe("image"); // < 12
-    expect(decideVectorOrImage(VECTOR_SOURCES.fema, { zoom: 12 })).toBe("vector"); // == 12 ok
+    expect(decideVectorOrImage(VECTOR_SOURCES.fema, { zoom: 14 })).toBe("image"); // < 15
+    expect(decideVectorOrImage(VECTOR_SOURCES.fema, { zoom: 15 })).toBe("vector"); // == 15 ok
   });
   it("image when the bbox covers more than maxAreaDeg", () => {
     expect(decideVectorOrImage(VECTOR_SOURCES.fema, { bboxAreaDeg: 0.6 })).toBe("image"); // > 0.5
