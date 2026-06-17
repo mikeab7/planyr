@@ -226,6 +226,23 @@ was never clicked" quietly ships broken.
   their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
+### V14 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site and lay out adjacent elements (a big building, a narrow trailer strip beside it,
+  a detention pond, a couple of sidewalks). (1) **Zoomed in:** each element shows its full centred label
+  (name + sf/count + dimensions) as before. (2) **Zoom out:** labels should *thin out*, not pile up — the
+  dimensions line drops first, then the area line, leaving the name; the **narrow trailer strip** should
+  drop to just its name (or hide) rather than spilling a 3-line label past its ~50′ width. (3) **Crowd
+  test:** push several labelled elements close together and confirm their centred labels no longer
+  overprint into an unreadable stack — a lower-priority label yields (shrinks or disappears) to the
+  bigger / building label rather than stacking on top. Zoom back in → the hidden labels return.
+- **Expect:** no two centred element-name labels overprint at any zoom; buildings / bigger elements keep
+  their labels; nothing crashes; non-labelled elements (paving / parking / roads) are unaffected.
+- **Known-not-yet (increment 2 — do NOT fail for these):** the **red edge-dimension ticks** ("300′",
+  "638′") are still a separate layer and may overlap the centred names; no leader lines yet. Tracked under B121.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
+  that vanished when it had room, or a pile that remained).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
