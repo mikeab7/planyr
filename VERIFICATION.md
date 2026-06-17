@@ -499,6 +499,12 @@ was never clicked" quietly ships broken.
   - **CORS-clean** (echoes `Access-Control-Allow-Origin: https://planyr.io`); metadata fetch → 200 JSON.
   - **Reproduce:** `node gis-verify/wetlands-verify.mjs` (vector variant). Same egress-proxy `ignoreHTTPSErrors`
     caveat as V26 — environment artifact only; real planyr.io users hit the genuine USGS cert directly.
+  - **Confirmed in the LIVE app — planyr.io, not just a test harness (2026-06-17):** drove production headless
+    (`node gis-verify/app-live-verify.mjs`) — ticked **Wetlands (NWI)** in the Layers panel and zoomed to NE Houston.
+    Every wetland request the app issued went to the new **Wetlands_gdb_split** vector source (NOT the old raster, so
+    the deploy is fresh) and returned **200** (metadata JSON + multiple `/export` `image/png` tiles, up to ~52 KB), and
+    the map painted crisp labeled polygons (PFO1A / PSS1A / PUBHh) + blue open water with the USFWS credit — screenshot
+    `gis-verify/app-wetlands-planyrio.png`. So production is wired to the vector source and renders end-to-end.
 - **Re-check trigger (🌐, no browser needed):** `curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: https://planyr.io'
   'https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer/export?bbox=-10594500,3487000,-10591500,3490000&bboxSR=102100&imageSR=102100&size=10,10&layers=show:1,2&f=image'`
   should return **200**. **Also watch the `Test/` path** — it's USFWS staging and may be renamed when their production
