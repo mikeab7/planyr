@@ -592,3 +592,13 @@ _Move items here with the date and who/what checked them._
   - The same shot incidentally confirmed **B122** numbering ("Building 1" / "Building 2") and **B123**'s stack (square footage on its own line) rendering correctly.
   - Backed by unit tests (leader placement + inside-stays-inside) · lint 0 · 204 tests · build green.
 - **Not covered (logged-out headless limits):** a very busy/crowded layout, and labels near the top viewport edge (the leader points up) — eyeball on a real dense plan when convenient. Sign-in paths untested (proxy blocks auth).
+
+### V32 — Measurement-grade scale bar + north arrow in print/export and on screen (B141 / B142) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (fix acceptance)
+- **Steps:** "Start blank" → planner → drew two buildings with the Building tool → (a) **File ▾ → Print / pick frame… → Print** and captured the actual print page; (b) **File ▾ → Export PNG** and captured the downloaded PNG; (c) screenshotted the on-screen canvas corners.
+- **Result ✅:**
+  - **Print/PDF page:** scale bar sits fully inside the sheet with clearance on every side, snapped to a round **0 / 125 / 250** with a **FEET** label, alternating black/white segments, ticks with numbers centered under them, on a translucent legibility plate — **no clipping** (the old "500 runs off the edge / 0 floats above the bar" is gone). North arrow is a **modest, clean filled arrow + "N"** on the same plate, anchored top-left inside the safe area — no oversized compass rose.
+  - **PNG export:** same furniture, anchored to the export frame (north top-left, scale bottom-right), nothing clipped.
+  - **On screen:** the live canvas shows the same measurement-grade scale bar (bottom-right) and north arrow (bottom-left) on plates — consistent with the print, sized modestly for the screen.
+  - Backed by **18 unit tests** (`test/sheetFurniture.test.js`) · lint 0 · **222 tests** · build green; `SitePlannerApp`/`DocReview` lazy chunks intact.
+- **Not covered:** a print over a **live aerial** backdrop (logged-out + sandbox tiles) and signed-in paths (proxy blocks auth) — both orthogonal to the furniture, which composites above whatever backdrop is present.
