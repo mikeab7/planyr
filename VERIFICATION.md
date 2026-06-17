@@ -462,7 +462,10 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
   offset/rotated, gain number not updating, baseline lost on reload).
 
-### V26 — NWI wetlands restored from the live `fwsprimary` raster host (B133) ✅
+### V26 — NWI wetlands restored from the live `fwsprimary` raster host (B133) ⚠️ SUPERSEDED by V27
+- ⚠️ **Superseded 2026-06-17 by V27 / B135.** This verified the raster *renders + 200 + CORS*, but the source
+  was a **100 m-per-pixel raster**, so in real use wetlands painted as coarse **blocks**, not true shapes (owner-spotted).
+  B135 switched to the crisp **vector** MapServer; see **V27**. Kept here as the honest record of what shipped first.
 - **Added** 2026-06-17 · **Cadence** once (bugfix acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright — esri-leaflet imageMapLayer over Sheldon Lake) · **Next check** —
 - **Result 2026-06-17 — VERIFIED in a real browser.** Follow-up to B129 / V20 (the NWI outage). The old
   `fwspublicservices` host is **still HTTP 500**; the live data the official USFWS Wetlands Mapper draws sits on the
@@ -483,6 +486,23 @@ was never clicked" quietly ships broken.
 - **Re-check trigger (🌐, no browser needed):** `curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: https://planyr.io'
   'https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer/exportImage?bbox=-10597000,3485000,-10589000,3493000&bboxSR=102100&imageSR=102100&size=10,10&f=image'`
   should return **200**. If it 500s/403s, NWI is down again and the B129 honest "service unavailable" path covers it.
+
+### V27 — NWI wetlands render as crisp VECTOR polygons (Mapper look), not raster blocks (B135) ✅
+- **Added** 2026-06-17 · **Cadence** once (bugfix acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright — esri-leaflet dynamicMapLayer over Sheldon Lake) · **Next check** —
+- **Result 2026-06-17 — VERIFIED in a real browser.** Fixes V26/B133's coarse-raster blocks. The crisp vector
+  polygons the official Mapper draws live in the staging service `…/server/rest/services/Test/Wetlands_gdb_split/MapServer`
+  (layer 0 empty; data in layer 1 = CONUS_East, layer 2 = CONUS_West). `STATEWIDE.wetlands` is now a `kind:"dynamic"`
+  esri **dynamicMapLayer** with `layers:[1,2]`, like FEMA.
+  - **Renders crisp.** the `…/export?…layers=show:1,2&f=image` request → HTTP **200 `image/png`** with **true-shape
+    polygons + NWI class labels** (PFO1A / PSS1A / PUBH…), navy open water = Sheldon Lake — screenshot
+    `gis-verify/wetlands-fwsprimary-vector-verified.png`. No 100 m blocks.
+  - **CORS-clean** (echoes `Access-Control-Allow-Origin: https://planyr.io`); metadata fetch → 200 JSON.
+  - **Reproduce:** `node gis-verify/wetlands-verify.mjs` (vector variant). Same egress-proxy `ignoreHTTPSErrors`
+    caveat as V26 — environment artifact only; real planyr.io users hit the genuine USGS cert directly.
+- **Re-check trigger (🌐, no browser needed):** `curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: https://planyr.io'
+  'https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer/export?bbox=-10594500,3487000,-10591500,3490000&bboxSR=102100&imageSR=102100&size=10,10&layers=show:1,2&f=image'`
+  should return **200**. **Also watch the `Test/` path** — it's USFWS staging and may be renamed when their production
+  `Wetlands/MapServer` is repopulated; if this 404/500s, NWI shows the honest "service unavailable" (B129) until re-pointed.
 
 ---
 

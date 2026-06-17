@@ -34,26 +34,27 @@ export const STATEWIDE = {
     opacity: 0.55,
   },
   wetlands: {
-    kind: "esriImage", label: "Wetlands (NWI)",
-    // NWI moved hosts mid-2026. The old vector endpoint
-    // (fwspublicservices.wim.usgs.gov/wetlandsmapservice/.../Wetlands/MapServer) went down
-    // 2026-06 with a hard HTTP 500 across its WHOLE catalog — metadata, /export, /query, even
-    // the REST root — an agency-side OUTAGE, not a CORS issue (B129). As of 2026-06-17 it is
-    // still 500. The live data that the official USFWS Wetlands Mapper actually draws lives on
-    // the sibling host fwsprimary.wim.usgs.gov — but at a DIFFERENT path AND as a pre-rendered
-    // RASTER image service, NOT the old dynamic vector MapServer (B130's "same path, different
-    // host" hunch was wrong on both counts): /server/rest/services/Wetlands_Raster/ImageServer.
-    // So this is an esri imageMapLayer (kind:"esriImage"), like 3DEP — NOT a dynamicMapLayer
-    // with layers:[0] (fwsprimary's vector MapServer/export returns an HTML interstitial and
-    // its /query 500s; only the raster renders). Verified 2026-06-17 in a real headless browser:
-    // esri-leaflet's imageMapLayer paints the standard NWI symbology (navy open water, greens
-    // for vegetated wetlands) over Sheldon Lake, the exportImage request returns HTTP 200
-    // image/png, and the host is CORS-clean for planyr.io (echoes Access-Control-Allow-Origin:
-    // https://planyr.io), so it loads cross-site fine. Like FEMA, it's source-scale-gated — zoom
-    // in (~14+) to see polygons. Raster = screening picture only, no click-identify (wetlands was
-    // never queried). If fwsprimary ever refuses or dies, the honest "service unavailable" path
-    // (B129) still applies; the durable fix is a /server proxy through our own origin.
-    url: "https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer",
+    kind: "dynamic", label: "Wetlands (NWI)",
+    // CRISP VECTOR NWI — the look of the official USFWS Wetlands Mapper (true polygon outlines +
+    // Cowardin class labels like PFO1A / PSS1A / PUBH), NOT a coarse raster. History: the old vector
+    // host (fwspublicservices.wim.usgs.gov/wetlandsmapservice/…/Wetlands/MapServer) went down 2026-06
+    // with a hard HTTP 500 across its whole catalog (B129) and is STILL 500. The new host
+    // fwsprimary.wim.usgs.gov is mid-migration: its public /server/…/Wetlands/MapServer is an empty
+    // dynamic shell (export + query both 500), and its Wetlands_Raster/ImageServer renders but is a
+    // 100-m-per-pixel raster — it paints wetlands as ugly ~100 m BLOCKS, not real shapes (B133 shipped
+    // that by mistake; B134 fixes it). The actual crisp vector polygons live in the staging service
+    // Test/Wetlands_gdb_split/MapServer: layer 0 ("Wetlands") is empty; the data is split into layer
+    // 1 = Wetlands_CONUS_East and layer 2 = Wetlands_CONUS_West, so we request layers:[1,2] (covers
+    // the whole lower-48; Texas is in West). It's a dynamicMapLayer (esri /export f=image), like FEMA
+    // — verified 2026-06-17 in a real browser: the layers=show:1,2 export returns HTTP 200 image/png
+    // with true-shape polygons + labels over Sheldon Lake, and the host is CORS-clean (echoes
+    // Access-Control-Allow-Origin: https://planyr.io). Source-scale-gated (layer minScale ~1:250k) —
+    // like FEMA, zoom in to about city level to see polygons. CAVEAT: "Test/" is a USFWS STAGING path
+    // during their host migration; it may be renamed/removed when the production Wetlands/MapServer is
+    // repopulated (revisit then, or if fwspublicservices recovers). If it dies, the honest "service
+    // unavailable" path (B129) still applies; the durable fix is a /server proxy through our own origin.
+    url: "https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer",
+    layers: [1, 2],
     note: "NWI is for screening only — not a jurisdictional determination.",
     opacity: 0.55,
   },
