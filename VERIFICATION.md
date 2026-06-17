@@ -524,8 +524,15 @@ was never clicked" quietly ships broken.
 - **If it fails:** **data-display class** — if an older plan still flashes or sticks on reload, record the exact step + the browser console + whether the badge read "Synced ✓" first, and flag it (don't log-and-move-on).
 - **Cross-refs:** **V13 / V15** (the durability halves — B124 / B126, work must never actually disappear), **B134** (this fix's item — its causes #3/#4, work that never reaches any store, remain open), **B125** (the still-open honest save-status / `beforeunload` guardrail for that never-saved case), **B136** (the one-time SCHIEL recovery).
 
-### V29 — Fort Bend parcels are clickable, not just visible (B137) ⏳
-- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** — · **Next check** 2026-06-17
+### V29 — Fort Bend parcels are clickable, not just visible (B137) ✅
+- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** 2026-06-17 ✅ · **Next check** done
+- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). Geocoded to Sugar Land (Fort
+  Bend), entered **Select parcels**, clicked a lot → it **selected on the first click**: the selection card
+  read **"1 parcel · 0.34 ac · Highway 90A"** with the orange highlight, and **"No parcel right there" never
+  fired**. The browser console confirmed `gis.fbcad.org/serverarcgis2/.../layers` was **CORS-blocked /
+  unreachable** (FBCAD down, as at fix time) — so the lot selected **purely via the statewide TxGIO fallback**,
+  which is exactly the B137 fix. Screenshot evidence captured. (Signed-in county-label relabel — B36a / V3 —
+  still rides the same code path; not re-exercised here since auth is CORS-blocked in the sandbox.)
 - **Steps:** Map view → "＋ Select parcels" → pan to a **Fort Bend** area (e.g. Sugar Land / Rosenberg /
   Richmond) and zoom in until purple parcel outlines paint. (1) Click directly on a lot → it should
   **select** (orange highlight + the selection card shows acreage), NOT pop "No parcel right there." (2)
