@@ -276,6 +276,12 @@ was never clicked" quietly ships broken.
   restore — geometry is always restored in full.)
 - **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
   immediately with the exact step + browser console; do **not** log-and-move-on.
+- **Update 2026-06-16 (B127):** the first run found **no data loss** but one rough edge — two open tabs
+  could **disagree until reload** (the durable store briefly held the thinner copy). That's now **fixed**:
+  a stale tab's save **folds into** the store (never thins it) and open tabs **live-sync** via `storage`
+  events. **Re-run T5/T6 to confirm:** (a) after the two-tab divergent edits, **both tabs converge while
+  still open** (no reload needed), and (b) the durable `sites:v1` always holds the **union** (never the
+  thinner copy), so any reload shows the full set.
 
 ---
 
