@@ -10,32 +10,49 @@ was never clicked" quietly ships broken.
 > **This is the runtime counterpart to `BACKLOG.md`.** An item can be `[x]` done in the
 > backlog and still ⏳ unverified here — the code landed; the click-through hasn't.
 
-> ## ⚠️ Testing policy (2026-06-16, standing — read this)
+> ## ⚠️ Testing policy (updated 2026-06-17 — read this)
 > **Michael does NOT click through to test things himself. Ever.** Don't wait on him, don't ask
-> him to verify, don't end a turn expecting him to go look. Live verification is **delegated to the
-> Claude cohort** (browser-capable Claude sessions running `/verify` or `/run`). The working rhythm:
-> - After a change is **CI-green + build-green**, the **default is to move on.** Log anything that
->   needs a real browser as an item below for the cohort to pick up — that's all the follow-up needed.
-> - **Do NOT surface "these N are unverified" to Michael as a to-do for him.** File them here instead.
+> him to verify, don't end a turn expecting him to go look.
+> **Claude self-verifies in a headless browser — in the same session, no separate "cohort."**
+> A headless Chromium is available in the environment (see "🤖 Self-verification" below), so a
+> session that ships a UI change should **drive the live app itself** and record the result rather
+> than file the click-through for someone else. The working rhythm:
+> - After a change is **CI-green + build-green**, **run the headless-browser check yourself**, then
+>   record the outcome here (✅/❌ + date). Don't punt it.
+> - **Only if no browser is reachable** (rare), log the item below and move on — never block on Michael.
+> - **Do NOT surface "these N are unverified" to Michael as a to-do for him.**
 > - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
 >   (blank screen), or a shipped feature is visibly crashing in production. Everything else: note it
 >   here, keep moving.
+>
+> ### 🤖 Self-verification — how (proven 2026-06-17 against planyr.io + per-branch preview URLs)
+> Write a short Playwright script and run it with Node:
+> - Browsers live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the module is the global
+>   `/opt/node22/lib/node_modules/playwright` (require it by absolute path).
+> - The sandbox egress proxy intercepts TLS, so launch with `args:['--ignore-certificate-errors']`
+>   **and** `newContext({ ignoreHTTPSErrors: true })`, or `page.goto` throws `ERR_CERT_AUTHORITY_INVALID`.
+> - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
+>   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
+>   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
+> - Enter the planner via **"Start blank"**; drive the SVG canvas with `page.mouse` (CDP mouse events
+>   fire React's pointer handlers); `page.screenshot({clip})` then read the PNG back to eyeball it.
 
 ---
 
 ## How to use this — Claude Code / coworkers, read on every run
 
-1. **Scan the 🔲 list below.** This is the **Claude cohort's** queue — items here are waiting for a
-   browser-capable session to verify. Per the testing policy above, do **not** hand this list to
-   Michael as his to-do; only escalate a **critical** (won't build / won't render / crashing) issue.
-2. **If you have a browser** (the `/verify` or `/run` skill, or any runtime): run the
-   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a
-   note), set `Last checked`, and bump `Next check` by the `Cadence`. This is the cohort's job.
-3. **If you have no browser:** **just leave the item logged here for the cohort and move on** — don't
-   block on Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app
-   is the entire point of this file.
-4. **Endpoint-liveness items (tagged 🌐) are the exception** — they're a `curl`/REST probe,
-   runnable from any session *without* a browser. Run those when due.
+1. **Scan the 🔲 list below** — items waiting to be confirmed in the running app. Per the testing
+   policy above, do **not** hand this list to Michael as his to-do; only escalate a **critical**
+   (won't build / won't render / crashing) issue.
+2. **Verify it yourself in a headless browser** (see "🤖 Self-verification" above): run the
+   **Steps**, compare to **Expect**, then record the outcome — flip ⏳→✅ (or ❌ with a note),
+   set `Last checked`, and bump `Next check` by the `Cadence`. Prefer doing this in the same session
+   that shipped the change.
+3. **Only if no browser is reachable:** leave the item logged here and move on — don't block on
+   Michael. Do **not** mark anything ✅ from reading the code — confirming-in-the-running-app is the
+   entire point of this file.
+4. **Endpoint-liveness items (tagged 🌐) are the exception** — a `curl`/REST probe, runnable
+   without a browser. Run those when due.
 5. Keep it honest: a ❌ stays ❌ with the date and what broke until it's re-fixed and re-run.
 
 `CLAUDE.md` points every session here, so this list is consulted automatically.
@@ -412,4 +429,20 @@ was never clicked" quietly ships broken.
 ---
 
 ## ✅ Verified / ❌ Failed — history
-_Move items here with the date and who/what checked them. Nothing yet._
+_Move items here with the date and who/what checked them._
+
+### V24 — Parking "Split rows/aisles": double-loaded modules, not single rows (B130) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (first run of the
+  in-session self-verification flow above) · **Cadence** once
+- **Steps:** Loaded the branch-preview build (= the code now on `main`) and **planyr.io** in headless
+  Chromium → "Start blank" → planner → drew a Car Parking field with the mouse → selected it → read
+  the panel + button text → clicked **"Split rows/aisles"** → zoomed in and screenshotted the striping.
+- **Result ✅:**
+  - Button reads **"Split rows/aisles"**; the old **"Split into rows"** label is gone.
+  - Panel reports the right defaults — **510 stalls @ 9′×18′, 90°, 24′ aisle**.
+  - Zoomed view shows the **double-loaded** pattern: stall rows pair around one **shared dashed drive
+    aisle** (an aisle every *other* gap), not one aisle per row.
+  - App loads cleanly (HTTP 200) on both planyr.io and the preview; the split runs without errors.
+  - Backed by 10 unit tests (`test/parking.test.js`) on the split math.
+- **Not covered (tracked in `BACKLOG.md` B130, still open):** free-field longest-edge auto-orientation;
+  the fuller curb rule. Sign-in paths untested (proxy blocks auth — logged-out run).
