@@ -484,3 +484,12 @@ _Move items here with the date and who/what checked them._
   - Backed by 10 unit tests (`test/parking.test.js`) on the split math.
 - **Not covered (tracked in `BACKLOG.md` B130, still open):** free-field longest-edge auto-orientation;
   the fuller curb rule. Sign-in paths untested (proxy blocks auth — logged-out run).
+
+### V25 — Parking B130 follow-ons: free-field orientation + full-perimeter curb (B130) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
+- **Steps:** "Start blank" → planner → zoomed in → drew a **tall** Car Parking field (item 2), drew an **isolated** field and split it (item 3); screenshotted at high zoom.
+- **Result ✅:**
+  - **Item 2:** a tall-drawn field runs its stall rows + dashed aisles along the **long (vertical) edge** (double-loaded), not short stacked rows.
+  - **Item 3:** an isolated pad shows a grey **6″ curb band around the full perimeter** (confirmed at high zoom on a corner); a split field stays **continuous with no curbs at the internal seams**.
+  - Backed by 6 unit tests (`edgeAbutsPaving`) · lint 0 · 191 tests · build green.
+- **Decision recorded:** no curb against the bare building face (B70 stands; owner-confirmed 2026-06-17). Sign-in paths untested (proxy blocks auth — logged-out run).
