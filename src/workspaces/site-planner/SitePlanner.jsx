@@ -36,6 +36,7 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers } from "./lib/siteModel.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
+import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -3292,19 +3293,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
     // and the rasterized page — composited above the aerial backdrop in the same z-order.
     if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
-    // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
-    // north arrow (bottom-left), positioned in the export viewBox.
-    const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
-    const sx = x + w - sbPx - 28, sy2 = y + h - 30, na = x + 36, ny = y + h - 54;
+    // Sheet furniture for the export — a measurement-grade graphic scale bar
+    // (bottom-right) and a north arrow (top-left), both on a translucent
+    // legibility plate. Sized in OUTPUT units and anchored to the export FRAME
+    // (lib/sheetFurniture.js) so they sit fully inside a safe-area inset, never
+    // clip, and print at a fixed physical size on the page — unlike the screen
+    // overlays (data-export="skip", already removed above) which are sized for the
+    // live viewport. ftPerUnit = feet per viewBox user unit (one foot == view.ppf
+    // user units). The planner canvas is north-up, so the arrow points straight up.
     const furn = document.createElementNS("http://www.w3.org/2000/svg", "g");
     furn.setAttribute("font-family", "Inter, system-ui, sans-serif");
-    furn.innerHTML =
-      [0, 1, 2, 3].map((i) => `<rect x="${sx + seg * i}" y="${sy2 - 3}" width="${seg}" height="6" fill="${i % 2 ? "#fff" : PAL.ink}" stroke="${PAL.ink}" stroke-width="1"/>`).join("") +
-      `<text x="${sx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">0</text>` +
-      `<text x="${sx + sbPx}" y="${sy2 - 7}" text-anchor="middle" font-size="12" fill="${PAL.ink}">${sbFt}'</text>` +
-      `<circle cx="${na}" cy="${ny}" r="17" fill="#ffffff" stroke="${PAL.panelLine}" stroke-width="1"/>` +
-      `<path d="M${na} ${ny - 13} L${na + 5} ${ny + 6} L${na} ${ny + 1.5} L${na - 5} ${ny + 6} Z" fill="${PAL.ink}"/>` +
-      `<text x="${na}" y="${ny - 19}" text-anchor="middle" font-size="12" font-weight="700" fill="${PAL.ink}">N</text>`;
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
     clone.appendChild(furn);
     return { clone, w, h };
   };
@@ -3894,14 +3893,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     });
     return <g>{nodes}</g>;
-  })();
-
-  const scaleBarFt = (() => {
-    const targetPx = 120;
-    const raw = targetPx / view.ppf;
-    const steps = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
-    const ft = steps.reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a), steps[0]);
-    return { ft, px: ft * view.ppf };
   })();
 
   // Accuracy state — the single source of truth for measurement / acreage trust.
@@ -4899,21 +4890,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </g>
             </g>
 
-            {/* graphic scale bar — alternating segments (sits above the status bar) */}
-            <g data-export="skip" transform={`translate(${size.w - scaleBarFt.px - 24}, ${size.h - 46})`} pointerEvents="none">
-              {[0, 1, 2, 3].map((i) => (
-                <rect key={i} x={(scaleBarFt.px / 4) * i} y={-3} width={scaleBarFt.px / 4} height={6}
-                  fill={i % 2 ? "#fff" : PAL.ink} stroke={PAL.ink} strokeWidth={1} />
-              ))}
-              <text x={0} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>0</text>
-              <text x={scaleBarFt.px} y={-7} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink}>{f0(scaleBarFt.ft)}′</text>
-            </g>
-            {/* north arrow */}
-            <g data-export="skip" transform={`translate(28, ${size.h - 70})`} pointerEvents="none">
-              <circle cx="0" cy="0" r="17" fill="rgba(255,255,255,0.82)" stroke={PAL.panelLine} strokeWidth="1" />
-              <path d="M0 -13 L5 6 L0 1.5 L-5 6 Z" fill={PAL.ink} />
-              <text x="0" y="-19" textAnchor="middle" fontSize="11" fontWeight="700" fill={PAL.ink}>N</text>
-            </g>
+            {/* On-screen sheet furniture — the SAME measurement-grade scale bar
+                (bottom-right) and north arrow (bottom-left) the export uses, sized
+                for the screen via lib/sheetFurniture.js. data-export="skip" so the
+                export composites its own frame-anchored copy instead. The planner
+                canvas is north-up, so the arrow points straight up. */}
+            <g data-export="skip" fontFamily="Inter, system-ui, sans-serif" pointerEvents="none"
+              dangerouslySetInnerHTML={{ __html: buildScreenFurnitureSvg({ vw: size.w, vh: size.h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }) }} />
 
             {/* print-frame crop overlay (screen space) */}
             {printMode && printFrame && (() => {
