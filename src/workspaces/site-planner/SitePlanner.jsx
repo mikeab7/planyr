@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -450,16 +451,10 @@ function estTrailers(area, s) {
 }
 
 /* --------------- parking row stepping (double-loading) ------------- */
-// A drive aisle is double-loaded when it has a stall row on BOTH sides, so a
-// field of n rows stacks as depth(n) = n·stallDepth + ⌈n/2⌉·aisle (one aisle per
-// pair of rows). "+"/"−" step exactly ONE row: a single-loaded bay (1 row + 1
-// aisle) becomes double-loaded (2 rows, same aisle) before a new aisle is added.
-function parkDepthForRows(n, sd, ai) { n = Math.max(1, Math.round(n)); return n * sd + Math.ceil(n / 2) * ai; }
-function parkRowsForDepth(h, sd, ai) {
-  const mod = 2 * sd + ai; if (mod <= 0) return 1;            // a double-loaded module
-  const m = Math.floor((h + 1e-6) / mod), rem = h - m * mod;  // full modules + leftover
-  return Math.max(1, 2 * m + (rem >= sd - 1e-6 ? 1 : 0));     // a leftover row is single-loaded
-}
+// parkDepthForRows / parkRowsForDepth / splitParkingPieces are pure (unit-tested
+// in test/parking.test.js) and imported from lib/parking.js. A drive aisle is
+// double-loaded when it has a stall row on BOTH sides: depth(n) = n·stallDepth +
+// ⌈n/2⌉·aisle (one aisle shared per pair of rows).
 
 /* ------------------------- curbs (derived) ------------------------- */
 // Curbs are auto-placed thin bands (not user geometry): a 6" mono curb is 0.5′ of
@@ -805,7 +800,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const onAttachDrawing = async (parcelId, file) => {
     if (!file || !parcelId) return;
-    if (!(isPdfFile(file) || /^image\//.test(file.type))) { setOverlapWarn("Attach a PDF or an image (PNG/JPG)."); return; }
+    if (!(isPdfFile(file) || /^image\//.test(file.type))) { flashWarn("Attach a PDF or an image (PNG/JPG).", 0); return; }
     const baseName = (file.name || "Drawing").replace(/\.[^.]+$/, "");
     try {
       const r = await openOverlayFile(file); // { src, imgW, imgH, page, pageCount, pdf } — reuses the B72 rasterizer
@@ -813,7 +808,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (r.pdf && r.pageCount > 1) { setPagePick({ parcelId, pdf: r.pdf, pageCount: r.pageCount, name: baseName, first: r, file }); return; }
       if (r.pdf) { try { r.pdf.destroy(); } catch (_) {} } // single page — first raster is all we need
       addDrawingFromRaster(parcelId, baseName, isPdfFile(file) ? "pdf" : "image", r, r.pageCount || 1, file);
-    } catch (_) { setOverlapWarn("Couldn't read that file — try another PDF or image."); }
+    } catch (_) { flashWarn("Couldn't read that file — try another PDF or image.", 0); }
   };
   // Page-picker: rasterize the chosen sheet of a multi-page PDF, then attach it (B67 increment 2a).
   const pickPage = async (n) => {
@@ -822,7 +817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const raster = pp.first && pp.first.page === n ? pp.first : await rasterizePage(pp.pdf, n);
       addDrawingFromRaster(pp.parcelId, `${pp.name} — p.${n}`, "pdf", raster, pp.pageCount, pp.file);
-    } catch (_) { setOverlapWarn("Couldn't render that page — try another."); }
+    } catch (_) { flashWarn("Couldn't render that page — try another.", 0); }
     finally { try { pp.pdf.destroy(); } catch (_) {} }
   };
   const cancelPagePick = () => { if (pagePick) { try { pagePick.pdf.destroy(); } catch (_) {} setPagePick(null); } };
@@ -886,6 +881,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
   const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
+  // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
+  // which cancels any pending auto-clear first — so a stale timer from an earlier message
+  // can never blank a newer one. ms<=0 = sticky (no auto-clear; still cancels a prior timer).
+  // Bare setOverlapWarn("") clears can stay: a later flashWarn cancels any lingering timer.
+  const warnTimerRef = useRef(null);
+  const flashWarn = useCallback((msg, ms = 6000) => {
+    if (warnTimerRef.current) { clearTimeout(warnTimerRef.current); warnTimerRef.current = null; }
+    setOverlapWarn(msg);
+    if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
+  }, []);
+  useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
 
   // Geographic basemap + shared overlay layers under the canvas (Phase 1). Only
@@ -962,7 +969,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!origin) return;
     const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       onStatus: (id, state, msg, extra) => setLayerStatus && setLayerStatus((s) => ({ ...s, [id]: state ? { state, msg, ts: extra?.ts ?? null, stale: extra?.stale ?? false } : null })),
-      onError: (cfg, msg) => { setOverlapWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`); setTimeout(() => setOverlapWarn(""), 6000); },
+      onError: (cfg, msg) => { flashWarn(`⚠ “${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`, 6000); },
     });
     sync();
     const iv = setInterval(sync, 45000); // re-probe so stopped services self-heal
@@ -1387,7 +1394,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
     if (xsecMode) { // ditch cross-section: two clicks → sample elevations
       const sp = snapPt(fp);
-      if (xsecPts.length === 0) { setXsecPts([sp]); setOverlapWarn("Click the far side of the ditch."); }
+      if (xsecPts.length === 0) { setXsecPts([sp]); flashWarn("Click the far side of the ditch.", 0); }
       else { runXSection(xsecPts[0], sp); }
       return;
     }
@@ -1397,16 +1404,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         let src = snapPt(fp);
         if (routeMode.snapTo === "traced") {
           const near = nearestOnPolylines(fp, markups.filter((m) => m.kind === "traced").map((m) => m.pts));
-          if (!near || near.d > 90) { setOverlapWarn("Click closer to a traced power line."); return; }
+          if (!near || near.d > 90) { flashWarn("Click closer to a traced power line.", 0); return; }
           src = near.pt;
         }
         setRouteMode({ ...routeMode, stage: "building", source: src });
-        setOverlapWarn("Now click the building to serve.");
+        flashWarn("Now click the building to serve.", 0);
         return;
       }
       let b = els.find((e) => e.type === "building" && ringHas(fp, ringOf(e)));
       if (!b) { const builds = els.filter((e) => e.type === "building"); if (builds.length) b = builds.reduce((best, e) => _hyp(fp, centroid(ringOf(e))) < _hyp(fp, centroid(ringOf(best))) ? e : best); }
-      if (!b) { setOverlapWarn("No building to serve — draw a building first."); return; }
+      if (!b) { flashWarn("No building to serve — draw a building first.", 0); return; }
       commitUtilRoute(routeMode, b);
       return;
     }
@@ -1468,7 +1475,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "calibrate") {
       // Calibration points are NOT grid-snapped — we want to land exactly on
       // the screenshot feature the user is clicking.
-      if (!underlay) { setOverlapWarn("Calibrate needs an underlay — drop an aerial/screenshot first (Aerial ▾)."); setTimeout(() => setOverlapWarn(""), 5000); return; }
+      if (!underlay) { flashWarn("Calibrate needs an underlay — drop an aerial/screenshot first (Aerial ▾).", 5000); return; }
       if (!calib || calib.b) { setCalib({ a: fp }); setCalibInput(""); }
       else setCalib((c) => ({ a: c.a, b: fp }));
       return;
@@ -1525,8 +1532,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Warn (but still accept) when a freshly-closed outline crosses itself or has ~zero area,
   // so a silently-wrong shoelace area can't slip into the yield math unnoticed.
   const flashPolyWarn = (pts, label) => {
-    if (polySelfIntersects(pts)) { setOverlapWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`); setTimeout(() => setOverlapWarn(""), 7000); }
-    else if (polyArea(pts) < 1) { setOverlapWarn(`${label} has almost no area — check the outline.`); setTimeout(() => setOverlapWarn(""), 6000); }
+    if (polySelfIntersects(pts)) { flashWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`, 7000); }
+    else if (polyArea(pts) < 1) { flashWarn(`${label} has almost no area — check the outline.`, 6000); }
   };
   const finishMeasure = () => {
     if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
@@ -1556,8 +1563,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // real pieces (e.g. 3 for a U-shaped lot), which this still accepts.
         const whole = polyArea(pc.points), sum = pieces.reduce((s, r) => s + polyArea(r), 0);
         if (pieces.some(polySelfIntersects) || Math.abs(sum - whole) > whole * 0.02 + 1) {
-          setOverlapWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.");
-          setTimeout(() => setOverlapWarn(""), 7000);
+          flashWarn("That cut crosses the parcel ambiguously (concave shape) — try a straight cut between two opposite edges.", 7000);
           return;
         }
         pushHistory();
@@ -2130,8 +2136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // differ (ftPerPx ≠ ftPerPxY at this latitude); a single diagonal-derived scalar
     // would mis-size it, so calibration is disabled for from-map underlays (B57a).
     if (underlay.fromMap) {
-      setOverlapWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.");
-      setTimeout(() => setOverlapWarn(""), 5000);
+      flashWarn("This underlay came from the map — it's already to scale, so manual calibration is disabled for it.", 5000);
       setCalib(null);
       return;
     }
@@ -2303,8 +2308,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!patch) return;
     pushHistory();
     setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
-    setOverlapWarn(`Aligned to ${nPairs} point${nPairs > 1 ? "s" : ""} — fit residual ≈ ${Math.round(S.residual)}′.`);
-    setTimeout(() => setOverlapWarn(""), 5000);
+    flashWarn(`Aligned to ${nPairs} point${nPairs > 1 ? "s" : ""} — fit residual ≈ ${Math.round(S.residual)}′.`, 5000);
   };
   const ovCalibMsg = () => {
     if (!ovCalib) return "";
@@ -3605,23 +3609,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for trailer-tire/dolly abuse. The property lives globally on any band; only
   // trailer parking surfaces the control for now.
   const setCurbW = (el, wv) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, curbW: wv } : x)); };
-  // Split a striped parking field into N independent row elements (each one stall
-  // row + its aisle), preserving position/rotation so each can be edited / dragged.
+  // Split a striped parking field into independent DOUBLE-LOADED module elements
+  // (each two stall rows sharing one drive aisle), plus a trailing single-loaded
+  // row only for a remainder that can't pair — never one row + a full aisle each
+  // (B130). Preserves position / rotation / total depth so each piece can be
+  // edited or dragged, and the field's stall count is unchanged.
   const splitParkingRows = (el) => {
     if (!el || el.points || el.type !== "parking") return;
     const cfg = cfgOf(el);
-    const count = parkRowsForDepth(el.h, cfg.stallDepth || settings.stallDepth, cfg.aisle ?? settings.aisle);
-    if (count < 2) return;
+    const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
+    const pieces = splitParkingPieces(el.h, sd, ai);  // module depths, summing to el.h
+    if (pieces.length < 2) return;                    // ≤ one module: nothing to split
     pushHistory();
-    const bandH = el.h / count;                       // even split into one element per row
-    const rows = [];
-    for (let i = 0; i < count; i++) {
-      const ly = -el.h / 2 + bandH * (i + 0.5);       // band centre in local depth
-      const off = rot2(0, ly, el.rot);
-      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: bandH, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+    let y = -el.h / 2;                                 // walk down the local depth axis
+    const newEls = [];
+    for (const ph of pieces) {
+      const off = rot2(0, y + ph / 2, el.rot);        // piece centre in local depth
+      newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: ph, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      y += ph;
     }
-    setEls((a) => [...a.filter((x) => x.id !== el.id), ...rows]);
-    setSel({ kind: "el", id: rows[0].id });
+    setEls((a) => [...a.filter((x) => x.id !== el.id), ...newEls]);
+    setSel({ kind: "el", id: newEls[0].id });
   };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
@@ -3849,17 +3857,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setPobMode({ calls });
     setTitleOpen(false);
     setSel(null); setTool("select");
-    setOverlapWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready.`);
+    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready.`, 0);
   };
 
   // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
   const anchorEncumbrance = (pob) => {
     const { calls } = pobMode;
-    if (!calls || !calls.length) { setOverlapWarn("No bearings were recognized in that description — check the metes-and-bounds format."); setTimeout(() => setOverlapWarn(""), 7000); setPobMode(null); return; }
+    if (!calls || !calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
     const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { setOverlapWarn("Couldn't form a shape from those calls — check the description."); setTimeout(() => setOverlapWarn(""), 6000); setPobMode(null); return; }
+    if (!ring || ring.length < 3) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     const gap = misclosure(path);
     const mk = {
       id: uid(), kind: "encumbrance",
@@ -3878,11 +3886,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (hits.length) {
       const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
-      setOverlapWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`);
+      flashWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`, 9000);
     } else {
-      setOverlapWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`);
+      flashWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`, 9000);
     }
-    setTimeout(() => setOverlapWarn(""), 9000);
   };
 
   // Manual quick-trace of an overhead power line on the aerial: click points,
@@ -3900,7 +3907,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // nearest-neighbour path, drawn dashed and labeled screening-only.
   const inferWaterMain = async () => {
     if (!origin || evidenceBusy) return;
-    setEvidenceBusy(true); setOverlapWarn("Fetching hydrants in view…");
+    setEvidenceBusy(true); flashWarn("Fetching hydrants in view…", 0);
     try {
       const corners = [[0, 0], [size.w, 0], [0, size.h], [size.w, size.h]].map(([px, py]) =>
         feetToLatLng({ x: (px - view.offX) / view.ppf, y: (py - view.offY) / view.ppf }, origin.lat, origin.lon));
@@ -3909,7 +3916,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const els = await fetchOverpass(bb, { hydrants: true });
       const feet = els.filter((e) => e.type === "node" && e.lat != null)
         .map((e) => lngLatRingToFeet([[e.lon, e.lat]], origin.lon, origin.lat)[0]);
-      if (feet.length < 2) { setOverlapWarn(`Only ${feet.length} hydrant${feet.length === 1 ? "" : "s"} in view — need ≥ 2 to infer a main. Zoom/pan to include a run of hydrants.`); setTimeout(() => setOverlapWarn(""), 7000); return; }
+      if (feet.length < 2) { flashWarn(`Only ${feet.length} hydrant${feet.length === 1 ? "" : "s"} in view — need ≥ 2 to infer a main. Zoom/pan to include a run of hydrants.`, 7000); return; }
       // nearest-neighbour order starting from the westmost hydrant
       const remaining = feet.slice();
       let cur = remaining.reduce((a, b) => (b.x < a.x ? b : a), remaining[0]);
@@ -3923,23 +3930,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       const mk = { id: uid(), kind: "infwater", pts: ordered, label: "Inferred water main (screening only)", stroke: "#0891b2", weight: 2, dash: "dashed" };
       setMarkups((a) => [...a, mk]); setSel({ kind: "markup", id: mk.id });
-      setOverlapWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`);
-      setTimeout(() => setOverlapWarn(""), 8000);
+      flashWarn(`Inferred a main through ${ordered.length} hydrants — screening only, verify with the utility.`, 8000);
     } catch (_) {
-      setOverlapWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.");
-      setTimeout(() => setOverlapWarn(""), 6000);
+      flashWarn("Couldn't reach the hydrant source (OSM Overpass). Try again in a moment.", 6000);
     } finally { setEvidenceBusy(false); }
   };
 
   // --- utility service routing (electric / water) ---
   const startRoute = (util, extra = {}) => {
     if (util === "elec" && !markups.some((m) => m.kind === "traced")) {
-      setOverlapWarn("Trace an overhead pole line first (✏ Trace overhead electric), then route from it.");
-      setTimeout(() => setOverlapWarn(""), 6000); return;
+      flashWarn("Trace an overhead pole line first (✏ Trace overhead electric), then route from it.", 6000); return;
     }
     setSel(null); setTool("select"); setTraceMode(false);
     setRouteMode({ util, snapTo: util === "elec" ? "traced" : "free", stage: "source", ...extra });
-    setOverlapWarn(util === "elec" ? "Click the connection point on a traced power line." : "Click the tap point on the water main (turn on the water layer to see it).");
+    flashWarn(util === "elec" ? "Click the connection point on a traced power line." : "Click the tap point on the water main (turn on the water layer to see it).", 0);
   };
   const commitUtilRoute = (mode, b) => {
     const opts = mode.util === "elec"
@@ -3950,15 +3954,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setRouteMode(null);
     const hits = els.filter((e) => e.id !== b.id && ["building", "paving", "parking", "trailer", "pond"].includes(e.type) && ringsOverlap(mk.corridor, ringOf(e)));
     const what = mode.util === "elec" ? "Electric" : "Water";
-    setOverlapWarn(hits.length ? `⚠ ${what} easement overlaps ${hits.length} element${hits.length > 1 ? "s" : ""} — reroute or relocate.` : `${what} service routed to the ${(b.w * b.h >= LARGE_BLDG_SF) ? "dock/long wall" : "nearest wall"} — no conflicts.`);
-    setTimeout(() => setOverlapWarn(""), 8000);
+    flashWarn(hits.length ? `⚠ ${what} easement overlaps ${hits.length} element${hits.length > 1 ? "s" : ""} — reroute or relocate.` : `${what} service routed to the ${(b.w * b.h >= LARGE_BLDG_SF) ? "dock/long wall" : "nearest wall"} — no conflicts.`, 8000);
   };
 
   // Ditch cross-section: sample the 3DEP DEM along the drawn line (screening only).
   const runXSection = async (p0, p1) => {
-    if (!origin) { setOverlapWarn("Cross-section needs a located site (a real-world origin)."); setTimeout(() => setOverlapWarn(""), 6000); return; }
+    if (xsecBusyRef.current) return; // in-flight guard: ignore a second run while one samples (B56b)
+    if (!origin) { flashWarn("Cross-section needs a located site (a real-world origin).", 6000); return; }
     const lenFt = _hyp(p0, p1);
-    if (!(lenFt > 1)) { setOverlapWarn("Cross-section line is too short — draw a longer line."); setTimeout(() => setOverlapWarn(""), 5000); setXsecMode(false); setXsecPts([]); return; }
+    if (!(lenFt > 1)) { flashWarn("Cross-section line is too short — draw a longer line.", 5000); setXsecMode(false); setXsecPts([]); return; }
+    xsecBusyRef.current = true;
     setXsec({ p0, p1, lenFt, busy: true, stats: null });
     setXsecMode(false); setXsecPts([]);
     try {
@@ -3969,8 +3974,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setXsec({ p0, p1, lenFt, busy: false, stats });
     } catch (_) {
       setXsec(null);
-      setOverlapWarn("Couldn't sample USGS 3DEP elevation there (service/coverage). Try again or a different line.");
-      setTimeout(() => setOverlapWarn(""), 7000);
+      flashWarn("Couldn't sample USGS 3DEP elevation there (service/coverage). Try again or a different line.", 7000);
+    } finally {
+      xsecBusyRef.current = false;
     }
   };
 
@@ -4818,7 +4824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
                     </button>
-                    <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); setOverlapWarn("Click one bank of the ditch, then the other side."); } else setOverlapWarn(""); }}
+                    <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
                       title="Draw a line across a ditch to sample USGS 3DEP elevation and estimate depth/invert"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${xsecMode ? "#0e7490" : PAL.panelLine}`, background: xsecMode ? "#0e7490" : "#fff", color: xsecMode ? "#fff" : PAL.ink, fontWeight: 600 }}>
                       {xsecMode ? "📏 Click both banks… (Esc to cancel)" : "📏 Cross-section (ditch)"}
@@ -5376,8 +5382,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
-                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 2 &&
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split into rows</button>}
+                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 3 &&
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
                         </label>
@@ -6008,8 +6014,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
                 <div style={{ fontSize: 9.5, color: "#b45309", lineHeight: 1.4, margin: "6px 0 8px" }}>Screening only — LiDAR bare-earth, verify with survey.</div>
                 <button onClick={() => {
-                  if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); setOverlapWarn("Available depth applied to the selected pond."); setTimeout(() => setOverlapWarn(""), 4000); }
-                  else { setOverlapWarn("Select a pond first, then apply the available depth."); setTimeout(() => setOverlapWarn(""), 5000); }
+                  if (selEl?.type === "pond") { pushHistory(); setSelEl({ det: { ...(selEl.det || {}), availDepth: s.depthFt } }); flashWarn("Available depth applied to the selected pond.", 4000); }
+                  else { flashWarn("Select a pond first, then apply the available depth.", 5000); }
                 }} style={{ ...chip, width: "100%", fontWeight: 600 }}>→ Use as detention available depth{selEl?.type === "pond" ? "" : " (select a pond)"}</button>
               </div>
             );
@@ -6082,10 +6088,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                     </>
                   )}
-                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 2 && (
+                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
-                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
+                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>

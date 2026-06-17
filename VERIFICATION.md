@@ -400,6 +400,19 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here (e.g. dims vanishing at working zoom = threshold
   too high; still piling when zoomed out = gate not applied).
 
+### V23 — Warning toasts: a newer message isn't blanked early by an older one (B56b) ⏳
+- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** — · **Next check** 2026-06-17
+- **Steps:** Trigger two bottom-banner warnings in quick succession. (1) Pop a long one (finish a metes/POB
+  **encumbrance** plot, ~9 s banner) then immediately a shorter one (e.g. Calibrate with no underlay, or start a
+  utility route with no building) — confirm the **second message stays up its own full time** and isn't wiped a
+  few seconds early by the first one's timer. (2) Open a sticky instructional prompt right after a transient
+  warning (utility routing → **"Now click the building to serve."**) — it should **persist until you act**, not
+  auto-clear from the prior timer. (3) Start a ditch **cross-section**, then click again to begin a second while
+  the first is still sampling — the second click is ignored (no double run / flicker).
+- **Expect:** the visible warning always reflects the latest message for its own duration; sticky prompts persist
+  until the next action; no cross-section double-run.
+- **If it fails:** not critical (cosmetic/UX, no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
