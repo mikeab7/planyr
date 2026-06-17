@@ -197,6 +197,10 @@ export const buildingNumbers = (els) => {
   (els || []).forEach((el) => { if (isBuilding(el)) m.set(el.id, ++n); });
   return m;
 };
+// Road travel width (ft) from CURRENT geometry: the cross-width minus a curb each side.
+// Derived live from w/h so a road's dimension callout always tracks a resize — it used to
+// read a frozen `travelW` snapshot that went stale when the road was dragged bigger.
+export const roadTravelWidth = (w, h, curb) => Math.max(0, Math.min(w, h) - 2 * curb);
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
 export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.

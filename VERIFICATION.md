@@ -629,3 +629,9 @@ _Move items here with the date and who/what checked them._
   - **On screen:** the live canvas shows the same measurement-grade scale bar (bottom-right) and north arrow (bottom-left) on plates — consistent with the print, sized modestly for the screen.
   - Backed by **18 unit tests** (`test/sheetFurniture.test.js`) · lint 0 · **222 tests** · build green; `SitePlannerApp`/`DocReview` lazy chunks intact.
 - **Not covered:** a print over a **live aerial** backdrop (logged-out + sandbox tiles) and signed-in paths (proxy blocks auth) — both orthogonal to the furniture, which composites above whatever backdrop is present.
+
+### V35 — Road dimension tracks a resize; roads resize in 1′ steps (B146 increment 1) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
+- **Steps:** "Start blank" → Road tool (free draw) → dragged a road rectangle → selected it → read the red dimension → dragged the bottom-right corner handle straight down to widen the road → re-read the dimension.
+- **Result ✅:** the red travel-width callout updated **live from 170′ → 428′** as the road was widened (before the fix it read a frozen `travelW` and stayed at 170′), and the value is a clean integer (1′ steps). Backed by the `roadTravelWidth` unit test · lint 0 · 205 tests · build green.
+- **Not covered:** the interactive move/edit of the callout (B146 increment 2) isn't built yet; a signed-in cloud-reload pass is untested (logged-out run).
