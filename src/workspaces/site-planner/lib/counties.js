@@ -217,8 +217,15 @@ export const COUNTIES_MAP = {
     zoom: 11,
     bbox: [29.36, -94.92, 29.92, -94.39],
     mapServer: null,
-    // TxGIO statewide parcels (see COUNTIES.chambers). Used for identify only; a map
-    // click is a point query, so the statewide extent is irrelevant for select.
+    // TxGIO statewide parcels (see COUNTIES.chambers) — one layer covering all 254
+    // Texas counties. `statewide:true` marks it as the UNIVERSAL parcel source: its
+    // display layer paints outlines anywhere you zoom in (so it backs the visible
+    // lines wherever a county's own CAD is down/unconfigured), and `candidateCounties
+    // ForPoint` therefore also makes it queryable everywhere — appended as a fallback
+    // so a click can always select an outline it can see. Without that, a click over
+    // a Fort Bend lot (TxGIO outline shown, but FBCAD host down) found nothing (B130).
+    // The answering county is corrected post-hit via `countyAtPoint` (B36a).
+    statewide: true,
     layerUrl:
       "https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer/0",
   },
@@ -227,13 +234,33 @@ export const COUNTIES_MAP = {
 // Which configured CAD county/counties could contain a clicked point — used to
 // route a parcel identify WITHOUT making the user pre-pick a county. Returns the
 // county keys whose padded bbox contains the point (border overlaps mean a
-// straddle click yields both, so the caller can query both and merge). Falls back
-// to ALL configured counties if the point is outside every bbox (a coarse screen
-// should never be the reason a real parcel goes unfound — better to try them all).
+// straddle click yields both, so the caller can query both and merge), with any
+// STATEWIDE parcel source (TxGIO) appended LAST as a universal fallback.
+//
+// Why the statewide fallback (B130): the TxGIO layer paints parcel OUTLINES across
+// every Texas county (it backs the visible lines wherever a county's own CAD is
+// down or unconfigured). Querying it only inside its own bbox meant a click could
+// see an outline it couldn't select — e.g. a Fort Bend lot showed a TxGIO outline,
+// but the click queried only Harris (empty) + FBCAD (host down) and reported "no
+// parcel right there." Making the statewide layer queryable everywhere keeps the
+// hit-test aligned with what's drawn. It's appended AFTER the bbox matches so a
+// county's own CAD still answers first (more authoritative, richer fields) and the
+// statewide layer only catches clicks the county CAD didn't; the answering county
+// is then corrected via `countyAtPoint` (B36a).
+//
+// NOTE on the first element: a second caller (MapFinder's Layers-panel jurisdiction
+// resolver) reads candidate[0]. The out-of-bbox branch below therefore returns ALL
+// counties in config order (harris first) — byte-identical to the pre-B130 fallback
+// — so that default still lands on Harris when the view is away from every county;
+// the statewide source is among them, so a click still gets its coverage there too.
+// The statewide append only AUGMENTS the in-bbox case (where Fort Bend lives — it
+// matches harris+fortbend but not the chambers bbox), so candidate[0] is unchanged.
 export function candidateCountiesForPoint(lat, lng) {
-  const within = Object.entries(COUNTIES_MAP).filter(([, c]) => {
-    const b = c.bbox;
-    return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3];
-  });
-  return (within.length ? within : Object.entries(COUNTIES_MAP)).map(([k]) => k);
+  const entries = Object.entries(COUNTIES_MAP);
+  const within = entries
+    .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
+    .map(([k]) => k);
+  if (!within.length) return entries.map(([k]) => k); // outside every bbox → try all (harris-first; incl. the statewide source)
+  const statewide = entries.filter(([, c]) => c.statewide).map(([k]) => k).filter((k) => !within.includes(k));
+  return [...within, ...statewide];
 }

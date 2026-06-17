@@ -524,6 +524,21 @@ was never clicked" quietly ships broken.
 - **If it fails:** **data-display class** — if an older plan still flashes or sticks on reload, record the exact step + the browser console + whether the badge read "Synced ✓" first, and flag it (don't log-and-move-on).
 - **Cross-refs:** **V13 / V15** (the durability halves — B124 / B126, work must never actually disappear), **B134** (this fix's item — its causes #3/#4, work that never reaches any store, remain open), **B125** (the still-open honest save-status / `beforeunload` guardrail for that never-saved case), **B136** (the one-time SCHIEL recovery).
 
+### V29 — Fort Bend parcels are clickable, not just visible (B137) ⏳
+- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** — · **Next check** 2026-06-17
+- **Steps:** Map view → "＋ Select parcels" → pan to a **Fort Bend** area (e.g. Sugar Land / Rosenberg /
+  Richmond) and zoom in until purple parcel outlines paint. (1) Click directly on a lot → it should
+  **select** (orange highlight + the selection card shows acreage), NOT pop "No parcel right there." (2)
+  Click it again → it deselects. (3) Confirm a **Harris** lot still selects exactly as before (no regression).
+  (4) Plan the selected Fort Bend lot → the planner hand-off should record **county = fortbend** (the B36a
+  relabel runs because the hit came via the statewide TxGIO layer).
+- **Expect:** any displayed Fort Bend outline is selectable; Harris unchanged; the saved site's county reads
+  Fort Bend. Works even though FBCAD's own host may be down — the statewide TxGIO layer answers the click.
+- **Note:** FBCAD (`gis.fbcad.org/serverarcgis2`) was returning HTTP 503 at fix time; if it comes back up the
+  county CAD will answer first and TxGIO stays the fallback — either way the lot must select.
+- **If it fails:** if a clearly-outlined Fort Bend lot still won't select, that's a real regression — log ❌
+  here with the coordinate; otherwise note what looked off (no data risk).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
