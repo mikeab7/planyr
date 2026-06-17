@@ -504,6 +504,20 @@ was never clicked" quietly ships broken.
   should return **200**. **Also watch the `Test/` path** — it's USFWS staging and may be renamed when their production
   `Wetlands/MapServer` is repopulated; if this 404/500s, NWI shows the honest "service unavailable" (B129) until re-pointed.
 
+### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134) ⏳ — HIGH PRIORITY, SIGNED-IN ONLY (the "limit")
+- **Added** 2026-06-17 · **Cadence** once (data-display acceptance) + on-change · **Last checked** — · **Next check** 2026-06-17
+- **Why a signed-in coworker must run this — the one thing this session could NOT self-verify.** The fix lives entirely on the **signed-in boot path**: `SitePlannerApp` bumps a `loadEpoch` after `applyUser`'s `pullCloud`, folded into the planner's `key`, so the keyed planner re-reads the freshly-merged cloud copy instead of lingering on the stale pre-auth one. Per the testing policy at the top of this file, the sandbox egress proxy **CORS-blocks the Supabase auth handshake**, so the in-session headless run is **logged-out only** — it confirmed the build (lint 0 · 197 tests · build green) and that logged-out behavior is byte-identical (the fix is gated to the signed-in branch; `loadEpoch` stays 0), but the actual signed-in resume can't be exercised here.
+- **Already confirmed live (no browser):** shipped via **PR #103** → `main` and **deployed** — planyr.io serves `index-DVWCJQ1q.js` / `SitePlannerApp-BUX0faXJ.js`; cloud still ON (Supabase URL baked in); Version history + "Retry now" intact.
+- **Steps (SIGNED IN, on planyr.io):**
+  1. Sign in. Open a site and add several **buildings** so the plan is materially bigger than its last cloud copy; wait for the header badge to read **"Synced ✓"**.
+  2. **Hard-reload** (`Ctrl+Shift+R`) — several times — watching the canvas the instant it paints.
+  3. **Expect:** it resumes **straight into the latest plan** (full building count) with **no flash of an older/thinner version first** and **no bounce to the map**. (The bug being fixed: a split-second older copy painted on load, then "came back on its own.")
+  4. **"Disappears on its own" trigger:** switch to another tab for ~2–3 min, then return / refocus the Planyr tab → still the latest plan, no flash, no bounce.
+  5. **Two-source sanity:** if this device's local cache holds a thinner copy than the cloud, boot must still end on the **fuller merged** copy, never the thin one.
+- **Expect:** at no point does an older / thinner plan appear, even for one frame; the resumed plan is always the newest merged copy. This is the **display half (cause #5)** of the persistence data-loss work.
+- **If it fails:** **data-display class** — if an older plan still flashes or sticks on reload, record the exact step + the browser console + whether the badge read "Synced ✓" first, and flag it (don't log-and-move-on).
+- **Cross-refs:** **V13 / V15** (the durability halves — B124 / B126, work must never actually disappear), **B134** (this fix's item — its causes #3/#4, work that never reaches any store, remain open), **B125** (the still-open honest save-status / `beforeunload` guardrail for that never-saved case), **B136** (the one-time SCHIEL recovery).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
