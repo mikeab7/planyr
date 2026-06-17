@@ -382,11 +382,9 @@ was never clicked" quietly ships broken.
     returns **HTTP 500 across its whole catalog** (confirmed three ways). PR #60's resilience held up — the
     app stays alive and shows a quiet per-layer "failed" dot; no alarming toast, no dropped-layer cascade.
     The message text is now honest ("service is not responding…") instead of esri's misleading CORS line.
-- **Re-check trigger (🌐, no browser needed):** if `curl -s -o /dev/null -w '%{http_code}'
-  "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer?f=json"`
-  returns **200** again (USFWS restored the service), do a quick browser pass to confirm NWI paints at
-  zoom 14+ over a known wetland (e.g. Addicks/Barker). Until then, a 500 there is the agency outage, not a
-  regression.
+- **RESOLVED by B133 / V26 (2026-06-17):** rather than wait for `fwspublicservices` to recover, NWI was pointed
+  at the live sibling raster host `fwsprimary.wim.usgs.gov` and **verified rendering in a real browser** — see V26.
+  (The old `fwspublicservices` host is still 500; this trigger is superseded.)
 
 ### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
@@ -463,6 +461,28 @@ was never clicked" quietly ships broken.
   numbers and ghost survive reload; "screening only — confirm with your civil engineer" caveat shown.
 - **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
   offset/rotated, gain number not updating, baseline lost on reload).
+
+### V26 — NWI wetlands restored from the live `fwsprimary` raster host (B133) ✅
+- **Added** 2026-06-17 · **Cadence** once (bugfix acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright — esri-leaflet imageMapLayer over Sheldon Lake) · **Next check** —
+- **Result 2026-06-17 — VERIFIED in a real browser.** Follow-up to B129 / V20 (the NWI outage). The old
+  `fwspublicservices` host is **still HTTP 500**; the live data the official USFWS Wetlands Mapper draws sits on the
+  sibling host **fwsprimary.wim.usgs.gov**, but at a different path **and as a pre-rendered RASTER ImageServer**
+  (`/server/rest/services/Wetlands_Raster/ImageServer`), not the old dynamic vector MapServer — so the fix is an
+  esri **imageMapLayer** (`kind:"esriImage"`, like 3DEP), **not** the one-line host swap the hand-off assumed.
+  - **Renders.** esri-leaflet's `imageMapLayer` paints the standard NWI symbology (navy open water = Sheldon Lake,
+    greens = vegetated wetlands) over Sheldon Lake at zoom 14 — screenshot `gis-verify/wetlands-fwsprimary-verified.png`.
+  - **Network 200.** the `exportImage` request → HTTP **200 `image/png`**; the service metadata fetch → **200** JSON.
+  - **CORS-clean cross-site (the flagged 403 risk DISPROVEN).** the host **reflects any Origin** in
+    `Access-Control-Allow-Origin` (verified for `https://planyr.io`, localhost, and an arbitrary origin), so it loads
+    from our origin with no refusal. The earlier out-of-band 403 did not reproduce.
+  - **Reproduce:** `node gis-verify/wetlands-verify.mjs` (serves `gis-verify/wetlands-verify.html` from the repo
+    root on :8000; uses the installed esri-leaflet, identical to the app). NB: this sandbox's egress proxy MITMs TLS
+    with an "Anthropic Egress Gateway" CA the bundled headless Chromium doesn't trust, so the driver sets
+    `ignoreHTTPSErrors` — an **environment artifact only**; real planyr.io users reach fwsprimary's genuine public
+    USGS cert directly, no proxy.
+- **Re-check trigger (🌐, no browser needed):** `curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: https://planyr.io'
+  'https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer/exportImage?bbox=-10597000,3485000,-10589000,3493000&bboxSR=102100&imageSR=102100&size=10,10&f=image'`
+  should return **200**. If it 500s/403s, NWI is down again and the B129 honest "service unavailable" path covers it.
 
 ---
 
