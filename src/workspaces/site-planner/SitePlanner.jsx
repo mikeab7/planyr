@@ -9,6 +9,7 @@ import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
+import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -691,6 +692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
+  const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B130); re-defaulted to on-screen visibility on entering print mode
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -3136,7 +3138,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame) => {
+  const buildExportSvg = (frame, includeOverlay = true) => {
     if (!svgRef.current) return null;
     let x, y, w, h;
     if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
@@ -3173,7 +3175,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Always include the aerial underlay (even if it's hidden on screen), placed
     // beneath everything but the paper, so prints/exports keep the satellite.
     if (underlay) {
-      clone.querySelectorAll("image").forEach((n) => n.remove()); // drop any live copy
+      clone.querySelectorAll('image:not([data-overlay-image])').forEach((n) => n.remove()); // drop any live aerial copy — keep the placed site-plan overlays (handled below)
       const tl = f2p({ x: underlay.x, y: underlay.y });
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
@@ -3186,6 +3188,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       im.setAttribute("opacity", underlay.opacity ?? 1);
       clone.insertBefore(im, bg.nextSibling);
     }
+    // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B130):
+    // off → drop every placed overlay raster (its editor chrome + any unsynced
+    // placeholder already left via data-export="skip"); on → the cloned <image>s keep
+    // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
+    // and the rasterized page — composited above the aerial backdrop in the same z-order.
+    if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
     // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
     // north arrow (bottom-left), positioned in the export viewBox.
     const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
@@ -3245,8 +3253,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Print to PDF.");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async (paper = "letter", orient = "landscape") => {
-    const built = buildExportSvg(printFrame);
+  const printPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
+    const built = buildExportSvg(printFrame, includeOverlay);
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
     // Open the window synchronously (before any await) so it isn't pop-up-blocked.
     const win = window.open("", "_blank");
@@ -3320,6 +3328,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dev) base = { cx: dev.cx, cy: dev.cy, w: dev.w + 80, h: dev.h + 80 };
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
     setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
+    setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
     setPrintMode(true); setExportMenu(false); setSel(null);
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
@@ -3332,7 +3341,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (printMode) setPrintFrame((f) => f ? fitFrame(f.cx, f.cy, f.wFt, f.hFt, printAspect()) : f);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printAspectKey]);
-  const doPrint = () => { const p = printPaper, o = printOrient; setPrintMode(false); setTimeout(() => printPDF(p, o), 60); };
+  const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
+  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => printPDF(p, o, ov), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -4310,15 +4320,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     pointerEvents={o.locked ? "none" : "auto"}
                     onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
                     {o.src ? (
-                      <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
-                    ) : (<>
+                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B130)
+                      <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                    ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
                       <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
-                    </>)}
+                    </g>)}
                     {isSel && tool === "select" && (
-                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+                      <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
-                    {isSel && tool === "select" && !o.locked && !ovCalib && (<>
+                    {isSel && tool === "select" && !o.locked && !ovCalib && (<g data-export="skip">
                       {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
                         <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                           style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
@@ -4326,7 +4337,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
                       <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                         style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
-                    </>)}
+                    </g>)}
                   </g>
                 );
               })}
@@ -4939,6 +4950,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={seg(printOrient === "landscape")} onClick={() => setPrintOrient("landscape")}>Landscape</button>
                   <button style={seg(printOrient === "portrait")} onClick={() => setPrintOrient("portrait")}>Portrait</button>
                 </span>
+                {/* B130 — include the placed site-plan overlay in the printout; only shown when one's loaded (no dead control) */}
+                {overlayPrintable && (
+                  <label title="Include the placed site-plan overlay in the printout — exactly as shown (scale, position, rotation, opacity)" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                    <input type="checkbox" checked={printOverlay} onChange={(e) => setPrintOverlay(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
+                    Print overlay
+                  </label>
+                )}
                 <span style={{ width: 1, height: 18, background: PAL.panelLine }} />
                 <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
                 <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
