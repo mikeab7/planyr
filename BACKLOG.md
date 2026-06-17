@@ -22,6 +22,28 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B130 — NWI wetlands: switch to the live sibling host `fwsprimary` + verify in-browser `[Site Planner / GIS]` (bug) — ▶ NEXT-SESSION HAND-OFF, follow-up to B129
+`[ ]` **Owner-spotted (2026-06-17).** Our configured NWI host `fwspublicservices.wim.usgs.gov/wetlandsmapservice/…` returns HTTP 500 (confirmed down in B129 — an agency-side outage). The owner opened the official USFWS **Wetlands Mapper** (`https://fwsprimary.wim.usgs.gov/wetlands/apps/wetlands-mapper/`) and the wetlands render fine — i.e. the data is LIVE on the **sibling host `fwsprimary.wim.usgs.gov`**; only the `fwspublicservices` alias is erroring. The likely fix is a one-line URL swap. **DO NOT ship it blind — verify in a browser first (the whole point of B129).**
+
+**The fix (one line, `src/workspaces/site-planner/lib/layers.js`, `STATEWIDE.wetlands.url`):** swap the host `fwspublicservices.wim.usgs.gov` → `fwsprimary.wim.usgs.gov` (path identical) →
+`https://fwsprimary.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer`
+
+**PREREQ before you can verify (owner action — may already be done):** `fwsprimary.wim.usgs.gov` must be in the **egress allowlist** (owner asked 2026-06-17; egress changes only take effect in a NEWLY started session). Sanity-check reachability:
+`curl -s -o /dev/null -w '%{http_code}\n' -H 'Origin: https://planyr.io' 'https://fwsprimary.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer?f=json'`
+- `403` + "Host not in allowlist" → not allowlisted yet; stop, tell the owner.
+- `500` → fwsprimary now down too; hold (and re-check whether `fwspublicservices` recovered).
+- `200` → reachable; proceed.
+
+**⚠️ THE risk to settle in-browser (don't skip):** an out-of-band probe of `fwsprimary` on 2026-06-17 returned a *real* **403** (NOT the egress block — a server 403). That *might* mean `fwsprimary` only serves its own mapper and refuses cross-site / non-browser requests (Referer/Origin/UA/WAF). If our app's `<img>` export gets 403'd cross-origin from planyr.io, wetlands STILL won't draw. Public ArcGIS export endpoints usually allow cross-site, so it's *probably* fine — but confirm by eye. (CORS specifically doesn't block the picture: if `fwsprimary` sends no `Access-Control-Allow-Origin`, the esri metadata fetch fails but the image still loads via the CORS-exempt `<img>` — PR #60 resilience — so it should render anyway.)
+
+**Verify (browser already set up — `.claude/` SessionStart hook installs Chromium; Playwright recipe + screenshots from B129 are under `gis-verify/`):** on planyr.io or a branch preview, toggle **Wetlands (NWI)** at **zoom 14+** over a known wetland (Sheldon Lake, the Greens/Halls Bayou greenways, or the Katy Prairie west of town). Confirm BOTH: (a) the `…/export?f=image` request returns **HTTP 200 `image/png`**, and (b) the green/blue wetland polygons actually **paint** on the map (do NOT trust the status dot — it lies). Like FEMA, NWI may be source-scale-gated, so zoom in.
+
+**Then:**
+- **Renders →** ship the swap (branch → PR → green build → merge) and update the `wetlands` comment in `layers.js` (it currently says "keep the canonical URL"; note that `fwspublicservices` went down 2026-06 and we moved to the `fwsprimary` sibling — the host USFWS's own live mapper uses — with the date).
+- **403s cross-site / doesn't render →** do NOT swap. Leave `fwspublicservices` (it may recover; the honest "service unavailable" message already shipped in B129), and note the `/server` proxy as the durable fix (serves through our own origin, sidesteps both CORS and any cross-site refusal). Report to the owner.
+
+**Key files:** `src/workspaces/site-planner/lib/layers.js` (`STATEWIDE.wetlands.url` + the `wetlands` comment block) · browser tooling `.claude/hooks/ensure-browser.sh` · evidence `gis-verify/` · context B129.
+
 ### B115 — Revisit keyboard shortcuts: memorability + let the owner remap them `[Site Planner / UI]` (task) — owner-gated
 `[ ]` Owner note (2026-06-16): the planner's single-key shortcuts are hard to remember and Michael may want to change them — **park this for a deliberate pass with him; do NOT unilaterally rename keys.** Decide together: (a) whether the current assignments stay, (b) whether to make them **user-remappable** (a small settings screen + persisted overrides) vs. just keep a fixed, better-surfaced set, and (c) whether any are non-obvious / collide with muscle memory (e.g. **S** could read as "save"). Current bindings, for reference when picked up: **V** Select · **H** Pan (+ hold **Space** = temp pan) · **S** toggle Snap (new, B114) · **Q** Callout · **T** Text · **L** Line · **R** Rect · **E** Ellipse · **⇧P** Polygon · **⇧N** Polyline · **Ctrl/⌘ Z / ⇧Z / Y** undo/redo · **Ctrl/⌘ C / X / V / D** copy/cut/paste/duplicate · **Delete/⌫** delete · **Esc** cancel · **?** shortcuts panel; gestures **⇧-drag** bond-to-neighbour, **Alt-drag** bypass-snap (B114). All are already listed in-app under the **?** panel. No code change yet — awaiting the owner's preferences.
 
@@ -556,7 +578,7 @@ FEMA/NWI are on the proven `dynamicMapLayer` (`f=image`) path. `lib/vectorLayers
 > - **The configured URL is canonical & correct — confirmed NOT to swap it.** The official USFWS "National Wetlands Inventory" ArcGIS web map (arcgis.com item `da9a3343…`) uses this EXACT MapServer. The only alternates are `www.fws.gov/wetlands/…` (older mirror, egress-blocked from the test sandbox so not in-browser-verifiable) and non-authoritative state re-hosts — swapping to either would repeat the blind guess this item exists to stop. **Decision: option (c) — keep the canonical URL** (it returns when USFWS restores the service) and make the failure honest.
 > - **Shipped (this branch):** `lib/layers.js` — the `requesterror` status now reads a plain *"the map service is not responding — it may be temporarily unavailable (screening only)"* instead of esri's misleading CORS text (the `'load'` handler still flips it back to "loaded" if the image lands, so a healthy-but-CORS-blocked layer is unaffected); documenting comments on FEMA's source-side scale-gating and the NWI canonical-but-outaged endpoint; and the user-facing FEMA "zoom in to see flood zones" note. **lint 0 errors · 175 tests · build green.**
 > - **Browser now persists for future sessions** (STEP 3): Playwright Chromium is installed to `/opt/pw-browsers`, a repo SessionStart hook (`.claude/hooks/ensure-browser.sh`) re-ensures it on every web session, and egress to the GIS hosts + `cdn.playwright.dev` is open. Evidence screenshots committed under `gis-verify/`.
-> - **Residual (NOT our bug, nothing to do):** NWI won't draw until USFWS brings `wetlandsmapservice` back up; a future 500 there is the agency outage, not a code regression. `lib/vectorLayers.js` stays unwired groundwork (unchanged).
+> - **▶ FOLLOW-UP — owner found a LIVE sibling host (2026-06-17):** the official USFWS Wetlands Mapper renders fine from `fwsprimary.wim.usgs.gov` (sibling of our down `fwspublicservices`). So the data is live — only our specific host is erroring, and the fix is likely a one-line URL swap. Handed off as **B130** (pending an egress allowlist + in-browser verification). `lib/vectorLayers.js` stays unwired groundwork (unchanged).
 
 ### B104 — Consolidate the two stacked headers into one (map view) `[Site Planner / map]` (bug)
 `[x]` Done 2026-06-16 (branch `claude/blissful-babbage-liboyn`) — the brand-dedup, matching how **B10**
