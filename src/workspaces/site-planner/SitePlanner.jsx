@@ -32,7 +32,7 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers } from "./lib/siteModel.js";
-import { layoutLabels, buildingLabelLines } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
@@ -6214,9 +6214,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       parts.push(<line key="cu1" x1={tl.x + w - cp} y1={tl.y} x2={tl.x + w - cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
     }
   }
-  if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel) {
+  if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel && dimCalloutVisible(ppf)) {
     // Dimension line along the short side (depth of a building/truck court, width
     // of a drive/road). A road's callout excludes its 6" curbs (true width − 1′).
+    // B121 (round 2): this red dimension layer is gated by zoom (dimCalloutVisible) so it
+    // hides when zoomed out instead of shrinking onto the centred name labels.
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
     const dimW = el.type === "road" ? (el.travelW ?? Math.max(0, fullMin - 2 * (el.curb ?? CURB))) : fullMin;

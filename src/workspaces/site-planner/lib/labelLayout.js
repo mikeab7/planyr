@@ -74,3 +74,12 @@ export const buildingLabelLines = ({ name, sqft, bumpCount = 0, dims }) => {
   if (dims) out.push(dims);
   return out;
 };
+
+// B121 (round 2) — the red per-edge dimension callouts ("300′" ticks, drawn per element in
+// renderElPx) are a separate layer from the centred name labels. Zoomed out they shrink to
+// illegible ticks that pile onto the names, so gate them by zoom: show at working zoom,
+// hide once the view is zoomed out past DIM_CALLOUT_MIN_PPF (they return as you zoom in).
+// Mirrors how the label engine thins labels on zoom-out, keeping the dimension layer out of
+// the name pile. Pure + tested; the threshold is a screening default, tune in-browser.
+export const DIM_CALLOUT_MIN_PPF = 0.18; // px per foot (default working zoom is ~0.35)
+export const dimCalloutVisible = (ppf) => ppf >= DIM_CALLOUT_MIN_PPF;

@@ -381,6 +381,21 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (e.g. sf still dropping
   before the dimensions, or wrong wording).
 
+### V22 — Red edge-dimension callouts hide when zoomed out (B121 round 2a) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site with a building / road / paving element (these carry the red short-side dimension
+  tick, e.g. "300′" / "24′"). (1) **Working zoom:** the red dimension callout shows exactly as before.
+  (2) **Zoom out** until the site is small on screen → the red dimension ticks **drop away** (rather than
+  shrinking into illegible marks that overlap the centred name labels). (3) **Zoom back in** → they return.
+- **Expect:** at normal/zoomed-in working zoom nothing changed; only when zoomed out (past ~0.18 px/ft) do the
+  red dimension callouts hide. The centred name/sf labels are governed separately (B121 increment 1) and are
+  unaffected by this gate.
+- **Known-not-yet (do NOT fail for these):** at working zoom the dimension callouts can still overlap a
+  centred name on very crowded layouts (not yet in the collision pool), there's no explicit show/hide toggle,
+  and no leader lines — all tracked under B121 increment 2.
+- **If it fails:** not critical (no data risk) — log ❌ here (e.g. dims vanishing at working zoom = threshold
+  too high; still piling when zoomed out = gate not applied).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history

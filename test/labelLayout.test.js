@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -71,5 +71,12 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     // (and the parenthetical) first — so square footage outlives the dimensions on zoom-out.
     const stack = buildingLabelLines({ name: "Building 1", sqft: "198,000 sf", bumpCount: 2, dims: "300′ × 638′" });
     expect(fitLines(stack, 10, 25)).toEqual(["Building 1", "198,000 sf"]);
+  });
+
+  it("dimCalloutVisible (B121 r2): red edge-dimension callouts hide only when zoomed out", () => {
+    expect(dimCalloutVisible(0.45)).toBe(true);                 // zoomed in → show
+    expect(dimCalloutVisible(0.35)).toBe(true);                 // default working zoom → show
+    expect(dimCalloutVisible(DIM_CALLOUT_MIN_PPF)).toBe(true);  // exactly at the threshold → show
+    expect(dimCalloutVisible(0.1)).toBe(false);                 // zoomed out → hide (declutter)
   });
 });
