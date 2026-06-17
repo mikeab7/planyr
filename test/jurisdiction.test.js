@@ -32,7 +32,7 @@ function fakeFetch(routes) {
   fn.calls = 0;
   return fn;
 }
-const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory", ETJ = "COH_ETJ_view";
+const CITY = "Texas_City_Boundaries", COUNTY = "Texas_County_Boundaries", ROAD = "TxDOT_Roadway_Inventory", ETJ = "HGAC_City_ETJ";
 
 // ----------------------------------------------------------------------------
 describe("roadAuthority — coded agency → who maintains (calibrated)", () => {
@@ -108,8 +108,12 @@ describe("normalizeFeature — source schema → one internal shape", () => {
     expect(normalizeFeature(JURISDICTION_SOURCES.county, { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" }))
       .toEqual({ role: "county", name: "Harris", fips: "48201" });
   });
-  it("a single-jurisdiction layer with no name column uses the source constant (Houston ETJ)", () => {
-    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { OBJECTID: 5 })).toEqual({ role: "etj", name: "Houston" });
+  it("the H-GAC ETJ maps the CITY field and title-cases the ALL-CAPS value", () => {
+    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { CITY: "HOUSTON" })).toEqual({ role: "etj", name: "Houston" });
+    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { CITY: "MISSOURI CITY" })).toEqual({ role: "etj", name: "Missouri City" });
+  });
+  it("a single-jurisdiction layer with no name column falls back to the source constant", () => {
+    expect(normalizeFeature({ role: "etj", fields: { name: null }, nameConst: "Houston" }, { OBJECTID: 5 })).toEqual({ role: "etj", name: "Houston" });
   });
   it("a null-mapped field with no constant stays null", () => {
     expect(normalizeFeature({ role: "x", fields: { name: null } }, {})).toEqual({ role: "x", name: null });
@@ -200,18 +204,31 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     expect(out.etj).toEqual([]);
     expect(out.sources.find((s) => s.id === "etj").state).toBe("empty");
   });
-  it("an unincorporated point inside Houston's ETJ resolves via the source constant", async () => {
+  it("an unincorporated point inside Houston's ETJ resolves via the H-GAC CITY field", async () => {
     const out = await identifyJurisdiction(-95.38, 29.93, {
       cache: freshCache(),
       fetchJson: fakeFetch({
         [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris" } }],
         [CITY]: () => [],
-        [ETJ]: () => [{ attributes: { OBJECTID: 9, Class: "ETJ" } }], // matched, no name column
+        [ETJ]: () => [{ attributes: { CITY: "HOUSTON" } }], // H-GAC regional ETJ, ALL-CAPS city
       }),
     });
     expect(out.unincorporated).toBe(true);
-    expect(out.etj).toEqual(["Houston"]);
+    expect(out.etj).toEqual(["Houston"]); // title-cased
     expect(out.sources.find((s) => s.id === "etj").state).toBe("loaded");
+  });
+  it("a NON-Houston city ETJ resolves from the regional layer (no longer Houston-only)", async () => {
+    const out = await identifyJurisdiction(-95.70, 29.56, {
+      cache: freshCache(),
+      fetchJson: fakeFetch({
+        [COUNTY]: () => [{ attributes: { CNTY_NM: "Fort Bend" } }],
+        [CITY]: () => [],
+        [ETJ]: () => [{ attributes: { CITY: "RICHMOND" } }], // a different city's ETJ
+      }),
+    });
+    expect(out.unincorporated).toBe(true);
+    expect(out.etj).toEqual(["Richmond"]); // title-cased, not Houston
+    expect(out.county).toEqual(["Fort Bend"]);
   });
   it("a whole-parcel test flags a boundary straddle (every city listed)", async () => {
     const ring = [[-95.46, 29.70], [-95.46, 29.72], [-95.44, 29.72], [-95.44, 29.70]];

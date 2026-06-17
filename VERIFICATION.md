@@ -87,6 +87,12 @@ was never clicked" quietly ships broken.
   rendered **County: Harris · City: Houston · ETJ: not in Houston ETJ · Road maint.: City**, each
   with a data-age ("just now") and the "Screening only — verify with the jurisdiction" disclaimer.
   Screenshot evidence captured. The B93/B94 feature is shipped + working in the live app.
+- **2026-06-17 — ETJ upgraded from Houston-only → regional, verified from the planyr.io origin.**
+  Swapped the ETJ source to **H-GAC's regional layer** (all metro cities' ETJ). In-browser fetch
+  from the planyr.io origin: Spring/Aldine → **Houston**, SW of Sugar Land → **Richmond** (HTTP 200,
+  CORS-clean). So ETJ now covers the whole 13-county metro, not just Houston. (Post-deploy, the
+  on-screen ETJ row reads e.g. "Richmond ETJ" for a non-Houston unincorporated lot; county/city/road
+  were already statewide.)
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
