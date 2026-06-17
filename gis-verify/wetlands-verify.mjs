@@ -8,13 +8,13 @@ const { chromium } = pw;
 
 const PORT = process.env.PORT || "8000";
 const PAGE = `http://localhost:${PORT}/gis-verify/wetlands-verify.html`;
-const SHOT = "gis-verify/wetlands-fwsprimary-verified.png";
+const SHOT = "gis-verify/wetlands-fwsprimary-vector-verified.png";
 const EXEC = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
 const exportResponses = [];
 const failures = [];
 
-const browser = await chromium.launch({ executablePath: EXEC, headless: true });
+const browser = await chromium.launch({ executablePath: EXEC, headless: true, args: ["--ignore-certificate-errors"] });
 // ignoreHTTPSErrors: this sandbox's egress proxy MITMs all TLS with an "Anthropic Egress
 // Gateway" CA that the OS trusts (curl/openssl OK) but Playwright's bundled Chromium doesn't.
 // Real planyr.io users hit fwsprimary directly with its genuine public USGS cert and no proxy,
@@ -23,8 +23,8 @@ const page = await browser.newPage({ viewport: { width: 820, height: 820 }, igno
 
 page.on("response", (r) => {
   const u = r.url();
-  if (u.includes("Wetlands_Raster") || u.includes("exportImage")) {
-    exportResponses.push({ status: r.status(), type: r.headers()["content-type"] || "", isExport: u.includes("exportImage"), url: u.slice(0, 90) });
+  if (u.includes("Wetlands_gdb_split") || /\/export(\?|$)/i.test(u)) {
+    exportResponses.push({ status: r.status(), type: r.headers()["content-type"] || "", isExport: /\/export(\?|$)/i.test(u), url: u.slice(0, 100) });
   }
 });
 page.on("requestfailed", (r) => {
