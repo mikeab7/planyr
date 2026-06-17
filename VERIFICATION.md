@@ -61,8 +61,8 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1 — Jurisdiction & road-authority identify (B93 / B94) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V1 — Jurisdiction & road-authority identify (B93 / B94) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅ · **Next check** done
 - **Steps:** On planyr.io open a georeferenced site (or bring a parcel in from the map).
   Right panel → **🔍 Identify parcel** → click a lot → **⚖︎ Jurisdiction & road authority**.
 - **Expect:** County / City (or "Unincorporated") / ETJ / Road maint. rows each render with
@@ -76,9 +76,17 @@ was never clicked" quietly ships broken.
   the production endpoints): downtown Houston → **Houston / Harris**, not in ETJ, road
   **City**; Spring → **unincorporated + Houston ETJ + Harris**; Sugar Land → **Fort Bend**.
   Field maps, normalization, the ETJ constant and county-key mapping are all correct
-  against live data. **Still ⏳ for the browser layer only** — CORS from the planyr.io
-  origin + the on-screen Identify-panel render — which needs a real browser (preview
-  https://claude-festive-davinci-0oco2.planyr.pages.dev, or planyr.io).
+  against live data. **The browser layer was the only ⏳ — now ✅ too.**
+- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). (1) **CORS/data
+  from the planyr.io origin:** ran the feature's four GIS queries in-page for a downtown-Houston
+  point — county `services.arcgis.com` → **200 "Harris"**, city `feature.geographic.texas.gov`
+  (TxGIO) → **200 "Houston"**, ETJ COHGIS → **200, 0 features** (in-city, correctly not in ETJ),
+  road TxDOT → **200, maint-agency 4 = City**. No CORS block from the production origin. (2)
+  **On-screen render end-to-end:** brought a Houston Heights parcel in from the map → planner →
+  **🔍 Identify parcel** → clicked the lot → **⚖︎ Jurisdiction & road authority** → the panel
+  rendered **County: Harris · City: Houston · ETJ: not in Houston ETJ · Road maint.: City**, each
+  with a data-age ("just now") and the "Screening only — verify with the jurisdiction" disclaimer.
+  Screenshot evidence captured. The B93/B94 feature is shipped + working in the live app.
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
@@ -337,8 +345,8 @@ was never clicked" quietly ships broken.
   sequence. Shipped code-verified + build-green (152 tests pass); this confirms it on screen.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ✅
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅
 - **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
   (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
   **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
@@ -350,7 +358,13 @@ was never clicked" quietly ships broken.
   must never detach or mis-link anything.
 - **Expect:** every visible building label updates in one pass on delete; non-building elements
   (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
-  their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
+  their own number.
+- **Result ✅ (2026-06-17, self-verified headless Chromium on the built artifact):** drew three buildings
+  → labelled **Building 1 / 2 / 3** in placement order; selected the **middle** one (Building 2) and
+  deleted it → the former **Building 3 renumbered to Building 2** (same 156,735 sf / 457′×343′ — identity
+  unchanged), leaving a contiguous {1, 2} with no gap. Screenshot eyeballed; the static 4-line stack
+  (name / sf / dims) rendered correctly too. (Attached-piece identity on renumber wasn't separately driven,
+  but identity is keyed on the stable `el.id`, which the delete leaves untouched.)
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
 ### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
@@ -553,6 +567,19 @@ was never clicked" quietly ships broken.
 - **Expect:** every step above; gain = proposed − existing via the same depth/slope math; zero console/page errors.
 - **Result 2026-06-17 — ✅ PASS.** All steps observed in the running app (screenshots captured); zero console/page errors. Residual: a **signed-in** pass that the baseline/ghost survive a cloud reload (sandbox runs logged-out) — low risk, it rides on the existing `el.det` persistence.
 
+### V32 — Pond acre labels (B140) + measurement vertex editing (B141) + text-box hit area (B142) ✅
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview build)
+- **Steps (driven) + result — ✅ PASS, zero console/page errors:**
+  - **B140:** draw a Detention Pond → on-canvas label reads **"3.60 ac · 156,730 sf"** (acres + sf, was sf-only). Enter Expand mode + push banks out → label becomes **"3.60 ac · 156,730 sf" / "+1.18 ac · +51,599 sf"** (existing total + added increment).
+  - **B141:** Measure ▾ → Area → draw a region (**166,530 sf · 3.82 ac · 1,644′ perim**) → Select it → draggable vertex squares + edge **＋** handles appear; dragging one vertex recomputed it to **257,958 sf · 5.92 ac · 2,202′ perim**.
+  - **B142:** create a text box, type, Enter → Select tool → click empty (deselects: stroke 1.4, panel gone) → click the box (**reselects**: stroke 2, "Text box" panel opens); clicking the text glyphs also selects. `pointerEvents="all"` makes a no/transparent-fill box clickable across its whole area.
+- **Note:** the B142 *default-fill* case already worked before the fix (could not reproduce the original "nothing happens"); the fix hardens the no-fill case. A **signed-in** reload pass for the pond label persistence still rides on existing `el.det` persistence.
+
+### V33 — Text box: Enter = newline, click-away / Esc finishes (Bluebeam-style) (B143) ✅
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview)
+- **Steps + result — ✅ PASS, zero console errors:** Text tool → click to place → type "Line1", **Enter**, "Line2" → still editing, textarea value = "Line1\nLine2" (Enter now makes a newline, was commit). **Click away +80 px** → editor closes and commits **two lines** (previously you were stuck in the editor at any distance). New box → type → **Esc** → finishes, keeps the text. Place a box and click away **without typing** → the empty box is removed.
+- **Expect:** matches Bluebeam — text box is multi-line; you finish by clicking away or pressing Esc.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
@@ -593,7 +620,7 @@ _Move items here with the date and who/what checked them._
   - Backed by unit tests (leader placement + inside-stays-inside) · lint 0 · 204 tests · build green.
 - **Not covered (logged-out headless limits):** a very busy/crowded layout, and labels near the top viewport edge (the leader points up) — eyeball on a real dense plan when convenient. Sign-in paths untested (proxy blocks auth).
 
-### V32 — Measurement-grade scale bar + north arrow in print/export and on screen (B141 / B142) ✅
+### V34 — Measurement-grade scale bar + north arrow in print/export and on screen (B144 / B145) ✅
 - **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (fix acceptance)
 - **Steps:** "Start blank" → planner → drew two buildings with the Building tool → (a) **File ▾ → Print / pick frame… → Print** and captured the actual print page; (b) **File ▾ → Export PNG** and captured the downloaded PNG; (c) screenshotted the on-screen canvas corners.
 - **Result ✅:**
