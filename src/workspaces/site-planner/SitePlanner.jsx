@@ -297,6 +297,54 @@ function offsetPolygon(pts, d) {
   return polyArea(a1) <= polyArea(pts) ? a1 : (build(-1) || a1);
 }
 
+/* Outward (EXPANDING) offset by d>0 — pushes every edge out along its outward normal,
+ * the opposite of offsetPolygon (which is inward-only, for setbacks/taper). Same miter/
+ * bevel handling; selects the variant that GROWS the ring. Used by the pond "push banks
+ * out" expansion (B139). Returns null if it can't build a sane ring; callers must ALSO
+ * reject a self-intersecting result (tight concave corners) and fall back to drag. */
+function expandPolygon(pts, d) {
+  const n = pts.length;
+  if (n < 3) return null;
+  if (!(d > 0)) return pts.map((p) => ({ x: p.x, y: p.y }));
+  const build = (sign) => {
+    const off = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      const ex = -(b.y - a.y), ey = b.x - a.x; // left normal of edge a→b
+      const len = Math.hypot(ex, ey);
+      if (len === 0) { off.push(null); continue; }
+      const k = (sign * d) / len;
+      off.push({ ax: a.x + ex * k, ay: a.y + ey * k, bx: b.x + ex * k, by: b.y + ey * k });
+    }
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const e1 = off[(i - 1 + n) % n], e2 = off[i];
+      if (!e1 && !e2) { out.push(pts[i]); continue; }
+      if (!e1) { out.push({ x: e2.ax, y: e2.ay }); continue; }
+      if (!e2) { out.push({ x: e1.bx, y: e1.by }); continue; }
+      const p = lineIntersect(e1.ax, e1.ay, e1.bx, e1.by, e2.ax, e2.ay, e2.bx, e2.by);
+      if (!p) { out.push({ x: e1.bx, y: e1.by }, { x: e2.ax, y: e2.ay }); continue; }
+      const lim = Math.abs(d) * 6 + 1; // bevel a runaway miter spike instead of keeping it
+      if (Math.hypot(p.x - e1.bx, p.y - e1.by) > lim) out.push({ x: e1.bx, y: e1.by }, { x: e2.ax, y: e2.ay });
+      else out.push(p);
+    }
+    return out.length >= 3 ? out : null;
+  };
+  const a1 = build(1);
+  if (!a1) return build(-1);
+  return polyArea(a1) >= polyArea(pts) ? a1 : (build(-1) || a1); // outward must GROW
+}
+// Ray-cast point-in-ring (even-odd). Powers the pond expansion's "past the property
+// line" screening warning (B139).
+const pointInRing = (pt, ring) => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
+    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+};
+
 /* Detention storage for a pond whose drawn footprint is TOP-OF-BANK, with
  * `slope`:1 (H:V) interior side slopes — so the basin tapers inward with depth
  * (not a vertical-wall box). Water surface sits `freeboard` below top of bank.
@@ -5368,7 +5416,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ) : (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
                   <Field label="Rotation (°)">
@@ -5461,7 +5509,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-                <button style={chip} onClick={() => toggleLock(selEl.id)}>{selEl.locked ? "🔒 Unlock" : "Lock"}</button>
+                <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place — prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete element</button>
               </div>
               {selEl.type === "pond" && (() => {
@@ -5470,6 +5518,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
+                // --- Expand this pond (B139): baseline + steppers; both steppers and free
+                // drag feed the one Existing→Proposed readout. Baseline freezes the original
+                // footprint + depth/slope so the delta is apples-to-apples. ---
+                const base = det.baseline, inMode = !!base;
+                const snapshotGeom = () => selEl.points ? { points: selEl.points.map((p) => ({ x: p.x, y: p.y })) } : { w: selEl.w, h: selEl.h, cx: selEl.cx, cy: selEl.cy, rot: selEl.rot };
+                const startExpand = () => {
+                  pushHistory();
+                  setSelEl({ det: { ...det, depth, freeboard: fb, slope, expandFt: 0, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), geom: snapshotGeom(), depth, freeboard: fb, slope } } });
+                  flashWarn("Expanding this pond — push the banks out or dig deeper, and watch the storage gained.", 4500);
+                };
+                const pushBanksOut = (n) => {
+                  const N = Math.max(0, Math.round(n));
+                  if (base.geom.points) {
+                    const grown = N > 0 ? expandPolygon(base.geom.points, N) : base.geom.points.map((p) => ({ x: p.x, y: p.y }));
+                    if (!grown || polySelfIntersects(grown)) { flashWarn("Can't push the banks out cleanly on this shape — the corners would cross. Drag the pond's edges on the map instead.", 6000); return; }
+                    pushHistory();
+                    setSelEl({ points: grown, det: { ...det, expandFt: N } });
+                  } else {
+                    pushHistory();
+                    setSelEl({ w: base.geom.w + 2 * N, h: base.geom.h + 2 * N, cx: base.geom.cx, cy: base.geom.cy, rot: base.geom.rot, det: { ...det, expandFt: N } });
+                  }
+                };
+                const digDeeper = (m) => setDet({ depth: base.depth + Math.max(0, Math.round(m)) });
+                const resetExisting = () => {
+                  pushHistory();
+                  const g = base.geom.points ? { points: base.geom.points.map((p) => ({ x: p.x, y: p.y })) } : { w: base.geom.w, h: base.geom.h, cx: base.geom.cx, cy: base.geom.cy, rot: base.geom.rot };
+                  setSelEl({ ...g, det: { ...det, depth: base.depth, freeboard: base.freeboard, slope: base.slope, expandFt: 0 } });
+                };
+                const doneExpand = () => { pushHistory(); const { baseline, expandFt, ...rest } = det; setSelEl({ det: rest }); flashWarn("Expansion kept — the pond now uses its new size everywhere.", 3500); };
+                const stepRow = (label, val, step, apply) => (
+                  <Field label={label}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <button style={{ ...spinBtn, width: 22, height: 22, fontSize: 13 }} onClick={() => apply(val - step)} title={`−${step} ft`}>−</button>
+                      <NumInput style={{ ...numInput, width: 52, textAlign: "center" }} value={val} min={0} onCommit={(v) => apply(v)} />
+                      <button style={{ ...spinBtn, width: 22, height: 22, fontSize: 13 }} onClick={() => apply(val + step)} title={`+${step} ft`}>＋</button>
+                    </span>
+                  </Field>
+                );
                 const pondRow = (label, val) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
                     <span style={{ fontSize: 11.5, color: PAL.muted }}>{label}</span>
@@ -5494,49 +5580,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {pondRow("Stored volume", `${f0(r.vol)} cf`)}
                       {pondRow("", `${f2(r.vol / 43560)} ac-ft`)}
                     </div>
-                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
-                      Footprint is top-of-bank; basin tapers at {slope}:1 to the bottom. Prismoidal volume — screening only.
-                      {r.aBottom === 0 && " Basin tapers to a point before full depth — reduce depth or slope."}
-                    </div>
-                    {/* Expansion vs. existing: lock today's pond as a baseline, then enlarge
-                        it (drag banks out / deepen) to read the storage gained. Baseline
-                        freezes its own footprint + depth/slope so the delta is apples-to-apples. */}
-                    {(() => {
-                      const base = det.baseline;
-                      if (!base) {
-                        return (
-                          <div style={{ marginTop: 10 }}>
-                            <button style={{ ...chip, width: "100%", fontWeight: 600 }} onClick={() => {
-                              pushHistory();
-                              setSelEl({ det: { ...det, depth, freeboard: fb, slope, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), depth, freeboard: fb, slope } } });
-                              flashWarn("Locked as the existing pond — now expand it to see the storage gained.", 4500);
-                            }}>Lock as existing pond</button>
-                            <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>
-                              Capture today's pond as the baseline, then drag the banks out (or deepen it). You'll see the original outline ghosted and the added detention.
-                            </div>
-                          </div>
-                        );
-                      }
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>Top-of-bank footprint; basin tapers {slope}:1 — prismoidal volume, screening only.</div>
+                    {r.aBottom === 0 && (
+                      <div style={{ fontSize: 10.5, color: "#b45309", lineHeight: 1.4, marginTop: 4 }}>⚠ Side slopes meet before full depth — reduce the depth or the side slope.</div>
+                    )}
+                    {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
+                        (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
+                    {!inMode ? (
+                      <div style={{ marginTop: 11 }}>
+                        <button style={{ width: "100%", padding: "9px 10px", border: "none", borderRadius: 8, background: PAL.accent, color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }} onClick={startExpand}>Expand this pond</button>
+                        <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>See how much more detention you'd gain by enlarging this pond — it snapshots today's size, then you push the banks out or dig deeper.</div>
+                      </div>
+                    ) : (() => {
                       const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
-                      const inc = r.vol - baseVol;
+                      const inc = r.vol - baseVol, sign = inc >= 0 ? "+" : "−", mag = Math.abs(inc);
+                      const digVal = Math.max(0, Math.round(depth - base.depth));
+                      const expandVal = Math.max(0, Math.round(det.expandFt || 0));
+                      const warns = [];
+                      const overlaps = els.filter((e) => e.id !== selEl.id && ["building", "parking", "trailer"].includes(e.type) && ringsOverlap(ring, ringOf(e)));
+                      if (overlaps.length) warns.push(overlaps.length === 1 ? `Overlaps a ${TYPE[overlaps[0].type].label.toLowerCase()} — the expanded pond runs into your layout.` : `Overlaps ${overlaps.length} other elements — the expanded pond runs into your layout.`);
+                      if (parcels.length && ring.some((p) => !parcels.some((pc) => pc.points && pc.points.length >= 3 && pointInRing(p, pc.points)))) warns.push("Extends past the property line.");
                       return (
                         <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                            <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Expansion vs. existing</span>
-                            <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} onClick={() => { pushHistory(); const { baseline, ...rest } = det; setSelEl({ det: { ...rest, depth, freeboard: fb, slope } }); }}>Clear</button>
-                          </div>
-                          <div style={{ background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                          <div style={{ fontSize: 10.5, color: PAL.accent, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 800, marginBottom: 7 }}>Expanding · existing locked</div>
+                          {stepRow("Push banks out (ft)", expandVal, 5, pushBanksOut)}
+                          {stepRow("Dig deeper (ft)", digVal, 1, digDeeper)}
+                          <div style={{ fontSize: 10, color: PAL.muted, marginTop: 3 }}>Or drag the pond's edges on the map.</div>
+                          <div style={{ marginTop: 8, background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
                             {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
                             {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
                             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
                               <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
-                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13.5, color: inc >= 0 ? "#15803d" : "#b3361b", fontWeight: 750 }}>{inc >= 0 ? "+" : ""}{f2(inc / 43560)} ac-ft</span>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 14, color: inc >= 0 ? "#15803d" : "#b3361b", fontWeight: 800 }}>{sign}{f2(mag / 43560)} ac-ft</span>
                             </div>
-                            {pondRow("", `${inc >= 0 ? "+" : ""}${f0(inc)} cf`)}
+                            {pondRow("", `${sign}${f0(mag)} cf`)}
                           </div>
-                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
-                            Existing (dashed ghost) and proposed use the same depth / slope method, so the difference is the added detention. Screening only — confirm with your civil engineer.
+                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>Screening estimate — confirm with your engineer.</div>
+                          {warns.map((w, i) => (
+                            <div key={i} style={{ fontSize: 10.5, color: "#b45309", lineHeight: 1.4, marginTop: 5 }}>⚠ {w}</div>
+                          ))}
+                          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                            <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
+                            <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
                           </div>
                         </div>
                       );
@@ -6172,7 +6258,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                   <div style={hdr(true)}>Edit</div>
                   <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
-                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unlock" : "Lock"}</button>
+                  <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unpin" : "Pin"}</button>
                   {!t.points && <button style={menuItem(false)} onClick={() => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor(typeMenu.id); setTypeMenu(null); }}>Align rotation…</button>}
                   {t.attachedTo
                     ? <button style={menuItem(false)} onClick={() => { detach(typeMenu.id); setTypeMenu(null); }}>Detach</button>
