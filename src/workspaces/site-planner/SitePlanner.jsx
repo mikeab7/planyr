@@ -29,6 +29,7 @@ import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsO
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
+import { buildingNumbers } from "./lib/siteModel.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -3387,6 +3388,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // out (no ballooning chips), capping at a comfortable size when zoomed in.
   const ls = Math.max(0.34, Math.min(1, view.ppf / 0.45));
   const NO_LABEL = ["paving", "parking", "road"]; // truck courts / employee parking / roads stay unlabelled
+  // B122: each standalone building shows a sequential "Building N" by placement order,
+  // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
+  const bldgNo = buildingNumbers(els);
   const seenLabels = new Set(); // suppress duplicate overlapping callouts (e.g. two stacked sidewalks)
   const labelEls = els.map((el) => {
     if (NO_LABEL.includes(el.type) || el.noLabel) return null;
@@ -3405,7 +3409,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (el.type === "pond") {
       lines = ["Detention Pond", `${f0(area)} sf`]; // SF only, no linear dimensions
     } else {
-      lines = [TYPE[el.type].label.split(" / ")[0]];
+      const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
+      lines = [bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0]];
       if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
       else if (el.type === "building" && !poly && !el.dogEar) {
         // include attached dog-ear / bump-out area in the on-plan building SF

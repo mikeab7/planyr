@@ -106,6 +106,20 @@ export const parcelsOf = (m) => m.parcels || [];
 // (`active === false`). Missing = active, so existing sites are unaffected (B100).
 export const activeParcelsOf = (m) => (m.parcels || []).filter((p) => p.active !== false);
 export const elementsOf = (m) => m.els || [];
+// B122 — a "building" element that is an actual standalone building, excluding the
+// attached dog-ear / bump-out pieces (stored as type "building" too, flagged `dogEar`).
+export const isBuilding = (el) => !!el && el.type === "building" && !el.dogEar;
+// B122 — map of building id → its sequential display number ("Building N"), assigned in
+// placement order (the order buildings appear in `els`). DERIVED from list position and
+// never stored: deleting a building renumbers the rest 1…N in one pass. Identity stays
+// `el.id` (what every cross-reference such as `attachedTo` binds to); the number is a
+// display label only, so renumbering can never silently re-point a reference.
+export const buildingNumbers = (els) => {
+  const m = new Map();
+  let n = 0;
+  (els || []).forEach((el) => { if (isBuilding(el)) m.set(el.id, ++n); });
+  return m;
+};
 // Placed site-plan overlays (B72) — immutable backdrop sheets over the map.
 export const sheetOverlaysOf = (m) => m.sheetOverlays || [];
 // Parcel-attached drawings (B67) — immutable backdrop + pixel-relative markup, per parcel.

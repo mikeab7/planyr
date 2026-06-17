@@ -210,6 +210,22 @@ was never clicked" quietly ships broken.
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
+### V13 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
+  (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
+  **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
+  re-label **immediately** as "Building 2" (numbers stay contiguous 1…N, no gap). Add another → it
+  appends as the next number. A site with a **single** building still reads "Building 1".
+- **Identity check (the important one):** give a building attached **parking** or a **bump-out**, then
+  delete a *lower-numbered* building so this one renumbers. Confirm the attached pieces stay attached and
+  nothing re-points — attachment binds to the hidden stable id, not the visible number, so a renumber
+  must never detach or mis-link anything.
+- **Expect:** every visible building label updates in one pass on delete; non-building elements
+  (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
+  their own number. Shipped code-verified (139 tests) + build-green; this confirms it in the running app.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
