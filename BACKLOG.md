@@ -81,22 +81,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > **Progress 2026-06-16 (increment 1 — branch `claude/determined-brown-bf86l7`): the shared label level-of-detail + collision engine is in.** New pure module `lib/labelLayout.js` (`fitLines` + `layoutLabels`, unit-tested in `test/labelLayout.test.js`) now drives the **centred element labels** (`SitePlanner.jsx`): each label is a priority-ordered stack (name → area/sf → dimensions, name last to drop) handed to the engine, which (a) **level-of-detail** drops the lowest lines first to fit the shape's smaller on-screen dimension — so a label can't spill past a narrow trailer strip and falls back toward just the name when zoomed out — and (b) **collision** places labels most-important-first (buildings, then larger area), shrinking or hiding a label that would overprint a higher-priority one instead of stacking on top. Zoomed in, shapes are large and spread out, so all lines show as before. lint 0 · 173 tests · build green · lazy split intact. **This is the shared engine B123 plugs into** (its building stack feeds the same pool, no parallel renderer). Browser-verify logged as **V14**.
 > **Still open (increment 2):** (a) the **red edge-dimension callouts** (the `"300′"`/`"638′"`/`"5′"` ticks drawn inside `renderElPx`) aren't in the engine's pool yet — they remain a separate layer and can still overlap the centred names; bring them into the same/sibling collision pass and make **dimension vs. area annotations separately toggleable**. (b) **Leader lines** — when a label still won't fit, pull it outside the shape with a thin connector rather than only dropping to the name. (c) live-browser tuning of the `pad` / importance thresholds against the sanity-check layout.
 
-### B123 — Restructure building label + make square footage persist on zoom-out `[Site Planner]` (feature)  *(arrived as "NEW-2"; re-minted B120→B123 after concurrent merges took B119–B121)*
-`[ ]` Today the square footage vanishes early on zoom-out because the label has no priority order — it just shrinks until lines disappear. Rebuild the building label as a **4-line stack with an explicit level-of-detail order** (level-of-detail = which lines survive as you zoom out vs. which drop first):
-```
-Building 1
-198,000 sf
-(incl. 2 bump-outs)
-300' × 638'
-```
-- **Line 1 — "Building N"** (from **B122**). Highest priority; last thing to drop.
-- **Line 2 — square footage** ("198,000 sf"). Second-highest priority — this is the line that disappears too eagerly today. It should survive zoom-out far longer than it does now, dropping only at extreme zoom-out where even the name is barely legible. Not literally pinned always-on, just promoted near the top of the drop order so it stops vanishing prematurely.
-- **Line 3 — modifier parenthetical,** rendered **only** when the building has one. Change the current "+2 bump-outs" wording to **"(incl. 2 bump-outs)"** — abbreviate "includes" → "incl." with the period, keep the parentheses. No parenthetical line at all when there are no bump-outs.
-- **Line 4 — dimensions** ("300' × 638'"). Lowest priority; first to drop on zoom-out.
-- **Drop order, first-to-drop → last:** dimensions → parenthetical → square footage → name.
-- **Build on B121's shared label level-of-detail/collision system — do NOT stand up a parallel label renderer.** This per-building 4-line stack is the building-specific concretization of B121's "Label priority / level-of-detail" tier; building labels must feed into B121's same priority/collision pool and its name-vs-dimension layer split.
-> **Depends on B122** (Line 1 is its "Building N") and **coordinates with B121**. **Dedupe vs. B121:** not a duplicate — B121 is the *general* cross-element collision / leader-line / LOD engine; B123 is the *building label's* specific content + drop order (the 4-line stack, the sf-persistence priority, and the "+2 bump-outs"→"(incl. 2 bump-outs)" wording — none of which B121 spells out). Implement B123's ordering **inside** B121's engine, not beside it. (B121 even cites this exact building label — `"Building … sf (+2 bump-outs) 300′×638′"` — as its overlap example.) Filed from chat as provisional "NEW-2"; minted **B123** here.
-
 ---
 
 ## 🎨 UI audit pass — 2026-06-16
@@ -678,6 +662,13 @@ Original spec:
 ## ✅ Done
 
 > **ID note (2026-06-16):** these three were filed/implemented as B93–B95, but a concurrent `main` (PRs #46/#51) had blindly taken B93–B100 for different items. Per the dedupe protocol they're **renumbered B101–B103** here (content is unique — no overlap with main's GIS/UI-overhaul items); the implementing commit message still says "B93–B95" (the provisional numbers). The colliding UI batch (PR #51) was separately renumbered **B104–B107**, so B93–B107 are now unique and gapless (GIS keeps B93–B96).
+
+### B123 — Restructure building label + make square footage persist on zoom-out `[Site Planner]` (feature)
+`[x]` Done 2026-06-16 (branch `claude/determined-brown-bf86l7`). The building label is now a 4-line **level-of-detail stack** built on B121's shared engine — name → square footage → "(incl. N bump-outs)" → dimensions — so the **square footage survives zoom-out far longer** instead of vanishing early.
+- **New ordering + wording** (`lib/labelLayout.js` `buildingLabelLines`, unit-tested): square footage is now its **own line** (was crammed onto the sf line with the bump-out note), the bump-out note is a **separate parenthetical line shown only when the building has bump-outs**, and its wording changed from "+N bump-outs" to **"(incl. N bump-outs)"**. `SitePlanner.jsx`'s building-label branch builds the stack via that helper; every other element label is unchanged.
+- **Drop order = dimensions → parenthetical → square footage → name.** The stack is ordered highest-priority-first and B121's `fitLines`/`layoutLabels` drop from the end, so dimensions go first on zoom-out and square footage outlives them (it drops only at extreme zoom-out). Reuses B121's pool — not a parallel renderer, as the item required.
+- Poly-drawn buildings keep their existing name/sf/ac label; only rect buildings get the 4-line stack.
+- **Tested:** `test/labelLayout.test.js` adds a `buildingLabelLines` case (exact order, singular/plural + conditional parenthetical, and a `fitLines` assertion proving sf outlives dimensions). lint 0 errors · **174 tests pass** · build green · lazy split intact. Browser-verify logged as **V20** in `VERIFICATION.md`. Completes the B122 → B121 → B123 building-label arc.
 
 ### B122 — Auto-number buildings with contiguous renumber-on-delete `[Site Planner]` (feature)
 `[x]` Done 2026-06-16 (branch `claude/determined-brown-bf86l7`). Each standalone building now shows a sequential **"Building N"** label, numbered by placement order and contiguous (1…N) at all times. Deliberately **render-derived, not stored**:

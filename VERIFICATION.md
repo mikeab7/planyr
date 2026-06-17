@@ -353,6 +353,20 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
   that vanished when it had room, or a pile that remained).
 
+### V20 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Steps:** Open a site, draw a **building** (rectangle), and add a **bump-out** or two (the purple ＋ at a
+  dock corner). Its label should read as a 4-line stack: **"Building N"** / **"198,000 sf"** (its own line) /
+  **"(incl. 2 bump-outs)"** / **"300′ × 638′"**. (1) **Wording:** the bump-out line reads **"(incl. 2
+  bump-outs)"** — not the old "+2 bump-outs" — and there is **no** parenthetical line on a building with no
+  bump-outs. (2) **Zoom out:** the **dimensions** line drops first, then the **(incl. …)** line, leaving
+  **name + square footage** down to fairly small sizes; the square footage should **outlast** the dimensions
+  (the old behavior dropped sf too early). Only at extreme zoom-out does it fall back to just the name.
+- **Expect:** square footage no longer vanishes early; the 4 lines appear in that order; the parenthetical is
+  conditional; the sf matches the yield panel's building total. Non-building labels are unaffected.
+- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (e.g. sf still dropping
+  before the dimensions, or wrong wording).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
