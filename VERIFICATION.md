@@ -413,6 +413,23 @@ was never clicked" quietly ships broken.
   until the next action; no cross-section double-run.
 - **If it fails:** not critical (cosmetic/UX, no data risk) — log ❌ here with what looked wrong.
 
+### V24 — "Print overlay" toggle includes the site-plan overlay in the print/export, exactly as shown (B131) ⏳
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
+- **Steps:** Open a site, left rail → **Overlay** → drop a site-plan PDF and place / scale / rotate it (set
+  opacity < 1 so the aerial shows through). Export menu → **Print / pick frame…**. In the print-frame toolbar,
+  confirm a **"Print overlay"** checkbox appears between Orientation and Print (and is **absent** when no overlay
+  is loaded). (1) Leave it **checked** → **Print** → the overlay appears in the print/PDF preview at the **same
+  position, scale, rotation and opacity** as on screen, **above** the aerial, with **no** selection handles or
+  outline. (2) Re-open, **uncheck** it → **Print** → the overlay is gone but parcels / massing / metrics print
+  normally. (3) Repeat with an **aerial underlay** present (open a parcel from the map first) — the overlay is
+  honored both ways (it used to silently vanish whenever an underlay existed). (4) Export menu → **Export PNG** →
+  the visible overlay is included in the image.
+- **Expect:** checkbox shown only when an overlay is loaded; defaults to match on-screen visibility (checked);
+  checked = WYSIWYG overlay in the output; unchecked = no overlay; editor chrome (handles, the "re-add me"
+  placeholder) never prints; PNG export includes the visible overlay.
+- **If it fails:** not critical (export-only, no data risk) — log ❌ here with what looked wrong (overlay missing
+  when checked, handles printing, or wrong position / scale / rotation / opacity).
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
