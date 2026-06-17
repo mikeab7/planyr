@@ -12,13 +12,16 @@ scaffolded). Last updated mid-2026.
 > ops/infra cleanup.)
 >
 > **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
-> green but still need a click-through on planyr.io. On every run, scan it and, **if you have
-> a browser** (`/verify` or `/run`), run any ⏳ unverified or due items and record the result.
+> green but still need a click-through on planyr.io. On every run, scan it and **verify any
+> ⏳/due items yourself in a headless browser**, then record the result. A headless Chromium is
+> available in the environment (Playwright — see "🤖 Self-verification" in `VERIFICATION.md`), so
+> the session that ships a UI change should drive the live app itself rather than defer it.
 > **Michael does NOT self-test — never wait on him or hand him a test to-do.** Browser
-> verification is the **Claude cohort's** job; with no browser, just log the item there and
-> **move on** (after CI-green + build-green). **Only interrupt Michael for a CRITICAL failure**
-> — won't build, won't render, or a shipped feature visibly crashing. See the testing policy at
-> the top of `VERIFICATION.md`. (Recurring 🌐 endpoint-liveness checks still run from any session.)
+> verification is **Claude's own in-session job** (no separate "cohort"); only if no browser is
+> reachable, log the item there and **move on** (after CI-green + build-green). Self-tests run
+> **logged-out** (the sandbox proxy blocks sign-in), so auth-only features (cloud sync) still need a
+> signed-in check. **Only interrupt Michael for a CRITICAL failure** — won't build, won't render, or
+> a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
 
 ## How to talk to me (Michael) — IMPORTANT, applies to every reply
 Michael is an industrial real-estate developer, not a software engineer. In chat,
@@ -196,6 +199,11 @@ server/                   # placeholder README only — NOT built or deployed; b
   hasn't run yet, so saving never regresses.
 
 ## KEY DECISIONS (must persist)
+- **Brand spelling — Planyr (P-L-A-N-Y-R).** Human-readable text → **Planyr** (capital
+  P); package name + technical identifiers → lowercase `planyr`. Michael often
+  says/dictates "Planner" (or "Planner Fit") — read these as the brand **Planyr** (and
+  the old name **Planar_Fit**), not the literal word "planner." Don't reintroduce a
+  "Planner"/"Planar" spelling for the brand.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and
@@ -226,6 +234,10 @@ server/                   # placeholder README only — NOT built or deployed; b
   if/when selling becomes real.
 - Planner single-reducer rewrite (state-management refactor) — deliberately deferred.
 - AI corridor scan — parked.
+- **Rebrand the `planarfit:*` localStorage keys → `planyr:*`** (leftover from the
+  Planar_Fit→Planyr rename). Deferred because these are client-side storage keys:
+  renaming them in code without a migration would orphan every existing user's saved
+  sites/settings. Do it with a one-time read-old → write-new migration so nothing is lost.
 
 ## ROADMAP / NOT YET BUILT
 Two parallel tracks now.

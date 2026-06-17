@@ -3,12 +3,14 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
+import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
@@ -450,16 +452,10 @@ function estTrailers(area, s) {
 }
 
 /* --------------- parking row stepping (double-loading) ------------- */
-// A drive aisle is double-loaded when it has a stall row on BOTH sides, so a
-// field of n rows stacks as depth(n) = n·stallDepth + ⌈n/2⌉·aisle (one aisle per
-// pair of rows). "+"/"−" step exactly ONE row: a single-loaded bay (1 row + 1
-// aisle) becomes double-loaded (2 rows, same aisle) before a new aisle is added.
-function parkDepthForRows(n, sd, ai) { n = Math.max(1, Math.round(n)); return n * sd + Math.ceil(n / 2) * ai; }
-function parkRowsForDepth(h, sd, ai) {
-  const mod = 2 * sd + ai; if (mod <= 0) return 1;            // a double-loaded module
-  const m = Math.floor((h + 1e-6) / mod), rem = h - m * mod;  // full modules + leftover
-  return Math.max(1, 2 * m + (rem >= sd - 1e-6 ? 1 : 0));     // a leftover row is single-loaded
-}
+// parkDepthForRows / parkRowsForDepth / splitParkingPieces are pure (unit-tested
+// in test/parking.test.js) and imported from lib/parking.js. A drive aisle is
+// double-loaded when it has a stall row on BOTH sides: depth(n) = n·stallDepth +
+// ⌈n/2⌉·aisle (one aisle shared per pair of rows).
 
 /* ------------------------- curbs (derived) ------------------------- */
 // Curbs are auto-placed thin bands (not user geometry): a 6" mono curb is 0.5′ of
@@ -494,17 +490,26 @@ function sidewalkBetween(el, host, allEls) {
   });
 }
 // Curbed edges (LOCAL frame) — the single source feeding both the drawn band and
-// the area math. Terminal curb on the far edge of every paved section; a
-// transition curb where a sidewalk sits behind it; both depth ends for a free field.
+// the area math. B130 rule: a 6" curb wraps the WHOLE perimeter wherever pavement
+// meets non-paving (dirt, landscape, a dead-end aisle), and is skipped wherever
+// pavement meets pavement — a drive-aisle opening, continuous paving, or the
+// internal seam between two abutting pads (e.g. split modules). The bare building
+// face stays curb-free (B70) unless a sidewalk sits between (a transition curb).
 function curbEdgesOf(el, allEls) {
   if (el.points || !CURB_TYPES.includes(el.type)) return [];
   const w = curbWidthOf(el), host = curbHost(el, allEls);
-  if (!host) // free-standing: both depth ends are terminal (no building side to spare)
-    return [{ axis: "y", sign: 1, length: el.w, width: w }, { axis: "y", sign: -1, length: el.w, width: w }];
-  const oe = outwardCurbEdge(el, allEls);
-  if (!oe) return [];
-  const edges = [{ ...oe, width: w }];                               // terminal (far/back) edge
-  if (sidewalkBetween(el, host, allEls)) edges.push({ axis: oe.axis, sign: -oe.sign, length: oe.length, width: w }); // sidewalk transition
+  const oe = host ? outwardCurbEdge(el, allEls) : null;             // edge AWAY from the host
+  const swalk = host ? sidewalkBetween(el, host, allEls) : false;
+  const edges = [];
+  for (const c of [
+    { axis: "y", sign: 1, length: el.w }, { axis: "y", sign: -1, length: el.w },
+    { axis: "x", sign: 1, length: el.h }, { axis: "x", sign: -1, length: el.h },
+  ]) {
+    const hostSide = oe && c.axis === oe.axis && c.sign === -oe.sign;
+    if (hostSide && !swalk) continue;                              // B70: bare building face → no curb
+    if (edgeAbutsPaving(el, c.axis, c.sign, allEls)) continue;     // meets pavement (opening / seam) → no curb
+    edges.push({ ...c, width: w });
+  }
   return edges;
 }
 // Plan-view area of an element's curbs (counts in the SF / impervious math).
@@ -691,6 +696,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printFrame, setPrintFrame] = useState(null);    // {cx, cy, wFt, hFt} feet — the crop to print
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
+  const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -2030,7 +2036,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const curb = +settings.roadCurb || CURB;
         const roadExtra = draftRect.type === "road" ? { travelW: Math.max(0, Math.min(draftRect.w, draftRect.h) - 2 * curb), curb } : {};
         const buildingExtra = draftRect.type === "building" ? { dock: buildingDock, dockSide: draftRect.w >= draftRect.h ? "bottom" : "right" } : {};
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w: draftRect.w, h: draftRect.h, rot: 0, ...roadExtra, ...buildingExtra };
+        // B130: a free-drawn parking field runs its stall rows along the LONGER edge.
+        // carStalls treats w as row-length and h as depth, so when the drawn box is
+        // deeper than it is long, swap the two and rotate 90° — identical footprint on
+        // screen, but the rows (and the double-loaded modules) lie along the long side.
+        let w = draftRect.w, h = draftRect.h, rot = 0;
+        if (draftRect.type === "parking" && h > w) { w = draftRect.h; h = draftRect.w; rot = 90; }
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w, h, rot, ...roadExtra, ...buildingExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -3136,7 +3148,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame) => {
+  const buildExportSvg = (frame, includeOverlay = true) => {
     if (!svgRef.current) return null;
     let x, y, w, h;
     if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
@@ -3173,7 +3185,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Always include the aerial underlay (even if it's hidden on screen), placed
     // beneath everything but the paper, so prints/exports keep the satellite.
     if (underlay) {
-      clone.querySelectorAll("image").forEach((n) => n.remove()); // drop any live copy
+      clone.querySelectorAll('image:not([data-overlay-image])').forEach((n) => n.remove()); // drop any live aerial copy — keep the placed site-plan overlays (handled below)
       const tl = f2p({ x: underlay.x, y: underlay.y });
       const sy = underlay.ftPerPxY || underlay.ftPerPx;
       const im = document.createElementNS("http://www.w3.org/2000/svg", "image");
@@ -3186,6 +3198,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       im.setAttribute("opacity", underlay.opacity ?? 1);
       clone.insertBefore(im, bg.nextSibling);
     }
+    // Site-plan overlays (B72) obey the print dialog's "Print overlay" toggle (B131):
+    // off → drop every placed overlay raster (its editor chrome + any unsynced
+    // placeholder already left via data-export="skip"); on → the cloned <image>s keep
+    // their exact on-screen transform — feet→pixel position, scale, rotation, opacity,
+    // and the rasterized page — composited above the aerial backdrop in the same z-order.
+    if (!includeOverlay) clone.querySelectorAll('[data-overlay-image]').forEach((n) => n.remove());
     // Sheet furniture for the export: a graphic scale bar (bottom-right) and a
     // north arrow (bottom-left), positioned in the export viewBox.
     const sbPx = scaleBarFt.px, sbFt = f0(scaleBarFt.ft), seg = sbPx / 4;
@@ -3245,8 +3263,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Print to PDF.");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async (paper = "letter", orient = "landscape") => {
-    const built = buildExportSvg(printFrame);
+  const printPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
+    const built = buildExportSvg(printFrame, includeOverlay);
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
     // Open the window synchronously (before any await) so it isn't pop-up-blocked.
     const win = window.open("", "_blank");
@@ -3320,6 +3338,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dev) base = { cx: dev.cx, cy: dev.cy, w: dev.w + 80, h: dev.h + 80 };
     else { const a = p2fStatic(0, 0), b = p2fStatic(size.w, size.h); base = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(b.x - a.x) * 0.8, h: Math.abs(b.y - a.y) * 0.8 }; }
     setPrintFrame(fitFrame(base.cx, base.cy, base.w, base.h, aspect));
+    setPrintOverlay(hasPrintableOverlay(sheetOverlays)); // default "Print overlay" to match on-screen visibility (WYSIWYG)
     setPrintMode(true); setExportMenu(false); setSel(null);
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
@@ -3332,7 +3351,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (printMode) setPrintFrame((f) => f ? fitFrame(f.cx, f.cy, f.wFt, f.hFt, printAspect()) : f);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printAspectKey]);
-  const doPrint = () => { const p = printPaper, o = printOrient; setPrintMode(false); setTimeout(() => printPDF(p, o), 60); };
+  const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
+  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => printPDF(p, o, ov), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -3614,23 +3634,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for trailer-tire/dolly abuse. The property lives globally on any band; only
   // trailer parking surfaces the control for now.
   const setCurbW = (el, wv) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, curbW: wv } : x)); };
-  // Split a striped parking field into N independent row elements (each one stall
-  // row + its aisle), preserving position/rotation so each can be edited / dragged.
+  // Split a striped parking field into independent DOUBLE-LOADED module elements
+  // (each two stall rows sharing one drive aisle), plus a trailing single-loaded
+  // row only for a remainder that can't pair — never one row + a full aisle each
+  // (B130). Preserves position / rotation / total depth so each piece can be
+  // edited or dragged, and the field's stall count is unchanged.
   const splitParkingRows = (el) => {
     if (!el || el.points || el.type !== "parking") return;
     const cfg = cfgOf(el);
-    const count = parkRowsForDepth(el.h, cfg.stallDepth || settings.stallDepth, cfg.aisle ?? settings.aisle);
-    if (count < 2) return;
+    const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
+    const pieces = splitParkingPieces(el.h, sd, ai);  // module depths, summing to el.h
+    if (pieces.length < 2) return;                    // ≤ one module: nothing to split
     pushHistory();
-    const bandH = el.h / count;                       // even split into one element per row
-    const rows = [];
-    for (let i = 0; i < count; i++) {
-      const ly = -el.h / 2 + bandH * (i + 0.5);       // band centre in local depth
-      const off = rot2(0, ly, el.rot);
-      rows.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: bandH, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+    let y = -el.h / 2;                                 // walk down the local depth axis
+    const newEls = [];
+    for (const ph of pieces) {
+      const off = rot2(0, y + ph / 2, el.rot);        // piece centre in local depth
+      newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: ph, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      y += ph;
     }
-    setEls((a) => [...a.filter((x) => x.id !== el.id), ...rows]);
-    setSel({ kind: "el", id: rows[0].id });
+    setEls((a) => [...a.filter((x) => x.id !== el.id), ...newEls]);
+    setSel({ kind: "el", id: newEls[0].id });
   };
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
@@ -4310,15 +4334,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     pointerEvents={o.locked ? "none" : "auto"}
                     onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
                     {o.src ? (
-                      <image href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
-                    ) : (<>
+                      // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131)
+                      <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
+                    ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
                       <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
-                    </>)}
+                    </g>)}
                     {isSel && tool === "select" && (
-                      <rect x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
+                      <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
                     )}
-                    {isSel && tool === "select" && !o.locked && !ovCalib && (<>
+                    {isSel && tool === "select" && !o.locked && !ovCalib && (<g data-export="skip">
                       {[[tl.x, tl.y], [tl.x + w, tl.y], [tl.x + w, tl.y + h], [tl.x, tl.y + h]].map(([hx, hy], hi) => (
                         <rect key={`hsc${hi}`} x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                           style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
@@ -4326,7 +4351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
                       <circle cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                         style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
-                    </>)}
+                    </g>)}
                   </g>
                 );
               })}
@@ -4939,6 +4964,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={seg(printOrient === "landscape")} onClick={() => setPrintOrient("landscape")}>Landscape</button>
                   <button style={seg(printOrient === "portrait")} onClick={() => setPrintOrient("portrait")}>Portrait</button>
                 </span>
+                {/* B131 — include the placed site-plan overlay in the printout; only shown when one's loaded (no dead control) */}
+                {overlayPrintable && (
+                  <label title="Include the placed site-plan overlay in the printout — exactly as shown (scale, position, rotation, opacity)" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: PAL.ink, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                    <input type="checkbox" checked={printOverlay} onChange={(e) => setPrintOverlay(e.target.checked)} style={{ cursor: "pointer", margin: 0 }} />
+                    Print overlay
+                  </label>
+                )}
                 <span style={{ width: 1, height: 18, background: PAL.panelLine }} />
                 <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
                 <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
@@ -5383,8 +5415,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
-                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 2 &&
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split into rows</button>}
+                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 3 &&
+                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
                         </label>
@@ -5466,6 +5498,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       Footprint is top-of-bank; basin tapers at {slope}:1 to the bottom. Prismoidal volume — screening only.
                       {r.aBottom === 0 && " Basin tapers to a point before full depth — reduce depth or slope."}
                     </div>
+                    {/* Expansion vs. existing: lock today's pond as a baseline, then enlarge
+                        it (drag banks out / deepen) to read the storage gained. Baseline
+                        freezes its own footprint + depth/slope so the delta is apples-to-apples. */}
+                    {(() => {
+                      const base = det.baseline;
+                      if (!base) {
+                        return (
+                          <div style={{ marginTop: 10 }}>
+                            <button style={{ ...chip, width: "100%", fontWeight: 600 }} onClick={() => {
+                              pushHistory();
+                              setSelEl({ det: { ...det, depth, freeboard: fb, slope, baseline: { ring: ring.map((p) => ({ x: p.x, y: p.y })), depth, freeboard: fb, slope } } });
+                              flashWarn("Locked as the existing pond — now expand it to see the storage gained.", 4500);
+                            }}>Lock as existing pond</button>
+                            <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>
+                              Capture today's pond as the baseline, then drag the banks out (or deepen it). You'll see the original outline ghosted and the added detention.
+                            </div>
+                          </div>
+                        );
+                      }
+                      const baseVol = detentionStorage(base.ring, base.depth, base.freeboard, base.slope).vol;
+                      const inc = r.vol - baseVol;
+                      return (
+                        <div style={{ marginTop: 11, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Expansion vs. existing</span>
+                            <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} onClick={() => { pushHistory(); const { baseline, ...rest } = det; setSelEl({ det: { ...rest, depth, freeboard: fb, slope } }); }}>Clear</button>
+                          </div>
+                          <div style={{ background: "#f8f6f0", borderRadius: 8, padding: "8px 10px" }}>
+                            {pondRow("Existing storage", `${f2(baseVol / 43560)} ac-ft`)}
+                            {pondRow("Proposed storage", `${f2(r.vol / 43560)} ac-ft`)}
+                            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 0 4px" }} />
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "3px 0" }}>
+                              <span style={{ fontSize: 12, color: PAL.ink, fontWeight: 700 }}>{inc >= 0 ? "Storage gained" : "Storage lost"}</span>
+                              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13.5, color: inc >= 0 ? "#15803d" : "#b3361b", fontWeight: 750 }}>{inc >= 0 ? "+" : ""}{f2(inc / 43560)} ac-ft</span>
+                            </div>
+                            {pondRow("", `${inc >= 0 ? "+" : ""}${f0(inc)} cf`)}
+                          </div>
+                          <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>
+                            Existing (dashed ghost) and proposed use the same depth / slope method, so the difference is the added detention. Screening only — confirm with your civil engineer.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -6089,10 +6164,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
                     </>
                   )}
-                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 2 && (
+                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
-                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split into rows</button>
+                      <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>
                     </>
                   )}
                   <div style={hdr(true)}>Edit</div>
@@ -6126,6 +6201,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
+  // feet, drawn dashed so the user sees what the pond grew from. Same path for the
+  // polygon and rect branches (the rect branch counter-rotates it back to world).
+  const ghostRing = el.type === "pond" && el.det?.baseline?.ring?.length >= 3 ? el.det.baseline.ring : null;
+  const ghostPath = ghostRing ? ghostRing.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
@@ -6135,6 +6216,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+        {ghostPath && ghostEl("ghost")}
       </g>
     );
   }
@@ -6147,6 +6229,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
+  // Counter-rotate the baseline ghost: its ring is already in world feet, but this
+  // branch's group rotates everything by el.rot — undo that so the ghost lands true.
+  if (ghostPath) parts.push(<g key="ghost" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}>{ghostEl("g")}</g>);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));

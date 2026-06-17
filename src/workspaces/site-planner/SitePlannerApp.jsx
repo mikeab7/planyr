@@ -62,6 +62,15 @@ export default function App() {
   const [migrating, setMigrating] = useState(false);
   const [migrateMsg, setMigrateMsg] = useState("");
   const [hideMigrate, setHideMigrate] = useState(false);
+  // Re-read epoch for the keyed planner (B133 — stale plan flashes on boot then "comes back").
+  // The planner snapshots its plan from storage ONCE at mount (`key={activeSiteId}`). At boot the
+  // first synchronous render reads the store BEFORE auth resolves (activeUser still null → the
+  // legacy/local store), so a signed-in user can momentarily see an older copy; the authoritative
+  // copy only lands after applyUser's `pullCloud`, which is a SAME-TAB localStorage write — and a
+  // same-tab write fires no `storage` event, so the already-mounted planner (B127's listener only
+  // catches OTHER tabs) never refreshes and the stale copy lingers. Bumping this after the pull
+  // forces a one-time remount so the resumed plan reflects the freshly-merged cloud copy.
+  const [loadEpoch, setLoadEpoch] = useState(0);
 
   // Switch the data store on sign-in / sign-out. Logged in → pull the user's cloud
   // sites into their local cache and make that the active store (cloud is home);
@@ -88,7 +97,14 @@ export default function App() {
       // synced copy rather than presenting a silent (and scary) empty library.
       setCloudError(res && res.ok === false ? "Couldn't reach the cloud — showing your last synced copy. Your saved sites are safe; reconnect to refresh." : "");
       const cur = getCurrentSiteId();
-      if (cur && loadSite(cur)) { setActiveSiteId(cur); setMode("plan"); } // resume if it's one of theirs
+      if (cur && loadSite(cur)) {
+        setActiveSiteId(cur); setMode("plan"); // resume if it's one of theirs
+        // Force the keyed planner to re-read from the post-pull merged store even though `cur` is
+        // unchanged, so the resumed plan can't linger on the stale pre-auth copy (B133). Safe: the
+        // tab-focus SIGNED_IN re-emit is already skipped above (no remount mid-edit), and a boot
+        // resume has no in-progress edits to lose.
+        setLoadEpoch((n) => n + 1);
+      }
       else { setActiveSiteId(null); setMode("map"); }
       refreshSites();
     } else {
@@ -255,7 +271,7 @@ export default function App() {
       <div style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && (
           <SitePlanner
-            key={activeSiteId}
+            key={`${activeSiteId}:${loadEpoch}`}
             active={mode === "plan"}
             siteId={activeSiteId}
             overlays={overlays}
