@@ -42,7 +42,7 @@ export const VECTOR_SOURCES = {
       pageSize: 1000,
       maxFeatures: 4000,
       ttl: 30 * 24 * 3600 * 1000, // 30 days — flood layers move slowly
-      minVectorZoom: 12,
+      minVectorZoom: 15,
       maxAreaDeg: 0.5,
     },
     imageFallback: { url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer", layers: [27, 28] },
@@ -59,7 +59,7 @@ export const VECTOR_SOURCES = {
       pageSize: 1000,
       maxFeatures: 4000,
       ttl: 30 * 24 * 3600 * 1000,
-      minVectorZoom: 12,
+      minVectorZoom: 15,
       maxAreaDeg: 0.5,
     },
     imageFallback: { url: "https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer", layers: [0] },

@@ -353,6 +353,20 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
   that vanished when it had room, or a pile that remained).
 
+### V20 — GIS layers survive a CORS-blocked health-check (B129 / PR #60) ⏳
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+- **Why ⏳:** the fix is pure `layers.js` logic (lint/test/build green) but the payoff is a real-browser
+  CORS behavior that can't be exercised headless.
+- **Steps:** On planyr.io (or a preview), open the map and toggle **FEMA flood zones**, then
+  **Wetlands (NWI)**. Watch the per-layer status dots and the browser console.
+- **Expect:** a layer whose health-*probe* is refused cross-origin (the NWI host has done this) **no longer
+  dies with a red "network / CORS error" banner** — the picture still paints via its CORS-exempt `<img>`
+  export, and a transient `requesterror` shows only a **quiet per-layer "failed" dot** that flips back to
+  "loaded" when the image lands. A genuinely-down service still shows the quiet failed dot. **No layer is
+  dropped, and no alarming toast fires, just because a metadata/probe fetch was CORS-blocked.**
+- **If it fails / deeper triage:** see **B129** — the open hand-off for the remaining NWI-CORS question and
+  the (reverted) cached-vector experiment, both of which need a browser to settle.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
