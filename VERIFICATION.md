@@ -650,4 +650,11 @@ _Move items here with the date and who/what checked them._
   - **Drag-to-move:** the building's **"314′"** dimension dragged freely up out of the shape, leaving a **dashed red leader** pointing back to the edge it measures; the offset persists on the element.
   - **Click-to-edit road width:** clicking the road's **"199′"** number opened the prompt (seeded "199"); entering **30** resized the road to a **30′** travel width and the callout updated to "30′".
   - lint 0 · 223 tests · build green; `SitePlannerApp` lazy chunk intact.
-- **Not covered / polish:** the width editor is a native `prompt()` (an inline on-canvas input is a future nicety); signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence).
+- **Not covered:** signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence). *(The width editor's `prompt()` is now replaced by an inline editor — see V37.)*
+
+### V37 — Edits happen inline on the canvas, never in a dialog box (owner rule) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once (rule acceptance)
+- **Why:** owner: dialog-box edits are "horrible UI." Replaced the three `window.prompt` edit dialogs (road travel width, per-edge setback, overlay trace length) with one shared inline `numEdit` `<input>` overlay; rule recorded in CLAUDE.md.
+- **Steps:** "Start blank" → Road tool → drew a road → selected it → clicked the red travel-width **number** → (verified no dialog) typed **30** → Enter.
+- **Result ✅:** clicking the number opened a small **inline input box on the canvas** at the dimension (accent border, seeded "199") — **no browser dialog fired** (Playwright `dialog` event count = 0; one `foreignObject input` present). Typing **30** + Enter resized the road to a **30′** travel width and closed the editor. Commit-on-Enter / click-away and Esc-to-cancel wired.
+- **Not covered:** the per-edge **setback** and overlay **trace-length** editors use the same component (so they inherit the behavior) but weren't separately driven; a native `window.confirm` still guards *deleting* a parcel drawing (a destructive confirmation, not an edit) — left as-is.

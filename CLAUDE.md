@@ -199,6 +199,12 @@ server/                   # placeholder README only — NOT built or deployed; b
   hasn't run yet, so saving never regresses.
 
 ## KEY DECISIONS (must persist)
+- **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
+  with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
+  on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline
+  `<input>` overlay in `SitePlanner.jsx` (road width, per-edge setback, overlay trace length) or
+  the callout `foreignObject` `<textarea>`. Commit on Enter / click-away, cancel on Esc. Applies
+  to any new editing affordance.
 - **Brand spelling — Planyr (P-L-A-N-Y-R).** Human-readable text → **Planyr** (capital
   P); package name + technical identifiers → lowercase `planyr`. Michael often
   says/dictates "Planner" (or "Planner Fit") — read these as the brand **Planyr** (and
