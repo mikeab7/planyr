@@ -692,3 +692,13 @@ _Move items here with the date and who/what checked them._
   - Selection card reads **"1 PARCEL · 14.78 AC · DEL PAPA"** — full acreage, correctly counted as a single parcel (was 8.12 AC, east-only). Screenshot `gis-verify/pearland-FIXED-clickwest.png`; script `gis-verify/pearland-fix-verify.mjs`.
   - lint 0 · 230 tests · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered:** the in-planner identify (`addIdentifiedParcel`) and address/account lookup (`importFeature`) paths got the same multipart fix but were verified by code + unit tests, not a separate click-through; a signed-in cloud-reload pass is untested (logged-out run, but parcels ride the normal Site Model persistence).
+
+### V40 — Delete removes the selected element on the first press (B154) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (bugfix acceptance)
+- **Steps:** "Start blank" → drew two buildings far apart. (A) **baseline:** clicked one → pressed **Delete** once. (B) **reported flow:** clicked a tool/panel button (**Pan**, then **Select**) to move focus off the canvas, then clicked a building and pressed **Delete** once *with no settle delay* (stresses the stale-listener window).
+- **Result ✅:**
+  - **A baseline:** 2 → 1 — a single Delete removed the selected building.
+  - **B from a panel control:** 2 → 1 — one immediate Delete removed exactly one building (previously this was the "needs two presses" case). Reliable across runs.
+  - Zero console/page errors.
+  - lint 0 · **230 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Typing guard (code-verified, not regressed):** the bail-when-a-field-is-focused guard is pre-existing (`document.activeElement` is INPUT/SELECT/TEXTAREA → return); this change only **appended** `contentEditable`, so the "Delete while editing a field must not nuke canvas elements" behavior is unchanged. (A live headless guard test was flaky only because reliably focusing the right panel input in the built UI was finicky — not a behavior gap.)

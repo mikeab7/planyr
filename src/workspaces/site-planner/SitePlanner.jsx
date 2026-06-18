@@ -803,6 +803,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
+  // Live mirrors of the selection. The window keydown listener is re-bound by a passive
+  // effect, so right after a selecting click it can briefly still hold the PREVIOUS
+  // render's `sel`/`multi` closure — which made Delete need a second press (NEW-1). The
+  // Delete path reads these refs instead, so it always sees the current selection.
+  // Synced during render (idempotent; a passive effect would lag the same window).
+  const selRef = useRef(sel); selRef.current = sel;
+  const multiRef = useRef(multi); multiRef.current = multi;
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
   // snap comes from the global pref (a tool mode), never the per-site saved value.
@@ -1343,7 +1350,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const onKey = (e) => {
       const t = document.activeElement;
-      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
@@ -1375,7 +1382,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
-      if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
+      if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
     window.addEventListener("keydown", onKey);
@@ -1384,6 +1391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
 
   const deleteSel = () => {
+    const sel = selRef.current, multi = multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
       pushHistory();
       const elIds = new Set();
