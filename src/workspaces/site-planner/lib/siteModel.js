@@ -18,7 +18,7 @@
 export const SITE_MODEL_VERSION = 5;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
-export const EASEMENT_KINDS = ["encumbrance"];                    // title metes-and-bounds tracts / corridors
+export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
 export const UTILITY_KINDS = ["utilRoute", "traced", "infwater"]; // service routes, traced overhead lines, inferred mains
 export const ANNOTATION_KINDS = ["line", "polyline", "rect", "ellipse", "polygon"]; // neutral drawing markups
 
@@ -223,6 +223,28 @@ export function constraintsOf(m) {
 // Utility runs: electric/water service routes, traced overhead lines, inferred mains.
 export const utilitiesOf = (m) => byKind(m.markups, UTILITY_KINDS);
 
+// First-class easement objects (NEW-1) — the kind:"easement" markups specifically
+// (a subset of constraintsOf().easements, which also includes legacy encumbrances).
+export const easementsOf = (m) => byKind(m && m.markups, ["easement"]);
+
+/* NEW-4 — easement geometry + restriction flags in the shape the buildable-area /
+ * yield engine consumes as EXCLUSION ZONES. Each zone carries its drawn ring plus
+ * whether it blocks buildings and/or paving, so the future verdict engine can
+ * subtract restrictsBuildings zones from the buildable footprint and restrictsPaving
+ * zones from the pavable area — without re-deriving any of this. `restrictsBuildings`
+ * defaults true, `restrictsPaving` false (missing flag = the default), matching the
+ * tool's create-time defaults. */
+export function exclusionZonesOf(m) {
+  return easementsOf(m).map((e) => ({
+    id: e.id,
+    ring: (e.pts && e.pts.length >= 3) ? e.pts : [],
+    restrictsBuildings: e.restrictsBuildings !== false,
+    restrictsPaving: e.restrictsPaving === true,
+    status: e.status || "existing",
+    easeType: e.easeType || "other",
+  })).filter((z) => z.ring.length >= 3);
+}
+
 // Neutral annotations (drawing markups + measures + callouts).
 export const annotationsOf = (m) => ({
   markups: byKind(m.markups, ANNOTATION_KINDS),
@@ -238,7 +260,14 @@ export const setbacksOf = (m) =>
 
 /* Reserved for the future buildable-area / cost synthesis: with one model holding
  * boundaries + setbacks + easements + utilities + elevation, this is where the
- * developable envelope and yield will be computed. Stub for now. */
-export function developableArea(/* m */) {
-  return { available: null, note: "not computed — reserved for buildable-area synthesis" };
+ * developable envelope and yield will be computed. The envelope math is still a
+ * stub, but the easement EXCLUSION ZONES it will subtract are now exposed (NEW-4),
+ * so the verdict engine can be dropped in later with no rework — and any caller can
+ * already read which areas are off-limits to buildings / paving. */
+export function developableArea(m) {
+  return {
+    available: null,
+    exclusions: exclusionZonesOf(m || {}),
+    note: "envelope synthesis reserved; easement exclusion zones exposed for the buildable-area engine",
+  };
 }

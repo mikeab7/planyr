@@ -31,6 +31,7 @@ import {
 } from "./lib/arcgis.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
@@ -100,6 +101,7 @@ const ICON_PATHS = {
   trailer: <><rect x="1.8" y="4.5" width="9" height="5.5" rx="0.5" /><path d="M10.8 6.5 h2.6 l0.8 2.4 v1.1 h-3.4" /><circle cx="4.6" cy="11.8" r="1.3" /><circle cx="12.2" cy="11.8" r="1.3" /></>,
   pond: <path d="M8 2.6 C8 2.6 3.6 7.8 3.6 10.4 a4.4 4.4 0 0 0 8.8 0 C12.4 7.8 8 2.6 8 2.6 Z" />,
   road: <><path d="M5.2 2.5 L3.2 13.5 M10.8 2.5 L12.8 13.5" /><path d="M8 3 v2.2 M8 7 v2.2 M8 11 v2.2" /></>,
+  easement: <><path d="M2.5 4.5 H13.5 M2.5 11.5 H13.5" /><path d="M2.5 8 H13.5" strokeDasharray="2 1.6" opacity="0.7" /></>,
   measure: <><path d="M2.2 10.8 L10.8 2.2 L13.8 5.2 L5.2 13.8 Z" /><path d="M5.6 7.4 l1.4 1.4 M8 5 l1.4 1.4" /></>,
   combine: <><path d="M2.5 2.5 h7 v4 h4 v7 h-7 v-4 h-4 Z" /></>,
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
@@ -131,6 +133,7 @@ const TOOLS = [
   { id: "trailer", label: "Trailer Parking", hint: "Drag for a rectangle, or click points to outline irregular trailer storage (double-click to close); auto-counts" },
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
+  { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
   { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
@@ -762,7 +765,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
-    roadAnchor = useRef(null), measureAnchor = useRef(null),
+    roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
     siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
@@ -783,6 +786,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const lsGet = (k, d) => { try { return localStorage.getItem("planarfit:" + k) || d; } catch (_) { return d; } };
   const [parkingRows, setParkingRows] = useState(() => lsGet("parkingRows", "free")); // drawn-parking depth preset
   const [roadWidth, setRoadWidth] = useState(() => lsGet("roadWidth", "free"));    // drawn-road width preset
+  // Easement tool (NEW-1/2/3): a first-class easement object on the editable layer.
+  // `easeMode` is the input mode; easeType/easeWidth are sticky tool defaults.
+  const [easeMode, setEaseMode] = useState(() => lsGet("easeMode", "centerline")); // centerline | boundary | parceledge
+  const [easeType, setEaseType] = useState(() => lsGet("easeType", "utility"));
+  const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
+  const [easeDraft, setEaseDraft] = useState(null); // {pts:[{x,y}]} centerline/boundary click-draw in progress
+  const [easeEdges, setEaseEdges] = useState(null); // {parcelId, idx:[edge#]} parcel-edge run in progress (NEW-3)
+  const [easeMenu, setEaseMenu] = useState(false);        // Easement ▾ rail menu open
+  const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
   const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
@@ -1288,7 +1300,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [leftPanel]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
-  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); } catch (_) {} }, [parkingRows, roadWidth, measureMode]);
+  useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
   // Drag the panel's right edge to resize it.
   const startLeftResize = (e) => {
     e.preventDefault();
@@ -1360,7 +1372,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && (sel || multi.length)) { e.preventDefault(); deleteSel(); }
@@ -1369,7 +1381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
 
   const deleteSel = () => {
     if (multi.length > 1) { // delete the whole multi-selection (+ each element's assembly)
@@ -1522,6 +1534,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const last = mkPoly?.pts?.[mkPoly.pts.length - 1];
       const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
       setMkPoly((d) => (d ? { ...d, pts: [...d.pts, pt] } : { kind: tool, pts: [pt] }));
+      return;
+    }
+    if (tool === "easement") {
+      if (easeMode === "parceledge") return; // edges are picked via the parcel-edge hit targets, not the canvas
+      const sp = snapPt(fp);
+      // boundary mode: clicking the first dot closes the polygon (≥3 pts)
+      if (easeMode === "boundary" && easeDraft && easeDraft.pts.length >= 3 && dist(f2p(sp), f2p(easeDraft.pts[0])) < 12) { finishEaseDraft(); return; }
+      const last = easeDraft?.pts?.[easeDraft.pts.length - 1];
+      const pt = (e.shiftKey && last) ? snapPt(snap45(last, fp)) : sp;
+      setEaseDraft((d) => (d ? { pts: [...d.pts, pt] } : { pts: [pt] }));
       return;
     }
     if (tool === "parcel") {
@@ -1732,6 +1754,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
     if (m.kind === "utilRoute") return { ...m, pts: shift(m.pts), corridor: shift(m.corridor), pad: shift(m.pad) };
     if (m.kind === "encumbrance") return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })), centerline: (m.centerline || []).map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+    if (m.kind === "easement") return { ...m, pts: shift(m.pts), centerline: m.centerline ? shift(m.centerline) : m.centerline };
     if (m.pts) return { ...m, pts: m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
     return { ...m, cx: m.cx + dx, cy: m.cy + dy };
@@ -1771,6 +1794,99 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
   // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
   const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
+
+  /* ------------ easements (first-class objects on the editable layer) ------------ */
+  // The hand-editable path of an easement: the boundary ring for mode B, else the
+  // centerline/edge-run spine that gets offset into the strip.
+  const easeEditPath = (e) => (e.mode === "boundary" ? (e.pts || []) : (e.centerline || []));
+  const easeEditClosed = (e) => e.mode === "boundary";
+  // Apply a patch and RE-DERIVE the drawn ring, so a width/vertex change re-offsets
+  // the strip live (NEW-1). Boundary mode derives pts = the path itself.
+  const withEaseRing = (e, patch) => {
+    const next = { ...e, ...patch };
+    const ring = deriveEasementRing(next);
+    return ring && ring.length >= 3 ? { ...next, pts: ring } : next;
+  };
+  const setEasePath = (e, path) => withEaseRing(e, e.mode === "boundary" ? { pts: path } : { centerline: path });
+  // Build an easement from a geometry spec + the sticky tool attributes.
+  const makeEasement = (spec) => {
+    const ring = deriveEasementRing(spec);
+    if (!ring || ring.length < 3) return null;
+    return {
+      id: uid(), kind: "easement", mode: spec.mode, pts: ring,
+      centerline: spec.centerline || null, width: spec.width || 0, offsetSide: spec.offsetSide,
+      ...DEFAULT_EASEMENT_ATTRS, easeType, // start from the tool's current type
+    };
+  };
+  // Commit a built easement: history + add + select + a screening overlap warning.
+  const commitEasement = (mk) => {
+    if (!mk) { flashWarn("Couldn't build that easement — check the points / width.", 5000); return; }
+    pushHistory();
+    setMarkups((a) => [...a, mk]);
+    setSel({ kind: "markup", id: mk.id }); setLeftPanel("props"); setTool("select");
+    const ringOfEl = (e) => (e.points ? e.points : elCorners(e));
+    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(mk.pts, ringOfEl(e)));
+    flashWarn(hits.length
+      ? `${easementLabel(mk)} placed — ⚠ overlaps ${hits.length} building/paving area${hits.length > 1 ? "s" : ""} (${Math.round(easementArea(mk)).toLocaleString()} sf).`
+      : `${easementLabel(mk)} placed — ${Math.round(easementArea(mk)).toLocaleString()} sf.`, 7000);
+  };
+  // Finish a centerline / boundary easement being click-drawn.
+  const finishEaseDraft = () => {
+    if (!easeDraft) return;
+    const pts = easeDraft.pts.filter((p, i) => i === 0 || dist(p, easeDraft.pts[i - 1]) > 0.01);
+    if (easeMode === "boundary") { if (pts.length >= 3) commitEasement(makeEasement({ mode: "boundary", pts })); }
+    else if (pts.length >= 2) commitEasement(makeEasement({ mode: "centerline", centerline: pts, width: easeWidth }));
+    setEaseDraft(null);
+  };
+  // Finish a parcel-edge easement (NEW-3): one-sided strip inset from the chosen run.
+  const finishEaseEdges = () => {
+    if (!easeEdges || !easeEdges.idx.length) return;
+    const pc = parcels.find((p) => p.id === easeEdges.parcelId);
+    if (!pc) { setEaseEdges(null); return; }
+    const strip = buildParcelEdgeStrip(pc.points, easeEdges.idx, easeWidth);
+    if (!strip) { flashWarn("Pick ONE contiguous run of edges along a single parcel, then press Enter.", 6000); return; }
+    commitEasement(makeEasement({ mode: "parceledge", centerline: strip.run, width: easeWidth, offsetSide: strip.offsetSide }));
+    setEaseEdges(null);
+  };
+  // Toggle a parcel edge in the in-progress run; switching parcels restarts the run.
+  const toggleEaseEdge = (parcelId, edge) => {
+    setEaseEdges((s) => {
+      if (!s || s.parcelId !== parcelId) return { parcelId, idx: [edge] };
+      const idx = s.idx.includes(edge) ? s.idx.filter((i) => i !== edge) : [...s.idx, edge];
+      return idx.length ? { parcelId, idx } : null;
+    });
+  };
+  // Attribute edit on the selected easement (re-derives the ring so width edits re-offset live).
+  const setSelEasement = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? withEaseRing(m, patch) : m)); };
+  // Vertex editing of the selected easement's path (drag; Shift-click deletes; ＋ adds).
+  const startEaseVertex = (ev, id, index) => {
+    if (tool !== "select" || ev.button !== 0) return;
+    ev.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
+    if (ev.shiftKey) {
+      const minN = m.mode === "boundary" ? 3 : 2;
+      if (easeEditPath(m).length > minN) { pushHistory(); setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, easeEditPath(x).filter((_, i) => i !== index)) : x)); }
+      return;
+    }
+    setSel({ kind: "markup", id });
+    pushHistory();
+    drag.current = { mode: "easeVertex", id, index };
+    svgRef.current.setPointerCapture(ev.pointerId);
+  };
+  const addEaseVertex = (ev, id, index) => {
+    if (tool !== "select" || ev.button !== 0) return;
+    ev.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) return;
+    pushHistory();
+    setMarkups((a) => a.map((x) => {
+      if (x.id !== id) return x;
+      const path = easeEditPath(x), p = path[index], q = path[(index + 1) % path.length];
+      const np = [...path]; np.splice(index + 1, 0, snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }));
+      return setEasePath(x, np);
+    }));
+  };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -2010,6 +2126,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "mkVertex") { // drag a line/polyline/polygon control point
       const sp = snapPt(fp);
       setMarkups((a) => a.map((m) => m.id === d.id ? setMkPts(m, mkPts(m).map((p, j) => (j === d.index ? sp : p))) : m));
+      return;
+    }
+    if (d.mode === "easeVertex") { // drag an easement's centerline/boundary vertex → re-offset the strip
+      const sp = snapPt(fp);
+      setMarkups((a) => a.map((m) => m.id === d.id ? setEasePath(m, easeEditPath(m).map((p, j) => (j === d.index ? sp : p))) : m));
       return;
     }
     if (d.mode === "mkResize") { // resize a rect/ellipse in its own (rotated) frame; opposite side fixed
@@ -2281,6 +2402,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
     if (draftElPoly?.pts?.length >= 3) { closeElPoly(); return true; } // any area element drawn as a polygon
+    if (tool === "easement" && easeMode === "parceledge" && easeEdges?.idx?.length) { finishEaseEdges(); return true; }
+    if (tool === "easement" && easeDraft?.pts?.length >= (easeMode === "boundary" ? 3 : 2)) { finishEaseDraft(); return true; }
     return false;
   };
   // Remove the last placed vertex of whatever multi-point shape is in progress (Backspace/Delete);
@@ -2292,6 +2415,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (mkPoly?.pts?.length) { setMkPoly((m) => { const pts = m.pts.slice(0, -1); return pts.length ? { ...m, pts } : null; }); return true; }
     if (draftPoly?.length) { setDraftPoly((a) => { const n = a.slice(0, -1); return n.length ? n : null; }); return true; }
     if (draftElPoly?.pts?.length) { setDraftElPoly((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; }); return true; }
+    if (easeDraft?.pts?.length) { setEaseDraft((d) => { const pts = d.pts.slice(0, -1); return pts.length ? { pts } : null; }); return true; }
     return false;
   };
   // Double-click finishes exactly the way Enter does (the shared path above).
@@ -3231,6 +3355,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detPct = siteSqft ? (pondArea / siteSqft) * 100 : 0;
   const ratio = bldg ? stalls / (bldg / 1000) : 0;
   const open = Math.max(0, siteSqft - impervious - pondArea);
+  // Easement encumbrance tally (NEW-1 readout + NEW-4 surface). Gross sum of easement
+  // areas — overlaps are NOT deduped (screening), so it reads "gross" — split by what
+  // each easement restricts (the same shape the buildable-area engine consumes).
+  const easeAll = markups.filter((m) => m.kind === "easement");
+  const easeArea = easeAll.reduce((s, e) => s + easementArea(e), 0);
+  const easeBldgArea = easeAll.reduce((s, e) => s + (e.restrictsBuildings !== false ? easementArea(e) : 0), 0);
+  const easePaveArea = easeAll.reduce((s, e) => s + (e.restrictsPaving === true ? easementArea(e) : 0), 0);
 
   const importRef = useRef(null);
   const importJSONFile = (file) => {
@@ -4060,6 +4191,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </g>
       );
     }
+    if (m.kind === "easement") {
+      // Grips on the editable PATH (boundary ring, or the centerline/edge-run spine).
+      const path = easeEditPath(m);
+      const px = path.map(f2p);
+      const closed = easeEditClosed(m);
+      const nodes = [];
+      px.forEach((p, i) => {
+        if (!closed && i === px.length - 1) return; // open spine: no edge past the last point
+        const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+        nodes.push(
+          <g key={`eav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addEaseVertex(e, m.id, i)}>
+            <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
+            <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
+            <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
+          </g>
+        );
+      });
+      px.forEach((p, i) => nodes.push(
+        <rect key={`ev${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+          style={{ cursor: "move" }} onPointerDown={(e) => startEaseVertex(e, m.id, i)} />
+      ));
+      return <g>{nodes}</g>;
+    }
     if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
     const px = mkPts(m).map(f2p);
     const isPoly = m.kind === "polyline" || m.kind === "polygon";
@@ -4143,6 +4298,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const selectTool = (id) => {
     setTool(id);
     setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setSplitPath([]); setMarquee(null);
+    if (id !== "easement") { setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); }
     if (id !== "select") setMulti([]);
     if (id !== "select") setCombineSel([]); // merge selection only lives in the Select tool
     if (id !== "callout") setCalloutDraft(null);
@@ -4160,22 +4316,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Parse the legal description and arm POB placement (the user then clicks the
   // canvas to anchor the point of beginning).
-  const startPlotMetes = () => {
+  const startPlotMetes = (asEasement = false) => {
     const calls = parseCalls(mbText);
     if (!calls.length) { setTitleErr("No bearing/distance calls found. Paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
     setTitleErr("");
-    setPobMode({ calls });
+    setPobMode({ calls, asEasement });
     setTitleOpen(false);
     setSel(null); setTool("select");
-    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready.`, 0);
+    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready${asEasement ? " (easement)" : ""}.`, 0);
   };
 
   // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
   const anchorEncumbrance = (pob) => {
-    const { calls } = pobMode;
+    const { calls, asEasement } = pobMode;
     if (!calls || !calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
+    // NEW-2 — reuse the M&B parser to spawn a first-class Easement (mode B for a closed
+    // tract; a corridor strip for an open traverse), attributes editable afterward.
+    if (asEasement) {
+      const mk = closed
+        ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
+        : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
+      setPobMode(null);
+      commitEasement(mk);
+      return;
+    }
     const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
     if (!ring || ring.length < 3) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     const gap = misclosure(path);
@@ -4583,6 +4749,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-sidewalk" width="7" height="7" patternUnits="userSpaceOnUse">
                 <circle cx="1.4" cy="1.4" r="0.7" fill="#9c998d" opacity="0.5" />
               </pattern>
+              {/* easement fills: a semi-transparent body + diagonal hatch, color-coded per type (NEW-1) */}
+              {EASEMENT_TYPES.map((t) => (
+                <pattern key={t.key} id={`pat-ease-${t.key}`} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="7" height="7" fill={t.color} opacity="0.10" />
+                  <line x1="0" y1="0" x2="0" y2="7" stroke={t.color} strokeWidth="1.1" opacity="0.5" />
+                </pattern>
+              ))}
             </defs>
 
             {!(origin && basemapOn) && <g data-export="skip">{gridLines()}</g>}
@@ -4756,6 +4929,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
+                if (m.kind === "easement") {
+                  const tcol = easementColor(m);
+                  const ecol = isSel ? PAL.accent : tcol;
+                  const proposed = m.status === "proposed";
+                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
+                  const cp = f2p(centroid(m.pts));
+                  const area = easementArea(m);
+                  return (
+                    <g key={m.id} style={{ cursor: tool === "select" ? "move" : "crosshair" }} onPointerDown={(e) => startMoveMarkup(e, m.id)}>
+                      <polygon points={ring} fill={`url(#pat-ease-${easementType(m.easeType).key})`} stroke={ecol} strokeWidth={isSel ? 2.4 : 1.8} strokeDasharray={proposed ? "7 5" : undefined} />
+                      {/* centerline shown for strip easements; flat-capped strip is the polygon above */}
+                      {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={ecol} strokeWidth={0.9} strokeDasharray="4 3" opacity={0.7} pointerEvents="none" />}
+                      {view.ppf > 0.05 && <text x={cp.x} y={cp.y} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{easementLabel(m)}{proposed ? " (proposed)" : ""}</text>}
+                      {isSel && view.ppf > 0.05 && <text x={cp.x} y={cp.y + 12} textAnchor="middle" fontSize="9" fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} sf · {(area / SQFT_PER_ACRE).toFixed(2)} ac</text>}
+                    </g>
+                  );
+                }
                 if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
                 if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
                 if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
@@ -4809,6 +5000,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {lp && all.length >= 2 && <text x={lp.x + 8} y={lp.y - 6} fontSize="11.5" fontFamily="ui-monospace, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{f0(total)}′</text>}
                   {mkPoly.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={PAL.accent} pointerEvents="none" />; })}
                 </>;
+              })()}
+              {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
+              {tool === "easement" && easeMode !== "parceledge" && easeDraft && (() => {
+                const live = cursor ? (easeDraft.pts.length ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                const all = live ? [...easeDraft.pts, live] : easeDraft.pts;
+                const tcol = easementType(easeType).color;
+                const ghost = easeMode === "centerline" && all.length >= 2 ? bufferPolyline(all, easeWidth)
+                  : (easeMode === "boundary" && all.length >= 3 ? all : null);
+                const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                const lp = live ? f2p(live) : null;
+                return <g data-export="skip" pointerEvents="none">
+                  {ghost && <polygon points={ghost.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill={tcol} fillOpacity={0.12} stroke={tcol} strokeWidth={1.4} strokeDasharray="5 4" />}
+                  <polyline points={s} fill="none" stroke={tcol} strokeWidth={2} strokeDasharray="5 4" />
+                  {easeDraft.pts.map((p, i) => { const q = f2p(p); return <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={tcol} />; })}
+                  {lp && all.length >= 2 && easeMode === "centerline" && <text x={lp.x + 8} y={lp.y - 6} fontSize="11" fontFamily="ui-monospace, monospace" fill={tcol} stroke="#fff" strokeWidth={3} paintOrder="stroke" fontWeight="700">{f0(pathLen(all))}′ · {easeWidth}′ wide</text>}
+                </g>;
+              })()}
+              {/* parcel-edge picker (NEW-3): clickable edge targets, highlighted run, ghost strip */}
+              {tool === "easement" && easeMode === "parceledge" && parcels.filter((p) => p.active !== false).map((pc) => (
+                <g key={`eepick${pc.id}`}>
+                  {pc.points.map((p, i) => {
+                    const q = f2p(p), r = f2p(pc.points[(i + 1) % pc.points.length]);
+                    const on = easeEdges && easeEdges.parcelId === pc.id && easeEdges.idx.includes(i);
+                    return <line key={i} x1={q.x} y1={q.y} x2={r.x} y2={r.y}
+                      stroke={on ? PAL.accent : "rgba(0,0,0,0.001)"} strokeWidth={on ? 4 : 12} strokeLinecap="round"
+                      style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); toggleEaseEdge(pc.id, i); }} />;
+                  })}
+                </g>
+              ))}
+              {tool === "easement" && easeMode === "parceledge" && easeEdges && (() => {
+                const pc = parcels.find((p) => p.id === easeEdges.parcelId);
+                if (!pc) return null;
+                const strip = buildParcelEdgeStrip(pc.points, easeEdges.idx, easeWidth);
+                if (!strip) return null;
+                const tcol = easementType(easeType).color;
+                return <polygon data-export="skip" pointerEvents="none" points={strip.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill={tcol} fillOpacity={0.14} stroke={tcol} strokeWidth={1.6} strokeDasharray="5 4" />;
               })()}
               {/* callouts & text boxes — sized in the drawing's frame (scale with
                   zoom) so they don't balloon when you zoom out. */}
@@ -5309,6 +5536,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
+          {/* Parcel-edge easement banner (NEW-3) — click edges to build a run, then create */}
+          {tool === "easement" && easeMode === "parceledge" && (
+            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              {easeEdges && easeEdges.idx.length ? `${easeEdges.idx.length} edge${easeEdges.idx.length > 1 ? "s" : ""} · ${easeWidth}′ inset` : "Click a parcel's edges to select a contiguous run"}
+              <button className="dbtn" style={{ ...btn(!!(easeEdges && easeEdges.idx.length)), padding: "5px 12px", opacity: (easeEdges && easeEdges.idx.length) ? 1 : 0.5, cursor: (easeEdges && easeEdges.idx.length) ? "pointer" : "default" }}
+                disabled={!(easeEdges && easeEdges.idx.length)} onClick={finishEaseEdges}>Create easement ⏎</button>
+              {easeEdges && <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setEaseEdges(null)}>Clear</button>}
+            </div>
+          )}
+
           {/* status bar — dark chrome */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: "rgba(25,22,19,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
@@ -5430,6 +5667,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </button>
             );
           })}
+
+          {railHdr("Easement")}
+          <div ref={easeAnchor} style={{ position: "relative" }}>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), flex: 1, flexDirection: "column", alignItems: "flex-start", gap: 1 }} onClick={() => selectTool("easement")}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="easement" /> Easement</span>
+                <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>{{ centerline: `centerline · ${easeWidth}′`, boundary: "boundary", parceledge: `parcel edge · ${easeWidth}′` }[easeMode]}</span>
+              </button>
+              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement"), width: 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-label="Easement options">▾</button>
+            </div>
+            <AnchoredMenu open={easeMenu} onClose={() => setEaseMenu(false)} anchorRef={easeAnchor} placement="left" width={248} panelStyle={menuPanel}>
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Input mode</div>
+              {[["centerline", "Centerline + width"], ["boundary", "Boundary polygon"], ["parceledge", "Offset from parcel edge"]].map(([k, label]) => (
+                <button key={k} style={menuItem(easeMode === k)} onClick={() => { setEaseMode(k); selectTool("easement"); setEaseMenu(false); }}>{label}</button>
+              ))}
+              {easeMode !== "boundary" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 8px 4px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: PAL.muted }}>Width</span>
+                  <NumInput style={{ ...numInput, width: 64 }} value={easeWidth} min={1} onCommit={(n) => setEaseWidth(n)} /> <span style={{ fontSize: 12, color: PAL.muted }}>ft</span>
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "8px 8px 6px", borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>Type (default)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 6px 4px" }}>
+                {EASEMENT_TYPES.map((ty) => (
+                  <button key={ty.key} title={ty.label} onClick={() => setEaseType(ty.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 7px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${easeType === ty.key ? ty.color : "#ddd6c5"}`, background: easeType === ty.key ? ty.color : "#fff", color: easeType === ty.key ? "#fff" : PAL.ink, fontWeight: easeType === ty.key ? 650 : 500 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: easeType === ty.key ? "#fff" : ty.color }} /> {ty.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
+                {easeMode === "parceledge" ? "Click a parcel's edges to select a contiguous run, then Enter." : easeMode === "boundary" ? "Click points; click the first dot (or double-click) to close." : "Click a centerline; double-click / Enter to finish."}
+              </div>
+            </AnchoredMenu>
+          </div>
 
           {railHdr("Shapes")}
           {MARKUP_TOOLS.map((id) => {
@@ -5613,8 +5884,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Select an element, markup, or callout on the canvas to edit its properties here.</div>
             </Section>
           )}
+          {/* selected easement — first-class attributes (NEW-1) */}
+          {leftPanel === "props" && selMarkup && selMarkup.kind === "easement" && (() => {
+            const e = selMarkup;
+            const t = easementType(e.easeType);
+            const area = easementArea(e);
+            const isStrip = e.mode !== "boundary";
+            const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
+            const txt = { ...numInput, width: 150, fontFamily: "inherit" };
+            const check = (label, val, key) => (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: PAL.ink, marginBottom: 7, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!val} onChange={(ev) => setSelEasement({ [key]: ev.target.checked })} /> {label}
+              </label>
+            );
+            return (
+              <Section title={`Easement · ${{ centerline: "Centerline strip", boundary: "Boundary", parceledge: "Parcel-edge strip" }[e.mode] || "Easement"}`} accent={t.color}>
+                {/* Type — shared portal popover so it never hides behind the rail / zoom rail */}
+                <Field label="Type">
+                  <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ opacity: 0.6 }}>▾</span>
+                  </button>
+                  <AnchoredMenu open={easeTypeMenu} onClose={() => setEaseTypeMenu(false)} anchorRef={easeTypeAnchor} placement="below-right" width={224} panelStyle={menuPanel}>
+                    {EASEMENT_TYPES.map((ty) => (
+                      <button key={ty.key} style={{ ...menuItem(e.easeType === ty.key), display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setSelEasement({ easeType: ty.key }); setEaseType(ty.key); setEaseTypeMenu(false); }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, background: ty.color }} /> {ty.label}
+                      </button>
+                    ))}
+                  </AnchoredMenu>
+                </Field>
+                <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
+                {isStrip && <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(e.width || 0)} min={1} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
+                <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
+                <Field label="Status">
+                  <span style={{ display: "flex", gap: 5, width: 150 }}>
+                    <button style={seg(e.status !== "proposed")} onClick={() => setSelEasement({ status: "existing" })}>Existing</button>
+                    <button style={seg(e.status === "proposed")} onClick={() => setSelEasement({ status: "proposed" })}>Proposed</button>
+                  </span>
+                </Field>
+                <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
+                  {check("Exclusive use", e.exclusive, "exclusive")}
+                  {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
+                  {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
+                </div>
+                <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
+                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                  <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete</button>
+                </div>
+              </Section>
+            );
+          })()}
           {/* selected markup shape — geometry + style */}
-          {leftPanel === "props" && selMarkup && (() => {
+          {leftPanel === "props" && selMarkup && selMarkup.kind !== "easement" && (() => {
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
@@ -6196,6 +6520,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {metricRow("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
             {metricRow("Detention %", `${f0(detPct)}%`)}
             {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+            {easeAll.length > 0 && <>
+              {metricRow("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
+              {metricRow("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "")}
+              {easePaveArea > 0 && metricRow("· Restrict paving", `${f0(easePaveArea)} sf`)}
+              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" }}>
+                Gross of overlaps; subtracted from buildable area by the future yield engine.
+              </div>
+            </>}
           </Section>
           )}
 
@@ -6421,7 +6753,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </label>
                 )}
                 <div style={{ flex: 1 }} />
-                <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={startPlotMetes}>Plot on canvas →</button>
+                <button style={{ ...chip, padding: "8px 13px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(true)} title="Spawn a first-class Easement object (type/holder/etc. editable afterward in the Element panel)">Plot as easement →</button>
+                <button style={{ ...btn(true), padding: "8px 15px", opacity: calls.length ? 1 : 0.5 }} disabled={!calls.length} onClick={() => startPlotMetes(false)}>Plot on canvas →</button>
               </div>
               {calls.length > 0 && (
                 <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
