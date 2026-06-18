@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
+import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
@@ -16,7 +17,7 @@ const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).s
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
-export default function App() {
+export default function App({ shellModule, onShellSwitch, authControl } = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
@@ -297,22 +298,35 @@ export default function App() {
 
   return (
     <>
-      <div style={{ display: mode === "map" ? "block" : "none", height: "100%" }}>
-        <MapFinder
-          visible={mode === "map"}
-          overlays={overlays}
-          setOverlays={setOverlays}
-          layerStatus={layerStatus}
-          setLayerStatus={setLayerStatus}
-          sites={siteGroups}
-          activeSiteId={activeSiteId}
-          onOpenSite={openSite}
-          onDeleteSite={deleteSiteGroup}
-          onSetStatus={setSiteStatus}
-          onUseParcels={newSiteFromMap}
-          onSkip={newBlankSite}
+      {/* Map mode — AppHeader sits above MapFinder's own toolbar */}
+      <div style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+        <AppHeader
+          module={shellModule || "site-planner"}
+          onSwitch={onShellSwitch}
+          authControl={authControl}
+          onDashboard={null}
+          centerContent={null}
+          saveSlot={null}
+          toolbarContent={null}
         />
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <MapFinder
+            visible={mode === "map"}
+            overlays={overlays}
+            setOverlays={setOverlays}
+            layerStatus={layerStatus}
+            setLayerStatus={setLayerStatus}
+            sites={siteGroups}
+            activeSiteId={activeSiteId}
+            onOpenSite={openSite}
+            onDeleteSite={deleteSiteGroup}
+            onSetStatus={setSiteStatus}
+            onUseParcels={newSiteFromMap}
+            onSkip={newBlankSite}
+          />
+        </div>
       </div>
+      {/* Plan mode — SitePlanner renders its own AppHeader */}
       <div style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && (
           <SitePlanner
@@ -334,17 +348,19 @@ export default function App() {
             onRenamePlan={renamePlan}
             onSiteDropped={handleSiteDropped}
             onSiteSaved={refreshSites}
+            shellModule={shellModule}
+            onShellSwitch={onShellSwitch}
+            authControl={authControl}
           />
         )}
       </div>
-      {/* account control is global in the shell header (top-right) */}
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
         </div>
       )}
       {cloudError && (
-        <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
@@ -354,7 +370,7 @@ export default function App() {
           are logged-out (legacy) sites not yet in the cloud account. The copy-up is
           non-destructive (originals kept); this is the bridge between the two stores. */}
       {mode === "map" && signedInUid && !hideMigrate && (pendingLegacy > 0 || migrateMsg) && (
-        <div role="status" style={{ position: "fixed", top: cloudError ? 92 : 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="status" style={{ position: "fixed", top: cloudError ? 136 : 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           {migrateMsg ? (
             <span style={{ flex: 1 }}>{migrateMsg}</span>
           ) : (
@@ -396,7 +412,7 @@ export default function App() {
       {/* In-planner migration decision banner — shown when the user opened a legacy site
           via "Open →" in the migration modal. Stays until they Save or Discard. */}
       {mode === "plan" && (migrationPendingSiteId || migrationSaveMsg) && (
-        <div role="status" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="status" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           {migrationSaveMsg ? (
             <>
               <span style={{ flex: 1 }}>{migrationSaveMsg}</span>

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 
 const PAL = { bg: "#efeadf", chrome: "#14110e", ink: "#2c2a26", muted: "#8a8473", ember: "#e8590c", line: "#e7e2d6" };
 
-export default function Scheduler() {
+export default function Scheduler({ shellModule, onShellSwitch, authControl } = {}) {
   useEffect(() => {
     window.location.href = "/sequence/";
   }, []);
