@@ -69,6 +69,7 @@ const ppfToZoom = (ppf, lat) =>
 
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
+const POND_ADD_FILL_DEFAULT = "#c8e4f0"; // B157: default "added area" fill — lighter tint, distinct from existing basin
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
@@ -3859,7 +3860,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
-    const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
+    // In pond expansion mode the two zones may have different fills — use each zone's color.
+    let _fillForInk;
+    if (d.added) _fillForInk = d.el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
+    else if (d.el.det?.baseline) _fillForInk = d.el.det?.existFill ?? elStyle(d.el, settings).fill;
+    else _fillForInk = elStyle(d.el, settings).fill;
+    const ink = leader ? PAL.ink : labelInk(_fillForInk);
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
@@ -6265,6 +6271,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {warns.map((w, i) => (
                             <div key={i} style={{ fontSize: 10.5, color: "#b45309", lineHeight: 1.4, marginTop: 5 }}>⚠ {w}</div>
                           ))}
+                          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 7 }}>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
+                              <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#9fc4d4")}
+                                onChange={(e) => setDet({ existFill: e.target.value })}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
+                              <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
+                                onChange={(e) => setDet({ addFill: e.target.value })}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                          </div>
                           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                             <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
                             <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
@@ -6949,11 +6970,16 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+    // B157: in expansion mode paint the two zones with distinct fills —
+    // full shape in addFill (new ground color), then baseline on top in existFill.
+    const existF = el.det?.existFill ?? st.fill;
+    const addF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>
-        <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
+        <path d={dPath} fill={ghostPath ? addF : st.fill} fillOpacity={fillOp} stroke="none" />
+        {ghostPath && <path d={ghostPath} fill={existF} fillOpacity={fillOp} stroke="none" pointerEvents="none" />}
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
         {ghostPath && ghostEl("ghost")}
@@ -6966,8 +6992,13 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
   const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
+  // B157: in expansion mode, split the rect pond into two fill zones (existing vs added).
+  const rectExistF = el.det?.existFill ?? st.fill;
+  const rectAddF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : st.fill} fillOpacity={fillOp}
     stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
+  // Baseline ghost fill (existing basin) sits on top of addFill rect; stroke layer added below.
+  if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={fillOp} stroke="none" pointerEvents="none" /></g>);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.
