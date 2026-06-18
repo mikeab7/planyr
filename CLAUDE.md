@@ -322,6 +322,26 @@ filing (`/server`). Keep these separate when reasoning about what exists.
 Deeper specifics behind the summaries above. Paths reflect the monorepo layout
 (`src/workspaces/site-planner/…`).
 
+## Playwright / ui-audit in the sandbox
+All screenshot harnesses live in `ui-audit/` and target the Vite preview server on
+`:4173` (`npm run build && npx vite preview`). One non-obvious sandbox quirk:
+
+**Always pass `--ignore-certificate-errors` to Chromium.** The sandbox routes
+outbound HTTPS through a TLS inspection proxy. Node.js trusts it (system cert store);
+Chromium does not — every tile request fails with `ERR_CERT_AUTHORITY_INVALID` and
+the basemap renders gray. The flag is already set in `capture.mjs` and
+`verify-markers.mjs`. Add it to any new Playwright harness you write:
+```js
+chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] })
+```
+The allowed-domain list (`*.arcgisonline.com`, etc.) is configured at the environment
+level and works fine once Chromium trusts the proxy cert.
+
+**`statusOf(site)` reads `site.status` (top level), not `site.data.status`.** When
+seeding localStorage for verification, put `status: "active"` directly on the site
+object. Sites loaded through `loadSitesList()` → `createSiteModel()` get the field
+normalized automatically, but raw localStorage seeds bypass that path.
+
 ## Stack
 Vite + React 18, plain JS/JSX, inline styles, the `PAL` drafting palette, terse
 comments. Map = Leaflet + esri-leaflet. Planner canvas = hand-rolled SVG. **Units:
