@@ -189,6 +189,29 @@ export function largestRingLngLat(feature) {
   return ringClosed(best) ? best.slice(0, -1) : best;
 }
 
+/* EVERY outer-boundary ring of a (possibly MULTIPART) polygon feature, each as an
+ * open [[lon,lat], ...] array (4326). A parcel can legitimately be several separate
+ * pieces under one account — e.g. "TRS 3 & 5" is two physically separate tracts —
+ * and the largest-ring-only pick (B36c) silently dropped the smaller piece: a click
+ * in it registered the account but highlighted (and imported) only the biggest
+ * tract, so the clicked piece "wouldn't select" and a neighbour appeared to. This
+ * returns all outer parts so callers can highlight + plan every tract. Holes (rings
+ * wound opposite to the outers) are excluded — the planner parcel model has no
+ * donut support and the prior behaviour already ignored them. Returns [] if none. */
+export function outerRingsLngLat(feature) {
+  const rings = feature?.geometry?.rings;
+  if (!rings || !rings.length) return [];
+  // Outer rings and holes wind oppositely (ArcGIS: outers clockwise, holes CCW);
+  // the largest |area| ring is always an outer boundary, so its winding sign marks
+  // the outers. Keep same-sign, non-degenerate rings; drop the opposite-sign holes.
+  const areas = rings.map(ringArea);
+  let outerSign = 1, bestA = -1;
+  areas.forEach((a) => { if (Math.abs(a) > bestA) { bestA = Math.abs(a); outerSign = Math.sign(a) || 1; } });
+  return rings
+    .filter((_, i) => areas[i] !== 0 && Math.sign(areas[i]) === outerSign)
+    .map((r) => (ringClosed(r) ? r.slice(0, -1) : r));
+}
+
 // Feet per degree using the Web-Mercator sphere base (2πR/360 ≈ 365223 ft) for
 // BOTH axes — so the local equirectangular feet model is a linearization of
 // spherical Mercator and overlays a Web-Mercator aerial basemap with no axis

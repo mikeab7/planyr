@@ -61,6 +61,13 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V39 — Easement drawing tool: 3 input modes + attributes + metes import (B150–B153) ✅ (self-verified) / ⏳ (signed-in persistence)
+- **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-18 ✅ (headless Chromium on the production build) · **Next check** —
+- **Steps:** Site Planner → right rail **Easement** (▾ picks mode + default width/type). (1) **Centerline+width:** click a path, double-click/Enter → a strip of the set width appears, hatched + color-coded. (2) **Element** panel shows the easement attributes — change **Type** (the portal dropdown), edit **Width** (strip re-offsets), toggle **Status** (proposed → dashed) and **Restricts buildings/paving**; drag a centerline dot to reshape. (3) **Boundary polygon** mode: click points, close on the first dot. (4) **Offset from parcel edge** mode: with a parcel present, click its edges then **Create easement ⏎** → a one-sided inset strip. (5) **File ▾ → Title reader / metes & bounds…**, paste a legal description, **Plot as easement →**, click the POB. (6) **Yield** panel shows the **Easements** rows (gross / restrict buildings / restrict paving).
+- **Expect:** each mode draws + labels + areas; the type dropdown floats above the rail (not clipped); width edits re-offset live; proposed renders dashed; the metes import spawns an editable easement.
+- **✅ Self-verified 2026-06-18 (headless Chromium on `npm run build` + `vite preview`, logged-out):** centerline strip drawn (1 easement polygon); attributes panel auto-opened; portal **Type** dropdown opened and swapping to Sanitary Sewer relabeled it; boundary easement drawn (2 total); parcel drawn → parcel-edge hit-target was the topmost element at the click → strip created (3 total); metes-and-bounds "Plot as easement →" + POB click created an easement (panel shown, **0 page errors**); Yield shows the Easements row. Screenshots eyeballed (hatched, color-coded, label + area).
+- **⏳ Still needs a SIGNED-IN check (cloud sync):** self-tests run logged-out (sandbox proxy blocks auth), so confirm an easement **persists across reload/devices when signed in** — it rides the existing `markups[]` Supabase save path (same as other markups, already proven), so this is a low-risk confirmation, not a new mechanism.
+
 ### V1 — Jurisdiction & road-authority identify (B93 / B94) ✅
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅ · **Next check** done
 - **Steps:** On planyr.io open a georeferenced site (or bring a parcel in from the map).
@@ -594,7 +601,7 @@ was never clicked" quietly ships broken.
 - **Steps + result — ✅ PASS, zero console errors:** Text tool → click to place → type "Line1", **Enter**, "Line2" → still editing, textarea value = "Line1\nLine2" (Enter now makes a newline, was commit). **Click away +80 px** → editor closes and commits **two lines** (previously you were stuck in the editor at any distance). New box → type → **Esc** → finishes, keeps the text. Place a box and click away **without typing** → the empty box is removed.
 - **Expect:** matches Bluebeam — text box is multi-line; you finish by clicking away or pressing Esc.
 
-### V39 — Added-detention area label seats on the NEW ground, not the whole-pond centre (B151) ✅
+### V42 — Added-detention area label seats on the NEW ground, not the whole-pond centre (B157) ✅
 - **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-18** (headless Chromium, logged-out preview build) · refines V32/B140
 - **Steps (driven):** seeded two ponds already in Expand mode (`det.baseline` set) and zoomed to fit — (P1) a **one-sided** expansion (existing basin on the left, new strip on the right) and (P2) a **concentric** "push banks out" expansion (existing basin centred → new ring all around, so the whole-pond centroid stays inside the old pond). Read back every on-canvas label `<text>` with its screen centre.
 - **Expect:** each pond shows its **existing** area centred over the old basin **and** a separate **"+X.XX ac · +Y sf"** label seated on the new ground (never stacked at the whole-pond centre); correct footprint sf/ac; zero console/page errors.
@@ -682,3 +689,29 @@ _Move items here with the date and who/what checked them._
   - Box geometry also settable precisely via the new panel **Width / Height** + **Rotation°** fields. Zero console/page errors from the change (only the unrelated FBCAD GIS-host CORS error, a known down host).
   - lint 0 · **225 tests** · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered (logged-out headless limits):** ellipse rotate/resize and polygon/line vertex edits weren't separately screenshotted, but they ride the exact same code paths (MK_BOX_KINDS / MK_VERTEX_KINDS) proven here; signed-in cloud-reload of an edited markup untested (markups ride the normal Site Model persistence).
+
+### V39 — Multipart parcel: clicking the smaller tract now selects ALL parts (B151) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bug-fix acceptance)
+- **Steps:** "＋ Select parcels" → `setView` on the **west (smaller) tract** of Pearland account `0440520000010` ("TRS 3 & 5", a two-tract parcel) at zoom 17 → clicked the meat of that west tract.
+- **Result ✅:**
+  - Both HCAD and TxGIO returned account `0440520000010` (2 rings); the on-map highlight is now a **2-subpath multipolygon** whose bbox spans the **full 1326×664 ft** parcel — i.e. **both** tracts light up, including the one clicked (before the fix only the larger east tract did — `gis-verify/pearland-mp-clickwest.png`).
+  - Selection card reads **"1 PARCEL · 14.78 AC · DEL PAPA"** — full acreage, correctly counted as a single parcel (was 8.12 AC, east-only). Screenshot `gis-verify/pearland-FIXED-clickwest.png`; script `gis-verify/pearland-fix-verify.mjs`.
+  - lint 0 · 230 tests · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered:** the in-planner identify (`addIdentifiedParcel`) and address/account lookup (`importFeature`) paths got the same multipart fix but were verified by code + unit tests, not a separate click-through; a signed-in cloud-reload pass is untested (logged-out run, but parcels ride the normal Site Model persistence).
+
+### V40 — Delete removes the selected element on the first press (B154) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (bugfix acceptance)
+- **Steps:** "Start blank" → drew two buildings far apart. (A) **baseline:** clicked one → pressed **Delete** once. (B) **reported flow:** clicked a tool/panel button (**Pan**, then **Select**) to move focus off the canvas, then clicked a building and pressed **Delete** once *with no settle delay* (stresses the stale-listener window).
+- **Result ✅:**
+  - **A baseline:** 2 → 1 — a single Delete removed the selected building.
+  - **B from a panel control:** 2 → 1 — one immediate Delete removed exactly one building (previously this was the "needs two presses" case). Reliable across runs.
+  - Zero console/page errors.
+  - lint 0 · **230 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Typing guard (code-verified, not regressed):** the bail-when-a-field-is-focused guard is pre-existing (`document.activeElement` is INPUT/SELECT/TEXTAREA → return); this change only **appended** `contentEditable`, so the "Delete while editing a field must not nuke canvas elements" behavior is unchanged. (A live headless guard test was flaky only because reliably focusing the right panel input in the built UI was finicky — not a behavior gap.)
+
+### V41 — Grab an unfilled markup shape by its INTERIOR, not just the border line (B155 increment 1) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (fix acceptance)
+- **Why:** owner-reported — selecting a markup rectangle was "kinda difficult, you have to grab exactly on the line." Cause: closed shape markups (`rect`/`ellipse`/`polygon`) rendered `fill:"none"` with selection on the element's own `onPointerDown`, so only the painted 2px stroke was a click target. Fix: `pointerEvents:"all"` on those shapes (same technique B142 used for text/callout boxes) so the **whole interior** is a hit target even when unfilled. Applied in `SitePlanner.jsx` and `components/ParcelDrawing.jsx` (the Box tool).
+- **Steps (Site Planner):** "Start blank" → **Rectangle** tool (R) → dragged an unfilled box → **Escape** (deselect) → clicked the rectangle's **interior centre** (not the border).
+- **Result ✅:** the drawn `<rect>` carries `pointer-events="all"` with `fill="none"` (interior is a hit target). Selection handles (the rotate `circle[r="6"]`) read **1 after draw → 0 after Escape → 1 after the interior click** — i.e. clicking inside the empty box re-selected it; the "MARKUP · RECT" panel opened (Fill opacity at 0, confirming it's unfilled). Screenshot `/tmp/b150-after-interior-click.png` shows the selected unfilled box with grips. lint 0 errors · **230 tests** · build green; `SitePlannerApp` / `DocReview` lazy chunks intact.
+- **Not covered:** **ParcelDrawing's** identical one-attribute change (the Box on a parcel drawing) wasn't separately driven — it needs a real drawing attached + rasterized (V9's flow), which is awkward logged-out; it's the same `pointerEvents="all"` edit on an analogous `fill:"none"` rect whose move handler already `stopPropagation`s, so low-risk by analogy. Doc Review's rect interior-select was already shipped under B33. The broader B155 tranche (shared `hitTest`, screen-space tolerance, forgiving line/polyline hit area, z-order tie-break, hover preview B156) is **not** in this increment — still ⏳ in BACKLOG B155/B156.

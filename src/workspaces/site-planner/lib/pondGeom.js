@@ -1,4 +1,4 @@
-// Pond-expansion geometry (B151) — where to anchor the "added detention area" map label.
+// Pond-expansion geometry (B157) — where to anchor the "added detention area" map label.
 //
 // When you enlarge an existing pond (B139), the new ground is the EXPANDED footprint minus
 // the existing/baseline footprint. We want the "+X ac · +Y sf" label to sit ON that new area

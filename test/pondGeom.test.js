@@ -6,7 +6,7 @@ const rect = (x0, y0, x1, y1) => [
   { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
 ];
 
-describe("pondGeom — added-detention label placement (B151)", () => {
+describe("pondGeom — added-detention label placement (B157)", () => {
   it("pointInRing: even-odd inside/outside", () => {
     const r = rect(0, 0, 100, 100);
     expect(pointInRing({ x: 50, y: 50 }, r)).toBe(true);
