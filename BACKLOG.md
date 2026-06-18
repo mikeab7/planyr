@@ -22,6 +22,13 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B159 — Task-names visibility toggle on PDF/Print export `[Scheduler / UI]` (feature)  *(arrived as "NEW-1"; minted B159 — highest B# across both files is B158, so this is the real next free ID)*
+`[ ]` On the PDF/Print Exhibit export panel, task names in the Gantt preview are currently not shown (or shown inconsistently). **Target:** task names visible by default on export, with a toggle in the export sidebar to suppress them.
+- **Default on.** Task names should render on the exported Gantt bars/rows by default — the toggle starts checked.
+- **Toggle placement.** Add a labeled control (e.g. "Task names") in the export sidebar alongside the existing controls (Gantt, Today line, Dep. arrows). On = names visible; off = names suppressed from the exported output only. The live schedule display is never affected.
+- **Persistence.** Toggle state persists for the session (or per-project export preference if that pattern already exists in the codebase).
+- **Acceptance:** default export includes task names; unchecking the toggle produces an export with names removed; the live Gantt is unchanged in both states.
+
 ### B158 — Replace inline ✕ delete button with right-click context menu on site list rows `[Site Planner / UI]` (feature)  *(arrived as "NEW-1"; minted B158 — highest B# across both files is B157 in BACKLOG-DONE.md, so this is the real next free ID)*
 `[ ]` **Current:** hovering a site row in the YOUR SITES panel reveals an inline ✕ button directly on the row. **Target:** no inline delete affordance at all — right-clicking any site row opens a small two-item context menu: **Rename** (triggers the existing inline-edit rename flow for that site) and **Delete** (triggers the existing delete confirmation flow). The menu dismisses on click-outside, Escape, or selecting either option. The ⊕ locate/crosshair icon visible on hover may stay if it serves a separate purpose — confirm before removing; only the ✕ is being replaced.
 - **Implementation notes:**
