@@ -731,6 +731,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
+  const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
@@ -1119,7 +1120,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
-  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft); });
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft || numEdit); });
   // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
   // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
   // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
@@ -2392,13 +2393,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (ovCalib.kind === "trace") {
       if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
       const measuredFt = dist(pts[0], pts[1]);
-      const v = window.prompt("Real length of that line on the drawing (ft):", "");
       setOvCalib(null);
-      const realFt = v == null ? NaN : +v;
-      const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
-      if (!patch) return;
-      pushHistory();
-      setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+      setNumEdit({ fx: pts[1].x, fy: pts[1].y, value: "", onCommit: (realFt) => {
+        const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
+        if (!patch) return;
+        pushHistory();
+        setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+      } });
     } else {
       // align: collect alternating drawing→map points (pairs); apply on demand (≥2 pairs)
       setOvCalib({ ...ovCalib, pts });
@@ -3039,14 +3040,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const editDimWidth = (id) => {
+  const editDimWidth = (id, e) => {
     const el = els.find((x) => x.id === id);
     if (!el || el.type !== "road") return;
-    const v = window.prompt("Road travel width (feet):", String(Math.round(roadTravel(el))));
-    if (v == null) return;
-    const n = parseFloat(v);
-    if (Number.isFinite(n) && n > 0) setRoadTravel(el, n);
+    const fp = e ? p2f(e.clientX, e.clientY) : { x: el.cx, y: el.cy };
+    setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(roadTravel(el))), onCommit: (n) => { if (n > 0) setRoadTravel(el, n); } });
   };
+  // Inline numeric editor — NEVER a dialog box (owner rule 2026-06-17). Commit on Enter / click-away,
+  // cancel on Esc; each opener says where to place it (feet) + what to do with the entered value.
+  const commitNumEdit = () => {
+    if (!numEdit) return;
+    const n = parseFloat(numEdit.value);
+    const cb = numEdit.onCommit;
+    setNumEdit(null);
+    if (Number.isFinite(n)) cb(n);
+  };
+  const cancelNumEdit = () => setNumEdit(null);
   const startEdgeResize = (e, id, nx, ny) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -4513,7 +4522,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <g data-export="skip">{pts.map((a, i) => {
                   const b = pts[(i + 1) % pts.length], mid = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
                   return (
-                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const v = window.prompt(`Setback for edge ${i + 1} (ft):`, String(sb[i])); if (v != null && v.trim() !== "" && !isNaN(+v)) setEdgeSetback(selParcel, i, +v); }}>
+                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (n) => setEdgeSetback(selParcel, i, n) }); }}>
                       <rect x={mid.x - 13} y={mid.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
                       <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{f0(sb[i])}′</text>
                     </g>
@@ -4722,6 +4731,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       placeholder="Type; click away or Esc to finish"
                       maxLength={2000}
                       style={{ width: W, height: H, resize: "none", border: `2px solid ${PAL.accent}`, borderRadius: 4, padding: "5px 7px", fontSize: fontPx, lineHeight: st.lineHeight, textAlign: st.align, fontWeight: st.bold ? 700 : 500, fontStyle: st.italic ? "italic" : "normal", textDecoration: st.underline ? "underline" : "none", color: st.color, background: st.fill, outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                  </foreignObject>
+                );
+              })()}
+
+              {/* Inline numeric editor — road width / per-edge setback / overlay trace length. NEVER a dialog box. */}
+              {numEdit && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitNumEdit(); }} />}
+              {numEdit && (() => {
+                const bp = f2p({ x: numEdit.fx, y: numEdit.fy });
+                const W = 96, H = 30;
+                return (
+                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
+                    <input autoFocus type="number" value={numEdit.value}
+                      onChange={(e) => setNumEdit((s) => ({ ...s, value: e.target.value }))}
+                      onBlur={commitNumEdit}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "#fff", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -6499,7 +6525,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dimSel = isSel && tool === "select"; // interactive (drag/edit) only when the element is selected
     const isRoad = el.type === "road";
     const numHandlers = dimSel && isRoad // road number: click to edit width (and don't start a drag)
-      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id); } }
+      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
       : {};
     const dim = [];
     if (horizLong) { // short side is vertical (h)
