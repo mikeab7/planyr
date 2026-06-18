@@ -1,7 +1,13 @@
-/* Project Scheduling workspace — placeholder. Lazy-loaded by the shell. */
+/* Sequence Planyr workspace — launches the scheduler app at /sequence/ */
+import { useEffect } from "react";
+
 const PAL = { bg: "#efeadf", chrome: "#14110e", ink: "#2c2a26", muted: "#8a8473", ember: "#e8590c", line: "#e7e2d6" };
 
 export default function Scheduler() {
+  useEffect(() => {
+    window.location.href = "/sequence/";
+  }, []);
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, background: PAL.bg, fontFamily: "system-ui, sans-serif" }}>
       <div style={{ width: 44, height: 44, borderRadius: 12, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center" }}>
@@ -16,8 +22,8 @@ export default function Scheduler() {
         </svg>
       </div>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontWeight: 800, fontSize: 17, color: PAL.ink, letterSpacing: "-0.01em" }}>Project Scheduling</div>
-        <div style={{ fontSize: 13, color: PAL.muted, marginTop: 5 }}>Coming soon</div>
+        <div style={{ fontWeight: 800, fontSize: 17, color: PAL.ink, letterSpacing: "-0.01em" }}>Sequence Planyr</div>
+        <div style={{ fontSize: 13, color: PAL.muted, marginTop: 5 }}>Launching…</div>
       </div>
     </div>
   );
