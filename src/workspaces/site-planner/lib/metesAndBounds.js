@@ -102,17 +102,23 @@ export function pathCloses(pts, tol) {
 // The misclosure (gap from last point back to POB), in feet.
 export const misclosure = (pts) => (pts.length >= 2 ? dist2(pts[0], pts[pts.length - 1]) : 0);
 
-/* Buffer an open polyline into a closed strip ring of total width `w` (a corridor
- * easement). Offsets each vertex by ±w/2 along the averaged segment normals
- * (miter join, clamped) and returns left-side-forward + right-side-back ring. */
-export function bufferPolyline(pts, w) {
-  if (pts.length < 2) return null;
-  const hw = w / 2;
+/* Offset an OPEN polyline by `dist` feet along its left-hand normal (a NEGATIVE
+ * `dist` offsets to the right side). Joins are mitered and the miter is clamped so
+ * a tight corner doesn't blow out into a spike. Returns a polyline with one point
+ * per input vertex (or null if < 2 points).
+ *
+ * This is the SHARED offset primitive behind every easement/setback strip: the
+ * symmetric corridor (bufferPolyline, ±half each side) and the one-sided
+ * parcel-edge / building-line strip (offset to a single side). Built once here so
+ * the centerline tool, the parcel-edge tool, and a future setback tool reuse the
+ * exact same corner math (NEW-1 / NEW-3). */
+export function offsetPolyline(pts, dist) {
+  if (!pts || pts.length < 2) return null;
   const seg = [];
   for (let i = 1; i < pts.length; i++) {
     const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
     const len = Math.hypot(dx, dy) || 1;
-    seg.push({ nx: -dy / len, ny: dx / len }); // left normal
+    seg.push({ nx: -dy / len, ny: dx / len }); // left normal of this segment
   }
   const normalAt = (i) => {
     const a = seg[Math.max(0, i - 1)], b = seg[Math.min(seg.length - 1, i)];
@@ -124,12 +130,25 @@ export function bufferPolyline(pts, w) {
     const scale = Math.min(1 / Math.max(0.3, Math.sqrt((1 + cos) / 2)), 3);
     return { nx: nx * scale, ny: ny * scale };
   };
-  const left = [], right = [];
-  for (let i = 0; i < pts.length; i++) {
-    const n = normalAt(i);
-    left.push({ x: pts[i].x + n.nx * hw, y: pts[i].y + n.ny * hw });
-    right.push({ x: pts[i].x - n.nx * hw, y: pts[i].y - n.ny * hw });
-  }
+  return pts.map((p, i) => { const n = normalAt(i); return { x: p.x + n.nx * dist, y: p.y + n.ny * dist }; });
+}
+
+/* Buffer an open polyline into a closed strip ring of total width `w` (a corridor
+ * easement). Offsets each vertex by ±w/2 along the averaged segment normals
+ * (miter join, clamped) and returns left-side-forward + right-side-back ring, with
+ * flat end caps.
+ *
+ * ASYMMETRY-READY: pass `{ leftW, rightW }` to offset a different distance on each
+ * side of the centerline. The default (no opts) stays the exact ±w/2 symmetric
+ * strip every existing caller relies on, so a future asymmetric-easement UI needs
+ * no geometry rework — just supply the two half-widths (NEW-1 engine note). */
+export function bufferPolyline(pts, w, opts = {}) {
+  if (!pts || pts.length < 2) return null;
+  const leftW = opts.leftW != null ? opts.leftW : w / 2;
+  const rightW = opts.rightW != null ? opts.rightW : w / 2;
+  const left = offsetPolyline(pts, leftW);
+  const right = offsetPolyline(pts, -rightW);
+  if (!left || !right) return null;
   return [...left, ...right.reverse()];
 }
 

@@ -61,6 +61,13 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V39 — Easement drawing tool: 3 input modes + attributes + metes import (B150–B153) ✅ (self-verified) / ⏳ (signed-in persistence)
+- **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-18 ✅ (headless Chromium on the production build) · **Next check** —
+- **Steps:** Site Planner → right rail **Easement** (▾ picks mode + default width/type). (1) **Centerline+width:** click a path, double-click/Enter → a strip of the set width appears, hatched + color-coded. (2) **Element** panel shows the easement attributes — change **Type** (the portal dropdown), edit **Width** (strip re-offsets), toggle **Status** (proposed → dashed) and **Restricts buildings/paving**; drag a centerline dot to reshape. (3) **Boundary polygon** mode: click points, close on the first dot. (4) **Offset from parcel edge** mode: with a parcel present, click its edges then **Create easement ⏎** → a one-sided inset strip. (5) **File ▾ → Title reader / metes & bounds…**, paste a legal description, **Plot as easement →**, click the POB. (6) **Yield** panel shows the **Easements** rows (gross / restrict buildings / restrict paving).
+- **Expect:** each mode draws + labels + areas; the type dropdown floats above the rail (not clipped); width edits re-offset live; proposed renders dashed; the metes import spawns an editable easement.
+- **✅ Self-verified 2026-06-18 (headless Chromium on `npm run build` + `vite preview`, logged-out):** centerline strip drawn (1 easement polygon); attributes panel auto-opened; portal **Type** dropdown opened and swapping to Sanitary Sewer relabeled it; boundary easement drawn (2 total); parcel drawn → parcel-edge hit-target was the topmost element at the click → strip created (3 total); metes-and-bounds "Plot as easement →" + POB click created an easement (panel shown, **0 page errors**); Yield shows the Easements row. Screenshots eyeballed (hatched, color-coded, label + area).
+- **⏳ Still needs a SIGNED-IN check (cloud sync):** self-tests run logged-out (sandbox proxy blocks auth), so confirm an easement **persists across reload/devices when signed in** — it rides the existing `markups[]` Supabase save path (same as other markups, already proven), so this is a low-risk confirmation, not a new mechanism.
+
 ### V1 — Jurisdiction & road-authority identify (B93 / B94) ✅
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅ · **Next check** done
 - **Steps:** On planyr.io open a georeferenced site (or bring a parcel in from the map).
@@ -677,7 +684,16 @@ _Move items here with the date and who/what checked them._
   - lint 0 · **225 tests** · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered (logged-out headless limits):** ellipse rotate/resize and polygon/line vertex edits weren't separately screenshotted, but they ride the exact same code paths (MK_BOX_KINDS / MK_VERTEX_KINDS) proven here; signed-in cloud-reload of an edited markup untested (markups ride the normal Site Model persistence).
 
-### V39 — Delete removes the selected element on the first press (B151) ✅
+### V39 — Multipart parcel: clicking the smaller tract now selects ALL parts (B151) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bug-fix acceptance)
+- **Steps:** "＋ Select parcels" → `setView` on the **west (smaller) tract** of Pearland account `0440520000010` ("TRS 3 & 5", a two-tract parcel) at zoom 17 → clicked the meat of that west tract.
+- **Result ✅:**
+  - Both HCAD and TxGIO returned account `0440520000010` (2 rings); the on-map highlight is now a **2-subpath multipolygon** whose bbox spans the **full 1326×664 ft** parcel — i.e. **both** tracts light up, including the one clicked (before the fix only the larger east tract did — `gis-verify/pearland-mp-clickwest.png`).
+  - Selection card reads **"1 PARCEL · 14.78 AC · DEL PAPA"** — full acreage, correctly counted as a single parcel (was 8.12 AC, east-only). Screenshot `gis-verify/pearland-FIXED-clickwest.png`; script `gis-verify/pearland-fix-verify.mjs`.
+  - lint 0 · 230 tests · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered:** the in-planner identify (`addIdentifiedParcel`) and address/account lookup (`importFeature`) paths got the same multipart fix but were verified by code + unit tests, not a separate click-through; a signed-in cloud-reload pass is untested (logged-out run, but parcels ride the normal Site Model persistence).
+
+### V40 — Delete removes the selected element on the first press (B154) ✅
 - **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (bugfix acceptance)
 - **Steps:** "Start blank" → drew two buildings far apart. (A) **baseline:** clicked one → pressed **Delete** once. (B) **reported flow:** clicked a tool/panel button (**Pan**, then **Select**) to move focus off the canvas, then clicked a building and pressed **Delete** once *with no settle delay* (stresses the stale-listener window).
 - **Result ✅:**
