@@ -22,6 +22,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B163 — Project `progress_pct` field on data model `[Site Planner]` (task)
+`[ ]` Follow-on to B161 (Path A). Add `progress_pct SMALLINT NOT NULL DEFAULT 0 CHECK (progress_pct BETWEEN 0 AND 100)` to the projects/sites data model and wire it to the building marker's arc. Exact storage: either a column on the `sites` Supabase table via migration, or a field in the `Site Model` `data` jsonb. UI for editing (slider or inline input on the map pin or site list) TBD — scope separately. Until then, the arc continues to derive from status (Path B, B161).
+
+### B162 — Suppress street labels at low map zoom `[Site Planner / map]` (feature)
+`[x]` Street labels should be hidden below zoom 14 and visible at zoom 14+. The basemap uses a separate Esri Reference/World_Transportation raster overlay (`LABELS_TILES`) — Case B from the spec. Implementation: zoom-driven `layer.setOpacity()` on `zoomend`, initial opacity set from live map zoom when the layer is created.
+> Done 2026-06-18 (branch `claude/charming-fermat-f9ktvp`). Added zoom-driven `useEffect` (`[zoom]` dep) that calls `layer.setOpacity(zoom >= 14 ? 0.4 : 0)` on the `labelsRef.current` tile layer. Initial opacity in the labels `useEffect` reads `map.getZoom()` directly (not the React state) to avoid a one-frame flash. Browser-verified: labels layer opacity transitions from `0` (zoom 11) → `0.4` (after 8× zoom-in) → `0` (after 8× zoom-out) correctly.
+
+### B161 — Building + progress arc project markers `[Site Planner / map]` (feature)
+`[x]` Replace all project map markers with a gabled industrial building silhouette (SVG path `M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z`, viewBox `0 0 28 36`) with a clockwise progress arc ring (cx=14, cy=19, r=11, C=69.12, dashOffset=17.28 for 12-o'clock start). Status variants: Active=amber #EF9F27 + 60% arc, Complete=teal #1D9E75 + full ring + white checkmark, On hold=gray #888780 + 30% frozen arc + white pause bars, Prospect/pursuit=dashed blue #378ADD outline + 10% nub, Dead=muted gray + 0% arc. Dock doors suppressed when building has no fill (pursuit). Active-site emphasis: 1.15× scale + ember drop-shadow. Anchor point = bottom-center tip. V1: progress derived from status (Path B — no DB column). Log Path A (real `progress_pct` column) as follow-on B163.
+> Done 2026-06-18 (branch `claude/charming-fermat-f9ktvp`). Replaced `pinGlyphSvg` + `statusPinIcon` with `BUILDING_COLORS` constant + `buildingPinIcon(status, active)` in `MapFinder.jsx`. Browser-verified: all 4 marker variants render distinctly (amber/teal/gray/dashed-blue building silhouettes with arc rings) over Esri aerial imagery (`ui-audit/verify-markers.mjs`).
+
 ### B159 — Task-names visibility toggle on PDF/Print export `[Scheduler / UI]` (feature)  *(arrived as "NEW-1"; minted B159 — highest B# across both files is B158, so this is the real next free ID)*
 `[ ]` On the PDF/Print Exhibit export panel, task names in the Gantt preview are currently not shown (or shown inconsistently). **Target:** task names visible by default on export, with a toggle in the export sidebar to suppress them.
 - **Default on.** Task names should render on the exported Gantt bars/rows by default — the toggle starts checked.

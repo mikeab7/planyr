@@ -91,40 +91,55 @@ const statusStyle = (st) => STATUS_STYLE[st] || STATUS_STYLE.pursuit;
 // alongside color). Pursuit = hollow ring (uncommitted), active = filled dot.
 const STATUS_GLYPH = { pursuit: "○", active: "●", onhold: "‖", complete: "✓", dead: "✕" };
 
-// Glyph drawn inside the pin head (white), per status. Empty for pursuit/active.
-function pinGlyphSvg(kind) {
-  if (kind === "pause") return `<rect x="11" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/><rect x="16.6" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/>`;
-  if (kind === "check") return `<path d="M10.5 13.4 L13.2 16 L19 9.8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
-  if (kind === "x") return `<path d="M11 9.5 L19 17.5 M19 9.5 L11 17.5" stroke="${statusStyle('dead').stroke}" stroke-width="2.2" stroke-linecap="round"/>`;
-  return "";
-}
-
-/* Build a saved-site map pin reflecting its project status + active state.
- * The pin ALWAYS carries its status color + glyph (so changing a site's status
- * is reflected even while it's open), and recedes when completed/dead. The
- * currently-open site is emphasized additively — an ember outline ring + a
- * slightly larger size + full opacity — rather than by recoloring it, so the
- * status cue is never lost (previously `active` overrode the fill to ember,
- * which made e.g. a Complete open site still read as a hot ember pursuit pin). */
-function statusPinIcon(status, active) {
-  const s = statusStyle(status);
-  const fill = s.hollow ? "#ffffff" : s.fill;
-  const stroke = active ? "#e8590c" : s.stroke;
-  const op = s.dim && !active ? 0.78 : 1;
-  const scale = active ? 1.12 : 1;
-  const w = Math.round(30 * scale), h = Math.round(40 * scale);
-  const glyph = pinGlyphSvg(s.glyph);
-  // pursuit = dashed outline ring (its distinguishing shape cue); others solid.
-  const ringDash = s.dashed ? ` stroke-dasharray="3.4 2.8"` : "";
-  const ringW = active ? 3 : (s.dashed ? 2.4 : 2);
+/* Building + progress-arc marker (B161). Gabled industrial-building silhouette
+ * with a clockwise progress arc ring (fills from 12 o'clock). Status colors and
+ * derived progress % (Path B — no DB column yet; Path A is follow-on B163). */
+const BUILDING_COLORS = {
+  active:   { fill: "#EF9F27", stroke: "#c17c0f", bgRing: "#FAC775", arc: "#EF9F27", pct: 60,  dim: false, dashed: false },
+  complete: { fill: "#1D9E75", stroke: "#167a5a", bgRing: null,      arc: "#1D9E75", pct: 100, dim: false, dashed: false },
+  onhold:   { fill: "#888780", stroke: "#65645e", bgRing: "#D3D1C7", arc: "#888780", pct: 30,  dim: false, dashed: false },
+  pursuit:  { fill: "none",    stroke: "#378ADD", bgRing: "#B5D4F4", arc: "#378ADD", pct: 10,  dim: false, dashed: true  },
+  dead:     { fill: "#f3f4f6", stroke: "#9ca3af", bgRing: "#e5e7eb", arc: "#9ca3af", pct: 0,   dim: true,  dashed: false },
+};
+function buildingPinIcon(status, active) {
+  const bc = BUILDING_COLORS[status] || BUILDING_COLORS.pursuit;
+  const scale = active ? 1.15 : 1;
+  const w = Math.round(28 * scale), h = Math.round(36 * scale);
+  const op = bc.dim && !active ? 0.72 : 1;
+  const C = 69.12, dashOff = 17.28; // circumference 2π×11; 12-o'clock start = C/4 offset
+  const arcLen = (C * bc.pct) / 100;
+  let glyph = "";
+  if (status === "complete") {
+    glyph = `<polyline points="9,18 13,22 20,13" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else if (status === "onhold") {
+    glyph = `<rect x="11" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.7)"/><rect x="14.5" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.7)"/>`;
+  }
+  const bStroke = bc.dashed
+    ? `stroke="${bc.stroke}" stroke-width="1.5" stroke-dasharray="4 2.5"`
+    : `stroke="${bc.stroke}" stroke-width="1"`;
+  const hasDoors = bc.fill !== "none";
+  const shadow = active
+    ? "filter:drop-shadow(0 0 6px rgba(232,89,12,.65)) drop-shadow(0 2px 4px rgba(0,0,0,.4));"
+    : "filter:drop-shadow(0 2px 6px rgba(0,0,0,.45));";
+  const html =
+    `<div style="${shadow}opacity:${op}">` +
+    `<svg width="${w}" height="${h}" viewBox="0 0 28 36">` +
+    (bc.bgRing ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.bgRing}" stroke-width="2.5"/>` : "") +
+    `<path d="M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z" fill="${bc.fill}" ${bStroke}/>` +
+    (hasDoors ? `<rect x="7.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/><rect x="16.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/>` : "") +
+    (bc.pct === 100
+      ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.arc}" stroke-width="2.5"/>`
+      : bc.pct > 0
+        ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.arc}" stroke-width="2.5" stroke-dasharray="${arcLen.toFixed(2)} ${C}" stroke-dashoffset="${dashOff}" stroke-linecap="round"/>`
+        : "") +
+    glyph +
+    `</svg></div>`;
   return L.divIcon({
     className: "",
-    html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4)); opacity:${op};">
-      <svg width="${w}" height="${h}" viewBox="0 0 30 40">
-        <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${fill}" stroke="${stroke}" stroke-width="${ringW}"${ringDash}/>
-        ${glyph || `<circle cx="15" cy="13.5" r="4.4" fill="${s.hollow ? s.stroke : '#fff'}" opacity="${s.hollow ? 0.9 : 0.95}"/>`}
-      </svg></div>`,
-    iconSize: [w, h], iconAnchor: [Math.round(w / 2), h - 2], tooltipAnchor: [0, -(h - 6)],
+    html,
+    iconSize: [w, h],
+    iconAnchor: [Math.round(w / 2), h],
+    tooltipAnchor: [0, -(h - 4)],
   });
 }
 
@@ -291,17 +306,25 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
-  /* faint labels overlay (toggle) */
+  /* faint labels overlay (toggle) — initial opacity set from live zoom (B162) */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
-    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, opacity: 0.4 });
+    const initOpacity = (map.getZoom() >= 14) ? 0.4 : 0;
+    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, opacity: initOpacity });
     layer.setZIndex(2);
     layer.addTo(map);
     labelsRef.current = layer;
-    return () => { try { map.removeLayer(layer); } catch (_) {} };
+    return () => { try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
+
+  /* zoom-driven label opacity (B162): hide street labels below zoom 14 */
+  useEffect(() => {
+    const layer = labelsRef.current;
+    if (!layer) return;
+    layer.setOpacity(zoom != null && zoom >= 14 ? 0.4 : 0);
+  }, [zoom]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
@@ -395,7 +418,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         });
       } else {
         // zoomed out: a status-aware map pin at the site origin
-        const marker = L.marker([lat, lon], { icon: statusPinIcon(status, active), interactive: !selectMode, keyboard: false });
+        const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
       }
