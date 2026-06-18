@@ -121,7 +121,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
       const [a, b] = pts; if (!b) return null;
       // pointerEvents:"all" → the Box selects + drags across its whole interior, not just its 2px
       // border. An unfilled rect's fill area is otherwise not a pointer target, so you'd have to
-      // grab exactly on the line (B154). `common` is shared with the open paths, so set it here only.
+      // grab exactly on the line (B155). `common` is shared with the open paths, so set it here only.
       return <rect key={m.id} x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} {...common} pointerEvents="all" />;
     }
     return null; // text + measure/calib labels are positioned divs below
