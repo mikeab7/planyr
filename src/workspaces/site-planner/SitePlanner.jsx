@@ -24,6 +24,7 @@ import {
   queryFeatures,
   queryAtPoint,
   largestRingLngLat,
+  outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
   humanizeError,
@@ -2513,16 +2514,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // looked-up parcel and a clicked one are sized identically — this path used true
     // EPSG:2278 feet before, a ~0.3% mismatch for the same lot (B57c). Anchored on the
     // parcel's own lon/lat centroid so it still drops centered (unchanged placement).
-    const ring = largestRingLngLat(entry.ft); // open [lon,lat] ring (queried in 4326)
-    if (!ring || ring.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
-    const lon0 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
-    const lat0 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-    const pts = lngLatRingToFeet(ring, lon0, lat0);
-    if (!pts || pts.length < 3) { setLookupErr("That record has no usable polygon geometry."); return; }
+    const rings = outerRingsLngLat(entry.ft); // open [lon,lat] rings (4326) — every part of a multipart parcel
+    if (!rings.length) { setLookupErr("That record has no usable polygon geometry."); return; }
+    // One shared anchor across all parts so separate tracts keep their true relative
+    // position (anchoring each on its own centroid would stack them on top of each other).
+    let n = 0, slon = 0, slat = 0;
+    rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
+    const lon0 = slon / n, lat0 = slat / n;
+    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), locked: true })).filter((pc) => pc.points.length >= 3);
+    if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory();
-    const pc = { id: uid(), points: pts, locked: true };
-    setParcels((a) => [...a, pc]);
-    setSel({ kind: "parcel", id: pc.id });
+    setParcels((a) => [...a, ...pcs]);
+    setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
     setLookupRes([]);
     requestFit();
   };
@@ -3159,7 +3162,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify (click any spot → county record without importing).
   const [identifyMode, setIdentifyMode] = useState(false);
-  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, ring, lng, lat, addr } | { error }
+  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, rings, ring, lng, lat, addr } | { error } — rings = all outer parts; ring = largest (for jurisdiction/road tests)
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
   // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
@@ -3197,18 +3200,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const feat = await queryAtPoint(idLayerRef.current, lng, lat);
       if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
       if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
-      const ring = largestRingLngLat(feat);
-      setIdentifyRes({ attrs: feat.attributes || {}, ring, lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+      const rings = outerRingsLngLat(feat); // every part of a multipart parcel
+      if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape." }); return; }
+      // `ring` (largest part) still drives the whole-parcel jurisdiction/road tests below; `rings` adds every part for import.
+      setIdentifyRes({ attrs: feat.attributes || {}, rings, ring: largestRingLngLat(feat), lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
   const addIdentifiedParcel = () => {
-    if (!identifyRes?.ring || !origin) return;
-    const points = lngLatRingToFeet(identifyRes.ring, origin.lon, origin.lat);
-    if (points.length < 3) return;
+    if (!identifyRes?.rings?.length || !origin) return;
+    // Add EVERY part of a multipart parcel (e.g. "TRS 3 & 5"), all in the site frame.
+    const pcs = identifyRes.rings
+      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null }))
+      .filter((pc) => pc.points.length >= 3);
+    if (!pcs.length) return;
     pushHistory();
-    const pc = { id: uid(), points, locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null };
-    setParcels((a) => [...a, pc]);
-    setSel({ kind: "parcel", id: pc.id });
+    setParcels((a) => [...a, ...pcs]);
+    setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
     setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
   };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
@@ -5797,7 +5804,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
                             </div>
                           ))}
-                          {identifyRes.ring && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
+                          {identifyRes.rings?.length > 0 && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
                           <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
                             {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
                           </button>

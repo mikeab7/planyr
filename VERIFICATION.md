@@ -651,3 +651,12 @@ _Move items here with the date and who/what checked them._
   - **Click-to-edit road width:** clicking the road's **"199′"** number opened the prompt (seeded "199"); entering **30** resized the road to a **30′** travel width and the callout updated to "30′".
   - lint 0 · 223 tests · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered / polish:** the width editor is a native `prompt()` (an inline on-canvas input is a future nicety); signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence).
+
+### V37 — Multipart parcel: clicking the smaller tract now selects ALL parts (B147) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bug-fix acceptance)
+- **Steps:** "＋ Select parcels" → `setView` on the **west (smaller) tract** of Pearland account `0440520000010` ("TRS 3 & 5", a two-tract parcel) at zoom 17 → clicked the meat of that west tract.
+- **Result ✅:**
+  - Both HCAD and TxGIO returned account `0440520000010` (2 rings); the on-map highlight is now a **2-subpath multipolygon** whose bbox spans the **full 1326×664 ft** parcel — i.e. **both** tracts light up, including the one clicked (before the fix only the larger east tract did — `gis-verify/pearland-mp-clickwest.png`).
+  - Selection card reads **"1 PARCEL · 14.78 AC · DEL PAPA"** — full acreage, correctly counted as a single parcel (was 8.12 AC, east-only). Screenshot `gis-verify/pearland-FIXED-clickwest.png`; script `gis-verify/pearland-fix-verify.mjs`.
+  - lint 0 · 230 tests · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered:** the in-planner identify (`addIdentifiedParcel`) and address/account lookup (`importFeature`) paths got the same multipart fix but were verified by code + unit tests, not a separate click-through; a signed-in cloud-reload pass is untested (logged-out run, but parcels ride the normal Site Model persistence).
