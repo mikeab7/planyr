@@ -658,3 +658,13 @@ _Move items here with the date and who/what checked them._
 - **Steps:** "Start blank" → Road tool → drew a road → selected it → clicked the red travel-width **number** → (verified no dialog) typed **30** → Enter.
 - **Result ✅:** clicking the number opened a small **inline input box on the canvas** at the dimension (accent border, seeded "199") — **no browser dialog fired** (Playwright `dialog` event count = 0; one `foreignObject input` present). Typing **30** + Enter resized the road to a **30′** travel width and closed the editor. Commit-on-Enter / click-away and Esc-to-cancel wired.
 - **Not covered:** the per-edge **setback** and overlay **trace-length** editors use the same component (so they inherit the behavior) but weren't separately driven; a native `window.confirm` still guards *deleting* a parcel drawing (a destructive confirmation, not an edit) — left as-is.
+
+### V38 — Markup tools: Bluebeam-style rotate/resize boxes + vertex-edit lines/polys (B147) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (feature acceptance)
+- **Steps:** "Start blank" → (a) **Rectangle** tool, drew a box, then with Select dragged a corner grip and the rotate handle; (b) **Polyline** tool, clicked 3 points + Enter, then dragged the middle vertex.
+- **Result ✅:**
+  - **Rectangle:** on select it shows **4 corner grips + 4 edge grips + a rotate handle** on a stem above the top edge. Dragging the bottom-right corner resized it (width 300 → 410 px). Dragging the rotate handle rotated it (`transform` `rotate(0…)` → `rotate(53…)`); all grips track the rotation. The on-screen rotation matched the headline "rotate a rectangle" ask.
+  - **Polyline:** on finish it shows **3 vertex grips + 2 ＋ add-point handles** (correctly none past the open path's last point). Dragging the middle vertex moved it (points string updated).
+  - Box geometry also settable precisely via the new panel **Width / Height** + **Rotation°** fields. Zero console/page errors from the change (only the unrelated FBCAD GIS-host CORS error, a known down host).
+  - lint 0 · **225 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered (logged-out headless limits):** ellipse rotate/resize and polygon/line vertex edits weren't separately screenshotted, but they ride the exact same code paths (MK_BOX_KINDS / MK_VERTEX_KINDS) proven here; signed-in cloud-reload of an edited markup untested (markups ride the normal Site Model persistence).
