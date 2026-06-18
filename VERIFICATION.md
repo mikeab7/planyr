@@ -594,6 +594,12 @@ was never clicked" quietly ships broken.
 - **Steps + result — ✅ PASS, zero console errors:** Text tool → click to place → type "Line1", **Enter**, "Line2" → still editing, textarea value = "Line1\nLine2" (Enter now makes a newline, was commit). **Click away +80 px** → editor closes and commits **two lines** (previously you were stuck in the editor at any distance). New box → type → **Esc** → finishes, keeps the text. Place a box and click away **without typing** → the empty box is removed.
 - **Expect:** matches Bluebeam — text box is multi-line; you finish by clicking away or pressing Esc.
 
+### V39 — Added-detention area label seats on the NEW ground, not the whole-pond centre (B151) ✅
+- **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-18** (headless Chromium, logged-out preview build) · refines V32/B140
+- **Steps (driven):** seeded two ponds already in Expand mode (`det.baseline` set) and zoomed to fit — (P1) a **one-sided** expansion (existing basin on the left, new strip on the right) and (P2) a **concentric** "push banks out" expansion (existing basin centred → new ring all around, so the whole-pond centroid stays inside the old pond). Read back every on-canvas label `<text>` with its screen centre.
+- **Expect:** each pond shows its **existing** area centred over the old basin **and** a separate **"+X.XX ac · +Y sf"** label seated on the new ground (never stacked at the whole-pond centre); correct footprint sf/ac; zero console/page errors.
+- **Result 2026-06-18 — ✅ PASS.** P1: existing **"1.10 ac · 48,000 sf"** over the left basin, added **"+0.73 ac · +32,000 sf"** to its right over the new strip (added.x 773 > existing.x 558). P2: existing **"0.66 ac · 28,800 sf"** centred in the old basin, added **"+1.18 ac · +51,200 sf"** out on the new ring (**183 px** off the centre — the case where a centroid would otherwise land inside the existing pond). Both labels ride the shared label engine; **zero console/page errors** (screenshot captured). Residual: a **signed-in** cloud-reload pass rides on the existing `el.det` persistence (sandbox runs logged-out) — low risk.
+
 ---
 
 ## ✅ Verified / ❌ Failed — history
