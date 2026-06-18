@@ -87,6 +87,12 @@ was never clicked" quietly ships broken.
   rendered **County: Harris · City: Houston · ETJ: not in Houston ETJ · Road maint.: City**, each
   with a data-age ("just now") and the "Screening only — verify with the jurisdiction" disclaimer.
   Screenshot evidence captured. The B93/B94 feature is shipped + working in the live app.
+- **2026-06-17 — ETJ upgraded from Houston-only → regional, verified from the planyr.io origin.**
+  Swapped the ETJ source to **H-GAC's regional layer** (all metro cities' ETJ). In-browser fetch
+  from the planyr.io origin: Spring/Aldine → **Houston**, SW of Sugar Land → **Richmond** (HTTP 200,
+  CORS-clean). So ETJ now covers the whole 13-county metro, not just Houston. (Post-deploy, the
+  on-screen ETJ row reads e.g. "Richmond ETJ" for a non-Houston unincorporated lot; county/city/road
+  were already statewide.)
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
@@ -634,4 +640,21 @@ _Move items here with the date and who/what checked them._
 - **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once
 - **Steps:** "Start blank" → Road tool (free draw) → dragged a road rectangle → selected it → read the red dimension → dragged the bottom-right corner handle straight down to widen the road → re-read the dimension.
 - **Result ✅:** the red travel-width callout updated **live from 170′ → 428′** as the road was widened (before the fix it read a frozen `travelW` and stayed at 170′), and the value is a clean integer (1′ steps). Backed by the `roadTravelWidth` unit test · lint 0 · 205 tests · build green.
-- **Not covered:** the interactive move/edit of the callout (B146 increment 2) isn't built yet; a signed-in cloud-reload pass is untested (logged-out run).
+- **Not covered:** a signed-in cloud-reload pass is untested (logged-out run). *(Increment 2 — the interactive move/edit — is now built + verified; see V36.)*
+
+### V36 — Interactive dimension callouts: drag to move + click road number to edit width (B146 increment 2) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once (feature acceptance)
+- **Steps:** "Start blank" → drew a building, selected it, grabbed its red dimension and dragged it up out of the shape; then drew a road, selected it, clicked the red travel-width **number** and accepted the prompt with a new value.
+- **Result ✅:**
+  - **Auto-declutter:** the dimension number renders OUTBOARD of its line, clear of the centred "Building N / sf / dims" label (no more red number printing over the sq-ft).
+  - **Drag-to-move:** the building's **"314′"** dimension dragged freely up out of the shape, leaving a **dashed red leader** pointing back to the edge it measures; the offset persists on the element.
+  - **Click-to-edit road width:** clicking the road's **"199′"** number opened the prompt (seeded "199"); entering **30** resized the road to a **30′** travel width and the callout updated to "30′".
+  - lint 0 · 223 tests · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered:** signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence). *(The width editor's `prompt()` is now replaced by an inline editor — see V37.)*
+
+### V37 — Edits happen inline on the canvas, never in a dialog box (owner rule) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once (rule acceptance)
+- **Why:** owner: dialog-box edits are "horrible UI." Replaced the three `window.prompt` edit dialogs (road travel width, per-edge setback, overlay trace length) with one shared inline `numEdit` `<input>` overlay; rule recorded in CLAUDE.md.
+- **Steps:** "Start blank" → Road tool → drew a road → selected it → clicked the red travel-width **number** → (verified no dialog) typed **30** → Enter.
+- **Result ✅:** clicking the number opened a small **inline input box on the canvas** at the dimension (accent border, seeded "199") — **no browser dialog fired** (Playwright `dialog` event count = 0; one `foreignObject input` present). Typing **30** + Enter resized the road to a **30′** travel width and closed the editor. Commit-on-Enter / click-away and Esc-to-cancel wired.
+- **Not covered:** the per-edge **setback** and overlay **trace-length** editors use the same component (so they inherit the behavior) but weren't separately driven; a native `window.confirm` still guards *deleting* a parcel drawing (a destructive confirmation, not an edit) — left as-is.
