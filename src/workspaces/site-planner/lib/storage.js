@@ -131,6 +131,41 @@ export function pendingLegacyCount(uid) {
   }
   return n;
 }
+
+// Returns the list of on-device (legacy) sites that are not yet in (or are newer than)
+// the signed-in user's cloud cache — the set pendingLegacyCount counts.
+export function pendingLegacySites(uid) {
+  if (!uid) return legacySitesList();
+  let legacy = {}, cloud = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  return Object.values(legacy)
+    .map(migrate)
+    .filter((rec) => {
+      if (!rec.id) return false;
+      const cur = cloud[rec.id];
+      return !cur || (cur.updatedAt || 0) < (rec.updatedAt || 0);
+    })
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+// Import a SINGLE legacy site into the cloud for uid. Non-destructive — original stays
+// in the legacy store. Returns { ok } (same shape as cloudUpsert).
+export async function importOneSiteToCloud(uid, siteId) {
+  if (!uid || !siteId) return { ok: false, error: "missing args" };
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const rec = legacy[siteId];
+  if (!rec) return { ok: false, error: "not found" };
+  const local = createSiteModel(rec);
+  if (!local.id) return { ok: false, error: "invalid record" };
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  cloud[local.id] = local; // stage in cache so it shows immediately
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return cloudUpsert(uid, local);
+}
+
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {
