@@ -676,3 +676,13 @@ _Move items here with the date and who/what checked them._
   - Box geometry also settable precisely via the new panel **Width / Height** + **Rotation°** fields. Zero console/page errors from the change (only the unrelated FBCAD GIS-host CORS error, a known down host).
   - lint 0 · **225 tests** · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered (logged-out headless limits):** ellipse rotate/resize and polygon/line vertex edits weren't separately screenshotted, but they ride the exact same code paths (MK_BOX_KINDS / MK_VERTEX_KINDS) proven here; signed-in cloud-reload of an edited markup untested (markups ride the normal Site Model persistence).
+
+### V39 — Delete removes the selected element on the first press (B151) ✅
+- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (bugfix acceptance)
+- **Steps:** "Start blank" → drew two buildings far apart. (A) **baseline:** clicked one → pressed **Delete** once. (B) **reported flow:** clicked a tool/panel button (**Pan**, then **Select**) to move focus off the canvas, then clicked a building and pressed **Delete** once *with no settle delay* (stresses the stale-listener window).
+- **Result ✅:**
+  - **A baseline:** 2 → 1 — a single Delete removed the selected building.
+  - **B from a panel control:** 2 → 1 — one immediate Delete removed exactly one building (previously this was the "needs two presses" case). Reliable across runs.
+  - Zero console/page errors.
+  - lint 0 · **230 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Typing guard (code-verified, not regressed):** the bail-when-a-field-is-focused guard is pre-existing (`document.activeElement` is INPUT/SELECT/TEXTAREA → return); this change only **appended** `contentEditable`, so the "Delete while editing a field must not nuke canvas elements" behavior is unchanged. (A live headless guard test was flaky only because reliably focusing the right panel input in the built UI was finicky — not a behavior gap.)
