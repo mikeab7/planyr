@@ -6,10 +6,12 @@ backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
 > **📋 `BACKLOG.md` is the single source of truth for open bugs & feature requests.**
-> On every run, check `BACKLOG.md`: work the items under **🔲 Open**, skip those under
-> **✅ Done**. (This is the product bug/feature backlog — distinct from the
-> "Deferred / maintenance backlog" section near the end of this file, which tracks
-> ops/infra cleanup.)
+> On every run, check `BACKLOG.md` **🔲 Open** section and work those items.
+> Completed items are archived in `BACKLOG-DONE.md` — **do not read that file** unless
+> looking up a specific past item; it is historical record only. When finishing an item,
+> move its block to `BACKLOG-DONE.md` (not to the Done stub in `BACKLOG.md`). The next
+> B# = highest `B#` across **both** files + 1. (This is the product backlog — distinct
+> from the "Deferred / maintenance backlog" section near the end of this file.)
 >
 > **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
 > green but still need a click-through on planyr.io. On every run, scan it and **verify any
