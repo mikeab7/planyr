@@ -37,6 +37,7 @@ import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
+import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
 
@@ -67,6 +68,7 @@ const ppfToZoom = (ppf, lat) =>
  * ------------------------------------------------------------------ */
 
 const SQFT_PER_ACRE = 43560;
+const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
@@ -3777,23 +3779,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (NO_LABEL.includes(el.type) || el.noLabel) continue;
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
-    const fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
+    let fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
     const dupKey = `${el.type}@${Math.round(fc.x / 12)},${Math.round(fc.y / 12)}`;
     if (seenLabels.has(dupKey)) continue; // same type stacked at (nearly) the same spot
     seenLabels.add(dupKey);
-    let lines;
+    let lines, pondAdd = null;
     if (el.type === "sidewalk" || el.type === "landscape") {
       // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
       const name = el.type === "landscape" ? "Landscape" : "Sidewalk";
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
-      // B140: label shows acres + sf (was sf only). In expansion mode (B139) the label
-      // shows the existing TOTAL plus the ADDED area as a "+" increment, so the new total
-      // is inferable without a third line (mirrors the panel's "+ac-ft").
+      // B140/B157: label shows acres + sf (was sf only). In expansion mode (B139) the
+      // EXISTING basin keeps this centred label; the ADDED ground gets its OWN label seated
+      // over the new area (B157 `pondAdd`, pushed below) so the "+X ac" never floats over the
+      // old pond — the case where the whole-pond centroid stays inside the existing basin. If
+      // the change is a net shrink (or too small to seat a label on the new ground) we fall
+      // back to the inline "+/−" increment so the delta still shows.
       const base = el.det?.baseline;
       if (base?.ring?.length >= 3) {
-        const exA = polyArea(base.ring), addA = area - exA, s = addA >= 0 ? "+" : "−", m = Math.abs(addA);
-        lines = ["Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`, `${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`];
+        const exA = polyArea(base.ring), addA = area - exA;
+        const pt = addA > POND_ADD_MIN_SF ? addedAreaLabelPoint(poly ? el.points : elCorners(el), base.ring) : null;
+        // Seat the EXISTING-area label over the existing basin (baseline centroid), not the
+        // whole-pond centre — so it reads over the old pond and clears the "+added" label.
+        fc = centroid(base.ring);
+        lines = ["Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`];
+        if (pt) pondAdd = { pt, addA };
+        else { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
         lines = ["Detention Pond", `${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`];
       }
@@ -3828,14 +3839,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
       halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
     }
-    labelCands.push({ el, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH });
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH });
+    if (pondAdd) {
+      // B157: the added-detention label, seated on the thickest part of the NEW ground.
+      // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
+      const a = pondAdd.addA;
+      labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
+        lines: [`+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
+    }
   }
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.el.id, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH })),
     { pad: 2 },
   );
   const labelEls = labelCands.map((d) => {
-    const place = labelShow.get(d.el.id);
+    const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
     const { lines, x, y, leader } = place;
     const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
@@ -3843,9 +3861,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so ink it dark with a white halo to read over any background (B121 round 2b).
     const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
     return (
-      <g key={`lbl${d.el.id}`} pointerEvents="none">
+      <g key={`lbl${d.lid}`} pointerEvents="none">
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
-        {d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
+        {!d.added && d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={fs}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink}
           stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * ls : undefined} paintOrder={leader ? "stroke" : undefined}
