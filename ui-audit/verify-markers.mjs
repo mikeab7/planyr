@@ -16,11 +16,13 @@ mkdirSync(OUT, { recursive: true });
 // Four sites spread around a central lat/lon so all markers are visible on-screen.
 // status is TOP LEVEL on each site object — that's what statusOf() reads.
 const CENTER = { lat: 29.783, lon: -95.89 };
+// Sites clustered near Harris county default center (29.76, -95.37) so they're
+// visible at the map's default zoom 11 without needing a "Fit all" button.
 const fourSites = {
-  s_active:   { id: "s_active",   groupId: "s_active",   site: "Katy Active Site",    name: "Plan 1", status: "active",   origin: { lat: 29.793, lon: -95.900 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
-  s_complete: { id: "s_complete", groupId: "s_complete", site: "Brookshire Complete",  name: "Plan 1", status: "complete", origin: { lat: 29.793, lon: -95.880 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
-  s_onhold:   { id: "s_onhold",   groupId: "s_onhold",   site: "Bear Creek On Hold",  name: "Plan 1", status: "onhold",   origin: { lat: 29.773, lon: -95.900 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
-  s_pursuit:  { id: "s_pursuit",  groupId: "s_pursuit",  site: "Cypress Pursuit",     name: "Plan 1", status: "pursuit",  origin: { lat: 29.773, lon: -95.880 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
+  s_active:   { id: "s_active",   groupId: "s_active",   site: "Katy Active Site",    name: "Plan 1", status: "active",   origin: { lat: 29.77, lon: -95.38 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
+  s_complete: { id: "s_complete", groupId: "s_complete", site: "Brookshire Complete",  name: "Plan 1", status: "complete", origin: { lat: 29.77, lon: -95.36 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
+  s_onhold:   { id: "s_onhold",   groupId: "s_onhold",   site: "Bear Creek On Hold",  name: "Plan 1", status: "onhold",   origin: { lat: 29.75, lon: -95.38 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
+  s_pursuit:  { id: "s_pursuit",  groupId: "s_pursuit",  site: "Cypress Pursuit",     name: "Plan 1", status: "pursuit",  origin: { lat: 29.75, lon: -95.36 }, county: "harris", parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now() },
 };
 
 const seed = `(() => { try {
@@ -31,13 +33,13 @@ const seed = `(() => { try {
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
 async function run() {
-  const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
   const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 2 });
   await ctx.addInitScript(seed);
   const page = await ctx.newPage();
 
   await page.goto(BASE, { waitUntil: "load" });
-  await page.waitForTimeout(1800);
+  await page.waitForTimeout(3000); // allow aerial tiles time to load
 
   // The map finder shows a "Your sites" panel; click "Fit all" to centre on the 4 markers.
   try {
