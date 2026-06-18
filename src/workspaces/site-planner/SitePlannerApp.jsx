@@ -5,6 +5,7 @@ import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
+import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -62,6 +63,7 @@ export default function App() {
   const [migrating, setMigrating] = useState(false);
   const [migrateMsg, setMigrateMsg] = useState("");
   const [hideMigrate, setHideMigrate] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
   // Re-read epoch for the keyed planner (B133 — stale plan flashes on boot then "comes back").
   // The planner snapshots its plan from storage ONCE at mount (`key={activeSiteId}`). At boot the
   // first synchronous render reads the store BEFORE auth resolves (activeUser still null → the
@@ -318,9 +320,9 @@ export default function App() {
             </span>
           )}
           {!migrateMsg && (
-            <button onClick={bringLocalSitesIn} disabled={migrating} title="Copy your on-device sites into your cloud account — keeps the originals, nothing is deleted"
-              style={{ flex: "none", cursor: migrating ? "default" : "pointer", background: migrating ? "#3b5bbf" : "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-              {migrating ? "Bringing them in…" : "Bring them into my account"}
+            <button onClick={() => setShowReviewModal(true)} title="Review each on-device site and choose which ones to save to your account"
+              style={{ flex: "none", cursor: "pointer", background: "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+              Review each site
             </button>
           )}
           <button onClick={() => { setHideMigrate(true); setMigrateMsg(""); }} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
@@ -330,6 +332,19 @@ export default function App() {
       {/* The cloud/connection state is now folded into the planner header's single
           save/sync badge (synced / syncing / offline / error) — see SitePlanner.
           On the map, signed-in state is shown by the shell account control. */}
+
+      {showReviewModal && signedInUid && (
+        <SiteReviewModal
+          uid={signedInUid}
+          onClose={async (savedCount) => {
+            setShowReviewModal(false);
+            if (savedCount > 0) {
+              await pullCloud(signedInUid).catch(() => {});
+              refreshSites();
+            }
+          }}
+        />
+      )}
     </>
   );
 }
