@@ -4700,7 +4700,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
                 const stroke = isSel ? PAL.accent : m.stroke;
                 const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
-                const fillProps = (m.fillOpacity > 0) ? { fill: m.fill, fillOpacity: m.fillOpacity } : {};
+                // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
+                // body selects + drags, not just the painted border. pointerEvents:"all" makes the
+                // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
+                // to clicks, so you'd have to land exactly on the 2px stroke). Mirrors Doc Review's
+                // B33 hit-test and Bluebeam/Figma behaviour (B150). Open paths (line/polyline) don't
+                // get fillProps, so their hit area is unchanged — see B150 for their forgiving buffer.
+                const fillProps = (m.fillOpacity > 0)
+                  ? { fill: m.fill, fillOpacity: m.fillOpacity, pointerEvents: "all" }
+                  : { pointerEvents: "all" };
                 if (m.kind === "utilRoute") {
                   const col = isSel ? PAL.accent : m.stroke;
                   const cor = m.corridor.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
