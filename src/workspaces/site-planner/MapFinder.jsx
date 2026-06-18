@@ -8,7 +8,7 @@ import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
   identifyParcelAcross,
-  largestRingLngLat,
+  outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
   aerialPlacement,
@@ -155,12 +155,14 @@ const shoelace = (pts) => {
 function computeAssembly(selected, exportBase) {
   if (!selected.length) return null;
   let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
-  selected.forEach((s) => s.ring.forEach(([lon, lat]) => {
+  selected.forEach((s) => s.rings.forEach((r) => r.forEach(([lon, lat]) => {
     lonMin = Math.min(lonMin, lon); lonMax = Math.max(lonMax, lon);
     latMin = Math.min(latMin, lat); latMax = Math.max(latMax, lat);
-  }));
+  })));
   const lon0 = (lonMin + lonMax) / 2, lat0 = (latMin + latMax) / 2;
-  const parcels = selected.map((s) => ({ points: lngLatRingToFeet(s.ring, lon0, lat0), addr: s.addr || null, acct: s.acct || null, attrs: s.attrs || null }));
+  // One planner parcel per part, in the shared frame — a multipart parcel (e.g.
+  // "TRS 3 & 5") brings in ALL its tracts, not just the biggest (acreage was undercounted before).
+  const parcels = selected.flatMap((s) => s.rings.map((r) => ({ points: lngLatRingToFeet(r, lon0, lat0), addr: s.addr || null, acct: s.acct || null, attrs: s.attrs || null })));
   const totalSqft = parcels.reduce((sum, p) => sum + shoelace(p.points), 0);
   // Generous context around the site so you can see access roads / neighbors.
   const padLon = Math.max((lonMax - lonMin) * 0.4, 0.0012);
@@ -215,7 +217,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
-  const [selected, setSelected] = useState([]); // [{key, ring, latlngs, addr, acct, county}]
+  const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const toggleHidden = (st) => setHidden((h) => { const n = new Set(h); n.has(st) ? n.delete(st) : n.add(st); return n; });
@@ -247,7 +249,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     onMove();
     const onMouseMove = (e) => {
       if (!selectModeRef.current || draggingRef.current) return; // don't fight the grab cursor while panning
-      const inside = selectedRef.current.some((s) => pointInPoly(e.latlng.lat, e.latlng.lng, s.latlngs));
+      const inside = selectedRef.current.some((s) => (s.latlngsList || []).some((ll) => pointInPoly(e.latlng.lat, e.latlng.lng, ll)));
       map.getContainer().style.cursor = inside ? REMOVE_CURSOR : ADD_CURSOR;
     };
     const onDragStart = () => { draggingRef.current = true; map.getContainer().style.cursor = "grabbing"; };
@@ -475,12 +477,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const hits = await identifyParcelAcross(candidates, latlng.lng, latlng.lat);
       if (!hits.length) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
       const { county, feature: feat } = hits[0]; // first county that answered owns the lot
-      const ring = largestRingLngLat(feat);
-      if (!ring) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
+      // ALL outer parts: a multipart parcel ("TRS 3 & 5" = two separate tracts) used to
+      // highlight only its largest piece, so clicking the smaller tract registered the
+      // account but lit up the neighbour instead (B36c). Highlight + plan every part.
+      const rings = outerRingsLngLat(feat);
+      if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const attrs = feat.attributes || {};
       // Namespace by county: OBJECTIDs are only unique within one CAD layer, so a multi-county
       // assembly could otherwise collide (two lots sharing an id would toggle each other off).
-      const oid = attrs.OBJECTID ?? attrs.objectid ?? `${ring[0][0].toFixed(6)},${ring[0][1].toFixed(6)}`;
+      const oid = attrs.OBJECTID ?? attrs.objectid ?? `${rings[0][0][0].toFixed(6)},${rings[0][0][1].toFixed(6)}`;
       const key = `${county}:${oid}`;
       const map = mapRef.current;
       if (hilitesRef.current[key]) {
@@ -489,10 +494,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         delete hilitesRef.current[key];
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
-        const latlngs = ring.map(([lon, lat]) => [lat, lon]);
+        const latlngsList = rings.map((r) => r.map(([lon, lat]) => [lat, lon])); // every part — for the highlight + cursor hit-test
         if (hilitesRef.current[key]) { try { map.removeLayer(hilitesRef.current[key]); } catch (_) {} } // drop a stale hilite before overwriting → no orphaned polygon if two clicks race (B22)
-        hilitesRef.current[key] = L.polygon(latlngs, { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-        setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, ring, latlngs, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+        // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
+        // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
+        hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
+        setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
         // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
         // for a Harris/FB lot when that county's own CAD didn't — relabel via a true
         // point-in-county lookup. Non-blocking + additive: only patches the saved
