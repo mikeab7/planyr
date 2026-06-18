@@ -52,27 +52,11 @@ export const JURISDICTION_SOURCES = {
     sourceName: "TxGIO (statewide)",
     note: "Texas city limits (TxGIO). A point in no city reads as unincorporated. Screening only — verify with the city.",
   },
-  // ETJ is fragmented — there is NO statewide ETJ layer (confirmed: TxGIO publishes
-  // city limits + county, but no ETJ). H-GAC (the Houston-Galveston Area Council)
-  // publishes a single REGIONAL layer carrying every city's ETJ across the 13-county
-  // metro — Houston, Sugar Land, Missouri City, Pearland, Richmond, Katy, Baytown,
-  // Conroe, Texas City, … — keyed by a CITY field. Verified live 2026-06-17:
-  // Spring/Aldine → HOUSTON, SW of Sugar Land → RICHMOND, an in-city point → none
-  // (ETJ is the ring OUTSIDE city limits). AGOL-hosted (services.arcgis.com), so it's
-  // CORS-clean from the app origin like the county/road sources. ETJ is volatile
-  // (SB2038 lets owners petition out; annexations move it), so it stays screening-only.
-  // CITY values are upper-case in the source → `titleCaseName` normalizes them for
-  // display. Outside the H-GAC region (e.g. Dallas → NCTCOG) is not covered yet — add
-  // that council's ETJ layer as another source when a deal needs it.
-  etj: {
-    id: "etj", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    url: "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/HGAC_City_ETJ_Boundaries/FeatureServer/0",
-    fields: { name: "CITY" }, titleCaseName: true,
-    ttl: 7 * 24 * 3600 * 1000,
-    sourceName: "H-GAC (Houston-Galveston Area Council)",
-    coverage: "13-county Houston-Galveston region",
-    note: "City ETJ across the H-GAC 13-county region. ETJ is volatile (SB2038 releases; annexations) — screening only; verify with the city.",
-  },
+  // ETJ is fragmented — there is NO statewide ETJ layer, and unlike Houston (where
+  // H-GAC publishes ONE regional layer) the Austin/DFW metros publish ETJ city-by-city.
+  // So ETJ is a REGION-ROUTED LIST of sources (see ETJ_SOURCES below), not one row here:
+  // a click only queries the metro(s) whose bbox contains it, so a Houston lookup never
+  // touches the Austin/DFW servers (no added latency for the Houston use case).
   road: {
     id: "road", role: "road", label: "Road maintenance authority", kind: "line",
     url: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadway_Inventory/FeatureServer/0",
@@ -83,6 +67,59 @@ export const JURISDICTION_SOURCES = {
     note: "Maintenance authority from the TxDOT Roadway Inventory. Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess. Screening only.",
   },
 };
+
+/* ETJ (extraterritorial jurisdiction) sources — fragmented by region, so this is a
+ * LIST, each row scoped to a metro `bbox` [latMin, lonMin, latMax, lonMax]. A click is
+ * routed to only the source(s) whose bbox covers it (`etjSourcesForPoint`), so:
+ *   • Houston click → ONLY H-GAC (one query — identical cost to before; no slowdown)
+ *   • Austin click  → ONLY the Austin layer
+ *   • DFW click     → ONLY the Fort Worth layer
+ * Adding a city/region = adding a row here (the registry design), never new code.
+ * All are AGOL-hosted (services*.arcgis.com) → CORS-clean from the app origin; each was
+ * verified live 2026-06-17. Coverage is the MAJOR cities (per the owner's call): Houston
+ * gets the whole metro via H-GAC's regional layer; Austin = the City of Austin's 2-/5-mile
+ * ETJ; DFW = the City of Fort Worth ETJ (Dallas itself is landlocked — ~no ETJ). Smaller
+ * suburbs in Austin/DFW aren't covered yet (they publish per-city) → such a point reads
+ * "not in a city ETJ". ETJ is volatile (SB2038 releases; annexations) — always screening-only. */
+export const ETJ_SOURCES = [
+  {
+    id: "etj_hgac", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Houston–Galveston (H-GAC)", bbox: [28.3, -97.1, 31.0, -94.2],
+    url: "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/HGAC_City_ETJ_Boundaries/FeatureServer/0",
+    fields: { name: "CITY" }, titleCaseName: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "H-GAC (Houston-Galveston Area Council)", coverage: "13-county Houston-Galveston region (all cities)",
+    note: "City ETJ across the H-GAC 13-county region. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_austin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Austin", bbox: [29.7, -98.4, 30.95, -97.0],
+    url: "https://services1.arcgis.com/PuB3FWUAxkScvfQy/arcgis/rest/services/COA_Jurisdiction/FeatureServer/20",
+    fields: { name: null }, nameConst: "Austin",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Austin GIS", coverage: "City of Austin 2-mile & 5-mile ETJ",
+    note: "City of Austin ETJ (2-/5-mile). Other Austin-metro cities publish separately — add as rows. Screening only.",
+  },
+  {
+    id: "etj_fortworth", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Dallas–Fort Worth", bbox: [32.2, -98.3, 33.7, -96.5],
+    url: "https://services3.arcgis.com/dViPBrlsejmXK64z/arcgis/rest/services/Fort_Worth_ETJ/FeatureServer/0",
+    fields: { name: null }, nameConst: "Fort Worth",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Fort Worth GIS", coverage: "City of Fort Worth ETJ",
+    note: "City of Fort Worth ETJ. Dallas is landlocked (~no ETJ); other DFW cities publish separately — add as rows. Screening only.",
+  },
+];
+
+// bbox = [latMin, lonMin, latMax, lonMax] (same convention as COUNTIES_MAP).
+const bboxHas = (b, lat, lng) => b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3];
+
+/* Region routing: the ETJ source(s) whose metro bbox covers a point. A point outside
+ * every covered metro returns [] (honest "no ETJ layer here" rather than a wrong guess).
+ * This is what keeps a Houston click at exactly one ETJ query. Pure. */
+export function etjSourcesForPoint(lat, lng) {
+  return ETJ_SOURCES.filter((s) => bboxHas(s.bbox, lat, lng));
+}
 
 // ---------------------------------------------------------------------------
 // Road maintenance authority — RDWAY_MAINT_AGCY → who maintains the segment.
@@ -286,19 +323,34 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     unincorporated: false, straddle: false, ages: {}, sources: [],
     note: "Screening only — verify with the jurisdiction. Boundaries (especially ETJ) change.",
   };
+  // Each role resolves to ONE source (county/city) or a region-routed LIST (etj).
+  const sourcesForRole = (role) =>
+    role === "etj" ? etjSourcesForPoint(lat, lng) : (JURISDICTION_SOURCES[role] ? [JURISDICTION_SOURCES[role]] : []);
   await Promise.all(roles.map(async (role) => {
-    const src = JURISDICTION_SOURCES[role];
-    if (!src) return;
-    if (src.unavailable) { out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: src.note }); return; }
+    const srcs = sourcesForRole(role).filter((s) => s && !s.unavailable && s.url);
+    if (!srcs.length) {
+      // no source for this role/area — e.g. ETJ outside the covered metros (honest, not a guess)
+      out[role] = []; out.ages[role] = null;
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" ? "No ETJ layer for this area yet." : null });
+      return;
+    }
     opts.onStatus && opts.onStatus(role, "loading");
-    const q = identifySource(src, geom, opts);
-    const r = await q.fresh;
-    const names = uniq(r.items.map((it) => normalizeFeature(src, it.attrs).name).filter((v) => v != null && v !== "").map(String));
-    out.ages[role] = r.ageMs;
+    // Query every source for the role in parallel and UNION the names (a point can sit
+    // in two cities' ETJ at a metro seam; a parcel can straddle two cities).
+    const parts = await Promise.all(srcs.map(async (src) => {
+      const q = identifySource(src, geom, opts);
+      const r = await q.fresh;
+      const names = uniq(r.items.map((it) => normalizeFeature(src, it.attrs).name).filter((v) => v != null && v !== "").map(String));
+      return { names, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
+    }));
+    const names = uniq(parts.flatMap((p) => p.names));
+    const ages = parts.map((p) => p.ageMs).filter((a) => a != null);
     out[role] = names;
-    const state = r.error && !r.items.length ? "failed" : names.length ? "loaded" : "empty";
-    out.sources.push({ id: role, state, ageMs: r.ageMs, msg: r.error ? humanize(r.error) : null });
-    opts.onStatus && opts.onStatus(role, state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
+    out.ages[role] = ages.length ? Math.min(...ages) : null;
+    const errPart = parts.find((p) => p.error);
+    const state = names.length ? "loaded" : errPart ? "failed" : "empty";
+    out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null });
+    opts.onStatus && opts.onStatus(role, state, errPart ? humanize(errPart.error) : null, { ts: parts[0]?.ts ?? null, stale: parts.some((p) => p.stale) });
   }));
   out.unincorporated = out.city.length === 0;
   out.straddle = out.city.length > 1 || out.county.length > 1;

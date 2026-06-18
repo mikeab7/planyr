@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  JURISDICTION_SOURCES, ROAD_MAINT_AGENCY, roadAuthority,
+  JURISDICTION_SOURCES, ETJ_SOURCES, etjSourcesForPoint, ROAD_MAINT_AGENCY, roadAuthority,
   buildIdentifyParams, normalizeFeature, simplifyRing, polylineDistMeters,
   identifySource, identifyJurisdiction, identifyRoadAuthority, countyAtPoint,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
+
+const HGAC = ETJ_SOURCES.find((s) => s.id === "etj_hgac"); // the regional Houston ETJ source
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 
 // Deterministic deps: a fake localStorage + clock for the cache, and a fake
@@ -109,8 +111,8 @@ describe("normalizeFeature — source schema → one internal shape", () => {
       .toEqual({ role: "county", name: "Harris", fips: "48201" });
   });
   it("the H-GAC ETJ maps the CITY field and title-cases the ALL-CAPS value", () => {
-    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { CITY: "HOUSTON" })).toEqual({ role: "etj", name: "Houston" });
-    expect(normalizeFeature(JURISDICTION_SOURCES.etj, { CITY: "MISSOURI CITY" })).toEqual({ role: "etj", name: "Missouri City" });
+    expect(normalizeFeature(HGAC, { CITY: "HOUSTON" })).toEqual({ role: "etj", name: "Houston" });
+    expect(normalizeFeature(HGAC, { CITY: "MISSOURI CITY" })).toEqual({ role: "etj", name: "Missouri City" });
   });
   it("a single-jurisdiction layer with no name column falls back to the source constant", () => {
     expect(normalizeFeature({ role: "etj", fields: { name: null }, nameConst: "Houston" }, { OBJECTID: 5 })).toEqual({ role: "etj", name: "Houston" });
@@ -180,6 +182,23 @@ describe("identifySource — rides the SWR cache (B96)", () => {
 });
 
 // ----------------------------------------------------------------------------
+describe("etjSourcesForPoint — region routing (Houston stays one query)", () => {
+  it("a Houston-metro point routes ONLY to H-GAC (no Austin/DFW server touched)", () => {
+    const ids = etjSourcesForPoint(29.76, -95.37).map((s) => s.id);
+    expect(ids).toEqual(["etj_hgac"]); // exactly one — the Houston use case is unchanged
+  });
+  it("an Austin point routes only to the Austin source", () => {
+    expect(etjSourcesForPoint(30.27, -97.74).map((s) => s.id)).toEqual(["etj_austin"]);
+  });
+  it("a Dallas–Fort Worth point routes only to the Fort Worth source", () => {
+    expect(etjSourcesForPoint(32.75, -97.33).map((s) => s.id)).toEqual(["etj_fortworth"]);
+  });
+  it("a point outside every covered metro routes to nothing (honest no-coverage)", () => {
+    expect(etjSourcesForPoint(31.76, -106.49)).toEqual([]); // El Paso
+  });
+});
+
+// ----------------------------------------------------------------------------
 describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
   const base = {
     [COUNTY]: () => [{ attributes: { CNTY_NM: "Harris", FIPS_ST_CNTY_CD: "48201" } }],
@@ -229,6 +248,18 @@ describe("identifyJurisdiction (B93) — city / ETJ / county", () => {
     expect(out.unincorporated).toBe(true);
     expect(out.etj).toEqual(["Richmond"]); // title-cased, not Houston
     expect(out.county).toEqual(["Fort Bend"]);
+  });
+  it("an Austin-metro point reads the Austin ETJ source, not H-GAC (region-routed)", async () => {
+    const out = await identifyJurisdiction(-97.74, 30.27, {
+      cache: freshCache(),
+      fetchJson: fakeFetch({
+        [COUNTY]: () => [{ attributes: { CNTY_NM: "Travis" } }],
+        [CITY]: () => [],
+        "COA_Jurisdiction": () => [{ attributes: { CITY_NAME: "CITY OF AUSTIN" } }], // Austin layer → nameConst "Austin"
+      }),
+    });
+    expect(out.county).toEqual(["Travis"]);
+    expect(out.etj).toEqual(["Austin"]); // resolved via the Austin source's nameConst
   });
   it("a whole-parcel test flags a boundary straddle (every city listed)", async () => {
     const ring = [[-95.46, 29.70], [-95.46, 29.72], [-95.44, 29.72], [-95.44, 29.70]];

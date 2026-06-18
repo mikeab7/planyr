@@ -93,6 +93,14 @@ was never clicked" quietly ships broken.
   CORS-clean). So ETJ now covers the whole 13-county metro, not just Houston. (Post-deploy, the
   on-screen ETJ row reads e.g. "Richmond ETJ" for a non-Houston unincorporated lot; county/city/road
   were already statewide.)
+- **2026-06-17 — ETJ extended to Austin + DFW, region-routed (data + CORS verified from origin).**
+  ETJ is now a bbox-scoped list; a click only queries the metro it falls in, so **Houston still fires
+  exactly one ETJ query** (unit test asserts this). Wired clean AGOL layers: **Austin** (City of Austin
+  2-/5-mile ETJ) and **Fort Worth** (City of Fort Worth ETJ; Dallas is landlocked, ~no ETJ). Verified
+  from the planyr.io origin: both CORS-clean + return features at real ETJ points (Austin: Del Valle /
+  NW edge; Fort Worth: Alliance / SW). **Still ⏳ — on-screen click-through for an Austin/DFW lot:**
+  the planner's parcel-identify there needs a working county CAD; do a live click in an Austin or
+  Fort Worth ETJ area once the new build deploys, and confirm the ETJ row names the city.
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
