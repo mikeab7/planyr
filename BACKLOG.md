@@ -880,6 +880,29 @@ Original spec:
 
 ---
 
+### B159 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)
+
+- [ ] Add a **time scale selector** to the PDF/Print Exhibit export sidebar, controlling the density of the Gantt chart's time axis in the exported output.
+- Options: **Days · Weeks · Months · Quarters** — matching common schedule exhibit conventions.
+- Changing the selection re-renders the Gantt preview in real time before the user prints/saves.
+- Export-only control; does not affect the live schedule view.
+
+<!-- Filed 2026-06-18 from owner-submitted NEW-2. No prior Scheduler/Gantt items to dedup against. -->
+
+---
+
+### B160 — Gantt horizontal width control on PDF/Print Exhibit export `[Scheduler]` (feature)
+
+- [ ] Add a control to the PDF/Print Exhibit export sidebar that lets the user adjust how much of the total page width the Gantt chart occupies vs. the task name/info columns.
+- Recommended implementation: a **horizontal split slider** or a **numeric percentage field** (e.g., "Gantt width: 60%") that shifts the column-to-chart ratio.
+- Preview updates in real time as the user drags/adjusts.
+- **Interacts with B159 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
+- Export-only; live schedule layout unaffected.
+
+<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B159 (related but distinct control). -->
+
+---
+
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
