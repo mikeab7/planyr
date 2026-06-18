@@ -93,6 +93,14 @@ was never clicked" quietly ships broken.
   CORS-clean). So ETJ now covers the whole 13-county metro, not just Houston. (Post-deploy, the
   on-screen ETJ row reads e.g. "Richmond ETJ" for a non-Houston unincorporated lot; county/city/road
   were already statewide.)
+- **2026-06-17 — ETJ extended to Austin + DFW, region-routed (data + CORS verified from origin).**
+  ETJ is now a bbox-scoped list; a click only queries the metro it falls in, so **Houston still fires
+  exactly one ETJ query** (unit test asserts this). Wired clean AGOL layers: **Austin** (City of Austin
+  2-/5-mile ETJ) and **Fort Worth** (City of Fort Worth ETJ; Dallas is landlocked, ~no ETJ). Verified
+  from the planyr.io origin: both CORS-clean + return features at real ETJ points (Austin: Del Valle /
+  NW edge; Fort Worth: Alliance / SW). **Still ⏳ — on-screen click-through for an Austin/DFW lot:**
+  the planner's parcel-identify there needs a working county CAD; do a live click in an Austin or
+  Fort Worth ETJ area once the new build deploys, and confirm the ETJ row names the city.
 
 ### V2 — GIS stale-while-revalidate cache + data-age (B96) ⏳
 - **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
@@ -650,9 +658,26 @@ _Move items here with the date and who/what checked them._
   - **Drag-to-move:** the building's **"314′"** dimension dragged freely up out of the shape, leaving a **dashed red leader** pointing back to the edge it measures; the offset persists on the element.
   - **Click-to-edit road width:** clicking the road's **"199′"** number opened the prompt (seeded "199"); entering **30** resized the road to a **30′** travel width and the callout updated to "30′".
   - lint 0 · 223 tests · build green; `SitePlannerApp` lazy chunk intact.
-- **Not covered / polish:** the width editor is a native `prompt()` (an inline on-canvas input is a future nicety); signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence).
+- **Not covered:** signed-in cloud-reload of a moved dimension untested (logged-out run, but `dimOffset` rides the normal Site Model persistence). *(The width editor's `prompt()` is now replaced by an inline editor — see V37.)*
 
-### V37 — Multipart parcel: clicking the smaller tract now selects ALL parts (B147) ✅
+### V37 — Edits happen inline on the canvas, never in a dialog box (owner rule) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (local preview of the built artifact) · **Cadence** once (rule acceptance)
+- **Why:** owner: dialog-box edits are "horrible UI." Replaced the three `window.prompt` edit dialogs (road travel width, per-edge setback, overlay trace length) with one shared inline `numEdit` `<input>` overlay; rule recorded in CLAUDE.md.
+- **Steps:** "Start blank" → Road tool → drew a road → selected it → clicked the red travel-width **number** → (verified no dialog) typed **30** → Enter.
+- **Result ✅:** clicking the number opened a small **inline input box on the canvas** at the dimension (accent border, seeded "199") — **no browser dialog fired** (Playwright `dialog` event count = 0; one `foreignObject input` present). Typing **30** + Enter resized the road to a **30′** travel width and closed the editor. Commit-on-Enter / click-away and Esc-to-cancel wired.
+- **Not covered:** the per-edge **setback** and overlay **trace-length** editors use the same component (so they inherit the behavior) but weren't separately driven; a native `window.confirm` still guards *deleting* a parcel drawing (a destructive confirmation, not an edit) — left as-is.
+
+### V38 — Markup tools: Bluebeam-style rotate/resize boxes + vertex-edit lines/polys (B147) ✅
+- **Added** 2026-06-17 · **Checked** 2026-06-17 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (feature acceptance)
+- **Steps:** "Start blank" → (a) **Rectangle** tool, drew a box, then with Select dragged a corner grip and the rotate handle; (b) **Polyline** tool, clicked 3 points + Enter, then dragged the middle vertex.
+- **Result ✅:**
+  - **Rectangle:** on select it shows **4 corner grips + 4 edge grips + a rotate handle** on a stem above the top edge. Dragging the bottom-right corner resized it (width 300 → 410 px). Dragging the rotate handle rotated it (`transform` `rotate(0…)` → `rotate(53…)`); all grips track the rotation. The on-screen rotation matched the headline "rotate a rectangle" ask.
+  - **Polyline:** on finish it shows **3 vertex grips + 2 ＋ add-point handles** (correctly none past the open path's last point). Dragging the middle vertex moved it (points string updated).
+  - Box geometry also settable precisely via the new panel **Width / Height** + **Rotation°** fields. Zero console/page errors from the change (only the unrelated FBCAD GIS-host CORS error, a known down host).
+  - lint 0 · **225 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered (logged-out headless limits):** ellipse rotate/resize and polygon/line vertex edits weren't separately screenshotted, but they ride the exact same code paths (MK_BOX_KINDS / MK_VERTEX_KINDS) proven here; signed-in cloud-reload of an edited markup untested (markups ride the normal Site Model persistence).
+
+### V39 — Multipart parcel: clicking the smaller tract now selects ALL parts (B151) ✅
 - **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bug-fix acceptance)
 - **Steps:** "＋ Select parcels" → `setView` on the **west (smaller) tract** of Pearland account `0440520000010` ("TRS 3 & 5", a two-tract parcel) at zoom 17 → clicked the meat of that west tract.
 - **Result ✅:**

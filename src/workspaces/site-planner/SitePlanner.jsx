@@ -249,6 +249,15 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 // Measure records are {mode, pts}. Old records were {a,b} — normalize both.
 const measPts = (m) => (m.pts ? m.pts : (m.a && m.b ? [m.a, m.b] : []));
 const measMode = (m) => m.mode || "line";
+// Neutral markup shapes that support Bluebeam-style geometry editing: vertex shapes
+// (line/polyline/polygon) expose draggable control points; box shapes (rect/ellipse)
+// resize + rotate via grips. Semantic markups (utilRoute/traced/encumbrance/…) stay
+// move-only — they carry derived geometry that hand-editing would desync.
+const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
+const MK_BOX_KINDS = ["rect", "ellipse"];
+const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
+const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
+const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
 const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); return t; };
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -732,6 +741,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [combineSel, setCombineSel] = useState([]);   // parcel ids picked for the Combine tool
   const [calloutDraft, setCalloutDraft] = useState(null); // {tip:{x,y}} while placing a callout
   const [editCallout, setEditCallout] = useState(null);   // {id, text, isNew} while typing a callout inline
+  const [numEdit, setNumEdit] = useState(null);           // {fx,fy (feet), value, onCommit} — inline numeric edit, NEVER a dialog box
   const [mkRect, setMkRect] = useState(null);   // {kind, a:{x,y}, b:{x,y}} drag-draw a markup rect/ellipse/line
   const [mkPoly, setMkPoly] = useState(null);   // {kind, pts:[{x,y}]} click-draw a markup polygon/polyline
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
@@ -1120,7 +1130,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
-  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft); });
+  useEffect(() => { busyRef.current = !!(drag.current || mkRect || mkPoly || draftRect || editCallout || calloutDraft || numEdit); });
   // When ANOTHER tab saves this site, fold its content into our canvas (union — never drops
   // either tab's work) so two open tabs agree without a reload. Idle-only + only-if-changed
   // (avoids churn / ping-pong). `storage` events fire only in OTHER tabs, never the writer.
@@ -1759,6 +1769,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
   const setSelMarkup = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); setMkStyle((s) => ({ ...s, ...patch })); };
+  // Geometry patch (w/h/rot) — kept out of mkStyle so new shapes don't inherit a past size/angle.
+  const setSelMarkupGeom = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? { ...m, ...patch } : m)); };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -1868,6 +1880,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "measure", i });
   };
 
+  /* ------------ markup geometry editing (Bluebeam-style: drag/add/delete vertices,
+     resize + rotate boxes). Mirrors the element/measure vertex + resize/rotate handlers
+     for the markups[] layer. ------------ */
+  const startMarkupVertex = (e, id, index) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) return;
+    pushHistory();
+    if (e.shiftKey) { // shift-click deletes the vertex (keep the kind's minimum)
+      const pts = mkPts(m);
+      if (pts.length > mkMinPts(m)) setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, pts.filter((_, j) => j !== index)) : x));
+      return;
+    }
+    setSel({ kind: "markup", id });
+    drag.current = { mode: "mkVertex", id, index };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const addMarkupVertex = (e, id, index) => { // ＋ on an edge midpoint (polyline/polygon)
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) return;
+    pushHistory();
+    setMarkups((a) => a.map((x) => {
+      if (x.id !== id) return x;
+      const pts = mkPts(x), p = pts[index], q = pts[(index + 1) % pts.length];
+      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+      const np = [...pts]; np.splice(index + 1, 0, mid);
+      return setMkPts(x, np);
+    }));
+    setSel({ kind: "markup", id });
+  };
+  const startMarkupResize = (e, id, hx, hy) => { // hx/hy ∈ {-1,0,1}: corner = both, edge = one
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) return;
+    const rot = m.rot || 0;
+    const oppLocal = rot2(-hx * m.w / 2, -hy * m.h / 2, rot); // the mirrored corner/edge stays fixed
+    pushHistory();
+    drag.current = { mode: "mkResize", id, hx, hy, rot, opp: { x: m.cx + oppLocal.x, y: m.cy + oppLocal.y } };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const startMarkupRotate = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    if (!m || m.locked) return;
+    const fp = p2f(e.clientX, e.clientY), pivot = { x: m.cx, y: m.cy };
+    pushHistory();
+    drag.current = { mode: "mkRotate", id, pivot, rot0: m.rot || 0, a0: Math.atan2(fp.y - pivot.y, fp.x - pivot.x) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+
   const onMove = (e) => {
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
@@ -1938,6 +2005,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "mkMove") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
       setMarkups((a) => a.map((m) => m.id === d.id ? translateMarkup(d.orig, dx, dy) : m));
+      return;
+    }
+    if (d.mode === "mkVertex") { // drag a line/polyline/polygon control point
+      const sp = snapPt(fp);
+      setMarkups((a) => a.map((m) => m.id === d.id ? setMkPts(m, mkPts(m).map((p, j) => (j === d.index ? sp : p))) : m));
+      return;
+    }
+    if (d.mode === "mkResize") { // resize a rect/ellipse in its own (rotated) frame; opposite side fixed
+      const local = rot2(fp.x - d.opp.x, fp.y - d.opp.y, -d.rot);
+      const snapDim = (v) => Math.max(1, snapOn ? Math.round(Math.abs(v) / settings.gridSize) * settings.gridSize : Math.round(Math.abs(v)));
+      setMarkups((a) => a.map((m) => {
+        if (m.id !== d.id) return m;
+        const nw = d.hx !== 0 ? snapDim(local.x) : m.w;
+        const nh = d.hy !== 0 ? snapDim(local.y) : m.h;
+        const half = rot2(d.hx * nw, d.hy * nh, d.rot);
+        return { ...m, w: nw, h: nh, cx: d.opp.x + half.x / 2, cy: d.opp.y + half.y / 2 };
+      }));
+      return;
+    }
+    if (d.mode === "mkRotate") { // rotate a rect/ellipse about its center (15° steps when snap is on)
+      let rot = d.rot0 + (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) - d.a0) * 180 / Math.PI;
+      rot = snapOn ? Math.round(rot / 15) * 15 : Math.round(rot);
+      setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, rot: ((rot % 360) + 360) % 360 } : m));
       return;
     }
     if (d.mode === "callout") {
@@ -2393,13 +2483,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (ovCalib.kind === "trace") {
       if (pts.length < 2) { setOvCalib({ ...ovCalib, pts }); return; }
       const measuredFt = dist(pts[0], pts[1]);
-      const v = window.prompt("Real length of that line on the drawing (ft):", "");
       setOvCalib(null);
-      const realFt = v == null ? NaN : +v;
-      const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
-      if (!patch) return;
-      pushHistory();
-      setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+      setNumEdit({ fx: pts[1].x, fy: pts[1].y, value: "", onCommit: (realFt) => {
+        const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
+        if (!patch) return;
+        pushHistory();
+        setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+      } });
     } else {
       // align: collect alternating drawing→map points (pairs); apply on demand (≥2 pairs)
       setOvCalib({ ...ovCalib, pts });
@@ -3042,14 +3132,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const editDimWidth = (id) => {
+  const editDimWidth = (id, e) => {
     const el = els.find((x) => x.id === id);
     if (!el || el.type !== "road") return;
-    const v = window.prompt("Road travel width (feet):", String(Math.round(roadTravel(el))));
-    if (v == null) return;
-    const n = parseFloat(v);
-    if (Number.isFinite(n) && n > 0) setRoadTravel(el, n);
+    const fp = e ? p2f(e.clientX, e.clientY) : { x: el.cx, y: el.cy };
+    setNumEdit({ fx: fp.x, fy: fp.y, value: String(Math.round(roadTravel(el))), onCommit: (n) => { if (n > 0) setRoadTravel(el, n); } });
   };
+  // Inline numeric editor — NEVER a dialog box (owner rule 2026-06-17). Commit on Enter / click-away,
+  // cancel on Esc; each opener says where to place it (feet) + what to do with the entered value.
+  const commitNumEdit = () => {
+    if (!numEdit) return;
+    const n = parseFloat(numEdit.value);
+    const cb = numEdit.onCommit;
+    setNumEdit(null);
+    if (Number.isFinite(n)) cb(n);
+  };
+  const cancelNumEdit = () => setNumEdit(null);
   const startEdgeResize = (e, id, nx, ny) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -3927,6 +4025,64 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{nodes}</g>;
   })();
 
+  // Bluebeam-style editing chrome on a selected markup (select tool):
+  //  • rect / ellipse → 4 corner + 4 edge resize grips + a rotate handle above the top edge
+  //  • line / polyline / polygon → draggable vertex dots; ＋ on edges (poly) to add a point,
+  //    Shift-click a dot to delete one
+  // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
+  const markupHandles = (() => {
+    if (sel?.kind !== "markup" || tool !== "select") return null;
+    const m = markups.find((x) => x.id === sel.id);
+    if (!m || m.locked) return null;
+    if (MK_BOX_KINDS.includes(m.kind)) {
+      const rot = m.rot || 0, cpx = f2p({ x: m.cx, y: m.cy });
+      const at = (lx, ly) => { const o = rot2(lx, ly, rot); return f2p({ x: m.cx + o.x, y: m.cy + o.y }); };
+      const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+      const edges = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      const topMid = at(0, -m.h / 2);
+      let ux = topMid.x - cpx.x, uy = topMid.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+      const rotPos = { x: topMid.x + ux * 26, y: topMid.y + uy * 26 };
+      return (
+        <g>
+          <line x1={topMid.x} y1={topMid.y} x2={rotPos.x} y2={rotPos.y} stroke={PAL.accent} strokeWidth={1.25} />
+          <circle cx={rotPos.x} cy={rotPos.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startMarkupRotate(e, m.id)} />
+          {edges.map(([nx, ny], i) => { const p = at(nx * m.w / 2, ny * m.h / 2); return (
+            <rect key={`mke${i}`} x={p.x - 4.5} y={p.y - 4.5} width={9} height={9} rx={2}
+              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              style={{ cursor: resizeCursor(p.x - cpx.x, p.y - cpx.y) }} onPointerDown={(e) => startMarkupResize(e, m.id, nx, ny)} />
+          ); })}
+          {corners.map(([sx, sy], i) => { const p = at(sx * m.w / 2, sy * m.h / 2); return (
+            <rect key={`mkc${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10}
+              fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5}
+              style={{ cursor: resizeCursor(p.x - cpx.x, p.y - cpx.y) }} onPointerDown={(e) => startMarkupResize(e, m.id, sx, sy)} />
+          ); })}
+        </g>
+      );
+    }
+    if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
+    const px = mkPts(m).map(f2p);
+    const isPoly = m.kind === "polyline" || m.kind === "polygon";
+    const nodes = [];
+    if (isPoly) px.forEach((p, i) => {
+      if (m.kind === "polyline" && i === px.length - 1) return; // open path: no edge past the last point
+      const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+      nodes.push(
+        <g key={`mkav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMarkupVertex(e, m.id, i)}>
+          <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
+          <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
+        </g>
+      );
+    });
+    px.forEach((p, i) => nodes.push(
+      <rect key={`mkv${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+        fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+        style={{ cursor: "move" }} onPointerDown={(e) => startMarkupVertex(e, m.id, i)} />
+    ));
+    return <g>{nodes}</g>;
+  })();
+
   // Accuracy state — the single source of truth for measurement / acreage trust.
   const isGeoref = restored?.origin || parcels.some((p) => p.attrs);
   const calibrationState =
@@ -4520,7 +4676,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <g data-export="skip">{pts.map((a, i) => {
                   const b = pts[(i + 1) % pts.length], mid = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
                   return (
-                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const v = window.prompt(`Setback for edge ${i + 1} (ft):`, String(sb[i])); if (v != null && v.trim() !== "" && !isNaN(+v)) setEdgeSetback(selParcel, i, +v); }}>
+                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (n) => setEdgeSetback(selParcel, i, n) }); }}>
                       <rect x={mid.x - 13} y={mid.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
                       <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{f0(sb[i])}′</text>
                     </g>
@@ -4733,6 +4889,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
 
+              {/* Inline numeric editor — road width / per-edge setback / overlay trace length. NEVER a dialog box. */}
+              {numEdit && <rect x={-100000} y={-100000} width={200000} height={200000} fill="transparent" pointerEvents="all" onPointerDown={(e) => { e.stopPropagation(); commitNumEdit(); }} />}
+              {numEdit && (() => {
+                const bp = f2p({ x: numEdit.fx, y: numEdit.fy });
+                const W = 96, H = 30;
+                return (
+                  <foreignObject x={bp.x - W / 2} y={bp.y - H - 8} width={W} height={H} style={{ overflow: "visible" }}>
+                    <input autoFocus type="number" value={numEdit.value}
+                      onChange={(e) => setNumEdit((s) => ({ ...s, value: e.target.value }))}
+                      onBlur={commitNumEdit}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "#fff", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                  </foreignObject>
+                );
+              })()}
+
               {/* measurements — line (distance), polyline (path length), area */}
               {measures.map((m, i) => {
                 const fpts = measPts(m);
@@ -4909,6 +5082,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parkingAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
+                {markupHandles}
                 {attachHint && (() => {
                   const p = f2p(attachHint);
                   return (
@@ -5456,6 +5630,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} onChange={(e) => setSelMarkup({ fill: e.target.value })} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
                 </>}
+                {MK_BOX_KINDS.includes(selMarkup.kind) && <>
+                  <Field label="Width / Height"><span style={{ display: "flex", gap: 5 }}>
+                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} onCommit={(n) => setSelMarkupGeom({ w: n })} />
+                    <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} onCommit={(n) => setSelMarkupGeom({ h: n })} />
+                  </span></Field>
+                  <Field label="Rotation°"><NumInput style={numInput} value={Math.round(selMarkup.rot || 0)} onCommit={(n) => setSelMarkupGeom({ rot: ((n % 360) + 360) % 360 })} /></Field>
+                </>}
+                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
+                  {MK_BOX_KINDS.includes(selMarkup.kind)
+                    ? "Drag the corner/edge grips to resize, the top handle to rotate."
+                    : selMarkup.kind === "line"
+                      ? "Drag either end dot to move it."
+                      : "Drag a dot to reshape; ＋ adds a point; Shift-click a dot removes it."}
+                </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                   <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
                   <button style={{ ...chip, color: "#b3361b" }} onClick={deleteSel}>Delete</button>
@@ -5813,7 +6001,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               {jurInfo.error ? <span style={{ color: "#b45309" }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
                                 {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "source not wired" : "not in a city ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
                                 {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
                                 {jurInfo.j.straddle && <div style={{ color: "#b45309", marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
                                 <div style={{ color: PAL.muted, marginTop: 4, fontStyle: "italic" }}>Screening only — verify with the jurisdiction.</div>
@@ -6506,7 +6694,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const dimSel = isSel && tool === "select"; // interactive (drag/edit) only when the element is selected
     const isRoad = el.type === "road";
     const numHandlers = dimSel && isRoad // road number: click to edit width (and don't start a drag)
-      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id); } }
+      ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
       : {};
     const dim = [];
     if (horizLong) { // short side is vertical (h)
