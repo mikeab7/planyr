@@ -3802,7 +3802,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // Seat the EXISTING-area label over the existing basin (baseline centroid), not the
         // whole-pond centre — so it reads over the old pond and clears the "+added" label.
         fc = centroid(base.ring);
-        lines = ["Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`];
+        lines = ["Existing Detention Pond", `${f2(exA / SQFT_PER_ACRE)} ac · ${f0(exA)} sf`];
         if (pt) pondAdd = { pt, addA };
         else { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
@@ -3845,7 +3845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: [`+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
     }
   }
   const labelShow = layoutLabels(
