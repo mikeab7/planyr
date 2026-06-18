@@ -149,6 +149,60 @@ export function pendingLegacySites(uid) {
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
+// localStorage is the INTENTIONAL PRIMARY store. When signed in, active store =
+// planarfit:sites:cloud:<uid> (local cache pulled from Supabase on login). Supabase is
+// a fire-and-forget mirror — not a fallback, not a gate. Writing always succeeds locally
+// first; the cloud write follows asynchronously. The "legacy" store (planarfit:sites:v1)
+// is the pre-login store; the migration flow bridges it to the cloud cache.
+
+// Stage a legacy site into the signed-in user's cloud cache WITHOUT pushing to Supabase.
+// Used when the user clicks "Open" in the migration modal so the planner can load the
+// site normally. The user then decides (Save = push; Discard = remove from both stores).
+// Non-destructive: the original legacy copy is kept.
+export function stageLegacySite(uid, siteId) {
+  if (!uid || !siteId) return null;
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const rec = legacy[siteId];
+  if (!rec) return null;
+  const local = createSiteModel(rec);
+  if (!local.id) return null;
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  cloud[local.id] = local;
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return local;
+}
+
+// Remove a site from both the legacy store and the signed-in user's cloud cache.
+// Used for an explicit Discard in the migration flow — the user wants to erase this
+// on-device copy entirely, not save it to their account.
+export function discardLegacySite(uid, siteId) {
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  delete legacy[siteId];
+  try { localStorage.setItem(SITES_KEY, JSON.stringify(legacy)); } catch (_) {}
+  if (uid) {
+    let cloud = {};
+    try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+    delete cloud[siteId];
+    try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  }
+}
+
+// True when a site has no meaningful content — nothing drawn, no parcels, no underlay.
+// Used to decide whether to offer Save (nothing to keep) vs. only Discard.
+export function isEmptySite(model) {
+  if (!model) return true;
+  return !(
+    (model.parcels || []).length ||
+    (model.els || []).length ||
+    (model.markups || []).length ||
+    (model.measures || []).length ||
+    model.underlay
+  );
+}
+
 // Import a SINGLE legacy site into the cloud for uid. Non-destructive — original stays
 // in the legacy store. Returns { ok } (same shape as cloudUpsert).
 export async function importOneSiteToCloud(uid, siteId) {

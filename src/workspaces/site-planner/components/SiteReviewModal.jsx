@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { pendingLegacySites, importOneSiteToCloud } from "../lib/storage.js";
+import { pendingLegacySites, importOneSiteToCloud, discardLegacySite, isEmptySite } from "../lib/storage.js";
 
 const F = "system-ui, -apple-system, sans-serif";
 
@@ -8,8 +8,25 @@ function formatDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-// Returns the index of the next undecided site after fromIdx, wrapping around.
-// "Undecided" means no decision yet or previous attempt failed.
+// Returns { primary, secondary } labels for a site, prioritising the most specific info.
+function siteLabel(s) {
+  const addr = s.parcels && s.parcels[0] && s.parcels[0].addr;
+  if (addr) return { primary: addr, secondary: s.site && s.site !== "Untitled site" ? s.site : null };
+  if (s.site && s.site !== "Untitled site") return { primary: s.site, secondary: null };
+  if (s.county) return { primary: `${s.county} County`, secondary: s.origin ? `${s.origin.lat.toFixed(4)}° N, ${Math.abs(s.origin.lon).toFixed(4)}° W` : null };
+  if (s.origin) return { primary: `${s.origin.lat.toFixed(4)}° N, ${Math.abs(s.origin.lon).toFixed(4)}° W`, secondary: null };
+  return null; // truly unidentifiable
+}
+
+function siteMeta(s) {
+  const parcels = (s.parcels || []).length;
+  const buildings = (s.els || []).filter(e => e && e.type === "building" && !e.dogEar && !e.attachedTo).length;
+  const parts = [];
+  if (parcels) parts.push(`${parcels} parcel${parcels !== 1 ? "s" : ""}`);
+  if (buildings) parts.push(`${buildings} building${buildings !== 1 ? "s" : ""}`);
+  return parts.join(" · ");
+}
+
 function nextUndecidedIdx(sites, fromIdx, decisions) {
   for (let i = fromIdx + 1; i < sites.length; i++) {
     const d = decisions[sites[i].id];
@@ -19,19 +36,18 @@ function nextUndecidedIdx(sites, fromIdx, decisions) {
     const d = decisions[sites[i].id];
     if (!d || d === "failed") return i;
   }
-  return -1; // all decided
+  return -1;
 }
 
-export function SiteReviewModal({ uid, onClose }) {
+export function SiteReviewModal({ uid, onOpen, onClose }) {
   const [sites] = useState(() => pendingLegacySites(uid));
-  const [decisions, setDecisions] = useState({}); // id -> 'saving'|'saved'|'skipped'|'failed'
+  const [decisions, setDecisions] = useState({});
   const [activeIdx, setActiveIdx] = useState(0);
-  // Ref so the async save callback can read latest decisions without a stale closure
   const decisionsRef = useRef(decisions);
   decisionsRef.current = decisions;
 
   const savedCount = Object.values(decisions).filter((v) => v === "saved").length;
-  const decidedCount = Object.values(decisions).filter((v) => v === "saved" || v === "skipped").length;
+  const decidedCount = Object.values(decisions).filter((v) => v === "saved" || v === "skipped" || v === "discarded").length;
 
   const handleSave = async (id) => {
     setDecisions((d) => ({ ...d, [id]: "saving" }));
@@ -58,6 +74,21 @@ export function SiteReviewModal({ uid, onClose }) {
     if (next !== -1) setActiveIdx(next);
   };
 
+  const handleDiscard = (id) => {
+    discardLegacySite(uid, id);
+    const idx = sites.findIndex((s) => s.id === id);
+    const updated = { ...decisionsRef.current, [id]: "discarded" };
+    decisionsRef.current = updated;
+    setDecisions(updated);
+    const next = nextUndecidedIdx(sites, idx, updated);
+    if (next !== -1) setActiveIdx(next);
+  };
+
+  const handleOpen = (id) => {
+    onClose(savedCount); // close modal first
+    onOpen(id);          // then navigate
+  };
+
   if (!sites.length) return null;
 
   const progress = sites.length > 0 ? (decidedCount / sites.length) * 100 : 0;
@@ -75,12 +106,12 @@ export function SiteReviewModal({ uid, onClose }) {
       <div style={{
         background: "#181f35", color: "#e4ecff",
         border: "1px solid #273560", borderRadius: 14,
-        width: "100%", maxWidth: 500,
+        width: "100%", maxWidth: 520,
         boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
         display: "flex", flexDirection: "column", maxHeight: "88vh",
       }}>
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div style={{
           padding: "15px 18px 13px",
           borderBottom: "1px solid #273560",
@@ -94,7 +125,6 @@ export function SiteReviewModal({ uid, onClose }) {
               {decidedCount} of {sites.length} decided
             </div>
           </div>
-          {/* Progress bar */}
           <div style={{ width: 72, height: 3, background: "#273560", borderRadius: 2, overflow: "hidden" }}>
             <div style={{
               height: "100%", width: `${progress}%`,
@@ -113,7 +143,7 @@ export function SiteReviewModal({ uid, onClose }) {
           >✕</button>
         </div>
 
-        {/* ── Site list ── */}
+        {/* Site list */}
         <div style={{ overflowY: "auto", flex: 1, padding: "10px 12px" }}>
           {sites.map((s, i) => {
             const isActive = i === activeIdx;
@@ -121,11 +151,14 @@ export function SiteReviewModal({ uid, onClose }) {
             const isSaving = d === "saving";
             const isSaved  = d === "saved";
             const isSkipped = d === "skipped";
+            const isDiscarded = d === "discarded";
             const isFailed = d === "failed";
-            const isDone   = isSaved || isSkipped;
+            const isDone   = isSaved || isSkipped || isDiscarded;
             const needsRetry = isFailed && isActive;
+            const empty = isEmptySite(s);
 
-            const siteName = s.site || s.name || "Untitled site";
+            const label = siteLabel(s);
+            const meta = siteMeta(s);
             const planName = s.name && s.name !== s.site ? s.name : null;
 
             return (
@@ -146,76 +179,122 @@ export function SiteReviewModal({ uid, onClose }) {
                   {/* Step circle */}
                   <div style={{
                     width: 24, height: 24, borderRadius: "50%", flex: "none",
-                    background: isSaved ? "#166534" : isSkipped ? "#374151" : isFailed ? "#7c2d12" : isActive ? "#4f7df0" : "#273560",
+                    background: isSaved ? "#166534" : (isSkipped || isDiscarded) ? "#374151" : isFailed ? "#7c2d12" : isActive ? "#4f7df0" : "#273560",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontSize: 11, fontWeight: 800, color: "#fff",
                   }}>
-                    {isSaved ? "✓" : isSkipped ? "–" : isFailed ? "!" : i + 1}
+                    {isSaved ? "✓" : (isSkipped || isDiscarded) ? "–" : isFailed ? "!" : i + 1}
                   </div>
 
                   {/* Name + meta */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 13, fontWeight: 700,
-                      color: isDone ? "#5a7099" : "#e4ecff",
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {siteName}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "#4a6080", marginTop: 1 }}>
-                      {planName ? `${planName} · ` : ""}
-                      {s.updatedAt ? `Updated ${formatDate(s.updatedAt)}` : "Never saved"}
-                    </div>
+                    {label ? (
+                      <>
+                        <div style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: isDone ? "#5a7099" : "#e4ecff",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {label.primary}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#4a6080", marginTop: 1, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {label.secondary && <span>{label.secondary}</span>}
+                          {meta && <span>{meta}</span>}
+                          {planName && <span>{planName}</span>}
+                          {s.updatedAt ? <span>Updated {formatDate(s.updatedAt)}</span> : <span>Never saved</span>}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: isDone ? "#5a7099" : "#8a9ab8",
+                          fontStyle: "italic",
+                        }}>
+                          {empty ? "Empty site (nothing was saved)" : "Untitled site"}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#4a6080", marginTop: 1 }}>
+                          {s.updatedAt ? `Created ${formatDate(s.updatedAt)}` : ""}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {/* Status badge */}
                   {isSaved && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, color: "#4ade80",
-                      background: "rgba(74,222,128,0.12)", borderRadius: 5, padding: "2px 8px",
-                    }}>Saved</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80", background: "rgba(74,222,128,0.12)", borderRadius: 5, padding: "2px 8px" }}>Saved</span>
                   )}
                   {isSkipped && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, color: "#6b7280",
-                      background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px",
-                    }}>Skipped</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>On device</span>
+                  )}
+                  {isDiscarded && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>Discarded</span>
                   )}
                   {isFailed && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, color: "#f87171",
-                      background: "rgba(248,113,113,0.12)", borderRadius: 5, padding: "2px 8px",
-                    }}>Failed</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171", background: "rgba(248,113,113,0.12)", borderRadius: 5, padding: "2px 8px" }}>Failed</span>
                   )}
                 </div>
 
-                {/* Action buttons — only on active, undecided (or failed) card */}
+                {/* Action buttons — only on the active, undecided (or failed-retry) card */}
                 {isActive && (!isDone || needsRetry) && (
                   <div style={{ padding: "0 14px 12px", display: "flex", gap: 8 }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleSave(s.id); }}
-                      disabled={isSaving}
-                      style={{
-                        flex: 1, cursor: isSaving ? "default" : "pointer",
-                        background: isSaving ? "#3b5bbf" : isFailed ? "#b45309" : "#4f7df0",
-                        color: "#fff", border: "none", borderRadius: 7,
-                        padding: "7px 0", fontFamily: F, fontSize: 12.5, fontWeight: 700,
-                      }}
-                    >
-                      {isSaving ? "Saving…" : isFailed ? "Retry" : "Save to account"}
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleSkip(s.id); }}
-                      disabled={isSaving}
-                      style={{
-                        flex: "none", cursor: isSaving ? "default" : "pointer",
-                        background: "rgba(255,255,255,0.07)", color: "#7a98c8",
-                        border: "1px solid #273560", borderRadius: 7,
-                        padding: "7px 16px", fontFamily: F, fontSize: 12.5, fontWeight: 600,
-                      }}
-                    >
-                      Skip
-                    </button>
+                    {empty ? (
+                      /* Empty/corrupt site: nothing worth keeping */
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDiscard(s.id); }}
+                        style={{
+                          flex: 1, cursor: "pointer",
+                          background: "#374151", color: "#9ca3af",
+                          border: "1px solid #4b5563", borderRadius: 7,
+                          padding: "7px 0", fontFamily: F, fontSize: 12.5, fontWeight: 700,
+                        }}
+                      >
+                        Discard (nothing here)
+                      </button>
+                    ) : (
+                      <>
+                        {/* Primary: open the site so the user can see it before deciding */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpen(s.id); }}
+                          disabled={isSaving}
+                          style={{
+                            flex: 1, cursor: isSaving ? "default" : "pointer",
+                            background: isFailed ? "#b45309" : "#4f7df0",
+                            color: "#fff", border: "none", borderRadius: 7,
+                            padding: "7px 0", fontFamily: F, fontSize: 12.5, fontWeight: 700,
+                          }}
+                        >
+                          {isFailed ? "Retry save" : "Open →"}
+                        </button>
+                        {/* Quick-save for sites the user already recognises */}
+                        {!isFailed && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleSave(s.id); }}
+                            disabled={isSaving}
+                            style={{
+                              flex: "none", cursor: isSaving ? "default" : "pointer",
+                              background: "rgba(79,125,240,0.15)", color: "#7ab3f0",
+                              border: "1px solid #3b5bbf", borderRadius: 7,
+                              padding: "7px 12px", fontFamily: F, fontSize: 12, fontWeight: 600,
+                            }}
+                          >
+                            {isSaving ? "Saving…" : "Save"}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSkip(s.id); }}
+                          disabled={isSaving}
+                          style={{
+                            flex: "none", cursor: isSaving ? "default" : "pointer",
+                            background: "rgba(255,255,255,0.07)", color: "#7a98c8",
+                            border: "1px solid #273560", borderRadius: 7,
+                            padding: "7px 12px", fontFamily: F, fontSize: 12, fontWeight: 600,
+                          }}
+                        >
+                          Keep on device
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -223,20 +302,20 @@ export function SiteReviewModal({ uid, onClose }) {
           })}
         </div>
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <div style={{
           padding: "12px 18px", borderTop: "1px solid #273560",
           display: "flex", alignItems: "center", gap: 10,
         }}>
           {decidedCount < sites.length ? (
             <span style={{ flex: 1, fontSize: 12, color: "#4a6080" }}>
-              {sites.length - decidedCount} remaining
+              {sites.length - decidedCount} remaining · click a site or use Open to see it first
             </span>
           ) : (
             <span style={{ flex: 1, fontSize: 12, color: "#4ade80" }}>
               {savedCount > 0
                 ? `${savedCount} site${savedCount === 1 ? "" : "s"} saved to your account`
-                : "No sites saved — they remain on this device"}
+                : "No sites saved — decisions applied"}
             </span>
           )}
           <button
