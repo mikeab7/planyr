@@ -3267,6 +3267,12 @@ function App() {
             // Enter / F2 — open edit with existing value; notes → open modal; pickers → open picker
       if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null &&
           (e.key === "Enter" || e.key === "F2")) {
+        if (selectedId === "__NEW_TASK__") {
+          e.preventDefault();
+          openNameEditOnReveal.current = true;
+          addTask();
+          return;
+        }
         const col = COLS[selectedColIdx];
         if (col) {
           e.preventDefault();
@@ -3288,6 +3294,7 @@ function App() {
       }
       // Type-to-edit — any printable key opens the cell and seeds it with that character
       if (!e.altKey && !e.ctrlKey && !e.metaKey && !typing && selectedId !== null && e.key.length === 1) {
+        if (selectedId === "__NEW_TASK__") return; // no-op on the "+ New task" affordance
         const col = COLS[selectedColIdx];
         if (col) {
           if (col.t === "notes") {
@@ -3330,14 +3337,24 @@ function App() {
         if (e.key === "ArrowDown") {
           e.preventDefault();
           const tasks = flatTasksRef.current;
+          if (selectedId === "__NEW_TASK__") return; // already at "+ New task" row
           const idx = selectedId !== null ? tasks.findIndex(t => t.id === selectedId) : -1;
-          const next = tasks[Math.min(tasks.length - 1, idx + 1)];
-          if (next) { setSelectedId(next.id); setSelRange(null); }
+          if (idx === tasks.length - 1) {
+            setSelectedId("__NEW_TASK__"); setSelRange(null); // move to "+ New task" row
+          } else {
+            const next = tasks[Math.min(tasks.length - 1, idx + 1)];
+            if (next) { setSelectedId(next.id); setSelRange(null); }
+          }
           return;
         }
         if (e.key === "ArrowUp") {
           e.preventDefault();
           const tasks = flatTasksRef.current;
+          if (selectedId === "__NEW_TASK__") {
+            const last = tasks[tasks.length - 1];
+            if (last) { setSelectedId(last.id); setSelRange(null); }
+            return;
+          }
           const idx = selectedId !== null ? tasks.findIndex(t => t.id === selectedId) : tasks.length;
           const prev = tasks[Math.max(0, idx - 1)];
           if (prev) { setSelectedId(prev.id); setSelRange(null); }
@@ -3662,13 +3679,19 @@ function App() {
   // its (pure) data update so the row can never land hidden; revealRef carries the
   // post-renumber id out, and rAF applies the selection after the commit.
   const revealRef = useRef(null);
+  const openNameEditOnReveal = useRef(false);
   const revealInserted = useCallback(() => {
+    const shouldOpenEdit = openNameEditOnReveal.current;
+    openNameEditOnReveal.current = false;
     requestAnimationFrame(() => {
       const id = revealRef.current; revealRef.current = null;
       if (id == null) return;
       setSelectedId(id); setSelRange(null);
       const ni = COLS.findIndex(c => c.k === "name");
       if (ni >= 0) setSelectedColIdx(ni);
+      if (shouldOpenEdit) {
+        requestAnimationFrame(() => setEdit({taskId: id, col: "name"}));
+      }
     });
   }, []);
 
@@ -5936,15 +5959,21 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         })}
         {Array.from({length: Math.max(0, Math.min(endIdx, totalRows) - Math.max(startIdx, tasks.length))}, (_, i) => {
           const ri = Math.max(startIdx, tasks.length) + i;
+          const isNewTaskFocused = ri === tasks.length && selectedId === "__NEW_TASK__";
           return (
             <div key={`_e${ri}`} className="drow"
               onClick={ri===tasks.length ? ()=>addTask() : undefined}
-              style={{top:ri*ROW_H, height:ROW_H, borderLeft:"2px solid transparent",
-                background:ri%2?"#f8fafc":"var(--bg)",
+              style={{top:ri*ROW_H, height:ROW_H,
+                borderLeft: isNewTaskFocused ? "2px solid var(--blue)" : "2px solid transparent",
+                background: isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)"),
                 cursor:ri===tasks.length?"pointer":"default"}}>
               {orderedCols.map(c => (
                 <div key={c.k} style={{width:colWidths[c.k],flexShrink:0,borderRight:"1px solid var(--bd)",height:ROW_H,
-                  ...(ri===tasks.length && c.k==="name" ? {color:"var(--mut)",fontSize:11,display:"flex",alignItems:"center",paddingLeft:8} : {})}}>
+                  ...(ri===tasks.length && c.k==="name" ? {
+                    color: isNewTaskFocused ? "var(--blue)" : "var(--mut)",
+                    fontSize:11,display:"flex",alignItems:"center",paddingLeft:8,
+                    fontWeight: isNewTaskFocused ? 600 : undefined
+                  } : {})}}>
                   {ri===tasks.length && c.k==="name" ? "+ New task" : ""}
                 </div>
               ))}
