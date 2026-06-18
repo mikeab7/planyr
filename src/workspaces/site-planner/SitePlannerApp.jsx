@@ -4,7 +4,7 @@ import SitePlanner from "./SitePlanner.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
@@ -64,6 +64,11 @@ export default function App() {
   const [migrateMsg, setMigrateMsg] = useState("");
   const [hideMigrate, setHideMigrate] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  // When the user clicks "Open" on a migration site, we stage it locally and open it in
+  // the planner. migrationPendingSiteId tracks that a decision (Save / Discard) is still
+  // outstanding so we can show the in-planner banner.
+  const [migrationPendingSiteId, setMigrationPendingSiteId] = useState(null);
+  const [migrationSaveMsg, setMigrationSaveMsg] = useState("");
   // Re-read epoch for the keyed planner (B133 — stale plan flashes on boot then "comes back").
   // The planner snapshots its plan from storage ONCE at mount (`key={activeSiteId}`). At boot the
   // first synchronous render reads the store BEFORE auth resolves (activeUser still null → the
@@ -149,6 +154,44 @@ export default function App() {
       setMigrateMsg(parts.length ? parts.join("; ") + "." : "Nothing new to bring in — your account is already up to date.");
     } finally { setMigrating(false); }
   };
+  // "Open →" in the migration modal: stage the legacy site into the cloud cache so the
+  // planner can load it, then navigate into it. The planner banner lets the user Save or
+  // Discard once they've seen the site. Non-destructive: the original legacy copy remains
+  // until the user explicitly acts (Save keeps it in Supabase; Discard removes both copies).
+  const handleOpenLegacySite = (siteId) => {
+    if (!signedInUid) return;
+    const staged = stageLegacySite(signedInUid, siteId);
+    if (!staged) return;
+    refreshSites();
+    setMigrationPendingSiteId(siteId);
+    setMigrationSaveMsg("");
+    goPlan(siteId);
+  };
+
+  // "Save to account" from the in-planner migration banner.
+  const handleMigrateSave = async () => {
+    if (!migrationPendingSiteId || !signedInUid) return;
+    const r = await pushSiteToCloud(migrationPendingSiteId).catch(() => ({ ok: false }));
+    if (r && r.ok) {
+      setMigrationSaveMsg("Saved to your account.");
+      setMigrationPendingSiteId(null);
+    } else {
+      setMigrationSaveMsg("Couldn't reach the cloud — try again when reconnected.");
+    }
+  };
+
+  // "Discard" from the in-planner migration banner: remove from both stores and go back.
+  const handleMigrateDiscard = () => {
+    if (!migrationPendingSiteId || !signedInUid) return;
+    const siteId = migrationPendingSiteId;
+    setMigrationPendingSiteId(null);
+    setMigrationSaveMsg("");
+    discardLegacySite(signedInUid, siteId);
+    setActiveSiteId(null);
+    setMode("map");
+    refreshSites();
+  };
+
   const pendingLegacy = signedInUid ? pendingLegacyCount(signedInUid) : 0;
   // Cross-tab freshness: when ANOTHER tab changes the site store, refresh this tab's finder list
   // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
@@ -336,6 +379,10 @@ export default function App() {
       {showReviewModal && signedInUid && (
         <SiteReviewModal
           uid={signedInUid}
+          onOpen={(siteId) => {
+            setShowReviewModal(false);
+            handleOpenLegacySite(siteId);
+          }}
           onClose={async (savedCount) => {
             setShowReviewModal(false);
             if (savedCount > 0) {
@@ -344,6 +391,25 @@ export default function App() {
             }
           }}
         />
+      )}
+
+      {/* In-planner migration decision banner — shown when the user opened a legacy site
+          via "Open →" in the migration modal. Stays until they Save or Discard. */}
+      {mode === "plan" && (migrationPendingSiteId || migrationSaveMsg) && (
+        <div role="status" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          {migrationSaveMsg ? (
+            <>
+              <span style={{ flex: 1 }}>{migrationSaveMsg}</span>
+              <button onClick={() => setMigrationSaveMsg("")} style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+            </>
+          ) : (
+            <>
+              <span style={{ flex: 1 }}>This site is saved on <b>this device only</b> — not yet in your account.</span>
+              <button onClick={handleMigrateSave} style={{ flex: "none", cursor: "pointer", background: "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Save to account</button>
+              <button onClick={handleMigrateDiscard} style={{ flex: "none", cursor: "pointer", background: "rgba(220,38,38,0.15)", color: "#f87171", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Discard</button>
+            </>
+          )}
+        </div>
       )}
     </>
   );
