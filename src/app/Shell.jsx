@@ -16,7 +16,7 @@ import ErrorBoundary from "./ErrorBoundary.jsx";
 const WORKSPACES = [
   { id: "site-planner", label: "Site Planyr", Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
   { id: "doc-review", label: "Document Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
-  { id: "scheduler", label: "Project Scheduling", Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
+  { id: "scheduler", label: "Sequence Planyr", Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
 const PAL = { chrome: "#14110e", line: "#2e2a23", ink: "#ece7db", muted: "#9b9482", ember: "#e8590c" };
