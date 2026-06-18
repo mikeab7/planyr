@@ -91,23 +91,19 @@ const statusStyle = (st) => STATUS_STYLE[st] || STATUS_STYLE.pursuit;
 // alongside color). Pursuit = hollow ring (uncommitted), active = filled dot.
 const STATUS_GLYPH = { pursuit: "○", active: "●", onhold: "‖", complete: "✓", dead: "✕" };
 
-/* Building + progress-arc marker (B161). Gabled industrial-building silhouette
- * with a clockwise progress arc ring (fills from 12 o'clock). Status colors and
- * derived progress % (Path B — no DB column yet; Path A is follow-on B163). */
+/* Building marker (B161). Gabled industrial-building silhouette, status color only — no ring. */
 const BUILDING_COLORS = {
-  active:   { fill: "#EF9F27", stroke: "#c17c0f", bgRing: "#FAC775", arc: "#EF9F27", pct: 60,  dim: false, dashed: false },
-  complete: { fill: "#1D9E75", stroke: "#167a5a", bgRing: null,      arc: "#1D9E75", pct: 100, dim: false, dashed: false },
-  onhold:   { fill: "#888780", stroke: "#65645e", bgRing: "#D3D1C7", arc: "#888780", pct: 30,  dim: false, dashed: false },
-  pursuit:  { fill: "none",    stroke: "#378ADD", bgRing: "#B5D4F4", arc: "#378ADD", pct: 10,  dim: false, dashed: true  },
-  dead:     { fill: "#f3f4f6", stroke: "#9ca3af", bgRing: "#e5e7eb", arc: "#9ca3af", pct: 0,   dim: true,  dashed: false },
+  active:   { fill: "#EF9F27", stroke: "#c17c0f", dim: false, dashed: false },
+  complete: { fill: "#1D9E75", stroke: "#167a5a", dim: false, dashed: false },
+  onhold:   { fill: "#888780", stroke: "#65645e", dim: false, dashed: false },
+  pursuit:  { fill: "none",    stroke: "#378ADD", dim: false, dashed: true  },
+  dead:     { fill: "#f3f4f6", stroke: "#9ca3af", dim: true,  dashed: false },
 };
 function buildingPinIcon(status, active) {
   const bc = BUILDING_COLORS[status] || BUILDING_COLORS.pursuit;
   const scale = active ? 1.15 : 1;
   const w = Math.round(28 * scale), h = Math.round(36 * scale);
   const op = bc.dim && !active ? 0.72 : 1;
-  const C = 69.12, dashOff = 17.28; // circumference 2π×11; 12-o'clock start = C/4 offset
-  const arcLen = (C * bc.pct) / 100;
   let glyph = "";
   if (status === "complete") {
     glyph = `<polyline points="9,18 13,22 20,13" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -124,14 +120,8 @@ function buildingPinIcon(status, active) {
   const html =
     `<div style="${shadow}opacity:${op}">` +
     `<svg width="${w}" height="${h}" viewBox="0 0 28 36">` +
-    (bc.bgRing ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.bgRing}" stroke-width="2.5"/>` : "") +
     `<path d="M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z" fill="${bc.fill}" ${bStroke}/>` +
     (hasDoors ? `<rect x="7.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/><rect x="16.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/>` : "") +
-    (bc.pct === 100
-      ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.arc}" stroke-width="2.5"/>`
-      : bc.pct > 0
-        ? `<circle cx="14" cy="19" r="11" fill="none" stroke="${bc.arc}" stroke-width="2.5" stroke-dasharray="${arcLen.toFixed(2)} ${C}" stroke-dashoffset="${dashOff}" stroke-linecap="round"/>`
-        : "") +
     glyph +
     `</svg></div>`;
   return L.divIcon({
