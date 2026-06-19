@@ -4723,7 +4723,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
@@ -4736,7 +4736,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
       {cloudSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
@@ -6318,12 +6318,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {parcels.map((pc, i) => {
                     const on = selParcel?.id === pc.id;
                     const picked = combineSel.includes(pc.id);
+                    const active = pc.active !== false; // default active; checkbox drives yield/coverage/detention (B100)
                     return (
-                      <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
-                      </button>
+                      // Row = active checkbox + click-to-select label. (Not one big
+                      // <button> any more: a checkbox can't nest inside a button.)
+                      <div key={pc.id}
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff" }}>
+                        <input type="checkbox" checked={active}
+                          onChange={() => toggleParcelActive(pc.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          title={active ? "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)." : "Inactive — excluded from yield / coverage / detention. Check to include."}
+                          style={{ flex: "none", width: 15, height: 15, cursor: "pointer", accentColor: PAL.accent }} />
+                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", opacity: active ? 1 : 0.55 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{active ? "" : " · inactive"}{picked ? " ✓" : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

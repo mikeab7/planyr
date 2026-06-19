@@ -1,6 +1,6 @@
 /* AppHeader — shared two-row chrome for all workspaces.
  *
- * Row 1 (44px): hamburger | logo + wordmark | divider | nav links
+ * Row 1 (35px): hamburger | logo + wordmark | divider | nav links
  *               || project name (center) ||
  *               save slot | settings | auth control
  *
@@ -24,6 +24,9 @@ import { useEffect, useState } from "react";
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
 const MUTED  = "#9b9482";
+// Inactive module tabs: a fully-opaque, legible muted tone (AA-contrast on the
+// dark chrome) so they read as "click to switch", never as disabled/grayed-out.
+const TAB_IDLE = "#b8b2a4";
 
 export const MODULE_ACCENT = {
   "site-planner": "#1D9E75",
@@ -98,6 +101,7 @@ export default function AppHeader({
   toolbarContent,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const [hoverTab,   setHoverTab]   = useState(null);
 
   useEffect(() => {
     const handle = (e) => {
@@ -143,8 +147,8 @@ export default function AppHeader({
         zIndex: 60,
       }}
     >
-      {/* ── Row 1 — 44px ────────────────────────────────────────────── */}
-      <div style={{ height: 44, display: "flex", alignItems: "center" }}>
+      {/* ── Row 1 — 35px (was 44px; trimmed 20% per owner request) ──── */}
+      <div style={{ height: 35, display: "flex", alignItems: "center" }}>
 
         {/* Left zone */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0 }}>
@@ -221,28 +225,35 @@ export default function AppHeader({
         <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
           {MODULES.map((m) => {
             const isActive = m.id === module;
+            const isHover  = hoverTab === m.id && !isActive;
             const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
+            // Active = full accent + underline; hover = accent preview; idle =
+            // a legible muted tone (NOT low-opacity, so it never reads disabled).
+            const color = isActive || isHover ? tabAccent : TAB_IDLE;
             return (
               <button
                 key={m.id}
                 onClick={() => onSwitch && onSwitch(m.id)}
+                onMouseEnter={() => setHoverTab(m.id)}
+                onMouseLeave={() => setHoverTab(null)}
                 style={{
                   display: "flex", alignItems: "center", gap: 5,
                   height: "100%", padding: "0 13px",
                   border: "none",
                   borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
                   background: "transparent",
-                  color: isActive ? tabAccent : "rgba(255,255,255,0.30)",
+                  color,
                   fontFamily: "inherit", fontSize: 12.5,
-                  fontWeight: isActive ? 500 : 400,
+                  fontWeight: isActive ? 600 : 500,
                   cursor: "pointer", whiteSpace: "nowrap",
                   transition: "color 0.15s, border-color 0.15s",
                 }}
               >
                 <svg
-                  width="13" height="13" viewBox="0 0 16 16"
+                  width="14" height="14" viewBox="0 0 16 16"
                   fill="none" stroke="currentColor"
-                  strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+                  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                  shapeRendering="geometricPrecision"
                   aria-hidden="true"
                 >
                   {m.icon}

@@ -372,7 +372,7 @@ export default function App({ shellModule, onShellSwitch, authControl } = {}) {
         </div>
       )}
       {cloudError && (
-        <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
@@ -424,7 +424,7 @@ export default function App({ shellModule, onShellSwitch, authControl } = {}) {
       {/* In-planner migration decision banner — shown when the user opened a legacy site
           via "Open →" in the migration modal. Stays until they Save or Discard. */}
       {mode === "plan" && (migrationPendingSiteId || migrationSaveMsg) && (
-        <div role="status" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="status" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           {migrationSaveMsg ? (
             <>
               <span style={{ flex: 1 }}>{migrationSaveMsg}</span>
