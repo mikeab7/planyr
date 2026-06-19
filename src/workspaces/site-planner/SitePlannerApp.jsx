@@ -14,10 +14,15 @@ migrateScenarios();   // fold legacy named scenarios into Plans
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
+// Last cross-workspace nav intent (B189–B191) already acted on. Module-scoped (not a
+// ref) so it survives this workspace unmounting/remounting — otherwise switching back
+// in via the module tab would re-fire the previous Dashboard/open/new intent on mount.
+let lastConsumedNavToken = null;
+
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
-export default function App({ shellModule, onShellSwitch, authControl } = {}) {
+export default function App({ shellModule, onShellSwitch, authControl, navIntent } = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
@@ -224,6 +229,28 @@ export default function App({ shellModule, onShellSwitch, authControl } = {}) {
   // a fully-formed record the moment you add anything.
   const newBlankSite = () => { goPlan(newId()); };
 
+  // Open a whole project (site group) from the header breadcrumb switcher (B189):
+  // resume its active plan if one's open, else its newest. Switching plans changes
+  // `activeSiteId`, which remounts/flushes the previous planner (B191 persist-on-switch).
+  const openProjectGroup = (groupId) => {
+    if (!groupId) return;
+    const plans = loadPlansOfGroup(groupId); // newest first
+    const target = plans.find((p) => p.id === activeSiteId) || plans[0];
+    if (target) goPlan(target.id);
+  };
+
+  // Consume the Shell's one-shot cross-workspace nav intent (B189–B191) — fired when
+  // Dashboard / a project / New project is chosen from Schedule or Markup, which then
+  // switches into this workspace. Token-stamped so a repeat of the same kind re-fires.
+  useEffect(() => {
+    if (!navIntent || navIntent.token === lastConsumedNavToken) return;
+    lastConsumedNavToken = navIntent.token;
+    if (navIntent.kind === "dashboard") setMode("map");
+    else if (navIntent.kind === "new-project") newBlankSite();
+    else if (navIntent.kind === "open-project") openProjectGroup(navIntent.projectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navIntent]);
+
   // Next plan number for a site (so "Plan 1", "Plan 2", … never collide).
   const nextPlanNo = (groupId) => loadPlansOfGroup(groupId).length + 1;
 
@@ -304,7 +331,12 @@ export default function App({ shellModule, onShellSwitch, authControl } = {}) {
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
           authControl={authControl}
-          onDashboard={null}
+          // Map IS the all-projects view, so no "current project" here — the
+          // Dashboard crumb reads as current and the project crumb invites a pick.
+          onDashboard={() => setMode("map")}
+          currentProject={null}
+          onSelectProject={openProjectGroup}
+          onNewProject={newBlankSite}
           centerContent={null}
           saveSlot={null}
           toolbarContent={
