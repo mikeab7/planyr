@@ -22,40 +22,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- B194–B196 filed 2026-06-19 from a Schedule/Gantt design brief (arrived as "NEW-1".."NEW-3";
-     minted B194–B196 — highest B# across both files was B193 in BACKLOG-DONE.md). Deduped against
-     B159 (export task-name toggle — unrelated) and B163 (progress_pct on the Site Planner data
-     model — different module). All three are browser-only changes to the embedded Schedule app
-     (`public/sequence/index.html`): the Gantt bar render paths (`GanttView` + the PDF/print
-     `buildGanttSvg`) and the left table panel (`GridView`). Palette held: summary bars navy, task
-     bars gray, the one purple dependency line (SS = #7c3aed) untouched. -->
-
-### B194 — Summary bars as depth-stepped brackets `[Scheduler / Gantt]` (feature)  *(arrived as "NEW-1"; minted B194 — highest B# across both files is B193, so this is the real next free ID)*
-`[ ]` Replace the heavy solid summary bars (slab + barely-visible triangle endcaps) with a thin **bracket** form, and encode WBS nesting depth so multi-level summaries are distinguishable.
-- **Bracket shape:** a thin horizontal span with straight-down vertical **legs** at each end (no triangles). Legs drop downward toward the child rows.
-- **Encode depth with three cues that step together (top = strongest):** (1) **darkness** — L0 = darkest navy, each deeper level a lighter navy tint (≈ L0 `#2B3340`, L1 `#46506A`, L2 `#6E7790`); (2) **span thickness** ≈ 7 → 5 → 4 px by level; (3) **leg length** longest at L0 (~⅔ row height), shorter each deeper level (~⅓), never colliding with the child bar below.
-- **Label** centered over the bracket span, just above the thin line, in the bar's own level-colored navy text (no thick fill to print white onto). **No** per-level label indentation (bars are date-positioned, indentation isn't perceptible).
-- **Scale:** cues distinguishable to ~4 levels; beyond 4, stop deepening the ramp — the left table's indented name remains the authoritative depth cue.
-- Applies to **both** render paths: on-screen `GanttView` and the PDF/print `buildGanttSvg`.
-
-### B195 — Task status as fill treatment (hollow / partial / solid) `[Scheduler / Gantt]` (feature)  *(arrived as "NEW-2"; minted B195 — next free ID after B194)*
-`[ ]` Move task status off the **color** channel onto a single continuous **fill** treatment, so status never collides with hierarchy. All task bars keep one identity hue (the existing task **gray**); status reads as 0→100% complete.
-- **Not started (0%):** hollow rounded pill — empty fill, gray outline in the task hue (outline required, else invisible).
-- **In progress:** partial fill — solid filled portion = percent complete, lighter remainder behind it, thin outline around the whole bar.
-- **Complete (100%):** solid fill.
-- **Minimum rendered width:** floor so a very short not-started bar can't collapse to a sliver; below the floor render at min width / guarantee a visible interior.
-- Drive the fill fraction from `percentComplete` (Complete → solid regardless). Red/paused/overdue keep their signal in the **row background + table** (unchanged), not the bar. Applies to **both** `GanttView` and `buildGanttSvg`.
-
-### B196 — Configurable table columns (show / hide / add / reorder), MS Project / P6 style `[Scheduler / Table]` (feature)  *(arrived as "NEW-3"; minted B196 — next free ID after B195)*
-`[ ]` Make the left table panel (`GridView`) columns user-customizable, matching MS Project / P6.
-- Show/hide any column; add columns from an available-field set; reorder via header drag (exists); resize via header-edge drag (exists).
-- **Entry points:** a discoverable **"Columns"** field-chooser button listing available vs shown fields, **plus** a right-click header context menu (Insert column / Hide column). **Portal-mount** the chooser/menu at document root (z-index pattern).
-- **Available fields:** name, start, finish, duration, predecessors, successors, status, % complete, and cost/budget fields (Budget, Cost, Actual/Spend). Include cost columns even when the project has no cost data — render blank/— for empty cells, never an error.
-- **Per-project persistence:** column config (which columns, order, widths) saved **per project** via the existing cloud-save path (`setData`), survives reload; each project independent; new projects start from the current default set. Must not fail silently — if cloud save is off, changes must not appear saved then revert.
-- (Optional/future, not v1) auto-default cost columns visible for Pursuit-lifecycle projects — left manual for now.
-
 <!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
-     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
+     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md.
+     B194–B196 (Schedule Gantt brackets, task-fill, configurable columns) filed AND shipped
+     this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
 
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
      B180–B183 here; provisionally B176–B179, but concurrent `main` (#159) took B176 (shipped)
