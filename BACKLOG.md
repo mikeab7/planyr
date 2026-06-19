@@ -36,39 +36,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      NEW-3 rungs 1–2) follow the backend tranche and are stubbed behind a clean interface so
      the UI never blocks on missing infra. -->
 
-<!-- Filed 2026-06-19 from a print/export brief (arrived as "NEW-1".."NEW-6" → minted
-     B191–B196; highest prior B# across both files is B190, so these are the real next
-     free IDs). These six are one coherent print/export tranche: B192 (building props:
-     clear height + slab by sf, auto + override) is the data foundation; B191 (print
-     data table) reads it; B193 (print options UI) edits it; B194 (cohesive print
-     scaling) is the layout fix the table rides; B195 (filename); B196 (prep hang).
-     Deduped: distinct from B131 (overlay-in-print TOGGLE — a what-to-include switch,
-     not the table/scaling/props here), B50 (export/print error robustness — already
-     shipped error surfacing), and B159 (Scheduler Gantt task-names toggle — different
-     module/output). No existing item covers building clear-height/slab, a buildings
-     table, print-zoom cohesion, the filename format, or the prep stall. -->
-
-### B191 — Print buildings/site data table `[Site Planner]` (feature)  *(arrived as "NEW-1"; minted B191 — highest B# across both files is B190, so this is the real next free ID)*
-`[ ]` Add a data table to the print output, anchored on the right side near the title block. One row per building; columns: building name (display label, e.g. "Building 1"), square footage, clear height, slab thickness. Name is the display label, row backed by the building's stable UUID (`el.id`). Clear height + slab come from the building's stored properties (B192), not recomputed in the print routine. The table is part of the cohesive print composition (B194) — it scales with the sheet, not a fixed-screen overlay.
-
-### B192 — Auto-assign clear height & slab thickness as building properties by square footage `[Site Planner]` (feature)  *(arrived as "NEW-2"; minted B192)*
-`[ ]` Store `clearHeight` + `slabThickness` as first-class building properties (available across modules, not print-only). Auto-assign defaults from building sf, upper tier inclusive at each boundary:
-- Clear height: `< 140,000 sf → 32′`; `140,000 to < 600,000 sf → 36′`; `≥ 600,000 sf → 40′`.
-- Slab: `< 140,000 sf → 6″`; `≥ 140,000 sf → 7″`.
-Each property = auto default + optional manual override (override wins; auto recomputes when sf changes and no override is set). A new 250,000 sf building defaults to 36′ clear / 7″ slab with no input.
-
-### B193 — Print options interface: edit global defaults and per-building overrides `[Site Planner]` (feature)  *(arrived as "NEW-3"; minted B193)*
-`[ ]` From the print flow, (a) edit the global default rules from B192 (the sf thresholds + their clear-height/slab values) and (b) override clear height + slab for any building. Per-building override sets the override on that building (B192); editing globals changes the defaults for buildings without overrides. Surface current effective values so auto vs overridden is clear. Portal-mount any dropdowns/flyouts at document root (the `AnchoredMenu` stacking-context pattern).
-
-### B194 — Print zoom: building/site plan doesn't scale with title block, not a cohesive PDF `[Site Planner]` (bug)  *(arrived as "NEW-4"; minted B194)*
-`[ ]` Repro: open print, zoom ~25%→~500% → the site-plan canvas stays a fixed size while the title-block elements scale, so the output isn't one cohesive sheet. Expected: the plan canvas + title-block/table layers share one scaling transform and scale together at every zoom, printing as one cohesive PDF. Cause: plan in screen-space vs title block in document-space — unify them onto one transform (compose the whole sheet as a single SVG). ("Address: [blank]" seen in this state is incidental, not causal.)
-
-### B195 — Print filename format `[Site Planner]` (feature)  *(arrived as "NEW-5"; minted B195)*
-`[ ]` Exported PDF filename: `YYYY.MM.DD {Project Name} - Site Plan {N}` (e.g. `2026.06.19 Cypress Logistics - Site Plan 1`). Date = today at export; project name = the active project (site) name; `{N}` = sheet/plan number, default 1, incrementing per exported sheet. Sanitize filesystem-illegal characters. *(Open confirm with Michael: whether `{N}` should be a sheet number, building name, or revision letter — shipping the incrementing-number default now.)*
-
-### B196 — "Preparing print" hangs before producing file `[Site Planner]` (bug)  *(arrived as "NEW-6"; minted B196)*
-`[ ]` Repro: trigger print → status sits on "Preparing print…" ~60s before the file appears; intermittent. Expected: prompt completion (or real progress). Investigate the prep stall (image inlining / rasterization / tile loading / compositing); instrument timing, then bound it so prep can't hang.
-
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*
 `[~]` A project-level **file repository** opened from **Row 1 (the project-name area), NOT a fourth module tab.** Rationale (owner): tabs are *workspaces* (modes of working — Site / Schedule / Markup); **Files is a shelf every workspace reaches into**, so it must be openable from inside any of them. "Folders" are **saved views over a tagged index, never a hand-maintained tree** — "All surveys", "All title commitments", "this project's civil set" are all *queries* against file facts. Two document classes: **spatial** (can live on the map — drawings, surveys, legal descriptions) vs **reference** (geotech, environmental, contracts — pulled and read, never a map object); a **title commitment is BOTH** (a reference document, but Schedule A's legal description feeds the boundary polygon and Schedule B's exceptions feed easement objects). Drawer: files grouped by discipline; per-file state **Filed** (automatic) vs **On map** (calibrated once); a **drop zone** (auto-file by title block) and a **"needs filing"** holding area with one-click confirm for low-confidence / no-match.
 - **✅ Shipped this session (browser-first tranche, branch `claude/laughing-ritchie-k5narx`):**
