@@ -5092,6 +5092,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <AppHeader
         module={shellModule || "site-planner"}
         onSwitch={onShellSwitch}
+        homeLabel="Map"
         onDashboard={onBackToMap}
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}

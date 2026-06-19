@@ -331,8 +331,10 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
           authControl={authControl}
-          // Map IS the all-projects view, so no "current project" here — the
-          // Dashboard crumb reads as current and the project crumb invites a pick.
+          // In the Site module the home crumb is "Map" (B204). Map IS the all-projects
+          // view, so no "current project" here — the Map crumb reads as current and the
+          // project crumb invites a pick.
+          homeLabel="Map"
           onDashboard={() => setMode("map")}
           currentProject={null}
           onSelectProject={openProjectGroup}
