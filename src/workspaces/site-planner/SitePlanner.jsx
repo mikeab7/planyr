@@ -35,6 +35,7 @@ import {
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
+import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
@@ -817,6 +818,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [easeWidth, setEaseWidth] = useState(() => Math.max(1, +lsGet("easeWidth", "10") || 10));
   const [easeDraft, setEaseDraft] = useState(null); // {pts:[{x,y}]} centerline/boundary click-draw in progress
   const [easeEdges, setEaseEdges] = useState(null); // {parcelId, idx:[edge#]} parcel-edge run in progress (NEW-3)
+  const [sbEditMode, setSbEditMode] = useState("side"); // B207 setback editor: "side" (whole run) | "segment" (one edge)
   const [easeMenu, setEaseMenu] = useState(false);        // Easement ▾ rail menu open
   const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
@@ -2011,6 +2013,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return {
       id: uid(), kind: "easement", mode: spec.mode, pts: ring,
       centerline: spec.centerline || null, width: spec.width || 0, offsetSide: spec.offsetSide,
+      // B206 — a parcel-edge easement is ANCHORED to its parcel: stamp the id so it
+      // inherits the parcel's active state (hidden + dropped from the tally when inactive).
+      parcelId: spec.parcelId || null,
       ...DEFAULT_EASEMENT_ATTRS, easeType, // start from the tool's current type
     };
   };
@@ -2041,7 +2046,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!pc) { setEaseEdges(null); return; }
     const strip = buildParcelEdgeStrip(pc.points, easeEdges.idx, easeWidth);
     if (!strip) { flashWarn("Pick ONE contiguous run of edges along a single parcel, then press Enter.", 6000); return; }
-    commitEasement(makeEasement({ mode: "parceledge", centerline: strip.run, width: easeWidth, offsetSide: strip.offsetSide }));
+    commitEasement(makeEasement({ mode: "parceledge", centerline: strip.run, width: easeWidth, offsetSide: strip.offsetSide, parcelId: pc.id }));
     setEaseEdges(null);
   };
   // Toggle a parcel edge in the in-progress run; switching parcels restarts the run.
@@ -3573,10 +3578,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detPct = siteSqft ? (pondArea / siteSqft) * 100 : 0;
   const ratio = bldg ? stalls / (bldg / 1000) : 0;
   const open = Math.max(0, siteSqft - impervious - pondArea);
+  // Parcels excluded from the math (B100); their anchored chrome inherits the state (B206).
+  const inactiveParcelIds = new Set(parcels.filter((p) => p.active === false).map((p) => p.id));
   // Easement encumbrance tally (NEW-1 readout + NEW-4 surface). Gross sum of easement
   // areas — overlaps are NOT deduped (screening), so it reads "gross" — split by what
-  // each easement restricts (the same shape the buildable-area engine consumes).
-  const easeAll = markups.filter((m) => m.kind === "easement");
+  // each easement restricts (the same shape the buildable-area engine consumes). An
+  // easement anchored to an INACTIVE parcel is context-only → excluded (B206).
+  const easeAll = markups.filter((m) => m.kind === "easement" && !(m.parcelId && inactiveParcelIds.has(m.parcelId)));
   const easeArea = easeAll.reduce((s, e) => s + easementArea(e), 0);
   const easeBldgArea = easeAll.reduce((s, e) => s + (e.restrictsBuildings !== false ? easementArea(e) : 0), 0);
   const easePaveArea = easeAll.reduce((s, e) => s + (e.restrictsPaving === true ? easementArea(e) : 0), 0);
@@ -4194,6 +4202,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
 
   const parcelLabels = parcels.map((pc) => {
+    // B206 — the acreage chip is anchored to the parcel, so it inherits its active state:
+    // an inactive parcel (excluded from the math, drawn dimmed/dashed) shows no chip.
+    if (pc.active === false) return null;
     // NEW-3: the acreage chip sits on the parcel centroid by default but is click-and-drag
     // to any spot (including outside the boundary); the offset is stored on the parcel (feet)
     // so it persists with the plan. Drag only in Select so it never blocks drawing tools.
@@ -4431,19 +4442,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   })();
 
-  // Edge-length labels on the selected parcel (so you can read/trim frontage).
+  // B207 — the selected parcel + its edges grouped into logical SIDES ("runs" of
+  // contiguous near-collinear edges). One run = one side even when a survey digitized
+  // it as ~10 segments, so a setback applies to the whole side and the side carries ONE
+  // length dimension instead of one label per segment (B208). selRuns is null unless an
+  // ACTIVE parcel is selected (an inactive parcel's anchored chrome is hidden — B206).
+  const SETBACK_RUN_TOL_DEG = 7; // an edge within ±7° of the run's first edge stays in the run
+  const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+  const selRuns = (selParcel && selParcel.active !== false) ? edgeRuns(selParcel.points, SETBACK_RUN_TOL_DEG) : null;
+  // Screen anchors for a run's fanned labels (B208): the boundary/run-length dimension sits
+  // OUTBOARD of the edge and the setback value pill sits INBOARD (toward the setback line it
+  // describes), so two co-located labels never stack/occlude at the shared edge midpoint.
+  const runLabelAnchors = (pc, run) => {
+    const m = f2p(run.mid);
+    const a = f2p(run.vertices[0]), b = f2p(run.vertices[run.vertices.length - 1]);
+    let dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+    if (L < 1) { // closed/degenerate run → use its middle segment's direction
+      const e0 = run.edges[Math.floor(run.edges.length / 2)], n = pc.points.length;
+      const p = f2p(pc.points[e0]), q = f2p(pc.points[(e0 + 1) % n]);
+      dx = q.x - p.x; dy = q.y - p.y; L = Math.hypot(dx, dy) || 1;
+    }
+    dx /= L; dy /= L;
+    let nx = -dy, ny = dx;                               // left normal (screen space)
+    const cen = f2p(centroid(pc.points));
+    if ((cen.x - m.x) * nx + (cen.y - m.y) * ny < 0) { nx = -nx; ny = -ny; } // orient inward
+    return { mid: m, nx, ny, out: { x: m.x - nx * 12, y: m.y - ny * 12 }, in: { x: m.x + nx * 13, y: m.y + ny * 13 } };
+  };
+
+  // ONE length label per side (run), placed OUTBOARD so it never stacks on the inboard
+  // setback pill or the add-vertex "+" at the segment midpoint (B207 single dim, B208 fan).
   const parcelEdgeLabels = (() => {
-    if (sel?.kind !== "parcel") return null;
-    const pc = parcels.find((p) => p.id === sel.id);
-    if (!pc) return null;
-    return pc.points.map((a, i) => {
-      const b = pc.points[(i + 1) % pc.points.length];
-      const am = f2p(a), bm = f2p(b);
-      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+    if (!selParcel || !selRuns) return null;
+    return selRuns.map((run, ri) => {
+      const { out } = runLabelAnchors(selParcel, run);
       return (
-        <text key={`pe${i}`} x={mid.x} y={mid.y} dy={-7} textAnchor="middle" fontSize="11"
+        <text key={`pe${ri}`} x={out.x} y={out.y} dy={3} textAnchor="middle" fontSize="11"
           fontFamily="ui-monospace, Menlo, monospace" fill={PAL.ink} stroke={PAL.paper} strokeWidth={3}
-          paintOrder="stroke" pointerEvents="none" fontWeight="600">{f0(dist(a, b))}′</text>
+          paintOrder="stroke" pointerEvents="none" fontWeight="600">{f0(run.lengthFt)}′</text>
       );
     });
   })();
@@ -4894,7 +4929,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
   // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
   const roadLengthOf = (el) => Math.max(el.w, el.h);
-  const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
   // falls back to the global default for any parcel that predates per-edge.
@@ -4905,6 +4939,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setEdgeSetback = (pc, i, v) => {
     pushHistory();
     const arr = parcelSetbacks(pc).slice(); arr[i] = Math.max(0, v);
+    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
+  };
+  // B207 — set the setback uniformly across every segment of one logical SIDE (run), so a
+  // multi-segment side is edited in one action. Writes the canonical per-edge pc.setbacks
+  // array (what the yield/buildable engine reads via setbacksOf) — no parallel store; the
+  // offsetPolygon miters the shared segment joints into one continuous setback line.
+  const setRunSetback = (pc, run, v) => {
+    pushHistory();
+    const arr = parcelSetbacks(pc).slice();
+    run.edges.forEach((i) => { arr[i] = Math.max(0, v); });
     setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
   };
   // "Front" = the longest edge (street frontage heuristic).
@@ -5256,25 +5300,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <line key={`ovl${k}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#2563eb" strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />;
               })}
 
-              {/* setback outlines (per-edge) */}
-              {settings.showSetback && parcels.map((pc) => {
+              {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
+                  parcel draws none (B206: inherits active state, like the yield math). */}
+              {settings.showSetback && parcels.filter((pc) => pc.active !== false).map((pc) => {
                 const sb = parcelSetbacks(pc);
                 if (!sb.some((v) => v > 0)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
                 return <polygon key={`sb${pc.id}`} points={o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />;
               })}
-              {/* per-edge setback values on the selected parcel (click to edit) */}
-              {settings.showSetback && selParcel && (() => {
-                const sb = parcelSetbacks(selParcel), pts = selParcel.points;
-                return <g data-export="skip">{pts.map((a, i) => {
-                  const b = pts[(i + 1) % pts.length], mid = f2p({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-                  return (
-                    <g key={`sbl${i}`} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (n) => setEdgeSetback(selParcel, i, n) }); }}>
-                      <rect x={mid.x - 13} y={mid.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
-                      <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{f0(sb[i])}′</text>
-                    </g>
-                  );
+              {/* setback value pills on the selected ACTIVE parcel — ONE per SIDE (run) by
+                  default so a multi-segment side edits in one click (B207); per SEGMENT when
+                  the editor is toggled, for notches/jogs. Placed INBOARD (toward the setback
+                  line) so they never stack on the outboard boundary dimension (B208). A pill
+                  reading "—" means the side's segments disagree (a per-segment override). */}
+              {settings.showSetback && selParcel && selRuns && (() => {
+                const sb = parcelSetbacks(selParcel);
+                const pill = (key, anchor, txt, onEdit) => (
+                  <g key={key} style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); const fp = p2f(e.clientX, e.clientY); onEdit(fp, e.altKey); }}>
+                    <rect x={anchor.x - 13} y={anchor.y - 9} width={26} height={16} rx={4} fill="#fff" stroke={PAL.setback} strokeWidth={1} />
+                    <text x={anchor.x} y={anchor.y + 3.5} textAnchor="middle" fontSize="10.5" fontFamily="ui-monospace, monospace" fill={PAL.setback} fontWeight="700">{txt}</text>
+                  </g>
+                );
+                if (sbEditMode === "segment") {
+                  // Per-segment pills, each on its own edge's inboard side.
+                  const cen = f2p(centroid(selParcel.points)), n = selParcel.points.length;
+                  return <g data-export="skip">{selParcel.points.map((a, i) => {
+                    const b = selParcel.points[(i + 1) % n], am = f2p(a), bm = f2p(b);
+                    const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
+                    let dx = bm.x - am.x, dy = bm.y - am.y, L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+                    let nx = -dy, ny = dx; if ((cen.x - m.x) * nx + (cen.y - m.y) * ny < 0) { nx = -nx; ny = -ny; }
+                    const anchor = { x: m.x + nx * 13, y: m.y + ny * 13 };
+                    return pill(`sbl${i}`, anchor, `${f0(sb[i])}′`, (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }));
+                  })}</g>;
+                }
+                // Per-SIDE pills (default). Alt-click edits just the run's nearest segment (the
+                // modifier-click single-edge override for a notch without leaving side mode).
+                const n = selParcel.points.length;
+                return <g data-export="skip">{selRuns.map((run, ri) => {
+                  const { in: anchor } = runLabelAnchors(selParcel, run);
+                  const val = runSetbackValue(run, sb);
+                  return pill(`sbr${ri}`, anchor, val == null ? "—" : `${f0(val)}′`, (fp, alt) => {
+                    const altSeg = (alt && run.edges.length > 1) ? run.edges.reduce((best, ei) => {
+                      const q = nearestOnSeg(fp, selParcel.points[ei], selParcel.points[(ei + 1) % n]);
+                      const d = Math.hypot(fp.x - q.x, fp.y - q.y); return d < best.d ? { ei, d } : best;
+                    }, { ei: run.edges[0], d: Infinity }).ei : null;
+                    setNumEdit({ fx: fp.x, fy: fp.y, value: String(val == null ? (sb[run.edges[0]] ?? 0) : val),
+                      onCommit: (v) => (altSeg != null ? setEdgeSetback(selParcel, altSeg, v) : setRunSetback(selParcel, run, v)) });
+                  });
                 })}</g>;
               })()}
               {/* parcels */}
@@ -5359,6 +5432,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   );
                 }
                 if (m.kind === "easement") {
+                  if (m.parcelId && inactiveParcelIds.has(m.parcelId)) return null; // B206: anchored easement hides with its parcel
                   const tcol = easementColor(m);
                   const ecol = isSel ? PAL.accent : tcol;
                   const proposed = m.status === "proposed";
@@ -7053,6 +7127,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
                 <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
               </div>
+              {/* B207 — setback editor mode. Only shown when a side is built from MORE than
+                  one segment (where "by side" actually saves clicks); otherwise every side is
+                  a single edge and the two modes are identical. */}
+              {settings.showSetback && selRuns && selRuns.some((r) => r.edges.length > 1) && (
+                <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span>Edit setbacks:</span>
+                  <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment)">By side</button>
+                  <button style={{ ...chip, ...(sbEditMode === "segment" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => setSbEditMode("segment")} title="Each segment on its own — for a notch or jog that needs its own setback">Per segment</button>
+                </div>
+              )}
               <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
                 <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
               </label>

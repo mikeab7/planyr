@@ -52,6 +52,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      NEW-3 rungs 1–2) follow the backend tranche and are stubbed behind a clean interface so
      the UI never blocks on missing infra. -->
 
+<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208) AND shipped the same
+     session — moved to BACKLOG-DONE.md (branch claude/sharp-edison-7gdn3y). -->
+
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*
 `[~]` A project-level **file repository** opened from **Row 1 (the project-name area), NOT a fourth module tab.** Rationale (owner): tabs are *workspaces* (modes of working — Site / Schedule / Markup); **Files is a shelf every workspace reaches into**, so it must be openable from inside any of them. "Folders" are **saved views over a tagged index, never a hand-maintained tree** — "All surveys", "All title commitments", "this project's civil set" are all *queries* against file facts. Two document classes: **spatial** (can live on the map — drawings, surveys, legal descriptions) vs **reference** (geotech, environmental, contracts — pulled and read, never a map object); a **title commitment is BOTH** (a reference document, but Schedule A's legal description feeds the boundary polygon and Schedule B's exceptions feed easement objects). Drawer: files grouped by discipline; per-file state **Filed** (automatic) vs **On map** (calibrated once); a **drop zone** (auto-file by title block) and a **"needs filing"** holding area with one-click confirm for low-confidence / no-match.
 - **✅ Shipped this session (browser-first tranche, branch `claude/laughing-ritchie-k5narx`):**
