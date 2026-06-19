@@ -103,23 +103,28 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200
   });
 });
 
-describe("export filename (B201)", () => {
-  it("formats as YYYY.MM.DD {Project} - Site Plan {N}", () => {
+describe("export filename (B201) — date · project · plan name", () => {
+  it("formats as YYYY.MM.DD {Project} - {Plan Name}", () => {
     const d = new Date(2026, 5, 19); // June (month index 5) 19, 2026
     expect(formatDateStamp(d)).toBe("2026.06.19");
-    expect(sheetFileName({ project: "Cypress Logistics", n: 1, date: d })).toBe("2026.06.19 Cypress Logistics - Site Plan 1");
+    expect(sheetFileName({ project: "Cypress Logistics", plan: "Plan 1", date: d })).toBe("2026.06.19 Cypress Logistics - Plan 1");
   });
-  it("keeps the ' - ' separator and the date dots; strips illegal characters from the project", () => {
+  it("tracks whatever the plan is renamed to (e.g. a scheme letter)", () => {
+    const d = new Date(2026, 5, 19);
+    expect(sheetFileName({ project: "Cypress Logistics", plan: "Scheme A", date: d })).toBe("2026.06.19 Cypress Logistics - Scheme A");
+  });
+  it("keeps the ' - ' separator and date dots; strips illegal characters from project + plan", () => {
     const d = new Date(2026, 0, 3);
-    const out = sheetFileName({ project: 'A/B: "North" <lot>', n: 2, date: d });
-    expect(out).toBe("2026.01.03 A B North lot - Site Plan 2");
-    expect(out).toContain(" - Site Plan "); // hyphen separator survives
+    const out = sheetFileName({ project: 'A/B: "North" <lot>', plan: "Scheme: 2", date: d });
+    expect(out).toBe("2026.01.03 A B North lot - Scheme 2");
+    expect(out).toContain(" - "); // separator survives
   });
   it("zero-pads month and day", () => {
     expect(formatDateStamp(new Date(2026, 8, 7))).toBe("2026.09.07");
   });
-  it("falls back to a default project name when blank", () => {
-    expect(sheetFileName({ project: "   ", n: 1, date: new Date(2026, 5, 19) })).toBe("2026.06.19 Site Plan - Site Plan 1");
+  it("falls back to a default project name when blank, and omits the tail when the plan is blank", () => {
+    expect(sheetFileName({ project: "   ", plan: "Plan 1", date: new Date(2026, 5, 19) })).toBe("2026.06.19 Site Plan - Plan 1");
+    expect(sheetFileName({ project: "Cypress Logistics", plan: "", date: new Date(2026, 5, 19) })).toBe("2026.06.19 Cypress Logistics");
   });
   it("sanitizeFilename keeps spaces, dots and hyphens", () => {
     expect(sanitizeFilename("Cross-Dock 2.0")).toBe("Cross-Dock 2.0");

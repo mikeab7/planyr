@@ -1,13 +1,13 @@
-/* Storage adapter — the single module the app talks to for file operations (B203 / NEW-1).
+/* Storage adapter — the single module the app talks to for file operations (B206 / NEW-1).
  *
  * The app calls ONLY these methods (save / fetch / list / move / rename / remove /
  * shareLink) and references files ONLY by Planyr's own stable keys. Inside, the adapter:
  *   - translates Planyr key ↔ backend id through the idMap (the only translator), so no
  *     backend id (e.g. a Google Drive file id) ever leaks into app code;
  *   - delegates the actual bytes work to a swappable `backend` (memory stub today,
- *     Google Drive next — B204; the swap is a one-line change here, nothing in the app);
- *   - routes every share link through the linkProvider (B205);
- *   - returns a result object for EVERY op and never throws (B206 / NEW-4), so a failed
+ *     Google Drive next — B207; the swap is a one-line change here, nothing in the app);
+ *   - routes every share link through the linkProvider (B208);
+ *   - returns a result object for EVERY op and never throws (B209 / NEW-4), so a failed
  *     or half-finished file op is always a visible state, never a silent success.
  *
  * Acceptance (NEW-1): point this at a different/stub backend and NOTHING outside this
@@ -83,7 +83,7 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
       return r;
     },
 
-    /* Produce a share link for a file (routed through the link provider — B205). */
+    /* Produce a share link for a file (routed through the link provider — B208). */
     async shareLink(planyrKey, opts = {}) {
       const backendId = resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);

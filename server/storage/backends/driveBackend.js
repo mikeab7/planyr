@@ -1,4 +1,4 @@
-/* Google Drive storage backend (B204 / NEW-2) — scaffold behind the adapter.
+/* Google Drive storage backend (B207 / NEW-2) — scaffold behind the adapter.
  *
  * One backend implementation of the contract in memoryBackend.js, storing BYTES ONLY in
  * a Workspace Drive on planyr.io. It is the substrate beneath auto-filing, NOT a
@@ -9,7 +9,7 @@
  *
  * ── Live wiring is BLOCKED on the manual Google setup (owner + Cowork). Until the OAuth
  *    client is provided, every op returns a clear { ok:false } — never a throw, never a
- *    silent success (B206). Pass a `client` (the thin Drive REST wrapper, created
+ *    silent success (B209). Pass a `client` (the thin Drive REST wrapper, created
  *    server-side from the credentials) to light it up; no app code changes.
  *
  * ── Decisions baked in (per the NEW-2 spec):
@@ -92,7 +92,7 @@ export function driveBackend({ client = null } = {}) {
       return ok();
     },
 
-    // Native Drive share link (B205 default). Recipients see a familiar Google Drive link.
+    // Native Drive share link (B208 default). Recipients see a familiar Google Drive link.
     async shareLink(backendId) {
       const n = need(); if (n) return n;
       const res = await client.permitAnyoneReader(backendId);

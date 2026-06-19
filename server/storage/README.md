@@ -1,4 +1,4 @@
-# Storage subsystem (`/server/storage`) — B203–B206
+# Storage subsystem (`/server/storage`) — B206–B209
 
 The single seam the app uses for **file bytes** (drawings, surveys, PDFs). The app talks
 ONLY to the adapter and references files ONLY by Planyr's own stable keys; the concrete
@@ -12,15 +12,15 @@ app  ──>  adapter.js  ──>  backend (memory | drive)
                 └── result.js        every op returns {ok} — never a silent failure
 ```
 
-- **B203 / NEW-1** — adapter discipline: `adapter.js` is the only entry point; `idMap.js`
+- **B206 / NEW-1** — adapter discipline: `adapter.js` is the only entry point; `idMap.js`
   is the only Planyr↔backend translator. Acceptance: point at a different backend and
   nothing outside this folder changes (see `test/storageAdapter.test.js`).
-- **B204 / NEW-2** — `backends/driveBackend.js`: Google Drive, **bytes only**. The index
+- **B207 / NEW-2** — `backends/driveBackend.js`: Google Drive, **bytes only**. The index
   of file facts lives in Supabase Postgres, not Drive. Scaffolded; **blocked on the manual
   Google setup below.**
-- **B205 / NEW-3** — `linkProvider.js`: all share links from one interface (Drive-native
+- **B208 / NEW-3** — `linkProvider.js`: all share links from one interface (Drive-native
   today, Planyr `planyr.io/s/<token>` later — a one-place switch).
-- **B206 / NEW-4** — `result.js` + `attempt()`: every op reports visible success/failure.
+- **B209 / NEW-4** — `result.js` + `attempt()`: every op reports visible success/failure.
 
 ## What I need from you (the part code can't do) — for Cowork
 

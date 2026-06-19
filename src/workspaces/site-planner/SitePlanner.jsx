@@ -784,7 +784,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
-  const sheetSeq = useRef(1); // per-session sheet number for the export filename (B201)
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -3862,10 +3861,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Print to PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
-        aEl.download = `${sheetFileName({ project: siteLabel, n: sheetSeq.current })}.png`; // B201
+        aEl.download = `${sheetFileName({ project: siteLabel, plan: planLabel })}.png`; // B201
         aEl.click();
         URL.revokeObjectURL(aEl.href);
-        sheetSeq.current += 1; // count this exported sheet (B201)
       }, "image/png");
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
@@ -3921,8 +3919,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
         pal: PAL,
       });
-      // Suggested PDF filename comes from the document <title> (B201).
-      const fileName = sheetFileName({ project: siteLabel, n: sheetSeq.current });
+      // Suggested PDF filename comes from the document <title> (B201) — date · project · plan name.
+      const fileName = sheetFileName({ project: siteLabel, plan: planLabel });
       const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
       const pageCss = paper === "tabloid"
         ? (orient === "portrait" ? "11in 17in" : "17in 11in")
@@ -3936,7 +3934,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         svg{display:block;margin:0 auto}
       </style></head><body>${sheetSvg}</body></html>`);
       win.document.close();
-      sheetSeq.current += 1; // the next exported sheet increments (B201)
       mark("ready");
       // Print once the aerial has loaded (or after a beat if it's cached/absent).
       const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
@@ -5092,6 +5089,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <AppHeader
         module={shellModule || "site-planner"}
         onSwitch={onShellSwitch}
+        homeLabel="Map"
         onDashboard={onBackToMap}
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}

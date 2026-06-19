@@ -1,4 +1,4 @@
-/* Storage-adapter result type (B206 / NEW-4).
+/* Storage-adapter result type (B209 / NEW-4).
  *
  * EVERY file operation returns one of these — never a bare value, never a thrown error
  * that the caller might swallow. A failed upload / move / rename / delete / link must be

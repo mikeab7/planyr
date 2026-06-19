@@ -1,4 +1,4 @@
-/* In-memory storage backend (B203 / NEW-1) — the stub the adapter is proven against.
+/* In-memory storage backend (B206 / NEW-1) — the stub the adapter is proven against.
  *
  * Implements the backend contract the adapter expects (put / get / list / move / rename /
  * remove / shareLink), keyed by its OWN backend ids. It exists so the adapter can be

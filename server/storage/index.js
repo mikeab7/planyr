@@ -1,4 +1,4 @@
-/* Storage subsystem assembly (B203–B206).
+/* Storage subsystem assembly (B206–B209).
  *
  * The one place the concrete backend is chosen and credentials are read — SERVER-SIDE
  * ONLY. Nothing here is bundled into the frontend (the app talks to the adapter through

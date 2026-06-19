@@ -1,4 +1,4 @@
-/* Planyr-ID ↔ backend-ID mapping (B203 / NEW-1).
+/* Planyr-ID ↔ backend-ID mapping (B206 / NEW-1).
  *
  * The ONE place a Planyr stable key is translated to/from a backend's own id (e.g. a
  * Google Drive file id). No Drive id — or any backend id — is allowed to leak past the

@@ -1,4 +1,4 @@
-/* Share-by-link provider (B205 / NEW-3).
+/* Share-by-link provider (B208 / NEW-3).
  *
  * ALL share-link generation goes through this one interface, so switching how links are
  * minted is a single-place change. Today it returns the backend's NATIVE share link

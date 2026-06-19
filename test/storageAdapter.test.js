@@ -8,7 +8,7 @@ import { buildStorageAdapter } from "../server/storage/index.js";
 
 const bytes = (s) => new TextEncoder().encode(s);
 
-describe("storage adapter — core ops, Planyr-keys only (B203/NEW-1)", () => {
+describe("storage adapter — core ops, Planyr-keys only (B206/NEW-1)", () => {
   const make = () => createStorageAdapter({ backend: memoryBackend() });
 
   it("saves, fetches, lists, renames, moves, removes by Planyr key", async () => {
@@ -51,7 +51,7 @@ describe("storage adapter — core ops, Planyr-keys only (B203/NEW-1)", () => {
   });
 });
 
-describe("storage adapter — no silent failures (B206/NEW-4)", () => {
+describe("storage adapter — no silent failures (B209/NEW-4)", () => {
   it("an unmapped key fails visibly, never throws", async () => {
     const a = createStorageAdapter({ backend: memoryBackend() });
     for (const r of [await a.fetch("nope"), await a.remove("nope"), await a.move("nope", "x"), await a.rename("nope", "y"), await a.shareLink("nope")])
@@ -75,7 +75,7 @@ describe("storage adapter — no silent failures (B206/NEW-4)", () => {
   });
 });
 
-describe("storage adapter — backend is swappable with zero consumer changes (B203/NEW-1 acceptance)", () => {
+describe("storage adapter — backend is swappable with zero consumer changes (B206/NEW-1 acceptance)", () => {
   // A tiny "app consumer" written ONLY against the adapter API + Planyr keys.
   async function appFlow(adapter) {
     await adapter.save({ planyrKey: "proj/civil/grading.pdf", bytes: bytes("grading"), folder: "proj/civil" });
@@ -93,7 +93,7 @@ describe("storage adapter — backend is swappable with zero consumer changes (B
   });
 });
 
-describe("idMap — the only Planyr↔backend translator (B203/NEW-1)", () => {
+describe("idMap — the only Planyr↔backend translator (B206/NEW-1)", () => {
   it("round-trips and unbinds", () => {
     const m = createIdMap(memoryIdStore());
     m.bind("planyr/a.pdf", "drive_123");
@@ -105,7 +105,7 @@ describe("idMap — the only Planyr↔backend translator (B203/NEW-1)", () => {
   });
 });
 
-describe("link provider — one place to switch link kinds (B205/NEW-3)", () => {
+describe("link provider — one place to switch link kinds (B208/NEW-3)", () => {
   it("drive kind returns the backend's native link", async () => {
     const backend = memoryBackend();
     const put = await backend.put({ bytes: bytes("x"), name: "x.pdf" });
@@ -126,7 +126,7 @@ describe("link provider — one place to switch link kinds (B205/NEW-3)", () => 
   });
 });
 
-describe("drive backend — scaffold reports 'not connected' until creds (B204/NEW-2)", () => {
+describe("drive backend — scaffold reports 'not connected' until creds (B207/NEW-2)", () => {
   it("every op fails clearly when no client is provided, and never throws", async () => {
     const d = driveBackend({});
     expect(d.configured).toBe(false);
@@ -149,7 +149,7 @@ describe("drive backend — scaffold reports 'not connected' until creds (B204/N
   });
 });
 
-describe("assembly — buildStorageAdapter (B203)", () => {
+describe("assembly — buildStorageAdapter (B206)", () => {
   it("defaults to the memory backend when Drive isn't configured", () => {
     const a = buildStorageAdapter({ backend: "memory", linkKind: "drive" });
     expect(a.backendName).toBe("memory");
