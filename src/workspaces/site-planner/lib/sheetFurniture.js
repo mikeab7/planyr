@@ -170,3 +170,20 @@ export function buildScreenFurnitureSvg({
   return translate(vw - margin - sb.plateW, baseY - sb.plateH, sb.markup) +
     translate(margin, baseY - na.plateH, na.markup);
 }
+
+// ON-SCREEN furniture as TWO standalone plates for DOM overlays (each rendered in
+// its own absolutely-positioned <svg> anchored to a visible canvas corner, instead
+// of inside the canvas SVG's coordinate space). This keeps the scale bar + north
+// arrow ALWAYS fully on screen — immune to canvas-taller-than-viewport / status-bar
+// overlap — and lets CSS place each precisely. Returns each plate's inner SVG markup
+// plus its width/height so the caller can size its wrapping <svg>. `targetU`/`maxU`
+// are absolute screen-pixel widths for the bar (the canvas user unit == screen px).
+export function screenFurniturePlates({
+  ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, refS = 540, targetU = 130, maxU = 240,
+}) {
+  const m = furnitureMetrics(refS);
+  const { feet, lengthU } = pickScaleBar({ ftPerUnit, targetU, maxU });
+  const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
+  const na = northArrowPlate({ m, pal, bearingDeg });
+  return { scaleBar: sb, north: na }; // each: { markup, plateW, plateH }
+}
