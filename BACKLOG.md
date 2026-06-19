@@ -25,18 +25,12 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-19: owner-reported (chat) "can't access my scheduling projects — this is imperative."
      Filed B203–B205 (arrived as B194–B196, but concurrent `main` #169–#172 minted B194–B202 for
      the project switcher / trailer labels / scale bar / print tranche, so renumbered to the real
-     next free IDs at merge time). B203 (Schedule picker showed Site projects — CRITICAL
-     data-access) + B204 (module-contextual home crumb: "Map" in Site, "Dashboard" in Schedule)
-     were filed AND shipped this session — moved to BACKLOG-DONE.md. B205 (remove the Site "center
-     map" control) stays open below, blocked on the owner identifying which control he means (no
-     control is literally named "center map"/"recenter"). -->
-
-### B205 — Remove the "center map" / recenter control in the Site module `[Site Planner / UI]` (task)  *(owner-reported 2026-06-19, tentative "maybe"; minted **B205** — concurrent `main` (#169–#172) took B194–B202 and this session took B203–B204, so this is the real next free ID after B204)*
-`[?]` Owner: in the Site module, "maybe we can get rid of the center map recall / the center map button." **Blocked on which control.** Audited the Site module (MapFinder + SitePlanner) — there is **no control literally named "center map" / "recenter" / "recall."** The candidates, none clearly "the center map button":
-  1. Plan-mode **"Zoom to fit"** (⤢) bottom-right of the canvas (`SitePlanner.jsx` zoom cluster → `fit()`) — fits the layout to the viewport; useful, and `fit`/`frameToActiveParcels` are reused by the Layers "show on map" path.
-  2. The **basemap on/off toggle** (the aerial "Map" control; `basemapOn`) — essential, not a "center" action.
-  3. The MapFinder per-site **"Show on map"** (⊕ `flyToSite`) row buttons — zoom to a saved site; useful.
-  Per the owner's own note ("if removal touches shared map-centering logic used elsewhere, confirm before deleting; otherwise remove") and the tentative "maybe," this needs a one-line confirm (which button / a screenshot) before deleting — removing the wrong one (e.g. Zoom-to-fit) would cost a useful control. **Question posed to the owner 2026-06-19.**
+     next free IDs at merge time). ALL THREE filed AND shipped this session — moved to
+     BACKLOG-DONE.md: B203 (Schedule picker showed Site projects — CRITICAL data-access), B204
+     (module-contextual home crumb: "Map" in Site, "Dashboard" in Schedule), and B205 (the owner
+     clarified via screenshot that the "center map" he meant was the planner's redundant center
+     "‹ Map" back-button — now that B204 renamed the breadcrumb crumb to "Map" there were two;
+     removed the center one). -->
 
 <!-- Filed 2026-06-19 from the Cowork storage-backend chat (arrived as "NEW-1".."NEW-4"). Provisionally
      B203–B206 (highest was B202 when filed), but concurrent `main` shipped B203/B204 (Schedule picker,
