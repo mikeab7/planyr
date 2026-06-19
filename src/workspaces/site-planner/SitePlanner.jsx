@@ -1008,6 +1008,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const overlayRefs = useRef({});
+  const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
+  const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -1031,7 +1033,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; };
+    geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1063,16 +1066,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* drive the basemap zoom/center from the planner view so it stays locked to
      the SVG. ppf→zoom keeps the scale identical; the canvas-center feet point
-     projects to the map center. */
+     projects to the map center.
+
+     Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
+     GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
+     step blanks the aerial for a frame each time (the white/dim flash). Instead
+     we hold Leaflet at a committed view and, for the small zoom/pan deltas of a
+     live gesture, just CSS-`transform` the whole map container (tiles AND the
+     shared overlay layers together, so they stay mutually aligned) to track the
+     gesture with the pixels already on screen — no reload, no flash. A debounced
+     `setView` then re-renders crisp once the gesture settles. Big jumps (fit/
+     resize/first paint, or >1.5 zoom levels of accumulated scroll) commit
+     immediately so we never scale the aerial into a blurry mess. */
   useEffect(() => {
     const map = geoMapRef.current;
-    if (!map || !origin) return;
+    const wrap = geoWrapRef.current;
+    if (!map || !wrap || !origin) return;
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
-    try { map.setView(center, z, { animate: false }); } catch (_) {}
+
+    const commit = (c, zoom) => {
+      wrap.style.transform = "";
+      try { map.setView(c, zoom, { animate: false }); } catch (_) {}
+      geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
+    };
+
+    const prev = geoCommitRef.current;
+    const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
+    // First paint, a resize, or a large jump → snap (one reload) rather than scale.
+    if (sizeChanged || Math.abs(z - prev.zoom) > 1.5) {
+      clearTimeout(geoCommitTimer.current);
+      commit(center, z);
+      return;
+    }
+
+    // Small delta → keep the committed tiles, just transform them to match.
+    try {
+      const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
+      const p = map.latLngToContainerPoint(L.latLng(center));        // where `center` sits now
+      const half = map.getSize().divideBy(2);
+      const tx = half.x - p.x * scale;
+      const ty = half.y - p.y * scale;
+      wrap.style.transformOrigin = "0 0";
+      wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+    } catch (_) { commit(center, z); return; }
+
+    // …then re-base to a crisp render shortly after the gesture stops.
+    clearTimeout(geoCommitTimer.current);
+    geoCommitTimer.current = setTimeout(() => commit(center, z), 180);
   }, [view, size, origin]);
+
+  useEffect(() => () => clearTimeout(geoCommitTimer.current), []);
 
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
@@ -4776,7 +4822,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
-          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
+          {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
+              brief tile gap during a zoom-level change reads as a subtle blink, not
+              a bright (near-white) flash against the imagery (B65). With the aerial
+              OFF this stays PAL.paper so the planner background matches the SVG. */}
+          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: basemapOn ? "#3f3f3f" : PAL.paper, pointerEvents: "none" }} />}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
