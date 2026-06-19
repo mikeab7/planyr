@@ -16,6 +16,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
@@ -4350,6 +4351,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const leftTabs = [
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "analysis", glyph: "⚐", label: "Analysis" },
     { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
@@ -6384,6 +6386,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Parcel menu — empty hint when no parcel is selected */}
           {/* every parcel in this plan — click to select */}
+          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
+              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
+          {leftPanel === "analysis" && (
+            <Section title="Site Analysis">
+              {!origin ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
+              ) : (() => {
+                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
+                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
+                const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip} />;
+              })()}
+            </Section>
+          )}
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
               {parcels.length === 0 ? (
