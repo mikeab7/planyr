@@ -1040,7 +1040,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+      // one-zoom-higher native tiles and renders them at half size (downsampled =
+      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+      // which tiles are fetched + their display size — never the map's CRS zoom —
+      // so the SVG↔aerial scale lock is untouched. (B168)
+      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
       t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
