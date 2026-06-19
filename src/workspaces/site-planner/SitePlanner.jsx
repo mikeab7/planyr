@@ -1043,7 +1043,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+      // one-zoom-higher native tiles and renders them at half size (downsampled =
+      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+      // which tiles are fetched + their display size — never the map's CRS zoom —
+      // so the SVG↔aerial scale lock is untouched. (B170)
+      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
       t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
@@ -1737,12 +1744,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
-  const toggleMerge = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // Inactive parcels are excluded from merge candidacy (B170) — they don't participate
+  // in yield/site analysis, so they shouldn't be combinable either. Allow de-selecting an
+  // already-picked id (e.g. one just toggled inactive) but never adding an inactive one.
+  const toggleMerge = (id) => setCombineSel((s) => {
+    if (s.includes(id)) return s.filter((x) => x !== id);
+    const pc = parcels.find((p) => p.id === id);
+    if (pc && pc.active === false) return s;
+    return [...s, id];
+  });
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
   // editable layer — a working merge for test-fit/yield, NOT a recorded legal
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
   const mergeParcels = () => {
-    const chosen = parcels.filter((p) => combineSel.includes(p.id));
+    const chosen = parcels.filter((p) => combineSel.includes(p.id) && p.active !== false); // inactive parcels never merge (B170)
     if (chosen.length < 2) return;
     let result = chosen[0].points;
     let remaining = chosen.slice(1).map((p) => p.points);
@@ -6378,12 +6393,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {parcels.map((pc, i) => {
                     const on = selParcel?.id === pc.id;
                     const picked = combineSel.includes(pc.id);
+                    const inactive = pc.active === false;
                     return (
-                      <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
-                      </button>
+                      // Per-row Active checkbox (B170): checked = participates in yield / coverage /
+                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
+                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
+                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
+                        <label
+                          title={inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
+                        >
+                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                            style={{ width: 15, height: 15, cursor: "pointer" }} />
+                        </label>
+                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: inactive ? 0.55 : 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{inactive ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

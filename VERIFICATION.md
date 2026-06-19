@@ -165,11 +165,14 @@ was never clicked" quietly ships broken.
   - **B97 layers panel** — on map + planner, the **Map layers / Utility evidence / jurisdiction** group
     headers collapse on click (chevron + "N on" count), state persists across reload; panel fits without
     scrolling.
-  - **B106 sites panel** — "Your sites · N" header collapses (persists); per-row **crosshair + delete
-    reveal on hover** (no always-on ✕); delete still asks to confirm; zero-count status chips are hidden.
+  - **B106 sites panel** — "Your sites · N" header collapses (persists); per-row **crosshair reveals on
+    hover** (no inline delete button at all, per B168); zero-count status chips are hidden.
   - **B104 map header** — only **one** "Site Planyr" brand shows (shell header); the map bar reads
     "Find a site" + search + Start blank, no duplicate lockup.
-  - **B105 hint** — the "Drag to move the map" card appears once, dismisses with ✕, and stays gone on reload.
+  - **B167 + B168 map card** ✅ self-verified 2026-06-19 (headless, logged-out, `ui-audit/verify-mapcard.mjs`):
+    no "Drag to move the map" bubble on load; project cards carry **no inline ✕**; **right-clicking a card
+    (or map marker) opens one menu** with the five statuses (current checked) + a red **Delete project…**
+    that routes through the existing confirm modal. Re-confirm signed-in that delete actually removes the site.
   - **B107 left tabs** — order reads **Yield · Parcel · Element · Aerial · Overlay · Setup**.
 - **If any fails:** none are critical (no data risk) — log ❌ here with what looked wrong; fixes are small.
 
@@ -606,6 +609,12 @@ was never clicked" quietly ships broken.
 - **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview)
 - **Steps + result — ✅ PASS, zero console errors:** Text tool → click to place → type "Line1", **Enter**, "Line2" → still editing, textarea value = "Line1\nLine2" (Enter now makes a newline, was commit). **Click away +80 px** → editor closes and commits **two lines** (previously you were stuck in the editor at any distance). New box → type → **Esc** → finishes, keeps the text. Place a box and click away **without typing** → the empty box is removed.
 - **Expect:** matches Bluebeam — text box is multi-line; you finish by clicking away or pressing Esc.
+
+### V43 — Aerial basemap requests HiDPI/retina tiles so imagery renders sharp (B169/B170) ✅
+- **Added** 2026-06-19 · **Cadence** once (fix acceptance) · **Self-verified 2026-06-19** (headless Chromium, `deviceScaleFactor` 1 vs 2, over a Katy/Houston parcel)
+- **Steps (driven):** `gis-verify/retina-basemap-verify.mjs` booted the map finder twice — once at `deviceScaleFactor: 1` (standard display) and once at `2` (HiDPI/"retina") — and recorded the **zoom level of every Esri World_Imagery tile actually requested** plus each tile's HTTP status.
+- **Expect:** with `detectRetina:true`, the retina run requests tiles **one zoom level higher** than the standard run (2× pixel density, downsampled = sharp); both runs load tiles with no failures (no gray-tile/coverage regression).
+- **Result 2026-06-19 — ✅ PASS:** DPR 1 requested **z11** tiles (35 tiles, all HTTP 200); DPR 2 requested **z12** tiles (96 tiles, all HTTP 200) → `detectRetina` engaged, higher-density tiles fetched, **0 failed/gray tiles** at either density. **Residual (NOT a Michael to-do):** the *visible* sharpness gain is invisible in the sandbox (its `devicePixelRatio = 1`), so eyeballing it on a real retina/4K display would be the final confirmation — but the mechanism (higher-density tile request) is proven engaged here, which is the fix.
 
 ### V42 — Added-detention area label seats on the NEW ground, not the whole-pond centre (B157) ✅
 - **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-18** (headless Chromium, logged-out preview build) · refines V32/B140
