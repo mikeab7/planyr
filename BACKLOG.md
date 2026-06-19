@@ -24,7 +24,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
      map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md.
-     B194–B196 (Schedule Gantt brackets, task-fill, configurable columns) filed AND shipped
+     B210–B212 (Schedule Gantt brackets, task-fill, configurable columns) filed AND shipped
      this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
 
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
