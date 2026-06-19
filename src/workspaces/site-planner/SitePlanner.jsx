@@ -1011,6 +1011,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
+  const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
@@ -1039,7 +1040,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1048,6 +1049,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
+      // Coarse "instant" backfill UNDER the detail layer: capped at a low native
+      // zoom so it only ever fetches a handful of large-area tiles. They load
+      // (and cache) near-instantly and fill the whole view with blurry imagery,
+      // so a fresh load / hard zoom-out never sits on the gray backdrop while the
+      // heavy detail tiles stream in on top. No detectRetina (light + blurry is
+      // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
+      const bf = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 6 }));
+      bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
       // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
       // one-zoom-higher native tiles and renders them at half size (downsampled =
       // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
@@ -1055,11 +1064,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // downsampling a higher-zoom tile over upscaling a lower one. It only changes
       // which tiles are fetched + their display size — never the map's CRS zoom —
       // so the SVG↔aerial scale lock is untouched. (B170)
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
-      t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
+      // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
+      // short fallback), so its many retina tiles don't flood the connection and
+      // starve the few coarse tiles — that's what left a fresh load gray for ~10s
+      // on a real connection. (B65)
+      const addDetail = () => {
+        // bail if the map went away, detail's already added, or the aerial was
+        // toggled off during the wait (backfill ref nulled by the cleanup below).
+        if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
+        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+        t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+      };
+      bf.once("load", addDetail);
+      setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
-      geoBaseRef.current = null;
+      try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
+      geoBaseRef.current = null; geoBackfillRef.current = null;
     }
   }, [basemapOn, origin]);
 
