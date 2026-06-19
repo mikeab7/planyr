@@ -46,10 +46,14 @@ function pointAtArcLen(verts, target) {
 /* Partition a closed polygon's edges into runs (logical sides).
  *
  * `points`  — ring of {x,y} (not repeated; the close is implicit).
- * `tolDeg`  — bearing tolerance; an edge joins the current run only while its
- *             bearing is within `tolDeg` of the run's FIRST edge (anchoring to the
- *             run start, not the previous edge, so a long gentle curve splits into
- *             several runs instead of being swallowed as one side). Default 8°.
+ * `tolDeg`  — bearing tolerance; an edge joins the current run while it turns no more
+ *             than `tolDeg` from the PREVIOUS edge. Chaining edge-to-edge (not to the
+ *             run's first edge) means a side that bends GENTLY — a curved street
+ *             frontage digitized at a few degrees per segment, or survey noise on a
+ *             nominally-straight line — reads as ONE side (one setback, one pill, one
+ *             dimension), while a genuine corner (a turn beyond `tolDeg`) still breaks
+ *             the run. A TIGHT curve (each segment turning more than `tolDeg`) stays
+ *             per-segment, which is correct — it isn't one straight side. Default 8°.
  *
  * Returns runs covering every edge exactly once. A run that straddles the index-0
  * seam is merged (the digitizer may have started mid-side). Each run:
@@ -67,21 +71,24 @@ export function edgeRuns(points, tolDeg = 8) {
   // For a 2-point "ring" there's a single edge (the back edge is degenerate); 1 run.
   const edgeCount = n === 2 ? 1 : n;
 
-  // Greedy partition over edges 0..edgeCount-1, anchored to each run's first bearing.
+  // Greedy partition over edges 0..edgeCount-1: each edge joins the current run while it
+  // turns ≤ tolDeg from the PREVIOUS edge (so a gentle, continuous bend stays one side).
   const runsIdx = [];
-  let cur = [0], anchor = bearings[0];
+  let cur = [0], prev = bearings[0];
   for (let i = 1; i < edgeCount; i++) {
-    if (bearingDelta(bearings[i], anchor) <= tolDeg) cur.push(i);
-    else { runsIdx.push(cur); cur = [i]; anchor = bearings[i]; }
+    if (bearingDelta(bearings[i], prev) <= tolDeg) cur.push(i);
+    else { runsIdx.push(cur); cur = [i]; }
+    prev = bearings[i];
   }
   runsIdx.push(cur);
 
-  // Wrap-merge: if the last and first runs are collinear (and they're different
-  // runs, and there are ≥3 of them so we never collapse a thin 2-sided sliver),
-  // the side straddles index 0 — fold the last run's edges onto the front of the first.
-  if (runsIdx.length >= 3) {
+  // Wrap-merge: the closing edge and the opening edge are physically adjacent across the
+  // index-0 seam. If they turn ≤ tolDeg into each other, the side straddles the seam (the
+  // digitizer started mid-side) — fold the last run's edges onto the front of the first.
+  // (The corner that separated them is the merged run's OPEN ends, never an interior turn.)
+  if (runsIdx.length >= 2) {
     const first = runsIdx[0], last = runsIdx[runsIdx.length - 1];
-    if (bearingDelta(bearings[first[0]], bearings[last[0]]) <= tolDeg) {
+    if (last !== first && bearingDelta(bearings[edgeCount - 1], bearings[0]) <= tolDeg) {
       runsIdx[0] = [...last, ...first];
       runsIdx.pop();
     }

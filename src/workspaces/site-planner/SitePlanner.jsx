@@ -4453,20 +4453,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Screen anchors for a run's fanned labels (B215): the boundary/run-length dimension sits
   // OUTBOARD of the edge and the setback value pill sits INBOARD (toward the setback line it
   // describes), so two co-located labels never stack/occlude at the shared edge midpoint.
+  // INWARD is decided by point-in-ring (a small step that lands INSIDE the boundary), NOT by
+  // "toward the centroid" — the centroid misfires on concave / L-shaped / flag-lot parcels
+  // (it can sit in a notch or outside the polygon), which would throw the pill to the wrong side.
+  const inwardScreenNormal = (pc, midF, dxF, dyF) => {
+    const L = Math.hypot(dxF, dyF) || 1; dxF /= L; dyF /= L;
+    let nxF = -dyF, nyF = dxF;                            // left normal in feet
+    const step = 0.5;                                     // ft — small enough for any real lot
+    if (!pointInRing({ x: midF.x + nxF * step, y: midF.y + nyF * step }, pc.points)) { nxF = -nxF; nyF = -nyF; }
+    // Map the inward FEET normal to a SCREEN unit vector (f2p is an axis-aligned scale+translate,
+    // y may invert) by transforming two feet points and normalizing the screen delta.
+    const o = f2p(midF), oi = f2p({ x: midF.x + nxF, y: midF.y + nyF });
+    let sx = oi.x - o.x, sy = oi.y - o.y; const sl = Math.hypot(sx, sy) || 1;
+    return { sx: sx / sl, sy: sy / sl, mid: o };
+  };
   const runLabelAnchors = (pc, run) => {
-    const m = f2p(run.mid);
-    const a = f2p(run.vertices[0]), b = f2p(run.vertices[run.vertices.length - 1]);
-    let dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
-    if (L < 1) { // closed/degenerate run → use its middle segment's direction
+    const aF = run.vertices[0], bF = run.vertices[run.vertices.length - 1];
+    let dxF = bF.x - aF.x, dyF = bF.y - aF.y;
+    if (Math.hypot(dxF, dyF) < 0.5) {                     // closed/degenerate run → middle segment
       const e0 = run.edges[Math.floor(run.edges.length / 2)], n = pc.points.length;
-      const p = f2p(pc.points[e0]), q = f2p(pc.points[(e0 + 1) % n]);
-      dx = q.x - p.x; dy = q.y - p.y; L = Math.hypot(dx, dy) || 1;
+      const p = pc.points[e0], q = pc.points[(e0 + 1) % n]; dxF = q.x - p.x; dyF = q.y - p.y;
     }
-    dx /= L; dy /= L;
-    let nx = -dy, ny = dx;                               // left normal (screen space)
-    const cen = f2p(centroid(pc.points));
-    if ((cen.x - m.x) * nx + (cen.y - m.y) * ny < 0) { nx = -nx; ny = -ny; } // orient inward
-    return { mid: m, nx, ny, out: { x: m.x - nx * 12, y: m.y - ny * 12 }, in: { x: m.x + nx * 13, y: m.y + ny * 13 } };
+    const { sx, sy, mid: m } = inwardScreenNormal(pc, run.mid, dxF, dyF);
+    return { mid: m, nx: sx, ny: sy, out: { x: m.x - sx * 12, y: m.y - sy * 12 }, in: { x: m.x + sx * 13, y: m.y + sy * 13 } };
   };
 
   // ONE length label per side (run), placed OUTBOARD so it never stacks on the inboard
@@ -5323,14 +5332,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </g>
                 );
                 if (sbEditMode === "segment") {
-                  // Per-segment pills, each on its own edge's inboard side.
-                  const cen = f2p(centroid(selParcel.points)), n = selParcel.points.length;
+                  // Per-segment pills, each on its own edge's inboard side (point-in-ring inward).
+                  const n = selParcel.points.length;
                   return <g data-export="skip">{selParcel.points.map((a, i) => {
                     const b = selParcel.points[(i + 1) % n], am = f2p(a), bm = f2p(b);
                     const m = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-                    let dx = bm.x - am.x, dy = bm.y - am.y, L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-                    let nx = -dy, ny = dx; if ((cen.x - m.x) * nx + (cen.y - m.y) * ny < 0) { nx = -nx; ny = -ny; }
-                    const anchor = { x: m.x + nx * 13, y: m.y + ny * 13 };
+                    const midF = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+                    const { sx, sy } = inwardScreenNormal(selParcel, midF, b.x - a.x, b.y - a.y);
+                    const anchor = { x: m.x + sx * 13, y: m.y + sy * 13 };
                     return pill(`sbl${i}`, anchor, `${f0(sb[i])}′`, (fp) => setNumEdit({ fx: fp.x, fy: fp.y, value: String(sb[i]), onCommit: (v) => setEdgeSetback(selParcel, i, v) }));
                   })}</g>;
                 }

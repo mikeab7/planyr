@@ -40,6 +40,27 @@ describe("edgeRuns", () => {
     expect(bottom.lengthFt).toBeLessThan(210);
   });
 
+  it("groups a GENTLE curve into ONE side (chain-from-previous)", () => {
+    // Bottom straight; top is a 12-segment arc bending ~5° per segment (< 8° tol) → one run.
+    const top = [];
+    for (let k = 0; k <= 12; k++) { const a = (5 + (60 * k) / 12) * Math.PI / 180; top.push({ x: 600 - 600 * (k / 12), y: 200 - 40 * Math.sin(a) }); }
+    const pts = [{ x: 0, y: 0 }, { x: 600, y: 0 }, ...top.slice(0, -1), { x: 0, y: 200 }].filter((p, i, a) => i === 0 || Math.hypot(p.x - a[i - 1].x, p.y - a[i - 1].y) > 0.01);
+    const runs = edgeRuns(pts, 8);
+    // The arc's many small bends collapse into a single run (far fewer runs than edges).
+    const maxRun = Math.max(...runs.map((r) => r.edges.length));
+    expect(maxRun).toBeGreaterThanOrEqual(10); // the arc is one long side
+    expect(runs.length).toBeLessThan(6);
+  });
+
+  it("keeps a TIGHT curve per-segment (each segment turns beyond tolerance)", () => {
+    // A 6-segment arc turning 30° per segment — genuinely curved, not one straight side.
+    const pts = [];
+    for (let k = 0; k < 6; k++) { const a = (k * 30) * Math.PI / 180; pts.push({ x: 300 * Math.cos(a), y: 300 * Math.sin(a) }); }
+    const runs = edgeRuns(pts, 8);
+    // No grouping: each edge is its own run (every segment is a distinct direction).
+    expect(runs.every((r) => r.edges.length === 1)).toBe(true);
+  });
+
   it("breaks a run at a genuine corner / notch beyond tolerance", () => {
     // A side with a 90° notch in the middle must NOT be one run.
     const pts = [
