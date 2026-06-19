@@ -11,12 +11,13 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
+import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
@@ -1018,6 +1019,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
+  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -1417,6 +1419,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [fitNonce, setFitNonce] = useState(0);
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
+     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
+     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
+     Used by the Site Analysis "show on map" toggle (B190). */
+  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
+    const pts = [];
+    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
+    if (pts.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+  }, [parcels, size]);
+
+  /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
+     the same app-shared `overlays` state the Layers panel uses (one source of truth) —
+     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
+     geographic context, then frame to the active parcels so it isn't offscreen. */
+  const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
+    if (!layerId) return;
+    setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
+    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -4873,6 +4902,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
+      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
+      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+        🗂 Files
+      </button>
     </span>
   );
 
@@ -4933,14 +4967,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </>
   );
 
-  // Header breadcrumb switcher (B189): open another project (site group) in place.
-  // Routes through handleOpenSite, which flushes the current plan first (B191).
+  // Header breadcrumb switcher (B191): open another project (site group) in place.
+  // Routes through handleOpenSite, which flushes the current plan first (B193).
   const openProjectGroupLocal = (gid) => {
     if (!gid || gid === groupId) return;
     const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
     if (target) handleOpenSite(target.id);
   };
-  // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B191).
+  // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
     const cloudActive = isCloudActive();
     const connOk = cloud?.state === "connected";
@@ -4966,6 +5000,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         saveSlot={plannerSaveSlot}
         authControl={authControl}
         toolbarContent={plannerToolbar}
+      />
+
+      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
+          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+      <ProjectFilesDrawer
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        signedIn={isCloudActive()}
+        projectId={groupId}
+        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
@@ -6596,7 +6641,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
                 const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
-                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip} />;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                  isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} />;
               })()}
             </Section>
           )}

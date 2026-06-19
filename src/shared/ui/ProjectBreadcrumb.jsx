@@ -2,11 +2,11 @@
  *
  * Renders `▦ Dashboard  /  <Project name> ▾` immediately right of the logo, in every
  * workspace (the header component is shared, so the breadcrumb is identical across
- * Site / Schedule / Markup). The "Dashboard" crumb (B190) is always-visible literal
- * text routing to the all-projects view; the project crumb (B189) opens a portal
+ * Site / Schedule / Markup). The "Dashboard" crumb (B192) is always-visible literal
+ * text routing to the all-projects view; the project crumb (B191) opens a portal
  * dropdown (search · "All projects" · recent projects newest-first · New project).
  *
- * Persist-before-switch (B191): the workspace flushes the current project on the way
+ * Persist-before-switch (B193): the workspace flushes the current project on the way
  * out (SitePlanner's unmount flush / Doc Review's persistence flush). This component
  * adds the *surfacing* the owner asked for — a passive ⚠ line in the dropdown plus a
  * transient toast when a switch happens while the cloud is unreachable — so a switch
@@ -79,7 +79,7 @@ export default function ProjectBreadcrumb({
   const [q, setQ] = useState("");
   const [projects, setProjects] = useState([]);
   const [hoverRow, setHoverRow] = useState(null);
-  const [toast, setToast] = useState(null); // transient "saved on device" notice (B191)
+  const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const anchorRef = useRef(null);
   const toastTimer = useRef(null);
 
@@ -95,7 +95,7 @@ export default function ProjectBreadcrumb({
   useEffect(() => { if (open) { refresh(); setQ(""); } }, [open]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
-  // Surface (don't block) an at-risk save when leaving the current project (B191).
+  // Surface (don't block) an at-risk save when leaving the current project (B193).
   const flagIfAtRisk = () => {
     if (!atRisk(saveState)) return;
     clearTimeout(toastTimer.current);
@@ -116,7 +116,7 @@ export default function ProjectBreadcrumb({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flex: "none" }}>
-      {/* Dashboard crumb (B190) — literal text, always visible, primary route home */}
+      {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
       <button
         onClick={goDashboard}
         title="All projects — Dashboard"
@@ -131,7 +131,7 @@ export default function ProjectBreadcrumb({
 
       <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
 
-      {/* Project crumb (B189) — opens the switcher dropdown */}
+      {/* Project crumb (B191) — opens the switcher dropdown */}
       <button
         ref={anchorRef}
         onClick={() => setOpen((o) => !o)}
@@ -173,7 +173,7 @@ export default function ProjectBreadcrumb({
           </div>
         )}
 
-        {/* All projects (Dashboard) — pinned at top, then a divider (B189/B190) */}
+        {/* All projects (Dashboard) — pinned at top, then a divider (B191/B192) */}
         <button
           onClick={goDashboard}
           onMouseEnter={() => setHoverRow("__dash")}
@@ -234,7 +234,7 @@ export default function ProjectBreadcrumb({
         </button>
       </AnchoredMenu>
 
-      {/* Transient at-risk-switch notice (B191) — non-blocking, auto-dismiss */}
+      {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss */}
       {toast && createPortal(
         <div role="status" style={{
           position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 9000,

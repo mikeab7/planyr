@@ -12,7 +12,7 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, onG
         authControl={authControl}
         // Schedule has no per-project React state (it's an embedded iframe), so the
         // breadcrumb routes through the shell: Dashboard / picking a project / New
-        // project all switch into the Site Planner where projects open (B189–B191).
+        // project all switch into the Site Planner where projects open (B191–B193).
         onDashboard={onGoDashboard}
         currentProject={null}
         onSelectProject={onOpenProject}

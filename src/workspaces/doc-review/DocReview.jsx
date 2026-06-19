@@ -84,7 +84,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
-  // The project the header breadcrumb points at in Markup (B189). Follows the open
+  // The project the header breadcrumb points at in Markup (B191). Follows the open
   // review's project; picking another project here browses its files in place (it does
   // NOT re-file the open review — browsing ≠ filing).
   const [markupProject, setMarkupProject] = useState(null); // { id, name } | null
@@ -456,7 +456,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
-        // Breadcrumb (B189–B191): Dashboard leaves Markup for the all-projects map;
+        // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
         // picking a project browses its files in place (opens the Files drawer scoped
         // to it); New project is born in the Site Planner. Save state from persistence.
         onDashboard={onGoDashboard}

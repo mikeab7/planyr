@@ -14,7 +14,7 @@ migrateScenarios();   // fold legacy named scenarios into Plans
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-// Last cross-workspace nav intent (B189–B191) already acted on. Module-scoped (not a
+// Last cross-workspace nav intent (B191–B193) already acted on. Module-scoped (not a
 // ref) so it survives this workspace unmounting/remounting — otherwise switching back
 // in via the module tab would re-fire the previous Dashboard/open/new intent on mount.
 let lastConsumedNavToken = null;
@@ -229,9 +229,9 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
   // a fully-formed record the moment you add anything.
   const newBlankSite = () => { goPlan(newId()); };
 
-  // Open a whole project (site group) from the header breadcrumb switcher (B189):
+  // Open a whole project (site group) from the header breadcrumb switcher (B191):
   // resume its active plan if one's open, else its newest. Switching plans changes
-  // `activeSiteId`, which remounts/flushes the previous planner (B191 persist-on-switch).
+  // `activeSiteId`, which remounts/flushes the previous planner (B193 persist-on-switch).
   const openProjectGroup = (groupId) => {
     if (!groupId) return;
     const plans = loadPlansOfGroup(groupId); // newest first
@@ -239,7 +239,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     if (target) goPlan(target.id);
   };
 
-  // Consume the Shell's one-shot cross-workspace nav intent (B189–B191) — fired when
+  // Consume the Shell's one-shot cross-workspace nav intent (B191–B193) — fired when
   // Dashboard / a project / New project is chosen from Schedule or Markup, which then
   // switches into this workspace. Token-stamped so a repeat of the same kind re-fires.
   useEffect(() => {

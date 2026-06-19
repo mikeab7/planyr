@@ -1,4 +1,4 @@
-/* Verify B189–B191 — shared-header project switcher.
+/* Verify B191–B193 — shared-header project switcher.
  *
  * Logged-out (sandbox proxy blocks sign-in), so we seed two located projects into the
  * legacy local store and drive the live built app on :4173. Checks: the breadcrumb
@@ -43,10 +43,10 @@ const shot = async (n) => { await page.screenshot({ path: OUT + n }); console.lo
 
 // ── 1. Breadcrumb renders on the map (Dashboard crumb + project crumb) ──
 const dashCrumb = page.locator('button[title="All projects — Dashboard"]:visible');
-await ok("Dashboard crumb visible (B190)", await dashCrumb.isVisible());
+await ok("Dashboard crumb visible (B192)", await dashCrumb.isVisible());
 await ok("Dashboard crumb is literal text", (await dashCrumb.innerText()).trim().includes("Dashboard"));
 const projCrumb = page.locator('button[title="Choose a project"]:visible, button[title="Switch project"]:visible').first();
-await ok("Project crumb visible (B189)", await projCrumb.isVisible());
+await ok("Project crumb visible (B191)", await projCrumb.isVisible());
 await ok("Map shows 'Select a project' (no current project)", (await projCrumb.innerText()).includes("Select a project"));
 await shot("new1to3-map-breadcrumb.png");
 
@@ -93,7 +93,7 @@ await shot("new1to3-project-loaded.png");
 await page.locator('button[title="All projects — Dashboard"]:visible').click();
 await page.waitForTimeout(1000);
 const backToMap = await page.locator('input[placeholder="Find a site — address or place…"]').isVisible().catch(() => false);
-await ok("Dashboard crumb returns to all-projects map (B190)", backToMap);
+await ok("Dashboard crumb returns to all-projects map (B192)", backToMap);
 await shot("new1to3-back-to-dashboard.png");
 
 // ── 6. Breadcrumb present in Markup + Schedule (shared header) ──
@@ -113,7 +113,7 @@ await page.waitForTimeout(400);
 await page.locator('button:has-text("Katy Logistics Park")').click();
 await page.waitForTimeout(1500);
 const inPlanner = (await page.locator('button[title="Switch project"]:visible').first().innerText().catch(() => "")).includes("Katy");
-await ok("Cross-workspace open routes into Site Planner (B189)", inPlanner);
+await ok("Cross-workspace open routes into Site Planner (B191)", inPlanner);
 await shot("new1to3-crossworkspace.png");
 
 await ctx.close();

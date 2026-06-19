@@ -139,7 +139,7 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
-  // Project breadcrumb / switcher (B189–B191). When onSelectProject is provided the
+  // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
   // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
   // simply omit it and the left zone stays logo-only.
   currentProject = null,
@@ -207,7 +207,7 @@ export default function AppHeader({
             </svg>
           </IconBtn>
 
-          {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B190) */}
+          {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B192) */}
           <button
             onClick={onDashboard || undefined}
             title={onDashboard ? "Dashboard — all projects" : undefined}
@@ -235,7 +235,7 @@ export default function AppHeader({
             </span>
           </button>
 
-          {/* Project breadcrumb / switcher (B189–B191) — immediately right of the wordmark */}
+          {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
           {onSelectProject && (
             <>
               <span style={{ width: 1, height: 18, background: LINE, flex: "none", margin: "0 4px" }} />

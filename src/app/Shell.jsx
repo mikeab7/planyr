@@ -26,7 +26,7 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
-  // Cross-workspace navigation (B189–B191). The project breadcrumb lives in every
+  // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
   // workspace's header; "Dashboard" and "open/new project" from Schedule or Markup
   // must route into the Site Planner (where projects open). The Shell switches the
   // active module and hands the Site Planner a one-shot `navIntent` (token-stamped so
