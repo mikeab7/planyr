@@ -1,6 +1,6 @@
 /* AppHeader — shared two-row chrome for all workspaces.
  *
- * Row 1 (44px): hamburger | logo + wordmark | divider | nav links
+ * Row 1 (35px): hamburger | logo + wordmark | divider | nav links
  *               || project name (center) ||
  *               save slot | settings | auth control
  *
@@ -24,6 +24,9 @@ import { useEffect, useState } from "react";
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
 const MUTED  = "#9b9482";
+// Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on CHROME).
+// NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
+const TAB_IDLE = "#c9c3b4";
 
 export const MODULE_ACCENT = {
   "site-planner": "#1D9E75",
@@ -70,6 +73,45 @@ const MODULES = [
     ),
   },
 ];
+
+// One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
+// the module accent reveals on hover, and the active tab keeps the accent + a 2px
+// underline indicator. Icons are crisp SVG at a fixed 13px (no bitmap scaling). (B167)
+function ModuleTab({ m, isActive, onClick }) {
+  const [hover, setHover] = useState(false);
+  const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-current={isActive ? "page" : undefined}
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        height: "100%", padding: "0 13px",
+        border: "none",
+        borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
+        background: "transparent",
+        color: isActive || hover ? tabAccent : TAB_IDLE,
+        fontFamily: "inherit", fontSize: 12.5,
+        fontWeight: isActive ? 600 : 500,
+        cursor: "pointer", whiteSpace: "nowrap",
+        transition: "color 0.15s, border-color 0.15s",
+      }}
+    >
+      <svg
+        width="13" height="13" viewBox="0 0 16 16"
+        fill="none" stroke="currentColor"
+        strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ flex: "none", display: "block", shapeRendering: "geometricPrecision" }}
+      >
+        {m.icon}
+      </svg>
+      {m.label}
+    </button>
+  );
+}
 
 const IconBtn = ({ label, children, onClick, style }) => (
   <button
@@ -143,8 +185,8 @@ export default function AppHeader({
         zIndex: 60,
       }}
     >
-      {/* ── Row 1 — 44px ────────────────────────────────────────────── */}
-      <div style={{ height: 44, display: "flex", alignItems: "center" }}>
+      {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
+      <div style={{ height: 35, display: "flex", alignItems: "center" }}>
 
         {/* Left zone */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0 }}>
@@ -219,38 +261,14 @@ export default function AppHeader({
 
         {/* Module tabs */}
         <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-          {MODULES.map((m) => {
-            const isActive = m.id === module;
-            const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
-            return (
-              <button
-                key={m.id}
-                onClick={() => onSwitch && onSwitch(m.id)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  height: "100%", padding: "0 13px",
-                  border: "none",
-                  borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
-                  background: "transparent",
-                  color: isActive ? tabAccent : "rgba(255,255,255,0.30)",
-                  fontFamily: "inherit", fontSize: 12.5,
-                  fontWeight: isActive ? 500 : 400,
-                  cursor: "pointer", whiteSpace: "nowrap",
-                  transition: "color 0.15s, border-color 0.15s",
-                }}
-              >
-                <svg
-                  width="13" height="13" viewBox="0 0 16 16"
-                  fill="none" stroke="currentColor"
-                  strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {m.icon}
-                </svg>
-                {m.label}
-              </button>
-            );
-          })}
+          {MODULES.map((m) => (
+            <ModuleTab
+              key={m.id}
+              m={m}
+              isActive={m.id === module}
+              onClick={() => onSwitch && onSwitch(m.id)}
+            />
+          ))}
         </div>
 
         {/* Toolbar slot */}
