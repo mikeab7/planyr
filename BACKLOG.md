@@ -81,7 +81,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      NEW-3 rungs 1–2) follow the backend tranche and are stubbed behind a clean interface so
      the UI never blocks on missing infra. -->
 
-<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208) AND shipped the same
+<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208, renumbered B210/B211/B212 after PR #175 raced for the same IDs) AND shipped the same
      session — moved to BACKLOG-DONE.md (branch claude/sharp-edison-7gdn3y). -->
 
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*
