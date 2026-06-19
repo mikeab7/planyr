@@ -192,8 +192,12 @@ export const sanitizeFilename = (s) =>
   String(s == null ? "" : s)
     .replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ")
     .replace(/\s+/g, " ").trim();
-// "YYYY.MM.DD {Project Name} - Site Plan {N}" (project sanitized; literal separators kept).
-export function sheetFileName({ project, n = 1, date = new Date() } = {}) {
+// "YYYY.MM.DD {Project Name} - {Plan Name}" — the trailing piece is the plan's own
+// label (e.g. "Plan 1", later "Scheme A"), so the filename always tracks whatever the
+// owner has named the plan (B201). Project + plan are sanitized; the literal " - "
+// separator and the date dots are kept. If the plan name is blank, the tail is omitted.
+export function sheetFileName({ project, plan, date = new Date() } = {}) {
   const proj = sanitizeFilename(project) || "Site Plan";
-  return `${formatDateStamp(date)} ${proj} - Site Plan ${n}`;
+  const pl = sanitizeFilename(plan);
+  return `${formatDateStamp(date)} ${proj}${pl ? ` - ${pl}` : ""}`;
 }
