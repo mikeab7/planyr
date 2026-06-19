@@ -4997,9 +4997,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ── AppHeader slot content ───────────────────────────────────────────────────
   const plannerCenterContent = (
     <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      {onBackToMap && (
-        <button className="dbtn" style={{ ...dGhost, marginLeft: -4 }} onClick={onBackToMap} title="Back to the map finder">‹ Map</button>
-      )}
+      {/* The "‹ Map" back button was removed (B205): the Row-1 breadcrumb's "Map" crumb
+          (homeLabel="Map" → onBackToMap) now does the same job, so this was a second "Map". */}
       <div ref={siteAnchor} style={{ position: "relative" }}>
         <button className="dbtn" style={hdrTab(12.5, "#fff", 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
@@ -5977,7 +5976,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ textAlign: "left", color: PAL.muted, background: "rgba(255,255,255,0.88)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
                 {[
-                  ["1", <>Pick a <b>parcel from the map</b> (‹ Map) to start from real county data,</>],
+                  ["1", <>Pick a <b>parcel from the map</b> (the “Map” button, top-left) to start from real county data,</>],
                   ["2", <>or drop a <b>screenshot underlay</b> and calibrate it,</>],
                   ["3", <>or draw one with the <b>Boundary</b> tool (right rail).</>],
                 ].map(([n, body]) => (
