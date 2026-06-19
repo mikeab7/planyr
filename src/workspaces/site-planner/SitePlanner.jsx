@@ -38,6 +38,7 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
+import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -1069,11 +1070,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // short fallback), so its many retina tiles don't flood the connection and
       // starve the few coarse tiles — that's what left a fresh load gray for ~10s
       // on a real connection. (B65)
+      // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
+      // one zoom HIGHER than the display zoom; without this the detail layer asks
+      // for z20 at deep zoom, which Esri World Imagery (native to z19) answers with
+      // the gray "Map data not yet available" placeholder. Capping the native fetch
+      // at z19 makes it upscale the deepest real imagery instead. (B182)
+      const detailMaxNative = L.Browser.retina ? GEO_BASEMAP.maxNative - 1 : GEO_BASEMAP.maxNative;
       const addDetail = () => {
         // bail if the map went away, detail's already added, or the aerial was
         // toggled off during the wait (backfill ref nulled by the cleanup below).
         if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
-        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
         t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       };
       bf.once("load", addDetail);
@@ -1125,19 +1132,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // transform, so it sits exactly where the basemap looks right now) and keep
     // it until the post-setView reload reports `load` — then drop it. The new
     // crisp tiles render underneath; swapping is invisible.
+    const dropGhost = () => { if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } };
     const spawnGhost = () => {
       const clip = wrap.parentElement;
       if (!clip || !basemapOn) return;
       try {
-        if (geoGhostRef.current) { geoGhostRef.current.remove(); geoGhostRef.current = null; }
+        dropGhost();
         const g = wrap.cloneNode(true);
         g.style.pointerEvents = "none";
+        // Transparent so the ghost contributes ONLY its sharp tiles on top; its
+        // own gaps (e.g. the wider area exposed on zoom-out) fall through to the
+        // live backfill below instead of showing the container's dark bg.
+        g.style.background = "transparent";
         clip.appendChild(g);
         geoGhostRef.current = g;
         const base = geoBaseRef.current;
         const drop = () => { try { g.remove(); } catch (_) {} if (geoGhostRef.current === g) geoGhostRef.current = null; };
         if (base) base.once("load", drop);
-        setTimeout(drop, 1400); // fallback: never leave a stale ghost up
+        // Generous fallback: hold the sharp snapshot until the fresh tiles report
+        // `load` (the real trigger); only drop on a timer if `load` never fires, so
+        // a slow connection doesn't briefly downgrade to the blurry backfill. Any
+        // later gesture replaces the ghost anyway, so a long fallback is safe.
+        setTimeout(drop, 5000);
       } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
     };
 
@@ -1153,6 +1169,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // First paint / resize → plain commit (no prior view worth ghosting).
     if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
 
+    // A new gesture is happening: drop any lingering snapshot immediately. It's a
+    // FROZEN copy that doesn't track this pan/zoom, so leaving it up would let the
+    // aerial visibly lag behind the drawn layers until it expired (the "shake off
+    // during load" decoupling). The live transform below keeps the basemap welded
+    // to the SVG; the backfill covers any reveal. A fresh snapshot is taken again
+    // only at the next commit. (B183)
+    dropGhost();
+
     // Track the gesture by transforming the committed tiles to match.
     try {
       const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
@@ -1164,9 +1188,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
     } catch (_) { commit(center, z, true); return; }
 
-    // Re-base to crisp tiles: immediately once the scale has drifted enough (so
-    // it never gets too blurry), otherwise shortly after the gesture stops. Both
-    // are ghost-buffered, so neither flashes.
+    // Re-base to crisp tiles once the scale has drifted ~0.75 levels either way
+    // (so a zoom-out still re-renders to cover the wider area, and a zoom-in pulls
+    // sharper detail), otherwise shortly after the gesture settles. Every commit
+    // is ghost-buffered AND the snapshot is held until the fresh tiles load, so
+    // the already-detailed area stays sharp through the swap (no downgrade) and
+    // the wider view fills without uncovering the backdrop.
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
@@ -4734,6 +4761,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { w: Math.max(1, len) } : { h: Math.max(1, len) }) } : x));
   };
+  // Road cost attributes (B181): curb type / curbed sides / gutter-pan width drive the
+  // separately-priced Paving (SY) + Curb (LF) quantities. Geometry is untouched — these
+  // only steer the cost takeoff (the drawn curb band still reads off el.curb).
+  const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
+  // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
+  const roadLengthOf = (el) => Math.max(el.w, el.h);
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
@@ -6313,6 +6346,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     );
                   })()}
+                  {selEl.type === "road" && !selEl.points && (() => {
+                    const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
+                    const hasPan = CURB_TYPE_META[ct].hasPan;
+                    const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curb &amp; paving (cost)</div>
+                        <Field label="Curb type">
+                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={ct} onChange={(e) => setRoadCost(selEl, { curbType: e.target.value })}>
+                            {COST_CURB_TYPES.map((k) => <option key={k} value={k}>{CURB_TYPE_META[k].label}</option>)}
+                          </select>
+                        </Field>
+                        {ct !== "none" && (
+                          <Field label="Curbed sides">
+                            <span style={{ display: "flex", gap: 4 }}>
+                              {[2, 1].map((n) => (
+                                <button key={n} style={{ ...chip, flex: 1, ...(sides === n ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setRoadCost(selEl, { curbedSides: n })}>{n === 2 ? "Both" : "One"}</button>
+                              ))}
+                            </span>
+                          </Field>
+                        )}
+                        {hasPan && (
+                          <Field label="Gutter pan (ft)"><NumInput style={numInput} value={roadPanWidth(selEl)} min={0} onCommit={(n) => setRoadCost(selEl, { panWidth: n })} /></Field>
+                        )}
+                        <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6, lineHeight: 1.55 }}>
+                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′ FC-FC{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
+                          <br /><span style={{ fontSize: 10.5 }}>Paving is face-of-curb to face-of-curb — curb is priced separately per LF. Set unit prices in the Yield panel.</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {selEl.type === "trailer" && !selEl.points && (
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Terminal curb</div>
@@ -6749,7 +6813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* metrics */}
-          {leftPanel === "yield" && (
+          {leftPanel === "yield" && (<>
           <Section title="Site yield" accent={PAL.accent}>
             {/* hero stat tiles */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
@@ -6788,7 +6852,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </>}
           </Section>
-          )}
+          {(() => {
+            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
+            // (LF, both sides), split by curb type so each rides its own unit price.
+            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
+            const prices = settings.prices || {};
+            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            if (!cost.segments) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
+            const priceField = (label, k, unit) => (
+              <Field label={label}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                  <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
+                  <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
+                </span>
+              </Field>
+            );
+            return (
+              <Section title="Road cost (screening)" accent="#0e7490" collapsed>
+                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, cost.pavingCost != null ? usd(cost.pavingCost) : "set $/SY")}
+                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, cost.curbBarrierCost != null ? usd(cost.curbBarrierCost) : "set $/LF")}
+                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, cost.curbGutterCost != null ? usd(cost.curbGutterCost) : "set $/LF")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                {priceField("Paving", "pavingSy", "/SY")}
+                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
+                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
+                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving. Screening — verify against bids.
+                </div>
+              </Section>
+            );
+          })()}
+          </>)}
 
           {/* settings — grouped, collapsible */}
           {leftPanel === "standards" && (<>
