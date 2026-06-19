@@ -10,6 +10,7 @@ import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
+import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -82,6 +83,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
 
@@ -443,15 +445,25 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
+      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
+        projectId={meta.projectId || null} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         centerContent={
-          meta.title ? (
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-              {meta.title}
-            </span>
-          ) : null
+          // Files is opened from Row 1 (the project-name area), not a module tab (B176):
+          // a shelf every workspace reaches into, so it lives next to the project name.
+          <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
+            {meta.title && (
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {meta.title}
+              </span>
+            )}
+            <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+              🗂 Files
+            </button>
+          </span>
         }
         saveSlot={<ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />}
         authControl={authControl}
