@@ -1,4 +1,4 @@
-/* Project Files (B176 / NEW-1) — the tagged-index drawer with saved views.
+/* Project Files (B180 / NEW-1) — the tagged-index drawer with saved views.
  *
  * Opened from Row 1 (the project-name area), NOT a fourth module tab: tabs are
  * workspaces (modes of working); Files is a shelf every workspace reaches into. The

@@ -6,7 +6,7 @@ import {
 } from "../src/shared/files/fileFacts.js";
 import { emptyPlacementFacts } from "../src/shared/placement/placementFacts.js";
 
-describe("fileFacts — document class (B176/NEW-1)", () => {
+describe("fileFacts — document class (B180/NEW-1)", () => {
   it("classifies a survey as spatial, geotech as reference", () => {
     expect(classifyDocClass("Survey", "ALTA Survey")).toBe(DOC_CLASS.SPATIAL);
     expect(classifyDocClass("Geotech", "Boring logs")).toBe(DOC_CLASS.REFERENCE);

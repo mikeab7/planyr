@@ -4,7 +4,7 @@ import {
   VERIFY_OK_PCT, CROSS_DISAGREE_PCT,
 } from "../src/shared/placement/verifyPlacement.js";
 
-describe("verifyPlacement — calibrate from a labeled dimension (B179/NEW-4 rung 4)", () => {
+describe("verifyPlacement — calibrate from a labeled dimension (B183/NEW-4 rung 4)", () => {
   it("derives feet-per-unit from a traced length + its certified value", () => {
     const c = calibrateFromDimension(2, 240); // 2 drawn units = 240 ft
     expect(c.feetPerUnit).toBeCloseTo(120, 9);

@@ -451,7 +451,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         centerContent={
-          // Files is opened from Row 1 (the project-name area), not a module tab (B176):
+          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.
           <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
             {meta.title && (

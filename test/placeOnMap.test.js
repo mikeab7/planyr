@@ -4,7 +4,7 @@ import { emptyPlacementFacts, longestDimension } from "../src/shared/placement/p
 
 const facts = (patch = {}) => ({ ...emptyPlacementFacts(), ...patch });
 
-describe("placeOnMap — cascade chooses best available rung (B178/NEW-3)", () => {
+describe("placeOnMap — cascade chooses best available rung (B182/NEW-3)", () => {
   it("rung 1: embedded coords win when reprojection is available", () => {
     const r = choosePlacement(facts({ embeddedCoords: { present: true, crs: "EPSG:2278" } }), { canReproject: true });
     expect(r.method).toBe(METHOD.EMBEDDED);

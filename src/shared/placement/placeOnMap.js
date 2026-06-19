@@ -1,4 +1,4 @@
-/* "Place on map" auto-placement cascade (B178 / NEW-3).
+/* "Place on map" auto-placement cascade (B182 / NEW-3).
  *
  * When the user places a filed drawing, walk the methods best→fallback and stop at the
  * first that runs WITH CONFIDENCE. The choice is driven entirely by the NEW-2 placement
@@ -18,7 +18,7 @@
  *   3 MEASURE    — scale bar or a labeled dimension; divide drawn length by the annotated
  *                  real value (resize-invariant). Prefer the longest baseline; use the
  *                  north arrow for rotation, then position to the parcel.
- *   4 MANUAL     — last resort: trace a labeled dimension by hand (B179 calibration).
+ *   4 MANUAL     — last resort: trace a labeled dimension by hand (B183 calibration).
  */
 import { longestDimension } from "./placementFacts.js";
 
@@ -67,7 +67,7 @@ export const RUNGS = [
   {
     method: METHOD.MANUAL,
     label: "Manual calibration",
-    // Always available — the user traces a known dimension by hand (B179).
+    // Always available — the user traces a known dimension by hand (B183).
     evaluate() { return { ok: true, detail: { byHand: true } }; },
   },
 ];

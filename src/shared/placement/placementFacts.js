@@ -1,7 +1,7 @@
-/* Placement-readiness facts (B177 / NEW-2).
+/* Placement-readiness facts (B181 / NEW-2).
  *
  * At filing/index time the title-block read pass captures more than discipline, so the
- * later "Place on map" cascade (B178 / NEW-3) can pick its method WITHOUT reopening the
+ * later "Place on map" cascade (B182 / NEW-3) can pick its method WITHOUT reopening the
  * file. These are cheap to capture during the read pass that auto-filing already does.
  *
  * Pure data shape only — no detection logic lives here (that's the backend title-block
