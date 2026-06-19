@@ -20,6 +20,7 @@
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
 import { useEffect, useState } from "react";
+import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
@@ -138,6 +139,13 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
+  // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
+  // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
+  // simply omit it and the left zone stays logo-only.
+  currentProject = null,
+  onSelectProject,
+  onNewProject,
+  saveState,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -199,10 +207,10 @@ export default function AppHeader({
             </svg>
           </IconBtn>
 
-          {/* Logo — also the home/map button */}
+          {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B192) */}
           <button
             onClick={onDashboard || undefined}
-            title={onDashboard ? "Back to map" : undefined}
+            title={onDashboard ? "Dashboard — all projects" : undefined}
             style={{
               display: "flex", alignItems: "center", gap: 6, flex: "none",
               background: "transparent", border: "none",
@@ -226,6 +234,21 @@ export default function AppHeader({
               planyr
             </span>
           </button>
+
+          {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
+          {onSelectProject && (
+            <>
+              <span style={{ width: 1, height: 18, background: LINE, flex: "none", margin: "0 4px" }} />
+              <ProjectBreadcrumb
+                currentProject={currentProject}
+                accent={accent}
+                onDashboard={onDashboard}
+                onSelectProject={onSelectProject}
+                onNewProject={onNewProject}
+                saveState={saveState}
+              />
+            </>
+          )}
         </div>
 
         {/* Center zone — project name */}

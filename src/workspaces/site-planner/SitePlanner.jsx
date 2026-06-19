@@ -4967,6 +4967,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </>
   );
 
+  // Header breadcrumb switcher (B191): open another project (site group) in place.
+  // Routes through handleOpenSite, which flushes the current plan first (B193).
+  const openProjectGroupLocal = (gid) => {
+    if (!gid || gid === groupId) return;
+    const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
+    if (target) handleOpenSite(target.id);
+  };
+  // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
+  const headerSaveState = (() => {
+    const cloudActive = isCloudActive();
+    const connOk = cloud?.state === "connected";
+    if (saveStatus === "saving") return "saving";
+    if (cloudSaveFailed) return "error";
+    if (cloudActive && !connOk) return "offline";
+    return cloudActive ? "synced" : "local";
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
@@ -4975,6 +4992,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         module={shellModule || "site-planner"}
         onSwitch={onShellSwitch}
         onDashboard={onBackToMap}
+        currentProject={{ id: groupId, name: siteLabel }}
+        onSelectProject={openProjectGroupLocal}
+        onNewProject={handleNewSite}
+        saveState={headerSaveState}
         centerContent={plannerCenterContent}
         saveSlot={plannerSaveSlot}
         authControl={authControl}
