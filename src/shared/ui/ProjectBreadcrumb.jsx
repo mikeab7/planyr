@@ -78,7 +78,7 @@ export default function ProjectBreadcrumb({
   // list (e.g. the Schedule module feeds in its embedded scheduler's own projects).
   // When omitted it falls back to the Site Planner site store via listProjects().
   projects: controlledProjects,
-  // The "home" crumb label — Site → "Map", Schedule → "Dashboard" (B195).
+  // The "home" crumb label — Site → "Map", Schedule → "Dashboard" (B204).
   homeLabel = "Dashboard",
 }) {
   const controlled = Array.isArray(controlledProjects);

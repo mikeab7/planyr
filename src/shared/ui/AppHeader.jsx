@@ -146,8 +146,8 @@ export default function AppHeader({
   onSelectProject,
   onNewProject,
   saveState,
-  // Optional: a workspace-supplied project list (B194 — Schedule feeds in its embedded
-  // scheduler's own projects) and a home-crumb label override (B195 — Site → "Map").
+  // Optional: a workspace-supplied project list (B203 — Schedule feeds in its embedded
+  // scheduler's own projects) and a home-crumb label override (B204 — Site → "Map").
   projects,
   homeLabel,
 }) {

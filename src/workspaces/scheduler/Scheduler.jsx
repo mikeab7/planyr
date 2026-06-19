@@ -2,7 +2,7 @@
  * The sequence app's own header is hidden when it detects it's inside an iframe
  * (see public/sequence/index.html — the .in-iframe CSS class), so its project
  * navigation is bridged up to the shell's shared Row-1 breadcrumb over postMessage
- * (B194). The embedded app emits its OWN project list + active project + section
+ * (B203). The embedded app emits its OWN project list + active project + section
  * ("planar:nav-state"); this component renders them in the breadcrumb and posts back
  * select / dashboard / new-project commands. That makes the Schedule picker show
  * SCHEDULE projects (Goose Creek, Grand Port, …) and switch them in place — instead

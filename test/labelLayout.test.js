@@ -111,4 +111,26 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(rotated.rot).toBe(90);          // render applies this rotation
     expect(rotated).toMatchObject({ x: 0, y: 0 });
   });
+
+  it("B195: a noLeader label that can't fit overflows IN PLACE instead of leadering out", () => {
+    // A small shape (halfW/halfH = 8px) with a label too wide to fit. A normal label is pulled
+    // outside with a leader; a `noLeader` label (a trailer strip sized to its own area) instead
+    // stays centred on the shape and overflows — controlled overflow rather than floating away.
+    const item = { id: "t", cx: 50, cy: 50, lines: ["50′ Trailer Parking", "29 trailers"], lh: 12, charW: 6, halfW: 8, halfH: 8, importance: 1 };
+    const led = layoutLabels([{ ...item }]).get("t");
+    const ovf = layoutLabels([{ ...item, noLeader: true }]).get("t");
+    expect(led.leader).not.toBeNull();                 // normal label escapes with a leader
+    expect(ovf.leader).toBeNull();                     // noLeader: never leadered out
+    expect(ovf).toMatchObject({ x: 50, y: 50 });       // overflows centred in place
+  });
+
+  it("B195: a noLeader label drops a line to fit inside before it overflows", () => {
+    // Tall enough for 1 line but not 2 (halfH small), wide enough that width never binds. The
+    // engine drops the count line and shows the 1-line label INSIDE rather than overflowing.
+    const p = layoutLabels([
+      { id: "t", cx: 0, cy: 0, lines: ["50′ Trailer Parking", "29 trailers"], lh: 10, charW: 4, halfW: 400, halfH: 7, noLeader: true, importance: 1 },
+    ]).get("t");
+    expect(p.lines).toEqual(["50′ Trailer Parking"]);  // count line dropped to fit the short side
+    expect(p.leader).toBeNull();                       // and it sits inside, no leader
+  });
 });
