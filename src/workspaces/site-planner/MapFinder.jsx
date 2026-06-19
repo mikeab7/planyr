@@ -287,7 +287,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const map = mapRef.current;
     if (!map) return;
     const bm = BASEMAPS[basemap] || BASEMAPS.esri;
-    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, attribution: bm.attr }));
+    // detectRetina: request 2x-density (one-zoom-higher) tiles on HiDPI displays
+    // so imagery is crisp instead of upscaled-and-soft. Keeps the Esri source. (B170)
+    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, detectRetina: true, attribution: bm.attr }));
     layer.setZIndex(1);
     layer.addTo(map);
     imageryRef.current = layer;
