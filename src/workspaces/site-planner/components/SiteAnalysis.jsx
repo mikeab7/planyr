@@ -16,10 +16,10 @@ import { formatAge } from "../lib/gisCache.js";
  *   parcelCount  — number of active parcels screened
  *   PAL          — the planner palette (passed so the panel matches the app chrome)
  *   chip         — the shared chip button style
- *   isLayerOn    — (layerId) => bool: is the shared GIS overlay currently shown? (B185)
- *   onToggleLayer— (layerId, wantOn) => void: toggle that overlay on the planner map (B185)
+ *   isLayerOn    — (layerId) => bool: is the shared GIS overlay currently shown? (B190)
+ *   onToggleLayer— (layerId, wantOn) => void: toggle that overlay on the planner map (B190)
  *   layerStatus  — shared per-overlay sync status map (id → {state}); for an honest
- *                  "service not responding" hint when a just-enabled layer fails (B185)
+ *                  "service not responding" hint when a just-enabled layer fails (B190)
  *   runAnalysis  — injectable for tests (defaults to the real runSiteAnalysis)
  */
 
@@ -103,7 +103,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
           const isOpen = open[f.id];
           const hasDetail = (f.detail && f.detail.length) || (f.rows && f.rows.length) || f.caveat || f.sourceName;
           const toggle = () => hasDetail && setOpen((o) => ({ ...o, [f.id]: !o[f.id] }));
-          // "Show on map" (B185): only for a category whose query RESOLVED (present/absent)
+          // "Show on map" (B190): only for a category whose query RESOLVED (present/absent)
           // AND that maps to a drawable shared overlay. UNKNOWN / failed / no-source
           // categories have nothing to draw — no blank toggle; their error stays surfaced.
           const canMap = !!f.mapLayer && !!onToggleLayer && (f.status === "present" || f.status === "absent");

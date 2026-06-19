@@ -39,7 +39,7 @@ const DAY = 24 * 3600 * 1000;
 export const ANALYSIS_SOURCES = [
   {
     id: "flood", category: "Floodplain", label: "FEMA flood zones", kind: "polygon",
-    mapLayer: "fema", // overlay id in lib/layers.js (B185 "show on map")
+    mapLayer: "fema", // overlay id in lib/layers.js (B190 "show on map")
     // NFHL layer 28 = Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA
     // polygons; the app already uses this MapServer for the flood overlay.
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
@@ -58,7 +58,7 @@ export const ANALYSIS_SOURCES = [
     // NWI staging split layers (B135): 1 = CONUS East, 2 = CONUS West (Texas is West).
     // These are JOINED layers (Wetlands ⋈ NWI_Wetland_Codes), so the server reports every
     // field TABLE-QUALIFIED (e.g. "Wetlands_CONUS_West.WETLAND_TYPE"). Asking for the bare
-    // names made ArcGIS reject the query with HTTP 400 "Failed to execute query." (B184) —
+    // names made ArcGIS reject the query with HTTP 400 "Failed to execute query." (B189) —
     // and the qualifier differs per layer (East vs West), so we request outFields:"*" and
     // strip the table prefix in normalizeAttrs(). Now VERIFIED: the /query executes and
     // returns real features (58 polygons over Sheldon Lake, confirmed live 2026-06-19), so
@@ -78,7 +78,7 @@ export const ANALYSIS_SOURCES = [
     mapLayer: "txrrc_wells",
     // Texas Railroad Commission surface wells, mirrored on the Harris County GIS host the
     // app already uses. The registry asked for LEASE_NAME, which this layer does NOT have
-    // (its fields are SYMNUM/API/RELIAB/SURFACE_ID/WELLID/…), so every query 400'd (B184).
+    // (its fields are SYMNUM/API/RELIAB/SURFACE_ID/WELLID/…), so every query 400'd (B189).
     // Fixed to real fields; VERIFIED — empty = no wells on the site, not "unknown".
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer",
     layer: 0,
@@ -95,7 +95,7 @@ export const ANALYSIS_SOURCES = [
     mapLayer: "txrrc_pipe",
     // The registry asked for OPERATOR/COMMODITY, which don't exist on this layer (real
     // fields: OPER_NM, CMDTY_DESC, DIAMETER), so every query 400'd "Failed to execute
-    // query." (B184). Fixed + VERIFIED (779 segments over the Ship Channel, live 2026-06-19).
+    // query." (B189). Fixed + VERIFIED (779 segments over the Ship Channel, live 2026-06-19).
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Pipelines/MapServer",
     layer: 0,
     fields: { operator: "OPER_NM", commodity: "CMDTY_DESC", diameter: "DIAMETER" },
@@ -184,7 +184,7 @@ export function buildAnalysisParams(source, rings) {
   // `outFields:"*"` is required for JOINED layers whose field names are table-qualified
   // and differ per sublayer (NWI East/West) — see the wetlands source. Otherwise we ask
   // for just the fields we summarize (smaller response). A bad/renamed field name is what
-  // 400'd three sources (B184), so this stays driven off the verified registry.
+  // 400'd three sources (B189), so this stays driven off the verified registry.
   const outFields = source.outFields || Object.values(source.fields || {}).filter(Boolean).join(",") || "*";
   return {
     f: "json",
@@ -279,7 +279,7 @@ async function defaultFetchJson(url) {
   const j = await res.json();
   if (j.error) {
     // ArcGIS returns HTTP 200 with a JSON error body (e.g. code 400 "Failed to execute
-    // query." for a bad field name — the B184 bug). Carry the code + url on the Error so
+    // query." for a bad field name — the B189 bug). Carry the code + url on the Error so
     // the failure is DIAGNOSABLE, not an opaque generic string.
     const code = j.error.code != null ? ` (code ${j.error.code})` : "";
     const e = new Error((j.error.message || "ArcGIS query error.") + code);

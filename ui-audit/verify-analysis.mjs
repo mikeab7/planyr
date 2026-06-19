@@ -1,10 +1,10 @@
-/* B184 + B185 verification — Site Analysis constraint queries + "show on map" toggle.
+/* B189 + B190 verification — Site Analysis constraint queries + "show on map" toggle.
  *
  * Boots a LOCATED site near Sheldon Lake, TX (known NWI wetlands + San Jacinto
  * floodplain), opens the ⚐ Analysis left-rail tab, and checks:
- *   B184 — flood / wetlands / pipelines / oil&gas RESOLVE (Present / None found),
+ *   B189 — flood / wetlands / pipelines / oil&gas RESOLVE (Present / None found),
  *          NOT "UNKNOWN / Failed to execute query" (the bug).
- *   B185 — a resolved card shows "◍ Map"; clicking it flips to "◉ On map" and adds
+ *   B190 — a resolved card shows "◍ Map"; clicking it flips to "◉ On map" and adds
  *          the GIS overlay layer to the planner's Leaflet map.
  *
  * Run: node ui-audit/verify-analysis.mjs   (vite preview must be on :4173)
@@ -81,9 +81,9 @@ for (const cat of mustResolve) {
   const resolved = t.includes("present") || t.includes("none found");
   if (failed || !resolved) { console.log(`❌ ${cat}: did NOT resolve (still unknown/failed)`); b184ok = false; }
 }
-console.log(`\nB184 (queries resolve, no "Failed to execute query"): ${b184ok ? "✅ PASS" : "❌ FAIL"}`);
+console.log(`\nB189 (queries resolve, no "Failed to execute query"): ${b184ok ? "✅ PASS" : "❌ FAIL"}`);
 
-// --- B185: click a resolved card's "◍ Map" toggle ---
+// --- B190: click a resolved card's "◍ Map" toggle ---
 const before = await overlayImgs();
 // Prefer Wetlands (PRESENT over the lake) for a visible layer.
 let b185ok = false, toggleCat = null;
@@ -112,17 +112,17 @@ if (toggleCat) {
     const btn = card && card.querySelector('button[title*="map"]');
     return btn ? btn.innerText.trim() : "(no btn)";
   }, toggleCat);
-  console.log(`\nB185 toggle on "${toggleCat}": clicked=${clicked} button="${onState}" overlayImgs ${before}→${after}`);
+  console.log(`\nB190 toggle on "${toggleCat}": clicked=${clicked} button="${onState}" overlayImgs ${before}→${after}`);
   b185ok = clicked && /on map/i.test(onState) && after > before;
-  console.log(`B185 (card toggles the map overlay on): ${b185ok ? "✅ PASS" : "❌ FAIL"}`);
+  console.log(`B190 (card toggles the map overlay on): ${b185ok ? "✅ PASS" : "❌ FAIL"}`);
 } else {
-  console.log("\nB185: no resolved card offered a Map toggle (depends on B184 resolving) ❌");
+  console.log("\nB190: no resolved card offered a Map toggle (depends on B189 resolving) ❌");
 }
 
 if (qFails.length) { console.log("\n[siteAnalysis] diagnostics logged (expected only on a real failure):"); qFails.forEach((l) => console.log("  " + l.split("\n")[0])); }
 
 await page.screenshot({ path: "ui-audit/screens/analysis-verify.png" });
 console.log("\nscreenshot → ui-audit/screens/analysis-verify.png");
-console.log(`\nRESULT: B184 ${b184ok ? "PASS" : "FAIL"} · B185 ${b185ok ? "PASS" : "FAIL"}`);
+console.log(`\nRESULT: B189 ${b184ok ? "PASS" : "FAIL"} · B190 ${b185ok ? "PASS" : "FAIL"}`);
 await browser.close();
 process.exit(b184ok && b185ok ? 0 : 1);

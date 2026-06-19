@@ -58,8 +58,14 @@ export const layoutLabels = (items, opts = {}) => {
     const halfW = it.halfW != null ? it.halfW : Infinity;
     let lines = fitLines(it.lines, it.lh, halfH * 2); // LOD: drop lines to fit the shape height
     let chosen = null;
+    // NEW-2 / NEW-5: a label may be rotated to run along a thin strip's long axis. Its
+    // on-screen footprint is the rotated bounding box, so a vertical label is tested for
+    // fit against the strip's (tall) height and its (narrow) width — the orientation we want.
+    const rot = it.rot || 0;
+    const rad = (rot * Math.PI) / 180, ca = Math.abs(Math.cos(rad)), sa = Math.abs(Math.sin(rad));
     while (lines.length >= 1) {
-      const w = widthOf(lines, it.charW), h = lines.length * it.lh;
+      const w0 = widthOf(lines, it.charW), h0 = lines.length * it.lh;
+      const w = ca * w0 + sa * h0, h = sa * w0 + ca * h0; // rotated on-screen footprint
       // Fits inside the shape? Otherwise pull it out, centred above the shape, with a leader.
       const inside = w <= halfW * 2 && h <= halfH * 2;
       const spot = inside
@@ -70,7 +76,7 @@ export const layoutLabels = (items, opts = {}) => {
       if (lines.length === 1) break;            // can't shrink further → hide it
       lines = lines.slice(0, lines.length - 1); // drop the lowest-priority remaining line, retry
     }
-    if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader }); }
+    if (chosen) { placed.push(chosen.box); out.set(it.id, { lines: chosen.lines, x: chosen.x, y: chosen.y, leader: chosen.leader, rot }); }
   }
   return out;
 };

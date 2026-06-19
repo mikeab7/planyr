@@ -22,7 +22,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- B184 (Site Analysis query failures) + B185 (click a constraint card → show its layer on the
+<!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
      map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
 
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
