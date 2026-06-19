@@ -133,22 +133,6 @@ export default function AppHeader({
     );
   }
 
-  const navLink = (label) => (
-    <button
-      onClick={onDashboard}
-      style={{
-        padding: "3px 8px", borderRadius: 6,
-        border: "none", background: "transparent",
-        color: MUTED, fontFamily: "inherit",
-        fontSize: 12.5, fontWeight: 500,
-        cursor: onDashboard ? "pointer" : "default",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <header
       style={{
@@ -173,8 +157,17 @@ export default function AppHeader({
             </svg>
           </IconBtn>
 
-          {/* Logo icon (tinted to active module) + wordmark */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "none" }}>
+          {/* Logo — also the home/map button */}
+          <button
+            onClick={onDashboard || undefined}
+            title={onDashboard ? "Back to map" : undefined}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, flex: "none",
+              background: "transparent", border: "none",
+              cursor: onDashboard ? "pointer" : "default",
+              padding: "2px 4px", borderRadius: 6,
+            }}
+          >
             <span
               style={{
                 width: 18, height: 18, borderRadius: 5,
@@ -190,14 +183,7 @@ export default function AppHeader({
             <span style={{ fontWeight: 800, fontSize: 13.5, color: "#fff", letterSpacing: "-0.01em" }}>
               planyr
             </span>
-          </div>
-
-          {/* Divider */}
-          <span style={{ width: 1, height: 18, background: LINE, flex: "none", margin: "0 6px" }} />
-
-          {/* Nav links */}
-          {navLink("Dashboard")}
-          {navLink("Projects")}
+          </button>
         </div>
 
         {/* Center zone — project name */}

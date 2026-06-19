@@ -571,26 +571,123 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#efeadf" }}>
-      {/* top bar — dark graphite chrome */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", zIndex: 1000 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          {/* B104: the brand lockup is dropped here — the shell header already shows "Planyr · Site
-              Planyr", so this bar keeps only its context label and no longer duplicates the brand
-              (mirrors B10's planner-header dedup; a single physical row stays a later polish). */}
-          <span style={{ color: PAL.chromeInk, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>Find a site</span>
-        </div>
-        <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
-          <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
-            onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }} />
-          <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
-        </div>
-        <div style={{ flex: 1 }} />
-        <button className="dbtn" title="Start a new blank plan without selecting parcels." style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Start blank</button>
-      </div>
-
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
+
+        {/* ── Combined site bar — floating pill at top-center ── */}
+        <div style={{
+          position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 1000,
+          display: "flex", alignItems: "center",
+          background: PAL.chrome,
+          borderRadius: 99,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
+          padding: "0 6px",
+          height: 42,
+          maxWidth: "calc(100% - 540px)",
+          minWidth: 300,
+        }}>
+          {/* Address search */}
+          <input
+            style={{
+              flex: 1, minWidth: 140, maxWidth: 300, height: "100%",
+              padding: "0 10px", background: "transparent", border: "none", outline: "none",
+              color: PAL.chromeInk, fontSize: 13, fontFamily: "inherit",
+            }}
+            placeholder="Find a site — address or place…"
+            value={addr}
+            onChange={(e) => setAddr(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
+          />
+          <button
+            style={{
+              flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+              border: "none", background: PAL.accent, color: "#fff",
+              fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer",
+              fontFamily: "inherit", opacity: busy && !selectMode ? 0.6 : 1,
+              whiteSpace: "nowrap",
+            }}
+            disabled={busy && !selectMode}
+            onClick={goAddress}
+          >
+            {busy && !selectMode ? "…" : "Go"}
+          </button>
+
+          {/* Divider */}
+          <span style={{ width: 1, height: 22, background: PAL.chromeLine, flex: "none", margin: "0 8px" }} />
+
+          {/* Right section — state-dependent */}
+          {!selectMode && selected.length === 0 && (
+            <button
+              onClick={() => setSelectMode(true)}
+              style={{
+                flex: "none", display: "flex", alignItems: "center", gap: 5,
+                height: 30, padding: "0 11px", borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.13)", background: "rgba(255,255,255,0.07)",
+                color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+              }}
+            >
+              ＋ Select parcels
+            </button>
+          )}
+          {selectMode && selected.length === 0 && (
+            <>
+              <span style={{
+                flex: "none", color: PAL.chromeMuted, fontSize: 12.5,
+                padding: "0 6px", whiteSpace: "nowrap",
+              }}>
+                {busy ? "Looking up lot…" : "Selecting…"}
+              </span>
+              <button
+                onClick={() => setSelectMode(false)}
+                style={{
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,0.13)", background: "rgba(255,255,255,0.07)",
+                  color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {selected.length > 0 && (
+            <>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: PAL.accent, flex: "none" }} />
+              <span style={{
+                flex: "none", color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                padding: "0 8px", whiteSpace: "nowrap",
+              }}>
+                {selected.length} parcel{selected.length > 1 ? "s" : ""} · {asm ? `${asm.totalAc.toFixed(2)} ac` : "…"}
+              </span>
+              <button
+                onClick={clearSel}
+                title="Clear selection"
+                style={{
+                  flex: "none", width: 26, height: 26, borderRadius: 5,
+                  border: "none", background: "transparent",
+                  color: PAL.chromeMuted, fontSize: 13, lineHeight: 1,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+              <button
+                onClick={planSelected}
+                style={{
+                  flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+                  border: "none", background: PAL.accent, color: "#fff",
+                  fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "inherit", whiteSpace: "nowrap",
+                }}
+              >
+                Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
+              </button>
+            </>
+          )}
+          <span style={{ width: 4 }} />
+        </div>
 
         {/* saved sites */}
         {sites.length > 0 && (
@@ -706,30 +803,6 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           </div>
         )}
 
-        {/* selection card */}
-        {selected.length > 0 && (
-          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 20, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 14, boxShadow: "0 14px 40px rgba(0,0,0,0.26), 0 2px 8px rgba(0,0,0,0.12)", padding: "14px 16px", minWidth: 320, maxWidth: 480 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 99, background: PAL.accent }} />
-              {selected.length} parcel{selected.length > 1 ? "s" : ""} · <span style={{ color: PAL.ink, fontWeight: 700 }}>{asm ? asm.totalAc.toFixed(2) : "—"} ac</span>
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {selected[selected.length - 1].addr || "Parcel"}{selected.length > 1 ? ` +${selected.length - 1} more` : ""}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button style={{ ...btn(true), flex: 1, padding: "9px 14px" }} onClick={planSelected}>Plan {selected.length > 1 ? `${selected.length} parcels` : "this site"} →</button>
-              <button style={btn(false)} onClick={clearSel}>Clear</button>
-            </div>
-          </div>
-        )}
-        {selected.length === 0 && (
-          <button onClick={() => setSelectMode((m) => !m)} style={{
-            position: "absolute", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 1000,
-            padding: "12px 22px", fontSize: 14, fontWeight: 700, borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
-            border: `1px solid ${PAL.accent}`, background: selectMode ? "#fff" : PAL.accent, color: selectMode ? PAL.accent : "#fff",
-            boxShadow: "0 6px 22px rgba(194,65,12,0.35)",
-          }}>{selectMode ? "✓ Selecting — click lots" : "＋ Select parcels"}</button>
-        )}
       </div>
       {/* Right-click status picker — set the project's lifecycle stage. Current
           state is checked; picking another persists it (via onSetStatus) and the

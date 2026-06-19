@@ -307,7 +307,19 @@ export default function App({ shellModule, onShellSwitch, authControl } = {}) {
           onDashboard={null}
           centerContent={null}
           saveSlot={null}
-          toolbarContent={null}
+          toolbarContent={
+            <button
+              onClick={newBlankSite}
+              style={{
+                padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.07)",
+                color: "rgba(236,231,219,0.75)", cursor: "pointer", fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Start blank
+            </button>
+          }
         />
         <div style={{ flex: 1, minHeight: 0 }}>
           <MapFinder
