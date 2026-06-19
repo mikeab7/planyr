@@ -16,6 +16,7 @@ import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
@@ -1011,6 +1012,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
+  const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
@@ -1039,7 +1041,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
     geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1048,6 +1050,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
+      // Coarse "instant" backfill UNDER the detail layer: capped at a low native
+      // zoom so it only ever fetches a handful of large-area tiles. They load
+      // (and cache) near-instantly and fill the whole view with blurry imagery,
+      // so a fresh load / hard zoom-out never sits on the gray backdrop while the
+      // heavy detail tiles stream in on top. No detectRetina (light + blurry is
+      // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
+      const bf = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 6 }));
+      bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
       // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
       // one-zoom-higher native tiles and renders them at half size (downsampled =
       // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
@@ -1055,11 +1065,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // downsampling a higher-zoom tile over upscaling a lower one. It only changes
       // which tiles are fetched + their display size — never the map's CRS zoom —
       // so the SVG↔aerial scale lock is untouched. (B170)
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
-      t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
+      // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
+      // short fallback), so its many retina tiles don't flood the connection and
+      // starve the few coarse tiles — that's what left a fresh load gray for ~10s
+      // on a real connection. (B65)
+      const addDetail = () => {
+        // bail if the map went away, detail's already added, or the aerial was
+        // toggled off during the wait (backfill ref nulled by the cleanup below).
+        if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
+        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+        t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+      };
+      bf.once("load", addDetail);
+      setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
-      geoBaseRef.current = null;
+      try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
+      geoBaseRef.current = null; geoBackfillRef.current = null;
     }
   }, [basemapOn, origin]);
 
@@ -4382,6 +4404,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const leftTabs = [
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "analysis", glyph: "⚐", label: "Analysis" },
     { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
@@ -6426,6 +6449,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Parcel menu — empty hint when no parcel is selected */}
           {/* every parcel in this plan — click to select */}
+          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
+              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
+          {leftPanel === "analysis" && (
+            <Section title="Site Analysis">
+              {!origin ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
+              ) : (() => {
+                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
+                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
+                const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip} />;
+              })()}
+            </Section>
+          )}
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
               {parcels.length === 0 ? (

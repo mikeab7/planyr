@@ -151,8 +151,9 @@ export const JURISDICTIONS = {
     // Map Viewer (tceq.texas.gov/gis/iwudview.html), so it covers Harris + Fort Bend +
     // statewide, not just one county. A `dynamic` image export renders via a CORS-exempt
     // <img>, so it paints even where the probe can't reach the host; the probe + per-layer
-    // status still flag a genuine outage honestly. (Couldn't byte-verify from the sandbox —
-    // its egress allowlist blocks harcresearch.org — so confirm tile paint on planyr.io, V44.)
+    // status still flag a genuine outage honestly. (harcresearch.org added to the env
+    // egress allowlist 2026-06-19 — confirm tile paint on planyr.io against a known MUD
+    // parcel, V44.)
     kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
     url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
     note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
