@@ -20,13 +20,14 @@
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
 import { useEffect, useState } from "react";
+import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
 const MUTED  = "#9b9482";
-// Inactive module tabs: a fully-opaque, legible muted tone (AA-contrast on the
-// dark chrome) so they read as "click to switch", never as disabled/grayed-out.
-const TAB_IDLE = "#b8b2a4";
+// Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on CHROME).
+// NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
+const TAB_IDLE = "#c9c3b4";
 
 export const MODULE_ACCENT = {
   "site-planner": "#1D9E75",
@@ -74,6 +75,45 @@ const MODULES = [
   },
 ];
 
+// One module tab. Inactive tabs are full-opacity and legible (never dimmed/disabled);
+// the module accent reveals on hover, and the active tab keeps the accent + a 2px
+// underline indicator. Icons are crisp SVG at a fixed 13px (no bitmap scaling). (B167)
+function ModuleTab({ m, isActive, onClick }) {
+  const [hover, setHover] = useState(false);
+  const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-current={isActive ? "page" : undefined}
+      style={{
+        display: "flex", alignItems: "center", gap: 5,
+        height: "100%", padding: "0 13px",
+        border: "none",
+        borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
+        background: "transparent",
+        color: isActive || hover ? tabAccent : TAB_IDLE,
+        fontFamily: "inherit", fontSize: 12.5,
+        fontWeight: isActive ? 600 : 500,
+        cursor: "pointer", whiteSpace: "nowrap",
+        transition: "color 0.15s, border-color 0.15s",
+      }}
+    >
+      <svg
+        width="13" height="13" viewBox="0 0 16 16"
+        fill="none" stroke="currentColor"
+        strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ flex: "none", display: "block", shapeRendering: "geometricPrecision" }}
+      >
+        {m.icon}
+      </svg>
+      {m.label}
+    </button>
+  );
+}
+
 const IconBtn = ({ label, children, onClick, style }) => (
   <button
     aria-label={label}
@@ -99,9 +139,15 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
+  // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
+  // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
+  // simply omit it and the left zone stays logo-only.
+  currentProject = null,
+  onSelectProject,
+  onNewProject,
+  saveState,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
-  const [hoverTab,   setHoverTab]   = useState(null);
 
   useEffect(() => {
     const handle = (e) => {
@@ -147,7 +193,7 @@ export default function AppHeader({
         zIndex: 60,
       }}
     >
-      {/* ── Row 1 — 35px (was 44px; trimmed 20% per owner request) ──── */}
+      {/* ── Row 1 — 35px (−20% from 44 per B169; contents stay vertically centered) ── */}
       <div style={{ height: 35, display: "flex", alignItems: "center" }}>
 
         {/* Left zone */}
@@ -161,10 +207,10 @@ export default function AppHeader({
             </svg>
           </IconBtn>
 
-          {/* Logo — also the home/map button */}
+          {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B192) */}
           <button
             onClick={onDashboard || undefined}
-            title={onDashboard ? "Back to map" : undefined}
+            title={onDashboard ? "Dashboard — all projects" : undefined}
             style={{
               display: "flex", alignItems: "center", gap: 6, flex: "none",
               background: "transparent", border: "none",
@@ -188,6 +234,21 @@ export default function AppHeader({
               planyr
             </span>
           </button>
+
+          {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
+          {onSelectProject && (
+            <>
+              <span style={{ width: 1, height: 18, background: LINE, flex: "none", margin: "0 4px" }} />
+              <ProjectBreadcrumb
+                currentProject={currentProject}
+                accent={accent}
+                onDashboard={onDashboard}
+                onSelectProject={onSelectProject}
+                onNewProject={onNewProject}
+                saveState={saveState}
+              />
+            </>
+          )}
         </div>
 
         {/* Center zone — project name */}
@@ -223,45 +284,14 @@ export default function AppHeader({
 
         {/* Module tabs */}
         <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-          {MODULES.map((m) => {
-            const isActive = m.id === module;
-            const isHover  = hoverTab === m.id && !isActive;
-            const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
-            // Active = full accent + underline; hover = accent preview; idle =
-            // a legible muted tone (NOT low-opacity, so it never reads disabled).
-            const color = isActive || isHover ? tabAccent : TAB_IDLE;
-            return (
-              <button
-                key={m.id}
-                onClick={() => onSwitch && onSwitch(m.id)}
-                onMouseEnter={() => setHoverTab(m.id)}
-                onMouseLeave={() => setHoverTab(null)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5,
-                  height: "100%", padding: "0 13px",
-                  border: "none",
-                  borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
-                  background: "transparent",
-                  color,
-                  fontFamily: "inherit", fontSize: 12.5,
-                  fontWeight: isActive ? 600 : 500,
-                  cursor: "pointer", whiteSpace: "nowrap",
-                  transition: "color 0.15s, border-color 0.15s",
-                }}
-              >
-                <svg
-                  width="14" height="14" viewBox="0 0 16 16"
-                  fill="none" stroke="currentColor"
-                  strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-                  shapeRendering="geometricPrecision"
-                  aria-hidden="true"
-                >
-                  {m.icon}
-                </svg>
-                {m.label}
-              </button>
-            );
-          })}
+          {MODULES.map((m) => (
+            <ModuleTab
+              key={m.id}
+              m={m}
+              isActive={m.id === module}
+              onClick={() => onSwitch && onSwitch(m.id)}
+            />
+          ))}
         </div>
 
         {/* Toolbar slot */}

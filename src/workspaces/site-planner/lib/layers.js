@@ -14,6 +14,7 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
+import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
 import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
 
 export { JURISDICTION_LAYERS };
@@ -117,6 +118,48 @@ export const EVIDENCE = {
   },
 };
 
+/* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
+ * county, city limits, city ETJ, and MUD / water districts. County / city / ETJ reuse
+ * the SAME verified endpoints the jurisdiction *identify* uses (lib/jurisdiction.js), so
+ * a boundary you see is the boundary the identify reports — one source of truth.
+ *
+ * ⚠ A boundary means the district HAS JURISDICTION there (it can tax / regulate) — it
+ * does NOT mean the district physically serves or connects water/sewer to a parcel.
+ * Service area ≠ taxing/authority boundary. Labelled so a MUD outline never reads as
+ * "a MUD provides water here." Screening only — verify with the district. */
+const HGAC_ETJ = ETJ_SOURCES.find((s) => s.id === "etj_hgac");
+export const JURISDICTIONS = {
+  jur_county: {
+    kind: "esriFeature", label: "County boundaries",
+    url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
+    note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area. Screening only — verify with the jurisdiction.",
+  },
+  jur_city: {
+    kind: "esriFeature", label: "City limits",
+    url: JURISDICTION_SOURCES.city.url, minZoom: 9, color: "#1d4ed8", weight: 1.8, opacity: 0.85,
+    note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. The boundary is jurisdiction, NOT proof of utility service. Screening only.",
+  },
+  jur_etj: {
+    kind: "esriFeature", label: "City ETJ (Houston region)",
+    url: HGAC_ETJ.url, minZoom: 9, color: "#7c3aed", weight: 1.6, opacity: 0.85,
+    note: "City extraterritorial jurisdiction across the H-GAC 13-county region (blank elsewhere — there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service. Screening only.",
+  },
+  jur_mud: {
+    // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
+    // supervisory authority over Texas water districts), republished by HARC (Houston
+    // Advanced Research Center) — this is the data behind TCEQ's public Water Districts
+    // Map Viewer (tceq.texas.gov/gis/iwudview.html), so it covers Harris + Fort Bend +
+    // statewide, not just one county. A `dynamic` image export renders via a CORS-exempt
+    // <img>, so it paints even where the probe can't reach the host; the probe + per-layer
+    // status still flag a genuine outage honestly. (harcresearch.org on the env egress
+    // allowlist since 2026-06-19; MUD tile paint verified headless from a fresh session
+    // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
+    kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
+    url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
+    note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
+  },
+};
+
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
 // then merge with the statewide overlays. The sync helper manages every layer by
 // id, so a layer keeps its toggle state across county switches; the sidebar only
@@ -125,7 +168,7 @@ export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...EVIDENCE, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
 
 // Fresh per-layer UI state (all off, each at its default opacity).
 export const defaultOverlayState = () => {

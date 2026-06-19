@@ -15,6 +15,15 @@
 html, body, #root {
   height: 100%;
   margin: 0;
+  /* Pin the app to the viewport — the whole UI lives inside one screen, so the
+     page itself never scrolls (that scroll is what used to hide the map scale
+     bar / push the header off-screen). Each panel scrolls internally instead. (B168) */
+  overflow: hidden;
+}
+/* Prefer the dynamic viewport height where supported, so mobile browser chrome
+   (the address bar that slides in/out) can't crop the bottom of the canvas. (B168) */
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
 }
 
 body {

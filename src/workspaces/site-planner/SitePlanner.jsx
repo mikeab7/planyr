@@ -11,11 +11,13 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
+import SiteAnalysis from "./components/SiteAnalysis.jsx";
+import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
@@ -37,6 +39,7 @@ import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
+import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -54,6 +57,10 @@ const GEO_BASEMAP = {
   maxNative: 19,
   attr: "Imagery &copy; Esri, Maxar",
 };
+// How far the basemap container overhangs the viewport on each side (px). The
+// extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
+// the basemap reveals already-loaded imagery instead of the backdrop (B65).
+const GEO_OVERSCAN = 320;
 const M_PER_FT = 0.3048;
 const EARTH_M = 40075016.686; // Web-Mercator world circumference (m) at the equator
 // Leaflet (fractional) zoom whose pixels-per-foot equals the planner's `ppf` at
@@ -684,9 +691,19 @@ const countyAcres = (attrs) => {
   const keys = Object.keys(attrs);
   const num = (k) => +attrs[k];
   const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
-  // 1) An explicit, already-in-acres field.
-  const acresKey = keys.find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
-  if (acresKey) return { acres: num(acresKey), source: acresKey };
+  // 1) An explicit, already-in-acres field. A CAD record often carries SEVERAL acreage
+  //    fields — total tract PLUS sub-acreages like a HOMESITE carve-out, an ag-use
+  //    portion, or an exemption acreage. A "PT TR ... (HOMESITE)" parcel can show a
+  //    ~0.5 ac homesite field beside a 17 ac total; picking the first match grabbed the
+  //    homesite and falsely flagged the geometry ~3,300% off (B166). The total tract is
+  //    always the LARGEST of these, so take the max — never a partial-tract sub-acreage.
+  //    (Belt-and-suspenders: also skip fields whose name marks them as a homesite/
+  //    exemption/improvement sub-acreage even if they happened to be larger.)
+  const isSubAcre = (k) => /(home_?site|homestead|\bhs_|hmst|exempt|imprv|improv)/i.test(k);
+  const acresKeys = keys.filter((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
+  const totalKeys = acresKeys.filter((k) => !isSubAcre(k));
+  const pick = (totalKeys.length ? totalKeys : acresKeys);
+  if (pick.length) { const best = pick.reduce((a, b) => (num(b) > num(a) ? b : a)); return { acres: num(best), source: best }; }
   // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
   //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
   //    so we don't misread square-metres as square-feet (the old regex matched neither, then
@@ -997,7 +1014,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoWrapRef = useRef(null);
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
+  const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
+  const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
+  const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
+  const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
+  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -1021,7 +1043,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; };
+    geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; geoBackfillRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1030,11 +1053,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
-      t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
+      // Coarse "instant" backfill UNDER the detail layer: capped at a low native
+      // zoom so it only ever fetches a handful of large-area tiles. They load
+      // (and cache) near-instantly and fill the whole view with blurry imagery,
+      // so a fresh load / hard zoom-out never sits on the gray backdrop while the
+      // heavy detail tiles stream in on top. No detectRetina (light + blurry is
+      // fine for a placeholder); generous keepBuffer to cover the overscan. (B65)
+      const bf = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 6 }));
+      bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
+      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+      // one-zoom-higher native tiles and renders them at half size (downsampled =
+      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+      // which tiles are fetched + their display size — never the map's CRS zoom —
+      // so the SVG↔aerial scale lock is untouched. (B170)
+      // Add the heavy detail layer only AFTER the coarse backfill has painted (or a
+      // short fallback), so its many retina tiles don't flood the connection and
+      // starve the few coarse tiles — that's what left a fresh load gray for ~10s
+      // on a real connection. (B65)
+      // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
+      // one zoom HIGHER than the display zoom; without this the detail layer asks
+      // for z20 at deep zoom, which Esri World Imagery (native to z19) answers with
+      // the gray "Map data not yet available" placeholder. Capping the native fetch
+      // at z19 makes it upscale the deepest real imagery instead. (B182)
+      const detailMaxNative = L.Browser.retina ? GEO_BASEMAP.maxNative - 1 : GEO_BASEMAP.maxNative;
+      const addDetail = () => {
+        // bail if the map went away, detail's already added, or the aerial was
+        // toggled off during the wait (backfill ref nulled by the cleanup below).
+        if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
+        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+        t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
+      };
+      bf.once("load", addDetail);
+      setTimeout(addDetail, 600); // fallback in case `load` is slow/never fires
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
-      geoBaseRef.current = null;
+      try { if (geoBackfillRef.current) map.removeLayer(geoBackfillRef.current); } catch (_) {}
+      geoBaseRef.current = null; geoBackfillRef.current = null;
     }
   }, [basemapOn, origin]);
 
@@ -1046,16 +1102,106 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* drive the basemap zoom/center from the planner view so it stays locked to
      the SVG. ppf→zoom keeps the scale identical; the canvas-center feet point
-     projects to the map center. */
+     projects to the map center.
+
+     Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
+     GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
+     step blanks the aerial for a frame each time (the white/dim flash). Two
+     defenses:
+     1. During a live gesture we hold Leaflet at a committed view and just
+        CSS-`transform` the whole map container (tiles AND the shared overlay
+        layers together, so they stay mutually aligned) to track the gesture with
+        the pixels already on screen — no reload, no flash.
+     2. When we DO re-render crisp (`commit`), we first clone the current tiles
+        into a frozen "ghost" overlay that stays on top until the fresh tiles
+        finish loading, THEN remove it — so the `setView` wipe never shows the
+        backdrop. This kills the "whole screen flashes to black on zoom-out"
+        (the wipe used to blank even already-loaded tiles).
+     The crisp re-render is debounced (gesture settles) and also forced once the
+     accumulated zoom delta passes ~0.75 levels, so the transform never scales the
+     aerial into a blurry mess — but because the commit is ghost-buffered, that
+     mid-gesture re-base no longer flashes. */
   useEffect(() => {
     const map = geoMapRef.current;
-    if (!map || !origin) return;
+    const wrap = geoWrapRef.current;
+    if (!map || !wrap || !origin) return;
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
-    try { map.setView(center, z, { animate: false }); } catch (_) {}
-  }, [view, size, origin]);
+
+    // Snapshot the current tiles as a static overlay (cloned WITH the live
+    // transform, so it sits exactly where the basemap looks right now) and keep
+    // it until the post-setView reload reports `load` — then drop it. The new
+    // crisp tiles render underneath; swapping is invisible.
+    const dropGhost = () => { if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } };
+    const spawnGhost = () => {
+      const clip = wrap.parentElement;
+      if (!clip || !basemapOn) return;
+      try {
+        dropGhost();
+        const g = wrap.cloneNode(true);
+        g.style.pointerEvents = "none";
+        // Transparent so the ghost contributes ONLY its sharp tiles on top; its
+        // own gaps (e.g. the wider area exposed on zoom-out) fall through to the
+        // live backfill below instead of showing the container's dark bg.
+        g.style.background = "transparent";
+        clip.appendChild(g);
+        geoGhostRef.current = g;
+        const base = geoBaseRef.current;
+        const drop = () => { try { g.remove(); } catch (_) {} if (geoGhostRef.current === g) geoGhostRef.current = null; };
+        if (base) base.once("load", drop);
+        // Generous fallback: hold the sharp snapshot until the fresh tiles report
+        // `load` (the real trigger); only drop on a timer if `load` never fires, so
+        // a slow connection doesn't briefly downgrade to the blurry backfill. Any
+        // later gesture replaces the ghost anyway, so a long fallback is safe.
+        setTimeout(drop, 5000);
+      } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
+    };
+
+    const commit = (c, zoom, ghost) => {
+      if (ghost) spawnGhost();
+      wrap.style.transform = "";
+      try { map.setView(c, zoom, { animate: false }); } catch (_) {}
+      geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
+    };
+
+    const prev = geoCommitRef.current;
+    const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
+    // First paint / resize → plain commit (no prior view worth ghosting).
+    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
+
+    // A new gesture is happening: drop any lingering snapshot immediately. It's a
+    // FROZEN copy that doesn't track this pan/zoom, so leaving it up would let the
+    // aerial visibly lag behind the drawn layers until it expired (the "shake off
+    // during load" decoupling). The live transform below keeps the basemap welded
+    // to the SVG; the backfill covers any reveal. A fresh snapshot is taken again
+    // only at the next commit. (B183)
+    dropGhost();
+
+    // Track the gesture by transforming the committed tiles to match.
+    try {
+      const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
+      const p = map.latLngToContainerPoint(L.latLng(center));        // where `center` sits now
+      const half = map.getSize().divideBy(2);
+      const tx = half.x - p.x * scale;
+      const ty = half.y - p.y * scale;
+      wrap.style.transformOrigin = "0 0";
+      wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+    } catch (_) { commit(center, z, true); return; }
+
+    // Re-base to crisp tiles once the scale has drifted ~0.75 levels either way
+    // (so a zoom-out still re-renders to cover the wider area, and a zoom-in pulls
+    // sharper detail), otherwise shortly after the gesture settles. Every commit
+    // is ghost-buffered AND the snapshot is held until the fresh tiles load, so
+    // the already-detailed area stays sharp through the swap (no downgrade) and
+    // the wider view fills without uncovering the backdrop.
+    clearTimeout(geoCommitTimer.current);
+    if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
+    else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
+  }, [view, size, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
@@ -1273,6 +1419,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [fitNonce, setFitNonce] = useState(0);
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
+     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
+     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
+     Used by the Site Analysis "show on map" toggle (B190). */
+  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
+    const pts = [];
+    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
+    if (pts.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+  }, [parcels, size]);
+
+  /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
+     the same app-shared `overlays` state the Layers panel uses (one source of truth) —
+     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
+     geographic context, then frame to the active parcels so it isn't offscreen. */
+  const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
+    if (!layerId) return;
+    setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
+    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -1681,12 +1854,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
-  const toggleMerge = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // Inactive parcels are excluded from merge candidacy (B170) — they don't participate
+  // in yield/site analysis, so they shouldn't be combinable either. Allow de-selecting an
+  // already-picked id (e.g. one just toggled inactive) but never adding an inactive one.
+  const toggleMerge = (id) => setCombineSel((s) => {
+    if (s.includes(id)) return s.filter((x) => x !== id);
+    const pc = parcels.find((p) => p.id === id);
+    if (pc && pc.active === false) return s;
+    return [...s, id];
+  });
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
   // editable layer — a working merge for test-fit/yield, NOT a recorded legal
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
   const mergeParcels = () => {
-    const chosen = parcels.filter((p) => combineSel.includes(p.id));
+    const chosen = parcels.filter((p) => combineSel.includes(p.id) && p.active !== false); // inactive parcels never merge (B170)
     if (chosen.length < 2) return;
     let result = chosen[0].points;
     let remaining = chosen.slice(1).map((p) => p.points);
@@ -2074,6 +2255,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!d) return;
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
+    if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
+      const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
+      setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
+      return;
+    }
     if (d.mode === "dimMove") { // B146: drag a selected element's dimension callout to reposition it
       const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
       setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: { x: d.base.x + loc.x, y: d.base.y + loc.y } } : x));
@@ -2988,7 +3174,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const refitChildren = (a, buildingId, nb, kids) => {
     const courtBox = {}; // court id -> { box, side } for trailers that back onto it
     const pass1 = a.map((x) => {
-      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
+      if (x.id === buildingId) {
+        // NEW-4: when the resized element IS a truck court, register its NEW box so the
+        // trailer parking flush against its far edge (forCourt) follows the moved edge —
+        // grow/shrink the depth and the trailer is pushed/pulled out to stay flush.
+        if (x.truckCourt) courtBox[x.id] = { box: { cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot ?? x.rot ?? 0 }, side: x.truckCourt.side };
+        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
+      }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
@@ -3265,6 +3457,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id });
     pushHistory();
     drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
+  // relative to the parcel centroid, so it survives geometry edits and persists with the plan.
+  const startAcChip = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const pc = parcels.find((p) => p.id === id);
+    if (!pc) return;
+    pushHistory();
+    drag.current = { mode: "acChip", id, start: p2f(e.clientX, e.clientY), base: pc.labelOffset || { x: 0, y: 0 } };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const editDimWidth = (id, e) => {
@@ -3768,6 +3971,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
   const bldgNo = buildingNumbers(els);
   const fs = 11 * ls, lh = 14.5 * ls, charW = fs * 0.6;
+  // NEW-2 / NEW-5: a thin buffer strip (landscape / sidewalk / trailer) whose width label
+  // is wider than the strip is narrow runs the label ALONG the strip's long axis — vertical
+  // text on a vertical strip, horizontal on a horizontal one — so it stops eating canvas
+  // across the strip. One shared rule for all three strip types (no per-type duplication).
+  // Returns a rotation in degrees ([-90,90], 0 = horizontal / no change).
+  const STRIP_LABEL_TYPES = ["landscape", "sidewalk", "trailer"];
+  const stripLabelRot = (el, lns, cw, ppf) => {
+    if (!el || el.points || !STRIP_LABEL_TYPES.includes(el.type)) return 0;
+    const shortPx = Math.min(el.w, el.h) * ppf;
+    const textW = Math.max(1, ...lns.map((t) => String(t).length)) * cw;
+    if (textW <= shortPx) return 0; // already fits across the strip → leave it horizontal
+    let a = (el.rot || 0) + (el.w >= el.h ? 0 : 90); // strip long-axis angle
+    a = ((a % 180) + 180) % 180;
+    if (a > 90) a -= 180;            // normalize to [-90,90] for readability
+    return a;
+  };
+  // B195: a trailer-parking label is sized as a FRACTION of the strip's real-world extent (feet)
+  // → screen px via view.ppf, so it scales WITH the area on zoom and stays inside the strip by
+  // construction. (The screen-space `fs` below is floored at ls≥0.34, so it stayed ~constant while
+  // the strip shrank on zoom-out → the label overflowed.) Floored at a legible minimum — below
+  // which a too-small strip (≈2-spot) takes controlled overflow rather than going illegible — and
+  // capped at the normal label size so it never balloons when zoomed in. The text runs along the
+  // strip's LONG side (width) and the line stack across its SHORT side, so each side has its own
+  // fit bound; the smaller governs (matches stripLabelRot, which aligns the label to the long axis).
+  const TRAILER_LABEL = { fracShort: 0.9, fracLong: 0.92, minPx: 5 };
+  const LH_RATIO = 14.5 / 11, CW_RATIO = 0.6; // label line-height / char-width vs font size
+  const trailerLabelFont = (el, lns, poly) => {
+    let shortFt, longFt;
+    if (poly) {
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
+      shortFt = Math.min(hi - lo, hi2 - lo2); longFt = Math.max(hi - lo, hi2 - lo2);
+    } else { shortFt = Math.min(el.w, el.h); longFt = Math.max(el.w, el.h); }
+    const chars = Math.max(1, ...lns.map((t) => String(t).length));
+    const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
+    const byW = (TRAILER_LABEL.fracLong * longFt * view.ppf) / (chars * CW_RATIO);         // text along the long side
+    const cap = Math.max(fs, TRAILER_LABEL.minPx); // never cap below the legibility floor
+    const f = Math.min(cap, Math.max(TRAILER_LABEL.minPx, Math.min(byH, byW)));
+    return { fs: f, lh: f * LH_RATIO, charW: f * CW_RATIO };
+  };
   // B121: build each element's centred label as priority-ordered lines (name → area →
   // dimensions, highest priority first), then hand them all to the shared LOD + collision
   // engine (lib/labelLayout) so adjacent labels never overprint into an unreadable pile.
@@ -3820,10 +4063,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
         lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+      } else if (el.type === "trailer") {
+        // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
+        // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
+        // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
+        // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
+        const tc = cfgOf(el);
+        const count = poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, tc).count;
+        lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
       } else {
         lines = [name];
-        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
-        else lines.push(`${f0(area)} sf`);
+        lines.push(`${f0(area)} sf`);
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
@@ -3840,52 +4090,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
       halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
     }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH });
+    // Per-candidate font: the global screen-space metrics by default; a trailer label is sized
+    // to its own real-world extent (B195) and opts out of leader-out (a too-small strip overflows
+    // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
+    let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
+    if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false });
     }
   }
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
     { pad: 2 },
   );
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
-    const { lines, x, y, leader } = place;
-    const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
+    const { lines, x, y, leader, rot } = place;
+    // Per-candidate metrics (B195: a trailer label is world-scaled, so it has its own fs/lh);
+    // dls is its scale relative to the 11px base, replacing the global `ls` for the halo/lock.
+    const dfs = d.fs, dlh = d.lh, dls = dfs / 11;
+    const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
     const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
-        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
-        {!d.added && d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
-        <text x={x} y={first} textAnchor="middle" fontSize={fs}
+        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
+        {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
+        <text x={x} y={first} textAnchor="middle" fontSize={dfs}
+          transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink}
-          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * ls : undefined} paintOrder={leader ? "stroke" : undefined}
+          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * dls : undefined} paintOrder={leader ? "stroke" : undefined}
           style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
-          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
+          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
       </g>
     );
   });
 
   const parcelLabels = parcels.map((pc) => {
-    const c = f2p(centroid(pc.points));
+    // NEW-3: the acreage chip sits on the parcel centroid by default but is click-and-drag
+    // to any spot (including outside the boundary); the offset is stored on the parcel (feet)
+    // so it persists with the plan. Drag only in Select so it never blocks drawing tools.
+    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
+    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
     const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
     const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+    const draggable = tool === "select";
     return (
-      <g key={`pl${pc.id}`} pointerEvents="none">
+      <g key={`pl${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
+        style={draggable ? { cursor: "move" } : undefined}
+        onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
         <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
         <text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
-          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
+          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
     );
   });
@@ -4279,6 +4545,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const leftTabs = [
     { id: "yield", glyph: "∑", label: "Yield" },
     { id: "parcel", glyph: "⬡", label: "Parcel" },
+    { id: "analysis", glyph: "⚐", label: "Analysis" },
     { id: "props", glyph: "✎", label: "Element" },
     { id: "aerial", glyph: "◳", label: "Aerial" },
     { id: "overlay", glyph: "▦", label: "Overlay" },
@@ -4541,6 +4808,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const nb = { cx: selEl.cx, cy: selEl.cy, w: patch.w ?? selEl.w, h: patch.h ?? selEl.h, rot: selEl.rot };
     pushHistory();
     const kids = wallKids(selEl);
+    // NEW-4: a strip/court attached to a building (e.g. a truck court) must stay ANCHORED to
+    // the dock wall when its depth changes — grow/shrink the FAR edge only, never from the
+    // centre (which detaches the paving from both the wall and the trailer parking). The same
+    // host-edge clamp the resize grips use; refitChildren then drags the trailer along.
+    const hc = hostClampOf(selEl);
+    if (hc) clampToHost(nb, hc);
     setEls((a) => refitChildren(a, selEl.id, nb, kids));
   };
   // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
@@ -4556,6 +4829,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...(crossIsH ? { w: Math.max(1, len) } : { h: Math.max(1, len) }) } : x));
   };
+  // Road cost attributes (B181): curb type / curbed sides / gutter-pan width drive the
+  // separately-priced Paving (SY) + Curb (LF) quantities. Geometry is untouched — these
+  // only steer the cost takeoff (the drawn curb band still reads off el.curb).
+  const setRoadCost = (el, patch) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, ...patch } : x)); };
+  // Road length (ft) + FC-FC travel width (ft) for the cost takeoff — live geometry.
+  const roadLengthOf = (el) => Math.max(el.w, el.h);
   const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
   const setSelParcel = (patch) => setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, ...patch } : p));
   // Per-edge setbacks: pc.setbacks aligned to edges (edge i = pts[i]→pts[i+1]);
@@ -4662,6 +4941,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
+      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
+      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+        🗂 Files
+      </button>
     </span>
   );
 
@@ -4722,6 +5006,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </>
   );
 
+  // Header breadcrumb switcher (B191): open another project (site group) in place.
+  // Routes through handleOpenSite, which flushes the current plan first (B193).
+  const openProjectGroupLocal = (gid) => {
+    if (!gid || gid === groupId) return;
+    const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
+    if (target) handleOpenSite(target.id);
+  };
+  // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
+  const headerSaveState = (() => {
+    const cloudActive = isCloudActive();
+    const connOk = cloud?.state === "connected";
+    if (saveStatus === "saving") return "saving";
+    if (cloudSaveFailed) return "error";
+    if (cloudActive && !connOk) return "offline";
+    return cloudActive ? "synced" : "local";
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
@@ -4730,10 +5031,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         module={shellModule || "site-planner"}
         onSwitch={onShellSwitch}
         onDashboard={onBackToMap}
+        currentProject={{ id: groupId, name: siteLabel }}
+        onSelectProject={openProjectGroupLocal}
+        onNewProject={handleNewSite}
+        saveState={headerSaveState}
         centerContent={plannerCenterContent}
         saveSlot={plannerSaveSlot}
         authControl={authControl}
         toolbarContent={plannerToolbar}
+      />
+
+      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
+          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+      <ProjectFilesDrawer
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        signedIn={isCloudActive()}
+        projectId={groupId}
+        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
@@ -4751,7 +5067,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
-          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
+          {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
+              brief tile gap during a zoom-level change reads as a subtle blink, not
+              a bright (near-white) flash against the imagery (B65). With the aerial
+              OFF this stays PAL.paper so the planner background matches the SVG.
+              Structure (B65 follow-up): a STATIC clip box (inset:0, never moves, dark
+              bg) holds an OVERSIZED inner map div (inset:-GEO_OVERSCAN). During a
+              pan/zoom the inner div is CSS-transformed; because it overhangs the
+              viewport by GEO_OVERSCAN with extra tiles loaded (keepBuffer), the
+              reveal shows real imagery, and anything beyond it shows the static
+              dark backdrop — never the cream page behind the canvas. */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
+              <div ref={geoWrapRef} style={{ position: "absolute", inset: -GEO_OVERSCAN, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            </div>
+          )}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
@@ -6140,6 +6470,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </div>
                     );
                   })()}
+                  {selEl.type === "road" && !selEl.points && (() => {
+                    const ct = roadCurbType(selEl), sides = roadCurbedSides(selEl);
+                    const hasPan = CURB_TYPE_META[ct].hasPan;
+                    const q = roadQuantities(selEl, roadTravel(selEl), roadLengthOf(selEl));
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Curb &amp; paving (cost)</div>
+                        <Field label="Curb type">
+                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={ct} onChange={(e) => setRoadCost(selEl, { curbType: e.target.value })}>
+                            {COST_CURB_TYPES.map((k) => <option key={k} value={k}>{CURB_TYPE_META[k].label}</option>)}
+                          </select>
+                        </Field>
+                        {ct !== "none" && (
+                          <Field label="Curbed sides">
+                            <span style={{ display: "flex", gap: 4 }}>
+                              {[2, 1].map((n) => (
+                                <button key={n} style={{ ...chip, flex: 1, ...(sides === n ? { borderColor: PAL.accent, color: PAL.accent, fontWeight: 600 } : {}) }} onClick={() => setRoadCost(selEl, { curbedSides: n })}>{n === 2 ? "Both" : "One"}</button>
+                              ))}
+                            </span>
+                          </Field>
+                        )}
+                        {hasPan && (
+                          <Field label="Gutter pan (ft)"><NumInput style={numInput} value={roadPanWidth(selEl)} min={0} onCommit={(n) => setRoadCost(selEl, { panWidth: n })} /></Field>
+                        )}
+                        <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6, lineHeight: 1.55 }}>
+                          Paving <b style={{ color: PAL.ink }}>{f0(q.pavingSy)} SY</b> ({f0(q.pavingWidth)}′ FC-FC{hasPan ? ` − pan` : ""}) · Curb <b style={{ color: PAL.ink }}>{f0(q.curbLf)} LF</b>
+                          <br /><span style={{ fontSize: 10.5 }}>Paving is face-of-curb to face-of-curb — curb is priced separately per LF. Set unit prices in the Yield panel.</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {selEl.type === "trailer" && !selEl.points && (
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Terminal curb</div>
@@ -6328,6 +6689,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Parcel menu — empty hint when no parcel is selected */}
           {/* every parcel in this plan — click to select */}
+          {/* Site Analysis (B147): screen the active-parcel footprint for floodplain,
+              wetlands, pipelines, oil/gas wells, contamination, jurisdiction & zoning. */}
+          {leftPanel === "analysis" && (
+            <Section title="Site Analysis">
+              {!origin ? (
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>Site Analysis needs a georeferenced plan. Bring a parcel in from the map to anchor it, then screen it here.</div>
+              ) : (() => {
+                const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
+                const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
+                const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                  isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} />;
+              })()}
+            </Section>
+          )}
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
               {parcels.length === 0 ? (
@@ -6337,20 +6713,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {parcels.map((pc, i) => {
                     const on = selParcel?.id === pc.id;
                     const picked = combineSel.includes(pc.id);
-                    const active = pc.active !== false; // default active; checkbox drives yield/coverage/detention (B100)
+                    const inactive = pc.active === false;
                     return (
-                      // Row = active checkbox + click-to-select label. (Not one big
-                      // <button> any more: a checkbox can't nest inside a button.)
-                      <div key={pc.id}
-                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff" }}>
-                        <input type="checkbox" checked={active}
-                          onChange={() => toggleParcelActive(pc.id)}
+                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
+                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
+                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
+                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
+                        <label
+                          title={inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
                           onClick={(e) => e.stopPropagation()}
-                          title={active ? "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)." : "Inactive — excluded from yield / coverage / detention. Check to include."}
-                          style={{ flex: "none", width: 15, height: 15, cursor: "pointer", accentColor: PAL.accent }} />
+                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
+                        >
+                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                            style={{ width: 15, height: 15, cursor: "pointer" }} />
+                        </label>
                         <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", opacity: active ? 1 : 0.55 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{active ? "" : " · inactive"}{picked ? " ✓" : ""}</div>
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: inactive ? 0.55 : 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{inactive ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
                           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
                         </button>
                       </div>
@@ -6536,7 +6915,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
                 <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
-                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show</label>
+                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
               </div>
               {(() => {
                 const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
@@ -6559,7 +6938,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* metrics */}
-          {leftPanel === "yield" && (
+          {leftPanel === "yield" && (<>
           <Section title="Site yield" accent={PAL.accent}>
             {/* hero stat tiles */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
@@ -6598,7 +6977,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </>}
           </Section>
-          )}
+          {(() => {
+            // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
+            // (LF, both sides), split by curb type so each rides its own unit price.
+            // Unit prices are user-supplied (anchor to your own bids) — never defaulted.
+            const prices = settings.prices || {};
+            const cost = costRollup(els, roadTravel, roadLengthOf, prices);
+            if (!cost.segments) return null;
+            const usd = (n) => `$${Math.round(n).toLocaleString()}`;
+            const setPrice = (k, v) => setSettings((s) => ({ ...s, prices: { ...(s.prices || {}), [k]: v } }));
+            const priceField = (label, k, unit) => (
+              <Field label={label}>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 12, color: PAL.muted }}>$</span>
+                  <NumInput style={{ ...numInput, width: 70 }} value={prices[k] ?? null} min={0} placeholder="—" onCommit={(n) => setPrice(k, n)} />
+                  <span style={{ fontSize: 11, color: PAL.muted }}>{unit}</span>
+                </span>
+              </Field>
+            );
+            return (
+              <Section title="Road cost (screening)" accent="#0e7490" collapsed>
+                {metricRow("Paving", `${f0(cost.pavingSy)} SY`, cost.pavingCost != null ? usd(cost.pavingCost) : "set $/SY")}
+                {cost.curbBarrierLf > 0 && metricRow("Curb · barrier", `${f0(cost.curbBarrierLf)} LF`, cost.curbBarrierCost != null ? usd(cost.curbBarrierCost) : "set $/LF")}
+                {cost.curbGutterLf > 0 && metricRow("Curb · curb & gutter", `${f0(cost.curbGutterLf)} LF`, cost.curbGutterCost != null ? usd(cost.curbGutterCost) : "set $/LF")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "10px 0 6px" }}>Unit prices (your bids)</div>
+                {priceField("Paving", "pavingSy", "/SY")}
+                {cost.curbBarrierLf > 0 && priceField("Barrier curb", "curbBarrierLf", "/LF")}
+                {cost.curbGutterLf > 0 && priceField("Curb & gutter", "curbGutterLf", "/LF")}
+                {cost.total != null && metricRow("Subtotal", usd(cost.total), "priced lines")}
+                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "6px 0 0" }}>
+                  Paving is face-of-curb to face-of-curb (curb excluded); curb-&amp;-gutter trims the gutter pan from paving. Screening — verify against bids.
+                </div>
+              </Section>
+            );
+          })()}
+          </>)}
 
           {/* settings — grouped, collapsible */}
           {leftPanel === "standards" && (<>
@@ -6606,7 +7019,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+            {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
+                next to the object it acts on — see B164. Not duplicated here. */}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
@@ -7099,8 +7513,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
       : {};
     const dim = [];
+    // NEW-1: a road's width dimension anchors to the MIDPOINT of the measured span
+    // (centred along the road's length), not 18% in from one end — otherwise the
+    // "24′" label drifts toward the left edge instead of sitting on the centreline.
+    const posF = el.type === "road" ? 0.5 : 0.18;
     if (horizLong) { // short side is vertical (h)
-      const x = tl.x + w * 0.18, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
+      const x = tl.x + w * posF, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
       if (moved) dim.push(<line key="ld" x1={x} y1={my} x2={x + ox} y2={my + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
       const X = x + ox, Y0 = y0 + oy, Y1 = y1 + oy, MY = my + oy;
       dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
@@ -7110,7 +7528,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
       dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
-      const y = tl.y + h * 0.18, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
+      const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
       if (moved) dim.push(<line key="ld" x1={mx} y1={y} x2={mx + ox} y2={y + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
       const Y = y + oy, X0 = x0 + ox, X1 = x1 + ox, MX = mx + ox;
       dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);

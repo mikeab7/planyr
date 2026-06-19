@@ -10,6 +10,7 @@ import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
+import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -44,7 +45,7 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl } = {}) {
+export default function DocReview({ shellModule, onShellSwitch, authControl, onGoDashboard, onNewProject } = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -82,6 +83,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  // The project the header breadcrumb points at in Markup (B191). Follows the open
+  // review's project; picking another project here browses its files in place (it does
+  // NOT re-file the open review — browsing ≠ filing).
+  const [markupProject, setMarkupProject] = useState(null); // { id, name } | null
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
 
@@ -214,6 +220,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
@@ -224,6 +231,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
+    setMarkupProject(null);
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setScale(0);
     setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
@@ -443,15 +451,33 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
+      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
+        projectId={markupProject?.id || meta.projectId || null} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
+        // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
+        // picking a project browses its files in place (opens the Files drawer scoped
+        // to it); New project is born in the Site Planner. Save state from persistence.
+        onDashboard={onGoDashboard}
+        currentProject={markupProject}
+        onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
+        onNewProject={onNewProject}
+        saveState={status === "saving" ? "saving" : status === "unsaved" ? "error" : (signedIn ? "synced" : "local")}
         centerContent={
-          meta.title ? (
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
-              {meta.title}
-            </span>
-          ) : null
+          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
+          // a shelf every workspace reaches into, so it lives next to the project name.
+          <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
+            {meta.title && (
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {meta.title}
+              </span>
+            )}
+            <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+              🗂 Files
+            </button>
+          </span>
         }
         saveSlot={<ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />}
         authControl={authControl}
