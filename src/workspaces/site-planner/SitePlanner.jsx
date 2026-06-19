@@ -3960,6 +3960,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (a > 90) a -= 180;            // normalize to [-90,90] for readability
     return a;
   };
+  // B190: a trailer-parking label is sized as a FRACTION of the strip's real-world extent (feet)
+  // → screen px via view.ppf, so it scales WITH the area on zoom and stays inside the strip by
+  // construction. (The screen-space `fs` below is floored at ls≥0.34, so it stayed ~constant while
+  // the strip shrank on zoom-out → the label overflowed.) Floored at a legible minimum — below
+  // which a too-small strip (≈2-spot) takes controlled overflow rather than going illegible — and
+  // capped at the normal label size so it never balloons when zoomed in. The text runs along the
+  // strip's LONG side (width) and the line stack across its SHORT side, so each side has its own
+  // fit bound; the smaller governs (matches stripLabelRot, which aligns the label to the long axis).
+  const TRAILER_LABEL = { fracShort: 0.9, fracLong: 0.92, minPx: 5 };
+  const LH_RATIO = 14.5 / 11, CW_RATIO = 0.6; // label line-height / char-width vs font size
+  const trailerLabelFont = (el, lns, poly) => {
+    let shortFt, longFt;
+    if (poly) {
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
+      shortFt = Math.min(hi - lo, hi2 - lo2); longFt = Math.max(hi - lo, hi2 - lo2);
+    } else { shortFt = Math.min(el.w, el.h); longFt = Math.max(el.w, el.h); }
+    const chars = Math.max(1, ...lns.map((t) => String(t).length));
+    const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
+    const byW = (TRAILER_LABEL.fracLong * longFt * view.ppf) / (chars * CW_RATIO);         // text along the long side
+    const cap = Math.max(fs, TRAILER_LABEL.minPx); // never cap below the legibility floor
+    const f = Math.min(cap, Math.max(TRAILER_LABEL.minPx, Math.min(byH, byW)));
+    return { fs: f, lh: f * LH_RATIO, charW: f * CW_RATIO };
+  };
   // B121: build each element's centred label as priority-ordered lines (name → area →
   // dimensions, highest priority first), then hand them all to the shared LOD + collision
   // engine (lib/labelLayout) so adjacent labels never overprint into an unreadable pile.
@@ -4012,10 +4036,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
         lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+      } else if (el.type === "trailer") {
+        // B189: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
+        // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
+        // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
+        // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
+        const tc = cfgOf(el);
+        const count = poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, tc).count;
+        lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
       } else {
         lines = [name];
-        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
-        else lines.push(`${f0(area)} sf`);
+        lines.push(`${f0(area)} sf`);
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
@@ -4032,37 +4063,45 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
       halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
     }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, charW, view.ppf) });
+    // Per-candidate font: the global screen-space metrics by default; a trailer label is sized
+    // to its own real-world extent (B190) and opts out of leader-out (a too-small strip overflows
+    // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
+    let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
+    if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false });
     }
   }
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
     { pad: 2 },
   );
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
     const { lines, x, y, leader, rot } = place;
-    const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
+    // Per-candidate metrics (B190: a trailer label is world-scaled, so it has its own fs/lh);
+    // dls is its scale relative to the 11px base, replacing the global `ls` for the halo/lock.
+    const dfs = d.fs, dlh = d.lh, dls = dfs / 11;
+    const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
     const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
-        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
-        {!d.added && d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
-        <text x={x} y={first} textAnchor="middle" fontSize={fs}
+        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
+        {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
+        <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink}
-          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * ls : undefined} paintOrder={leader ? "stroke" : undefined}
+          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * dls : undefined} paintOrder={leader ? "stroke" : undefined}
           style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
-          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
+          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
       </g>
     );
