@@ -22,25 +22,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B168 — Map-viewer project card: kill single-click delete, move to a right-click context menu `[Site Planner / map]` (bug + feature)  *(arrived as "NEW-2"; minted B168 — next free ID after B167)*
-`[ ]` **Current (bug):** the floating project card on the map canvas (e.g. `JFK · Pursuit · 37.9 ac · ⊕ ✕`) has an **✕ that deletes the project on a single click** — one accidental click destroys a project. Remove this destructive single-click affordance.
-- **Target:** **right-clicking the project card** opens a context menu with:
-  - **Delete** — wires to the **existing** delete handler + confirmation flow (do not rewrite it).
-  - **Change status** — the five lifecycle states with the current one checked: **Pursuit → Active → On Hold → Complete → Dead**.
-- If the ✕ currently doubles as a non-destructive **close/deselect** of the card, it may stay **only** in that role — confirm; it must never delete.
-- **Render the menu via the portal-mounted-at-`document.body` pattern** (same `AnchoredMenu` approach logged for the **B127** measure-type-dropdown z-index fix) so it sits above the map layers without clipping. Position at the cursor; constrain to viewport edges.
-- **Implementation notes:**
-  - Find the map-canvas project-card component (distinct from the YOUR SITES sidebar rows in **B158**) — locate the ✕ and its single-click delete `onClick`. Remove the destructive single-click; keep the delete handler and wire it to the menu's **Delete**.
-- **Dedup / reconciliation:**
-  - **The "Change status" half is the existing right-click-marker-status feature (done as B7/B8):** that menu already does Pursuit→Active→On Hold→Complete→Dead with the current state checked, persisted via the Site Model `statusOf`/`STATUSES`. **Fold these into one menu — reuse B7's status control, don't build a second one.**
-  - **B158** is the *sidebar* YOUR SITES list right-click menu (Rename/Delete); **this is the map-canvas card** — a separate component. **Check whether the two should share one portal-mounted context-menu component** (and reuse B158's, if B158 lands first). Rename isn't requested here, but consider adding it for consistency with the sidebar menu.
-- **Acceptance:** the card has no single-click delete; right-clicking it opens a cursor-positioned, viewport-clamped menu with **Delete** (→ existing confirm flow) and **Change status** (five states, current checked, → existing status setter); the menu renders above all map layers without clipping; Escape / click-outside closes it.
-
-### B167 — Remove the "Drag to move the map" instructional bubble entirely `[Site Planner / map]` (task)  *(arrived as "NEW-1"; minted B167 — highest B# across both files is B166, so this is the real next free ID)*
-`[ ]` The lower instructional bubble on the map viewer reading **"Drag to move the map. Hit '+ Select parcels' to start adding lots."** should be **removed entirely.** Independent of B168 (different element, separate test path).
-- **Expected:** the map viewer loads with **no instructional overlay bubble** at all.
-- **Dedup / reconciliation:** supersedes **the completed B105** — B105 removed the *persistent* bottom-left card but kept a **one-time, dismissible first-run bubble** (same copy + an ✕, remembered in `localStorage` `planarfit:mapHintDismissed:v1`). The owner now wants that remaining bubble **gone entirely**, so this removes the first-run hint state B105 introduced. Per **B21 / B105**, the bottom-left slot is shared between this hint, the contextual selection guidance (only while `selectMode` is on), and the error toast — remove **only** the idle "Drag to move the map" hint; **leave the selection guidance and the error toast intact.** The dismissed-flag localStorage key becomes dead and can be dropped.
-
 ### B166 — Geometry check reads wrong county acreage (homesite carve-out, not total) `[Site Planner]` (bug)  *(arrived as "NEW-3"; minted B166 — next free ID after B165)*
 `[ ]` **Repro (owner-reported):** parcel `0440110000065`. The Appraisal Data panel shows **Acreage = 17.0000 AC** (also under All county fields → Acreage 17.0000 AC) and the drawn boundary is **17.06 ac** — they agree to ~0.4%. But the geometry check flags **"county 0.50 ac vs 17.06 ac (3,312% off)."** The 0.50 ac is almost certainly the **homesite** carve-out (the small portion a Texas appraisal district assigns when a tract carries a HOMESITE designation — this parcel's Legal field literally reads **"PT TR 4D (HOMESITE)"**), not the total tract acreage.
 - **Expected:** the check compares the drawn area against the parcel's **total** acreage (17.00 AC) → ~0.4% delta, **no warning fires.**
