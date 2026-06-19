@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ANALYSIS_SOURCES, simplifyRing, ringsBBox, ringCentroid, representativeRing,
-  ringsSignature, buildAnalysisParams, buildQueryUrl, zoneSummary, wetlandSummary,
+  ringsSignature, buildAnalysisParams, buildQueryUrl, normalizeAttrs, zoneSummary, wetlandSummary,
   pipelineSummary, classifyStatus, analyzeSource, runSiteAnalysis,
   buildJurisdictionFinding, buildRoadFinding, deriveZoning,
 } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
@@ -91,8 +91,22 @@ describe("summarizers", () => {
   it("wetlandSummary lists distinct NWI types", () => {
     expect(wetlandSummary([{ WETLAND_TYPE: "Freshwater Forested/Shrub Wetland" }])).toContain("Freshwater");
   });
-  it("pipelineSummary counts + names operators", () => {
-    expect(pipelineSummary([{ OPERATOR: "Kinder Morgan" }, { OPERATOR: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
+  it("pipelineSummary counts + names operators (real RRC field OPER_NM, B184)", () => {
+    expect(pipelineSummary([{ OPER_NM: "Kinder Morgan" }, { OPER_NM: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
+  });
+});
+
+describe("normalizeAttrs — joined-layer field qualifier (B184)", () => {
+  it("strips the ArcGIS table prefix so summarizers read plain names", () => {
+    expect(normalizeAttrs({ "Wetlands_CONUS_West.WETLAND_TYPE": "Lake", "NWI_Wetland_Codes.ATTRIBUTE": "L1UBH" }))
+      .toEqual({ WETLAND_TYPE: "Lake", ATTRIBUTE: "L1UBH" });
+  });
+  it("leaves unqualified attributes untouched, keeps first non-empty on collision", () => {
+    expect(normalizeAttrs({ FLD_ZONE: "AE" })).toEqual({ FLD_ZONE: "AE" });
+    expect(normalizeAttrs({ "A.X": "", "B.X": "kept" })).toEqual({ X: "kept" });
+  });
+  it("null/undefined → empty object (never throws)", () => {
+    expect(normalizeAttrs(null)).toEqual({});
   });
 });
 
@@ -136,11 +150,20 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     expect(f.status).toBe("unknown");
     expect(f.error).toMatch(/network|reach/i);
   });
-  it("empty from an UNVERIFIED source → unknown, not absent", async () => {
+  it("empty from a now-VERIFIED wetlands query → absent (none found), post-B184 fix", async () => {
     const cache = freshCache();
     const wet = ANALYSIS_SOURCES.find((s) => s.id === "wetlands");
+    expect(wet.verified).toBe(true);
     const fetchJson = fakeFetch({ "Wetlands_gdb_split": () => [] });
     const f = await analyzeSource(wet, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("absent");
+    expect(f.summary).toMatch(/No NWI-mapped wetlands/);
+  });
+  it("empty from an UNVERIFIED source → unknown, not absent (silent-error guard intact)", async () => {
+    const cache = freshCache();
+    const synthetic = { id: "synthx", category: "X", label: "x", kind: "polygon", url: "https://x/MapServer", layer: 0, fields: { a: "A" }, verified: false, summarize: () => "", detail: () => [] };
+    const fetchJson = fakeFetch({ "/MapServer/0/query": () => [] });
+    const f = await analyzeSource(synthetic, [SQUARE], { cache, fetchJson });
     expect(f.status).toBe("unknown");
   });
   it("queries every sublayer of a multi-layer source", async () => {
@@ -153,6 +176,34 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     const f = await analyzeSource(wet, [SQUARE], { cache, fetchJson });
     expect(fetchJson.calls).toBe(2);
     expect(f.status).toBe("present");
+  });
+  it("reads table-QUALIFIED wetland fields via normalization → present (the B184 root cause)", async () => {
+    const cache = freshCache();
+    const wet = ANALYSIS_SOURCES.find((s) => s.id === "wetlands");
+    const fetchJson = fakeFetch({
+      "/MapServer/2/query": () => [{ attributes: { "Wetlands_CONUS_West.WETLAND_TYPE": "Freshwater Emergent Wetland" } }],
+      "/MapServer/1/query": () => [],
+    });
+    const f = await analyzeSource(wet, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/Freshwater Emergent/);
+  });
+  it("pipelines query asks for the REAL fields, not the 400-ing OPERATOR/COMMODITY (B184)", async () => {
+    const pipe = ANALYSIS_SOURCES.find((s) => s.id === "pipelines");
+    const params = buildAnalysisParams(pipe, [SQUARE]);
+    expect(params.outFields).toBe("OPER_NM,CMDTY_DESC,DIAMETER");
+    expect(params.outFields).not.toMatch(/OPERATOR|COMMODITY\b/);
+  });
+  it("oil & gas wells query drops the non-existent LEASE_NAME field (B184)", async () => {
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    expect(buildAnalysisParams(wells, [SQUARE]).outFields).not.toMatch(/LEASE_NAME/);
+  });
+  it("findings carry their map-overlay layer id for the show-on-map toggle (B185)", async () => {
+    const cache = freshCache();
+    const flood = ANALYSIS_SOURCES.find((s) => s.id === "flood");
+    const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "AE" } }] });
+    const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    expect(f.mapLayer).toBe("fema");
   });
   it("pending source reads as pending (source not connected), never absent", async () => {
     const contam = ANALYSIS_SOURCES.find((s) => s.id === "contamination");
