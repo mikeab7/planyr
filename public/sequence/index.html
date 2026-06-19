@@ -4239,6 +4239,45 @@ function App() {
     });
   }, []);
 
+  // ── Embedded-mode bridge (Planyr shell) ───────────────────────────────────
+  // Inside the Planyr shell this app runs in an iframe with its OWN header (the
+  // project picker + Dashboard/Projects toggle) hidden. Bridge that navigation to
+  // the shell's shared Row-1 breadcrumb over postMessage, so the Schedule module's
+  // picker drives THIS app's projects (Goose Creek, Grand Port, …) — not the Site
+  // Planner's. Same-origin, so messages are targeted to window.location.origin.
+  const inShell = typeof window !== "undefined" && window.self !== window.top;
+  const navSigRef = useRef("");
+  useEffect(() => {
+    if (!inShell || !data) return;
+    const list = Object.values(data.projects || {}).map(p => ({ id: p.id, name: p.name }));
+    const sig = JSON.stringify([data.section ?? "projects", data.aPid ?? null, list]);
+    if (sig === navSigRef.current) return; // only emit when the nav state actually changes
+    navSigRef.current = sig;
+    try {
+      window.parent.postMessage({
+        source: "planar-seq", type: "planar:nav-state",
+        section: data.section ?? "projects", activeId: data.aPid ?? null, projects: list,
+      }, window.location.origin);
+    } catch (_) {}
+  }, [data, inShell]);
+  useEffect(() => {
+    if (!inShell) return;
+    const onMsg = (e) => {
+      const m = e.data;
+      if (!m || m.source !== "planar-shell") return;
+      if (m.type === "planar:nav-select" && m.id != null) {
+        setData(d => (d.projects && d.projects[m.id]) ? { ...d, section: "projects", aPid: m.id } : d);
+      } else if (m.type === "planar:nav-dashboard") {
+        setData(d => ({ ...d, section: "reports" }));
+      } else if (m.type === "planar:nav-new") {
+        addProject();
+        setData(d => ({ ...d, section: "projects" }));
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [inShell, addProject]);
+
   const proj = data?.projects[data?.aPid];
 
   const flatTasks = useMemo(() => {

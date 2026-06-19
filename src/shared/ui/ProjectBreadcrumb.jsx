@@ -74,24 +74,36 @@ export default function ProjectBreadcrumb({
   onSelectProject,
   onNewProject,
   saveState,
+  // When `projects` is supplied the breadcrumb is "controlled": the workspace owns the
+  // list (e.g. the Schedule module feeds in its embedded scheduler's own projects).
+  // When omitted it falls back to the Site Planner site store via listProjects().
+  projects: controlledProjects,
+  // The "home" crumb label — Site → "Map", Schedule → "Dashboard" (B204).
+  homeLabel = "Dashboard",
 }) {
+  const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [projects, setProjects] = useState([]);
+  const [internalProjects, setInternalProjects] = useState([]);
+  const projects = controlled ? controlledProjects : internalProjects;
   const [hoverRow, setHoverRow] = useState(null);
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const anchorRef = useRef(null);
   const toastTimer = useRef(null);
 
-  const refresh = () => setProjects(listProjects());
-  // Keep the list fresh: on mount, whenever the dropdown opens, and when another tab
-  // changes the site store (same store the Site Planner finder watches).
+  const refresh = () => { if (!controlled) setInternalProjects(listProjects()); };
+  // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when
+  // another tab changes the site store (same store the Site Planner finder watches).
+  // Controlled mode skips this entirely — the workspace pushes updates via the prop.
   useEffect(() => {
+    if (controlled) return;
     refresh();
     const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refresh(); };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controlled]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (open) { refresh(); setQ(""); } }, [open]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
@@ -119,14 +131,14 @@ export default function ProjectBreadcrumb({
       {/* Dashboard crumb (B192) — literal text, always visible, primary route home */}
       <button
         onClick={goDashboard}
-        title="All projects — Dashboard"
+        title={`All projects — ${homeLabel}`}
         aria-current={onDash ? "page" : undefined}
         style={crumbBtn({ color: onDash ? "#fff" : MUTED })}
         onMouseEnter={(e) => { if (!onDash) e.currentTarget.style.color = INK; }}
         onMouseLeave={(e) => { if (!onDash) e.currentTarget.style.color = MUTED; }}
       >
         <DashboardIcon />
-        Dashboard
+        {homeLabel}
       </button>
 
       <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
@@ -182,7 +194,7 @@ export default function ProjectBreadcrumb({
         >
           <span style={{ display: "flex", alignItems: "center", gap: 8, color: "#4a463d" }}>
             <DashboardIcon size={14} />
-            All projects (Dashboard)
+            All projects ({homeLabel})
           </span>
           {onDash && <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>}
         </button>
