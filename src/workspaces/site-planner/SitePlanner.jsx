@@ -43,7 +43,7 @@ import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbed
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
-import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
+import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -5024,7 +5024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
@@ -5052,7 +5052,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
@@ -5692,13 +5692,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </g>
             </g>
 
-            {/* On-screen sheet furniture — the SAME measurement-grade scale bar
-                (bottom-right) and north arrow (bottom-left) the export uses, sized
-                for the screen via lib/sheetFurniture.js. data-export="skip" so the
-                export composites its own frame-anchored copy instead. The planner
-                canvas is north-up, so the arrow points straight up. */}
-            <g data-export="skip" fontFamily="Inter, system-ui, sans-serif" pointerEvents="none"
-              dangerouslySetInnerHTML={{ __html: buildScreenFurnitureSvg({ vw: size.w, vh: size.h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }) }} />
+            {/* On-screen sheet furniture (scale bar + north arrow) is no longer drawn
+                inside this canvas SVG — it's now rendered as DOM overlays anchored to
+                the VISIBLE canvas corners (see below), so it can never scroll off-screen
+                or hide behind the status bar. The export still composites its own
+                frame-anchored copy via buildSheetFurnitureSvg. */}
 
             {/* print-frame crop overlay (screen space) */}
             {printMode && printFrame && (() => {
@@ -5734,6 +5732,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onPointerDown={(e) => { if (e.button === 0) { e.stopPropagation(); onOvCalibClick(p2f(e.clientX, e.clientY)); } }} />
             )}
           </svg>
+
+          {/* Scale bar + north arrow as DOM overlays anchored to the VISIBLE canvas
+              corners (not the SVG coordinate space) so they are ALWAYS fully on screen,
+              never scrolled off or hidden behind the bottom status bar. Each plate sits
+              clear of the status bar (30px) and its neighbour (calibration pill / zoom
+              controls, which were nudged to make room). pointerEvents:none so they never
+              swallow a click. data-export="skip" — the export draws its own copy. */}
+          {(() => {
+            const furn = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+            const plate = (p) => (
+              <svg width={p.plateW} height={p.plateH} viewBox={`0 0 ${p.plateW} ${p.plateH}`}
+                fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
+                dangerouslySetInnerHTML={{ __html: p.markup }} />
+            );
+            return (
+              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: 7 }}>
+                <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
+                <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
+              </div>
+            );
+          })()}
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
           {origin && (
@@ -5847,7 +5866,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const warn = calibrationState === "uncalibrated";
             return (
               <div onClick={warn ? () => { setShowAerial(true); setTool("calibrate"); setCalib(null); } : undefined}
-                style={{ position: "absolute", left: 12, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
+                style={{ position: "absolute", left: 56, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
               </div>
@@ -5859,7 +5878,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "rgba(255,255,255,0.92)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 78, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
@@ -6696,7 +6715,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const picked = combineSel.includes(pc.id);
                     const inactive = pc.active === false;
                     return (
-                      // Per-row Active checkbox (B170): checked = participates in yield / coverage /
+                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
                       // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
                       // The `active` flag persists per-parcel via the Site Model (same path as B100).
                       <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
