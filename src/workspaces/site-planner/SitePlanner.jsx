@@ -1014,6 +1014,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const overlayRefs = useRef({});
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
+  const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -1074,14 +1075,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
      Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
      GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
-     step blanks the aerial for a frame each time (the white/dim flash). Instead
-     we hold Leaflet at a committed view and, for the small zoom/pan deltas of a
-     live gesture, just CSS-`transform` the whole map container (tiles AND the
-     shared overlay layers together, so they stay mutually aligned) to track the
-     gesture with the pixels already on screen — no reload, no flash. A debounced
-     `setView` then re-renders crisp once the gesture settles. Big jumps (fit/
-     resize/first paint, or >1.5 zoom levels of accumulated scroll) commit
-     immediately so we never scale the aerial into a blurry mess. */
+     step blanks the aerial for a frame each time (the white/dim flash). Two
+     defenses:
+     1. During a live gesture we hold Leaflet at a committed view and just
+        CSS-`transform` the whole map container (tiles AND the shared overlay
+        layers together, so they stay mutually aligned) to track the gesture with
+        the pixels already on screen — no reload, no flash.
+     2. When we DO re-render crisp (`commit`), we first clone the current tiles
+        into a frozen "ghost" overlay that stays on top until the fresh tiles
+        finish loading, THEN remove it — so the `setView` wipe never shows the
+        backdrop. This kills the "whole screen flashes to black on zoom-out"
+        (the wipe used to blank even already-loaded tiles).
+     The crisp re-render is debounced (gesture settles) and also forced once the
+     accumulated zoom delta passes ~0.75 levels, so the transform never scales the
+     aerial into a blurry mess — but because the commit is ghost-buffered, that
+     mid-gesture re-base no longer flashes. */
   useEffect(() => {
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
@@ -1091,7 +1099,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
 
-    const commit = (c, zoom) => {
+    // Snapshot the current tiles as a static overlay (cloned WITH the live
+    // transform, so it sits exactly where the basemap looks right now) and keep
+    // it until the post-setView reload reports `load` — then drop it. The new
+    // crisp tiles render underneath; swapping is invisible.
+    const spawnGhost = () => {
+      const clip = wrap.parentElement;
+      if (!clip || !basemapOn) return;
+      try {
+        if (geoGhostRef.current) { geoGhostRef.current.remove(); geoGhostRef.current = null; }
+        const g = wrap.cloneNode(true);
+        g.style.pointerEvents = "none";
+        clip.appendChild(g);
+        geoGhostRef.current = g;
+        const base = geoBaseRef.current;
+        const drop = () => { try { g.remove(); } catch (_) {} if (geoGhostRef.current === g) geoGhostRef.current = null; };
+        if (base) base.once("load", drop);
+        setTimeout(drop, 1400); // fallback: never leave a stale ghost up
+      } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
+    };
+
+    const commit = (c, zoom, ghost) => {
+      if (ghost) spawnGhost();
       wrap.style.transform = "";
       try { map.setView(c, zoom, { animate: false }); } catch (_) {}
       geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
@@ -1099,14 +1128,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
     const prev = geoCommitRef.current;
     const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
-    // First paint, a resize, or a large jump → snap (one reload) rather than scale.
-    if (sizeChanged || Math.abs(z - prev.zoom) > 1.5) {
-      clearTimeout(geoCommitTimer.current);
-      commit(center, z);
-      return;
-    }
+    // First paint / resize → plain commit (no prior view worth ghosting).
+    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
 
-    // Small delta → keep the committed tiles, just transform them to match.
+    // Track the gesture by transforming the committed tiles to match.
     try {
       const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
       const p = map.latLngToContainerPoint(L.latLng(center));        // where `center` sits now
@@ -1115,14 +1140,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const ty = half.y - p.y * scale;
       wrap.style.transformOrigin = "0 0";
       wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
-    } catch (_) { commit(center, z); return; }
+    } catch (_) { commit(center, z, true); return; }
 
-    // …then re-base to a crisp render shortly after the gesture stops.
+    // Re-base to crisp tiles: immediately once the scale has drifted enough (so
+    // it never gets too blurry), otherwise shortly after the gesture stops. Both
+    // are ghost-buffered, so neither flashes.
     clearTimeout(geoCommitTimer.current);
-    geoCommitTimer.current = setTimeout(() => commit(center, z), 180);
-  }, [view, size, origin]);
+    if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
+    else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
+  }, [view, size, origin]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => clearTimeout(geoCommitTimer.current), []);
+  useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
