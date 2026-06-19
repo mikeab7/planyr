@@ -5,7 +5,7 @@
  * opacity slider, a live status indicator (loading/loaded/empty/failed-with-reason)
  * and a disclaimer note. */
 import { useEffect, useState } from "react";
-import { STATEWIDE, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
+import { STATEWIDE, JURISDICTIONS, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
 
@@ -84,6 +84,14 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     <div>
       {groupHead("statewide", "Map layers", onCount(STATEWIDE))}
       {!collapsed.statewide && Object.entries(STATEWIDE).map(([k, cfg]) => row(k, cfg))}
+
+      {groupHead("jurbounds", "Jurisdictions", onCount(JURISDICTIONS))}
+      {!collapsed.jurbounds && <>
+        <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, margin: "0 0 4px" }}>
+          District lines for screening — a boundary means a district <b>has jurisdiction</b> (can tax/regulate), not that it serves/connects utilities here.
+        </div>
+        {Object.entries(JURISDICTIONS).map(([k, cfg]) => row(k, cfg))}
+      </>}
 
       {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
       {!collapsed.evidence && Object.entries(EVIDENCE).map(([k, cfg]) => row(k, cfg))}
