@@ -1,10 +1,10 @@
-// Print sheet composition (B194 + B191) — the WHOLE printed sheet as ONE SVG.
+// Print sheet composition (B200 + B197) — the WHOLE printed sheet as ONE SVG.
 //
 // Why one SVG: the old print view put the site plan in a nested SVG but the
 // title block and metrics in HTML flow around it. Those are two different layout
 // systems, so the browser's print "scale" slider (≈25%–500%) could scale the
 // HTML chrome while the plan held a fixed size — the output wasn't one cohesive
-// sheet (B194). Composing the title block, the plan, the buildings table (B191)
+// sheet (B200). Composing the title block, the plan, the buildings table (B197)
 // and the metrics into a SINGLE <svg> with ONE viewBox gives them ONE coordinate
 // system and ONE scaling transform, so every layer scales together at any zoom
 // and prints as one cohesive PDF.
@@ -61,7 +61,7 @@ export function printSheetLayout({ paper = "letter", orient = "landscape", build
   };
 }
 
-// ---- buildings data table (B191) ----------------------------------------
+// ---- buildings data table (B197) ----------------------------------------
 // `rows`: [{ name, sf, clearHeight, slab }] — values already resolved (effective,
 // from buildingProps). Columns: BUILDING | SF | CLEAR | SLAB; numeric columns
 // right-aligned. Returns an SVG markup string anchored at the box's top-left.
@@ -182,7 +182,7 @@ export function buildPrintSheetSvg({
   return s;
 }
 
-// ---- export filename (B195) ---------------------------------------------
+// ---- export filename (B201) ---------------------------------------------
 const pad2 = (n) => String(n).padStart(2, "0");
 // Today (or a given date) as YYYY.MM.DD.
 export const formatDateStamp = (d = new Date()) => `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())}`;

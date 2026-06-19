@@ -1,5 +1,5 @@
-// Verifies the single-SVG print sheet composition (B194) + the buildings data table
-// (B191): renders the real `buildPrintSheetSvg` output (the exact markup the print
+// Verifies the single-SVG print sheet composition (B200) + the buildings data table
+// (B197): renders the real `buildPrintSheetSvg` output (the exact markup the print
 // routine emits) to an HTML page and screenshots it. Confirms the title block, the
 // plan, the right-hand buildings table and the metrics band live in ONE cohesive SVG.
 import { chromium } from "playwright";

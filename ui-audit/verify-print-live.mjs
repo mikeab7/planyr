@@ -1,7 +1,7 @@
-// Live smoke test for the print/export tranche (B191–B196): seeds a site with two
+// Live smoke test for the print/export tranche (B197–B202): seeds a site with two
 // differently-sized buildings, opens the planner, enters print mode, opens the print
-// Options flyout (B193), and selects a building to show its clear-height/slab fields
-// (B192). Captures console/page errors; logged-out (no auth needed).
+// Options flyout (B199), and selects a building to show its clear-height/slab fields
+// (B198). Captures console/page errors; logged-out (no auth needed).
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
@@ -39,7 +39,7 @@ await page.waitForTimeout(300);
 await page.locator('button:has-text("Print / pick frame")').first().click({ timeout: 8000 }).catch((e) => errors.push("Print item: " + e.message));
 await page.waitForTimeout(500);
 log.printToolbar = await page.locator('text=Print frame').count();
-// Open the Options flyout (B193)
+// Open the Options flyout (B199)
 await page.locator('button:has-text("Options ▾")').first().click({ timeout: 8000 }).catch((e) => errors.push("Options btn: " + e.message));
 await page.waitForTimeout(400);
 log.optionsFlyout = await page.locator('text=Defaults by building size').count();

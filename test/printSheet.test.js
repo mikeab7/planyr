@@ -15,7 +15,7 @@ const ROWS = [
   { name: "Cross Dock", sf: 620000, clearHeight: 40, slab: 7 },
 ];
 
-describe("printSheetLayout — regions for the single-SVG sheet (B194)", () => {
+describe("printSheetLayout — regions for the single-SVG sheet (B200)", () => {
   it("page sizes match paper/orientation aspect", () => {
     expect(pageSize("letter", "landscape")).toMatchObject({ w: 1100, h: 850 });
     expect(pageSize("letter", "portrait")).toMatchObject({ w: 850, h: 1100 });
@@ -44,7 +44,7 @@ describe("printSheetLayout — regions for the single-SVG sheet (B194)", () => {
   });
 });
 
-describe("buildBuildingTableSvg — one row per building (B191)", () => {
+describe("buildBuildingTableSvg — one row per building (B197)", () => {
   const box = printSheetLayout({ buildingCount: 2 }).table;
   const svg = buildBuildingTableSvg({ ...box, rows: ROWS, pal: PAL });
   it("titled BUILDINGS with the four column headers", () => {
@@ -68,7 +68,7 @@ describe("buildBuildingTableSvg — one row per building (B191)", () => {
   });
 });
 
-describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B194)", () => {
+describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B200)", () => {
   const L = printSheetLayout({ paper: "letter", orient: "landscape", buildingCount: 2 });
   const svg = buildPrintSheetSvg({
     layout: L,
@@ -103,7 +103,7 @@ describe("buildPrintSheetSvg — ONE svg, ONE viewBox, all layers share it (B194
   });
 });
 
-describe("export filename (B195)", () => {
+describe("export filename (B201)", () => {
   it("formats as YYYY.MM.DD {Project} - Site Plan {N}", () => {
     const d = new Date(2026, 5, 19); // June (month index 5) 19, 2026
     expect(formatDateStamp(d)).toBe("2026.06.19");

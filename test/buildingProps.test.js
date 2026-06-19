@@ -10,7 +10,7 @@ import {
   fmtSlab,
 } from "../src/workspaces/site-planner/lib/buildingProps.js";
 
-describe("auto clear height by sf — upper tier inclusive at each boundary (B192)", () => {
+describe("auto clear height by sf — upper tier inclusive at each boundary (B198)", () => {
   it("under 140k → 32'", () => {
     expect(autoClearHeight(0)).toBe(32);
     expect(autoClearHeight(100000)).toBe(32);
@@ -27,7 +27,7 @@ describe("auto clear height by sf — upper tier inclusive at each boundary (B19
   });
 });
 
-describe("auto slab by sf (B192)", () => {
+describe("auto slab by sf (B198)", () => {
   it("under 140k → 6\"", () => {
     expect(autoSlab(0)).toBe(6);
     expect(autoSlab(139999)).toBe(6);

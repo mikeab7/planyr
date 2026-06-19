@@ -1,7 +1,7 @@
 // Building properties derived from square footage — clear height and slab
-// thickness (B192). These are FIRST-CLASS building properties (stored on the
+// thickness (B198). These are FIRST-CLASS building properties (stored on the
 // element, available to any module), not print-only fields: the print data table
-// (B191) reads them, the print options interface (B193) edits them.
+// (B197) reads them, the print options interface (B199) edits them.
 //
 // Each property has an auto-computed default (a function of the building's
 // footprint sf, via an editable tiered rule) plus an OPTIONAL manual override.
@@ -18,7 +18,7 @@
 // (so 140,000 sf → 36′ / 7″, and 600,000 sf → 40′.)
 
 // Pure default rules. Persisted per-plan in `settings.buildingRules`; the print
-// options interface (B193) edits a copy of this shape.
+// options interface (B199) edits a copy of this shape.
 export const DEFAULT_BUILDING_RULES = {
   clearHeight: [
     { upTo: 140000, value: 32 },
