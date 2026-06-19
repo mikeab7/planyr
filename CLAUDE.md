@@ -5,6 +5,20 @@ two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
 backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
+> **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT. Do not log-and-defer.**
+> If Michael reports a bug or asks for a change, the job is to **fix it, verify it, and merge it to
+> live this session** — not to file it in `BACKLOG.md` and leave it for "a future session." That
+> turns his one request into homework he has to chase later, wastes a round-trip, and is exactly the
+> opposite of what he wants. **The backlog is for things that genuinely cannot be done now** (blocked
+> on a decision, an external dependency, or too large to finish this run) — NOT a parking lot for his
+> requests. Even if he literally says "add this to the backlog," read the intent: he wants it
+> **handled**. So: file it (for the record) **and then go fix it the same session**, moving it
+> straight to `BACKLOG-DONE.md` when it ships. Default to action. The only acceptable reason to leave
+> something merely filed is a hard blocker — and then you say so plainly, you don't go quiet. If
+> several items arrive at once, fix them all; if one is genuinely too big, fix the rest and flag that
+> one with the specific blocker. (Owner rule, 2026-06-19, after a session filed three fixable items
+> instead of fixing them.)
+>
 > **📋 `BACKLOG.md` is the single source of truth for open bugs & feature requests.**
 > On every run, check `BACKLOG.md` **🔲 Open** section and work those items.
 > Completed items are archived in `BACKLOG-DONE.md` — **do not read that file** unless

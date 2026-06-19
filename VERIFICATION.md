@@ -165,11 +165,14 @@ was never clicked" quietly ships broken.
   - **B97 layers panel** — on map + planner, the **Map layers / Utility evidence / jurisdiction** group
     headers collapse on click (chevron + "N on" count), state persists across reload; panel fits without
     scrolling.
-  - **B106 sites panel** — "Your sites · N" header collapses (persists); per-row **crosshair + delete
-    reveal on hover** (no always-on ✕); delete still asks to confirm; zero-count status chips are hidden.
+  - **B106 sites panel** — "Your sites · N" header collapses (persists); per-row **crosshair reveals on
+    hover** (no inline delete button at all, per B168); zero-count status chips are hidden.
   - **B104 map header** — only **one** "Site Planyr" brand shows (shell header); the map bar reads
     "Find a site" + search + Start blank, no duplicate lockup.
-  - **B105 hint** — the "Drag to move the map" card appears once, dismisses with ✕, and stays gone on reload.
+  - **B167 + B168 map card** ✅ self-verified 2026-06-19 (headless, logged-out, `ui-audit/verify-mapcard.mjs`):
+    no "Drag to move the map" bubble on load; project cards carry **no inline ✕**; **right-clicking a card
+    (or map marker) opens one menu** with the five statuses (current checked) + a red **Delete project…**
+    that routes through the existing confirm modal. Re-confirm signed-in that delete actually removes the site.
   - **B107 left tabs** — order reads **Yield · Parcel · Element · Aerial · Overlay · Setup**.
 - **If any fails:** none are critical (no data risk) — log ❌ here with what looked wrong; fixes are small.
 
