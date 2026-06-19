@@ -7,6 +7,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
+import FilesDrawer from "../workspaces/doc-review/components/FilesDrawer.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
@@ -26,6 +27,8 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
+  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (app-wide, B180)
+  const [pendingReview, setPendingReview] = useState(null); // a file the drawer asked to open in the viewer
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -146,9 +149,20 @@ export default function Shell() {
               shellModule={active}
               onShellSwitch={setActive}
               authControl={authControl}
+              onOpenFiles={() => setFilesOpen(true)}
+              pendingReview={pendingReview}
+              onPendingHandled={() => setPendingReview(null)}
             />
           </Suspense>
         </ErrorBoundary>
+        {/* Project Files shelf — app-wide, opened from Row 1 of any workspace (B180).
+            Opening a file routes to the Markup workspace and hands it the review. */}
+        <FilesDrawer
+          open={filesOpen}
+          onClose={() => setFilesOpen(false)}
+          signedIn={!!user}
+          onOpenReview={(review) => { setPendingReview({ id: review.id }); setActive("doc-review"); setFilesOpen(false); }}
+        />
       </main>
       {authOpen && (
         <AuthPanel

@@ -3,13 +3,14 @@
  * (see public/sequence/index.html — the .in-iframe CSS class). */
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 
-export default function Scheduler({ shellModule, onShellSwitch, authControl } = {}) {
+export default function Scheduler({ shellModule, onShellSwitch, authControl, onOpenFiles } = {}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
       <AppHeader
         module={shellModule || "scheduler"}
         onSwitch={onShellSwitch}
         authControl={authControl}
+        onOpenFiles={onOpenFiles}
       />
       <iframe
         src="/sequence/"

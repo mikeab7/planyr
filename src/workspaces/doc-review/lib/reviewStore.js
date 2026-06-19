@@ -195,6 +195,23 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf" };
 }
 
+// Re-file an existing review under a (different) project/discipline — the one-click
+// confirm out of the "needs filing" holding area (B180). Loads the full record, updates
+// only the filing fields, and re-upserts; the work layer + sources are untouched. (The
+// stored object path doesn't move — storageKey already encodes the prior location and
+// stays valid; re-pathing bytes is a backend-tranche nicety, not needed to re-file.)
+export async function refileReview(id, { projectId = null, project = "", discipline, item } = {}) {
+  if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
+  const rec = await loadReview(id);
+  if (!rec) return { ok: false, error: "Review not found." };
+  const next = { ...rec };
+  next.projectId = projectId || null;
+  next.project = project || "";
+  if (discipline) next.discipline = discipline;
+  if (item) next.item = item;
+  return upsertReview({ ...next, updatedAt: Date.now() });
+}
+
 /* --------------------------- source PDFs (Storage) -------------------------- */
 
 // Upload one source PDF. Returns { ok, oversize, storageKey, error }. A file over

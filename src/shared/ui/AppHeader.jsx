@@ -134,6 +134,7 @@ export default function AppHeader({
   module = "site-planner",
   onSwitch,
   onDashboard,
+  onOpenFiles,
   centerContent,
   saveSlot,
   authControl,
@@ -228,13 +229,30 @@ export default function AppHeader({
           </button>
         </div>
 
-        {/* Center zone — project name */}
+        {/* Center zone — Project Files shelf (openable from any workspace) + project name */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0, maxWidth: "40%", padding: "0 8px",
+            flexShrink: 0, maxWidth: "44%", padding: "0 8px", gap: 8,
           }}
         >
+          {onOpenFiles && (
+            <button
+              onClick={onOpenFiles}
+              title="Project Files — surveys, drawings & documents (opens from any workspace)"
+              style={{
+                display: "flex", alignItems: "center", gap: 5, flex: "none",
+                padding: "3px 9px", borderRadius: 999, cursor: "pointer",
+                fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
+                border: `1px solid ${LINE}`, background: "rgba(255,255,255,0.06)", color: "#d7d1c4",
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5.5a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z" />
+              </svg>
+              Files
+            </button>
+          )}
           {centerContent}
         </div>
 

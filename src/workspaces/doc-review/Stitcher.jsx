@@ -14,7 +14,6 @@ import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength } from "./lib/takeoff.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
@@ -43,7 +42,7 @@ function sheetBBox(s) {
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false }) {
+export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false, onOpenFiles }) {
   const svgRef = useRef(null);
   const [pdfs, setPdfs] = useState([]);          // {srcId,name,doc,numPages,blob,size,storageKey,oversize,missing}
   const [placed, setPlaced] = useState([]);      // {id,srcId,pageNum,name,href,baseW,baseH,M,missing}
@@ -61,7 +60,6 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // --- cloud persistence (stitched-set review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const pdfsRef = useRef([]); useEffect(() => { pdfsRef.current = pdfs; });
   const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
@@ -294,7 +292,6 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
-      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={onOpenReview} signedIn={signedIn} />
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid #2e2a23", flexWrap: "wrap" }}>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
@@ -310,7 +307,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+        {onOpenFiles && <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={onOpenFiles} title="Browse Project Files">📁 Files</button>}
         <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 

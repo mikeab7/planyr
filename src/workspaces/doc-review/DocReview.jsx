@@ -9,7 +9,6 @@ import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
 import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -44,7 +43,7 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl } = {}) {
+export default function DocReview({ shellModule, onShellSwitch, authControl, onOpenFiles, pendingReview, onPendingHandled } = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -81,7 +80,6 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [signedIn, setSignedIn] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
 
@@ -240,6 +238,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return; booted.current = true;
+    if (pendingReview && pendingReview.id) return; // an explicit open from the Files drawer wins over resume
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -259,6 +258,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Open a review the Project Files drawer asked for (from any workspace, routed via the
+  // Shell). Guarded so the same id can't reopen; clears the pending request when handled.
+  const openedPending = useRef(null);
+  useEffect(() => {
+    if (!pendingReview || !pendingReview.id || openedPending.current === pendingReview.id) return;
+    openedPending.current = pendingReview.id;
+    openReview(pendingReview);
+    onPendingHandled && onPendingHandled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReview]);
 
   /* ---- pointer → page units ---- */
   const toPage = (e) => {
@@ -379,6 +389,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
       onConsumeLoad={() => setPendingStitch(null)}
       onOpenReview={openReview}
       signedIn={signedIn}
+      onOpenFiles={onOpenFiles}
     />
   );
 
@@ -442,10 +453,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
-      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
+        onOpenFiles={onOpenFiles}
         centerContent={
           meta.title ? (
             <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>
@@ -460,7 +471,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl } = 
             <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => fileRef.current?.click()}>{fileName ? "Open another…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch sheets ▸</button>
-            <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+            {onOpenFiles && <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={onOpenFiles} title="Browse Project Files">📁 Files</button>}
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
             {pdfRef.current && <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 2px" }} />}
             {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} onClick={() => { setTool(t.id); setDraft(null); }}>{t.label}</button>)}
