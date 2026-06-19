@@ -1068,11 +1068,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // short fallback), so its many retina tiles don't flood the connection and
       // starve the few coarse tiles — that's what left a fresh load gray for ~10s
       // on a real connection. (B65)
+      // maxNativeZoom drops by 1 on a retina display because detectRetina fetches
+      // one zoom HIGHER than the display zoom; without this the detail layer asks
+      // for z20 at deep zoom, which Esri World Imagery (native to z19) answers with
+      // the gray "Map data not yet available" placeholder. Capping the native fetch
+      // at z19 makes it upscale the deepest real imagery instead. (B176)
+      const detailMaxNative = L.Browser.retina ? GEO_BASEMAP.maxNative - 1 : GEO_BASEMAP.maxNative;
       const addDetail = () => {
         // bail if the map went away, detail's already added, or the aerial was
         // toggled off during the wait (backfill ref nulled by the cleanup below).
         if (!geoMapRef.current || geoBaseRef.current || !geoBackfillRef.current) return;
-        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+        const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
         t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       };
       bf.once("load", addDetail);
@@ -1124,19 +1130,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // transform, so it sits exactly where the basemap looks right now) and keep
     // it until the post-setView reload reports `load` — then drop it. The new
     // crisp tiles render underneath; swapping is invisible.
+    const dropGhost = () => { if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } };
     const spawnGhost = () => {
       const clip = wrap.parentElement;
       if (!clip || !basemapOn) return;
       try {
-        if (geoGhostRef.current) { geoGhostRef.current.remove(); geoGhostRef.current = null; }
+        dropGhost();
         const g = wrap.cloneNode(true);
         g.style.pointerEvents = "none";
+        // Transparent so the ghost contributes ONLY its sharp tiles on top; its
+        // own gaps (e.g. the wider area exposed on zoom-out) fall through to the
+        // live backfill below instead of showing the container's dark bg.
+        g.style.background = "transparent";
         clip.appendChild(g);
         geoGhostRef.current = g;
         const base = geoBaseRef.current;
         const drop = () => { try { g.remove(); } catch (_) {} if (geoGhostRef.current === g) geoGhostRef.current = null; };
         if (base) base.once("load", drop);
-        setTimeout(drop, 1400); // fallback: never leave a stale ghost up
+        // Generous fallback: hold the sharp snapshot until the fresh tiles report
+        // `load` (the real trigger); only drop on a timer if `load` never fires, so
+        // a slow connection doesn't briefly downgrade to the blurry backfill. Any
+        // later gesture replaces the ghost anyway, so a long fallback is safe.
+        setTimeout(drop, 5000);
       } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
     };
 
@@ -1152,6 +1167,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // First paint / resize → plain commit (no prior view worth ghosting).
     if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
 
+    // A new gesture is happening: drop any lingering snapshot immediately. It's a
+    // FROZEN copy that doesn't track this pan/zoom, so leaving it up would let the
+    // aerial visibly lag behind the drawn layers until it expired (the "shake off
+    // during load" decoupling). The live transform below keeps the basemap welded
+    // to the SVG; the backfill covers any reveal. A fresh snapshot is taken again
+    // only at the next commit. (B177)
+    dropGhost();
+
     // Track the gesture by transforming the committed tiles to match.
     try {
       const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
@@ -1163,9 +1186,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
     } catch (_) { commit(center, z, true); return; }
 
-    // Re-base to crisp tiles: immediately once the scale has drifted enough (so
-    // it never gets too blurry), otherwise shortly after the gesture stops. Both
-    // are ghost-buffered, so neither flashes.
+    // Re-base to crisp tiles once the scale has drifted ~0.75 levels either way
+    // (so a zoom-out still re-renders to cover the wider area, and a zoom-in pulls
+    // sharper detail), otherwise shortly after the gesture settles. Every commit
+    // is ghost-buffered AND the snapshot is held until the fresh tiles load, so
+    // the already-detailed area stays sharp through the swap (no downgrade) and
+    // the wider view fills without uncovering the backdrop.
     clearTimeout(geoCommitTimer.current);
     if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
     else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
