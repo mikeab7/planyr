@@ -26,6 +26,15 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
+  // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
+  // workspace's header; "Dashboard" and "open/new project" from Schedule or Markup
+  // must route into the Site Planner (where projects open). The Shell switches the
+  // active module and hands the Site Planner a one-shot `navIntent` (token-stamped so
+  // each click re-fires even if the kind repeats); the Site Planner consumes it.
+  const [navIntent, setNavIntent] = useState(null);
+  const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
+  const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
+  const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -146,6 +155,10 @@ export default function Shell() {
               shellModule={active}
               onShellSwitch={setActive}
               authControl={authControl}
+              navIntent={navIntent}
+              onGoDashboard={goDashboard}
+              onOpenProject={openProjectInPlanner}
+              onNewProject={newProjectInPlanner}
             />
           </Suspense>
         </ErrorBoundary>

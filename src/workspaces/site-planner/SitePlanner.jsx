@@ -11,7 +11,7 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -38,12 +38,14 @@ import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementAre
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, roadTravelWidth } from "./lib/siteModel.js";
+import { buildingNumbers, isBuilding, roadTravelWidth } from "./lib/siteModel.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
-import { buildSheetFurnitureSvg, buildScreenFurnitureSvg } from "./lib/sheetFurniture.js";
+import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
+import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
+import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -780,6 +782,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
+  const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
+  const printOptAnchor = useRef(null);
+  const sheetSeq = useRef(1); // per-session sheet number for the export filename (B201)
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
@@ -1419,6 +1424,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [fitNonce, setFitNonce] = useState(0);
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
+     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
+     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
+     Used by the Site Analysis "show on map" toggle (B190). */
+  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
+    const pts = [];
+    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
+    if (pts.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+  }, [parcels, size]);
+
+  /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
+     the same app-shared `overlays` state the Layers panel uses (one source of truth) —
+     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
+     geographic context, then frame to the active parcels so it isn't offscreen. */
+  const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
+    if (!layerId) return;
+    setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
+    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -2228,6 +2260,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!d) return;
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
+    if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
+      const dx = fp.x - d.start.x, dy = fp.y - d.start.y;
+      setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, labelOffset: { x: d.base.x + dx, y: d.base.y + dy } } : pc));
+      return;
+    }
     if (d.mode === "dimMove") { // B146: drag a selected element's dimension callout to reposition it
       const loc = rot2(fp.x - d.start.x, fp.y - d.start.y, -d.rot); // world pointer delta → element-local frame
       setEls((a) => a.map((x) => x.id === d.id ? { ...x, dimOffset: { x: d.base.x + loc.x, y: d.base.y + loc.y } } : x));
@@ -3142,7 +3179,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const refitChildren = (a, buildingId, nb, kids) => {
     const courtBox = {}; // court id -> { box, side } for trailers that back onto it
     const pass1 = a.map((x) => {
-      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
+      if (x.id === buildingId) {
+        // NEW-4: when the resized element IS a truck court, register its NEW box so the
+        // trailer parking flush against its far edge (forCourt) follows the moved edge —
+        // grow/shrink the depth and the trailer is pushed/pulled out to stay flush.
+        if (x.truckCourt) courtBox[x.id] = { box: { cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot ?? x.rot ?? 0 }, side: x.truckCourt.side };
+        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
+      }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
@@ -3421,6 +3464,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "dimMove", id, start: p2f(e.clientX, e.clientY), base: el.dimOffset || { x: 0, y: 0 }, rot: el.rot || 0 };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
+  // relative to the parcel centroid, so it survives geometry edits and persists with the plan.
+  const startAcChip = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const pc = parcels.find((p) => p.id === id);
+    if (!pc) return;
+    pushHistory();
+    drag.current = { mode: "acChip", id, start: p2f(e.clientX, e.clientY), base: pc.labelOffset || { x: 0, y: 0 } };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   const editDimWidth = (id, e) => {
     const el = els.find((x) => x.id === id);
     if (!el || el.type !== "road") return;
@@ -3527,6 +3581,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const easeArea = easeAll.reduce((s, e) => s + easementArea(e), 0);
   const easeBldgArea = easeAll.reduce((s, e) => s + (e.restrictsBuildings !== false ? easementArea(e) : 0), 0);
   const easePaveArea = easeAll.reduce((s, e) => s + (e.restrictsPaving === true ? easementArea(e) : 0), 0);
+
+  // Building properties (B198): clear height + slab thickness, auto-assigned from each
+  // building's footprint sf via an editable per-plan rule (`settings.buildingRules`),
+  // with optional manual overrides stored on the element (clearHeightOverride /
+  // slabThicknessOverride). Surfaced in the selected-building panel, the print options
+  // flyout (B199) and the printed buildings table (B197) — one source, never recomputed
+  // ad hoc in the print routine.
+  const buildingRules = normalizeRules(settings.buildingRules);
+  const buildingSqft = (el) => {
+    const base = el.points ? polyArea(el.points) : el.w * el.h;
+    const ba = els.reduce((s, x) => s + (x.attachedTo === el.id && x.dogEar ? x.w * x.h : 0), 0);
+    return base + ba; // include attached dog-ear bump-outs, matching the on-plan sf label
+  };
+  const buildingList = els.filter(isBuilding);
+  const nBuildings = buildingList.length;
+  // Rich rows (effective values + auto/overridden state) for the options + selected panels.
+  const buildingRows = () => {
+    const nums = buildingNumbers(els);
+    return buildingList.map((el) => {
+      const sf = buildingSqft(el);
+      const p = effectiveBuildingProps(el, sf, buildingRules);
+      return { id: el.id, n: nums.get(el.id), name: (el.name && el.name.trim()) || `Building ${nums.get(el.id)}`, sf, clearHeight: p.clearHeight, slab: p.slab, el };
+    });
+  };
+  // Edit the global default rules (B199): change one tier's threshold (`upTo`) or value.
+  const setRuleTier = (key, idx, field, val) => setSettings((s) => {
+    const r = normalizeRules(s.buildingRules);
+    return { ...s, buildingRules: { ...r, [key]: r[key].map((t, i) => (i === idx ? { ...t, [field]: val } : t)) } };
+  });
+  const resetBuildingRules = () => setSettings((s) => { const { buildingRules, ...rest } = s; return rest; }); // drop → defaults
+  // Set/clear a per-building override (B199). `val == null` reverts that property to auto.
+  const setBuildingProp = (id, field, val) => { pushHistory(); setEls((a) => a.map((e) => (e.id === id ? { ...e, [field]: val } : e))); };
 
   const importRef = useRef(null);
   const importJSONFile = (file) => {
@@ -3735,18 +3821,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Rasterizing/printing an SVG can't fetch remote resources, so inline every
   // <image> (the aerial) as a data URL first. Drops any that are CORS-blocked.
+  // A single slow/hung image fetch used to stall print prep on "Preparing print…" for
+  // up to a minute (B202): the fetches ran one-by-one with no timeout, so any image
+  // that hung through the TLS-inspection proxy blocked the whole prep. Now each fetch
+  // is time-boxed (AbortController) and they all run in parallel, so worst-case prep is
+  // ~INLINE_TIMEOUT_MS, not unbounded. On timeout/CORS/non-200 we drop the image (PNG)
+  // or keep its remote href (print can still load it natively).
+  const INLINE_TIMEOUT_MS = 8000;
   const inlineImages = async (root, dropOnFail = true) => {
     const XL = "http://www.w3.org/1999/xlink";
-    for (const img of root.querySelectorAll("image")) {
+    const imgs = [...root.querySelectorAll("image")];
+    await Promise.all(imgs.map(async (img) => {
       const href = img.getAttribute("href") || img.getAttributeNS(XL, "href");
-      if (href && !href.startsWith("data:")) {
-        try {
-          const blob = await fetch(href, { mode: "cors" }).then((r) => { if (!r.ok) throw new Error(); return r.blob(); });
-          const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
-          img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
-        } catch (_) { if (dropOnFail) img.remove(); } // print keeps the remote href as a fallback
-      }
-    }
+      if (!href || href.startsWith("data:")) return;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), INLINE_TIMEOUT_MS);
+      try {
+        const blob = await fetch(href, { mode: "cors", signal: ctrl.signal }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+        const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+        img.setAttribute("href", dataUrl); img.removeAttributeNS(XL, "href");
+      } catch (_) { if (dropOnFail) img.remove(); }
+      finally { clearTimeout(timer); }
+    }));
   };
   const exportPNG = async () => {
     const built = buildExportSvg(printFrame); // use the print crop if one's set, else dev extent
@@ -3766,9 +3862,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Print to PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
-        aEl.download = `${fileSlug()}.png`;
+        aEl.download = `${sheetFileName({ project: siteLabel, n: sheetSeq.current })}.png`; // B201
         aEl.click();
         URL.revokeObjectURL(aEl.href);
+        sheetSeq.current += 1; // count this exported sheet (B201)
       }, "image/png");
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
@@ -3777,6 +3874,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } finally { URL.revokeObjectURL(url); }
   };
   const printPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
+    // Timing instrumentation (B202): surface where prep spends its time so a future
+    // stall is diagnosable rather than a mystery 60-second "Preparing print…".
+    const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
+    const t0 = now();
+    const mark = (label, since = t0) => { try { console.debug(`[print] ${label}: ${Math.round(now() - since)}ms`); } catch (_) {} };
     const built = buildExportSvg(printFrame, includeOverlay);
     if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
     // Open the window synchronously (before any await) so it isn't pop-up-blocked.
@@ -3784,51 +3886,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
     win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
     try {
-    await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked)
-    // Print clone is purely viewBox-driven (no px width/height that fight the CSS/zoom).
-    built.clone.removeAttribute("width"); built.clone.removeAttribute("height");
-    const ar = (built.w / built.h).toFixed(4); // plan box aspect = the framed crop
-    const xml = new XMLSerializer().serializeToString(built.clone);
-    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); // also escape >/" so it's safe to reuse in an attribute/style context (B48)
-    const pageCss = paper === "tabloid"
-      ? (orient === "portrait" ? "11in 17in" : "17in 11in")
-      : (orient === "portrait" ? "letter portrait" : "letter landscape");
-    const rows = [
-      ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
-      ["Building", `${f0(bldg)} sf`],
-      ["Lot coverage", `${f0(cov)}%`],
-      ["FAR (1-story)", f2(far)],
-      ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
-      ["Trailer stalls", f0(trailers)],
-      ["Impervious", `${f0(impPct)}%`],
-      ["Detention", `${f0(pondArea)} sf`],
-      ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
-    ];
-    win.document.open();
-    win.document.write(`<!doctype html><html><head><title>${esc(siteName)}</title><style>
-      @page { size: ${pageCss}; margin: 8mm; }
-      body{font-family:"Inter",system-ui,sans-serif;color:#26231e;margin:0}
-      .sheet{box-sizing:border-box;border:1.5px solid #26231e;padding:8px}
-      .title{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #b8b1a0;padding-bottom:3px}
-      .title h1{font-size:13px;margin:0;font-weight:600;line-height:1.2} .title .sub{font-size:9.5px;color:#6b6557}
-      .plan{width:100%;aspect-ratio:${ar};margin:6px auto}
-      .plan svg{width:100%;height:100%;display:block}
-      .block{border-top:1px solid #b8b1a0;padding-top:3px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:9.5px;line-height:1.2}
-      .metrics{display:flex;flex-wrap:wrap;gap:2px 16px} .metrics b{font-variant-numeric:tabular-nums} .note{color:#8a8473;font-size:9px}
-    </style></head><body>
-      <div class="sheet">
-        <div class="title"><h1>${esc(siteName)}</h1><span class="sub">${new Date().toLocaleDateString()} · Site Planyr</span></div>
-        <div class="plan">${xml}</div>
-        <div class="block">
-          <div class="metrics">${rows.map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join("")}</div>
-          <span class="note">Concept site plan — planning-level estimates, not a survey.</span>
-        </div>
-      </div>
-    </body></html>`);
-    win.document.close();
-    // Print once the aerial has loaded (or after a beat if it's cached/absent).
-    const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
-    if (win.document.readyState === "complete") go(); else win.onload = go;
+      const tIn = now();
+      await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked); time-boxed (B202)
+      mark("inline images", tIn);
+      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg>
+      // sized to the layout's plan box (it keeps its own viewBox), then the title
+      // block, the buildings table (B197) and the metrics live in the SAME outer SVG
+      // coordinate system — one viewBox, one scaling transform, so every layer scales
+      // together at any print zoom and prints as one cohesive PDF.
+      const rows = buildingRows();
+      const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
+      const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
+      plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
+      plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
+      plan.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      const planSvg = new XMLSerializer().serializeToString(plan);
+      const metricPairs = [
+        ["Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac (${f0(siteSqft)} sf)`],
+        ["Building", `${f0(bldg)} sf`],
+        ["Lot coverage", `${f0(cov)}%`],
+        ["FAR (1-story)", f2(far)],
+        ["Car stalls", `${f0(stalls)}${ratio ? ` (${f2(ratio)}/1k sf)` : ""}`],
+        ["Trailer stalls", f0(trailers)],
+        ["Impervious", `${f0(impPct)}%`],
+        ["Detention", `${f0(pondArea)} sf`],
+        ["Open / green", `${f2(open / SQFT_PER_ACRE)} ac`],
+      ];
+      const sheetSvg = buildPrintSheetSvg({
+        layout, planSvg,
+        title: siteLabel, sub: planLabel,
+        date: formatDateStamp(),
+        metrics: metricPairs,
+        note: "Concept site plan — planning-level estimates, not a survey.",
+        buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
+        pal: PAL,
+      });
+      // Suggested PDF filename comes from the document <title> (B201).
+      const fileName = sheetFileName({ project: siteLabel, n: sheetSeq.current });
+      const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      const pageCss = paper === "tabloid"
+        ? (orient === "portrait" ? "11in 17in" : "17in 11in")
+        : (orient === "portrait" ? "letter portrait" : "letter landscape");
+      // @page margin 0 + the SVG's intrinsic inch size = exactly one page; the inset
+      // border in the sheet keeps content off the printer's unprintable edge.
+      win.document.open();
+      win.document.write(`<!doctype html><html><head><title>${escAttr(fileName)}</title><style>
+        @page { size: ${pageCss}; margin: 0; }
+        html,body{margin:0;padding:0;background:#fff}
+        svg{display:block;margin:0 auto}
+      </style></head><body>${sheetSvg}</body></html>`);
+      win.document.close();
+      sheetSeq.current += 1; // the next exported sheet increments (B201)
+      mark("ready");
+      // Print once the aerial has loaded (or after a beat if it's cached/absent).
+      const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
+      if (win.document.readyState === "complete") go(); else win.onload = go;
     } catch (_) {
       try { win.close(); } catch (e2) {} // don't strand a blank "Preparing…" window if inlining/serialization threw (B50)
       alert("Couldn't prepare the print view — the aerial basemap may have blocked it. Turn the basemap off and retry.");
@@ -3836,13 +3948,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ print-frame placement ------------ */
-  // [wIn, hIn] of the chosen paper + orientation; aspect = w / h.
-  const paperDims = (paper, orient) => { const [lng, sht] = paper === "tabloid" ? [17, 11] : [11, 8.5]; return orient === "portrait" ? [sht, lng] : [lng, sht]; };
-  // The frame matches the PRINTABLE area (paper minus @page margins and the
-  // title/metrics chrome), so the plan fills both dimensions with no slack.
-  const PRINT_MARGIN_IN = 0.315, PRINT_PAD_W_IN = 0.18, PRINT_CHROME_H_IN = 0.85;
-  const printableDims = (paper, orient) => { const [pw, ph] = paperDims(paper, orient); return [pw - 2 * PRINT_MARGIN_IN - PRINT_PAD_W_IN, ph - 2 * PRINT_MARGIN_IN - PRINT_CHROME_H_IN]; };
-  const printAspect = () => { const [w, h] = printableDims(printPaper, printOrient); return w / h; };
+  // The on-canvas crop matches the PRINTED PLAN BOX (B200), not the raw paper: the plan
+  // box is the sheet minus the title block, the metrics band, and — when buildings
+  // exist — the right-hand buildings-table column. So the frame the owner draws is
+  // exactly what fills the printed plan area (WYSIWYG), computed from the same layout
+  // the print routine uses.
+  const printAspect = () => { const L = printSheetLayout({ paper: printPaper, orient: printOrient, buildingCount: nBuildings }); return L.plan.w / L.plan.h; };
   // A frame of the given aspect, centred at cx,cy, that contains a w×h area.
   const fitFrame = (cx, cy, w, h, aspect) => { const wFt = Math.max(w, h * aspect, 40); return { cx, cy, wFt, hFt: wFt / aspect }; };
   const enterPrintMode = () => {
@@ -3856,7 +3967,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Re-fit the frame's aspect when paper/orientation changes (keep it around the
   // same coverage). Skip the initial render.
-  const printAspectKey = `${printPaper}:${printOrient}`;
+  const printAspectKey = `${printPaper}:${printOrient}:${nBuildings > 0}`;
   const prevAspectKey = useRef(printAspectKey);
   useEffect(() => {
     if (prevAspectKey.current === printAspectKey) return;
@@ -3922,6 +4033,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // derived from list position (a delete renumbers the rest 1…N); identity stays el.id.
   const bldgNo = buildingNumbers(els);
   const fs = 11 * ls, lh = 14.5 * ls, charW = fs * 0.6;
+  // NEW-2 / NEW-5: a thin buffer strip (landscape / sidewalk / trailer) whose width label
+  // is wider than the strip is narrow runs the label ALONG the strip's long axis — vertical
+  // text on a vertical strip, horizontal on a horizontal one — so it stops eating canvas
+  // across the strip. One shared rule for all three strip types (no per-type duplication).
+  // Returns a rotation in degrees ([-90,90], 0 = horizontal / no change).
+  const STRIP_LABEL_TYPES = ["landscape", "sidewalk", "trailer"];
+  const stripLabelRot = (el, lns, cw, ppf) => {
+    if (!el || el.points || !STRIP_LABEL_TYPES.includes(el.type)) return 0;
+    const shortPx = Math.min(el.w, el.h) * ppf;
+    const textW = Math.max(1, ...lns.map((t) => String(t).length)) * cw;
+    if (textW <= shortPx) return 0; // already fits across the strip → leave it horizontal
+    let a = (el.rot || 0) + (el.w >= el.h ? 0 : 90); // strip long-axis angle
+    a = ((a % 180) + 180) % 180;
+    if (a > 90) a -= 180;            // normalize to [-90,90] for readability
+    return a;
+  };
+  // B195: a trailer-parking label is sized as a FRACTION of the strip's real-world extent (feet)
+  // → screen px via view.ppf, so it scales WITH the area on zoom and stays inside the strip by
+  // construction. (The screen-space `fs` below is floored at ls≥0.34, so it stayed ~constant while
+  // the strip shrank on zoom-out → the label overflowed.) Floored at a legible minimum — below
+  // which a too-small strip (≈2-spot) takes controlled overflow rather than going illegible — and
+  // capped at the normal label size so it never balloons when zoomed in. The text runs along the
+  // strip's LONG side (width) and the line stack across its SHORT side, so each side has its own
+  // fit bound; the smaller governs (matches stripLabelRot, which aligns the label to the long axis).
+  const TRAILER_LABEL = { fracShort: 0.9, fracLong: 0.92, minPx: 5 };
+  const LH_RATIO = 14.5 / 11, CW_RATIO = 0.6; // label line-height / char-width vs font size
+  const trailerLabelFont = (el, lns, poly) => {
+    let shortFt, longFt;
+    if (poly) {
+      let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity;
+      for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); }
+      shortFt = Math.min(hi - lo, hi2 - lo2); longFt = Math.max(hi - lo, hi2 - lo2);
+    } else { shortFt = Math.min(el.w, el.h); longFt = Math.max(el.w, el.h); }
+    const chars = Math.max(1, ...lns.map((t) => String(t).length));
+    const byH = (TRAILER_LABEL.fracShort * shortFt * view.ppf) / (lns.length * LH_RATIO); // stack across the short side
+    const byW = (TRAILER_LABEL.fracLong * longFt * view.ppf) / (chars * CW_RATIO);         // text along the long side
+    const cap = Math.max(fs, TRAILER_LABEL.minPx); // never cap below the legibility floor
+    const f = Math.min(cap, Math.max(TRAILER_LABEL.minPx, Math.min(byH, byW)));
+    return { fs: f, lh: f * LH_RATIO, charW: f * CW_RATIO };
+  };
   // B121: build each element's centred label as priority-ordered lines (name → area →
   // dimensions, highest priority first), then hand them all to the shared LOD + collision
   // engine (lib/labelLayout) so adjacent labels never overprint into an unreadable pile.
@@ -3974,10 +4125,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
         lines = buildingLabelLines({ name, sqft: `${f0(area + ba)} sf`, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+      } else if (el.type === "trailer") {
+        // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
+        // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
+        // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
+        // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
+        const tc = cfgOf(el);
+        const count = poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, tc).count;
+        lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
       } else {
         lines = [name];
-        if (el.type === "trailer") lines.push(`${f0(poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, cfgOf(el)).count)} trailers${poly ? " (est)" : ""}`);
-        else lines.push(`${f0(area)} sf`);
+        lines.push(`${f0(area)} sf`);
         lines.push(poly ? `${f2(area / SQFT_PER_ACRE)} ac` : `${f0(el.w)}′ × ${f0(el.h)}′`);
       }
     }
@@ -3994,52 +4152,68 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       halfW = ((el.w / 2) * cw + (el.h / 2) * sw) * view.ppf;
       halfH = ((el.w / 2) * sw + (el.h / 2) * cw) * view.ppf;
     }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH });
+    // Per-candidate font: the global screen-space metrics by default; a trailer label is sized
+    // to its own real-world extent (B195) and opts out of leader-out (a too-small strip overflows
+    // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
+    let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
+    if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false });
     }
   }
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh, charW, halfW: d.halfW, halfH: d.halfH })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader })),
     { pad: 2 },
   );
   const labelEls = labelCands.map((d) => {
     const place = labelShow.get(d.lid);
     if (!place) return null; // hidden this frame to avoid overprinting a higher-priority label
-    const { lines, x, y, leader } = place;
-    const top = y - (lines.length * lh) / 2, first = top + fs * 0.82;
+    const { lines, x, y, leader, rot } = place;
+    // Per-candidate metrics (B195: a trailer label is world-scaled, so it has its own fs/lh);
+    // dls is its scale relative to the 11px base, replacing the global `ls` for the halo/lock.
+    const dfs = d.fs, dlh = d.lh, dls = dfs / 11;
+    const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
     const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
-        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * lh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
-        {!d.added && d.el.locked && <text x={x} y={top - 3 * ls} textAnchor="middle" fontSize={12 * ls}>🔒</text>}
-        <text x={x} y={first} textAnchor="middle" fontSize={fs}
+        {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
+        {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
+        <text x={x} y={first} textAnchor="middle" fontSize={dfs}
+          transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
           fontFamily="ui-monospace, Menlo, monospace" fill={ink}
-          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * ls : undefined} paintOrder={leader ? "stroke" : undefined}
+          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * dls : undefined} paintOrder={leader ? "stroke" : undefined}
           style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
-          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : lh}>{t}</tspan>)}
+          {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
       </g>
     );
   });
 
   const parcelLabels = parcels.map((pc) => {
-    const c = f2p(centroid(pc.points));
+    // NEW-3: the acreage chip sits on the parcel centroid by default but is click-and-drag
+    // to any spot (including outside the boundary); the offset is stored on the parcel (feet)
+    // so it persists with the plan. Drag only in Select so it never blocks drawing tools.
+    const base = centroid(pc.points), off = pc.labelOffset || { x: 0, y: 0 };
+    const c = f2p({ x: base.x + off.x, y: base.y + off.y });
     const txt = `${f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac`;
     const fs = 12 * ls, padX = 9 * ls, padY = 5 * ls, charW = fs * 0.6;
     const boxW = txt.length * charW + padX * 2, boxH = fs + padY * 2;
+    const draggable = tool === "select";
     return (
-      <g key={`pl${pc.id}`} pointerEvents="none">
+      <g key={`pl${pc.id}`} pointerEvents={draggable ? "auto" : "none"}
+        style={draggable ? { cursor: "move" } : undefined}
+        onPointerDown={draggable ? (e) => startAcChip(e, pc.id) : undefined}>
         <rect x={c.x - boxW / 2} y={c.y - boxH / 2} width={boxW} height={boxH} rx={7 * ls}
           fill="rgba(17,24,39,0.62)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
         <text x={c.x} y={c.y - boxH / 2 + padY + fs * 0.82} textAnchor="middle" fontSize={fs}
-          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
+          fontFamily="ui-monospace, Menlo, monospace" fill="#e9edf2" pointerEvents="none" style={{ fontWeight: 500, letterSpacing: "0.02em" }}>{txt}</text>
       </g>
     );
   });
@@ -4696,6 +4870,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const nb = { cx: selEl.cx, cy: selEl.cy, w: patch.w ?? selEl.w, h: patch.h ?? selEl.h, rot: selEl.rot };
     pushHistory();
     const kids = wallKids(selEl);
+    // NEW-4: a strip/court attached to a building (e.g. a truck court) must stay ANCHORED to
+    // the dock wall when its depth changes — grow/shrink the FAR edge only, never from the
+    // centre (which detaches the paving from both the wall and the trailer parking). The same
+    // host-edge clamp the resize grips use; refitChildren then drags the trailer along.
+    const hc = hostClampOf(selEl);
+    if (hc) clampToHost(nb, hc);
     setEls((a) => refitChildren(a, selEl.id, nb, kids));
   };
   // Road travel width = element cross-width − two curbs. Editing it keeps the curb.
@@ -4888,14 +5068,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </>
   );
 
+  // Header breadcrumb switcher (B191): open another project (site group) in place.
+  // Routes through handleOpenSite, which flushes the current plan first (B193).
+  const openProjectGroupLocal = (gid) => {
+    if (!gid || gid === groupId) return;
+    const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
+    if (target) handleOpenSite(target.id);
+  };
+  // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
+  const headerSaveState = (() => {
+    const cloudActive = isCloudActive();
+    const connOk = cloud?.state === "connected";
+    if (saveStatus === "saving") return "saving";
+    if (cloudSaveFailed) return "error";
+    if (cloudActive && !connOk) return "offline";
+    return cloudActive ? "synced" : "local";
+  })();
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600, background: "#efeadf",
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "#efeadf",
       fontFamily: "inherit", color: PAL.ink, overflow: "hidden" }}>
 
       <AppHeader
         module={shellModule || "site-planner"}
         onSwitch={onShellSwitch}
         onDashboard={onBackToMap}
+        currentProject={{ id: groupId, name: siteLabel }}
+        onSelectProject={openProjectGroupLocal}
+        onNewProject={handleNewSite}
+        saveState={headerSaveState}
         centerContent={plannerCenterContent}
         saveSlot={plannerSaveSlot}
         authControl={authControl}
@@ -4913,7 +5114,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
-        <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
@@ -5553,13 +5754,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </g>
             </g>
 
-            {/* On-screen sheet furniture — the SAME measurement-grade scale bar
-                (bottom-right) and north arrow (bottom-left) the export uses, sized
-                for the screen via lib/sheetFurniture.js. data-export="skip" so the
-                export composites its own frame-anchored copy instead. The planner
-                canvas is north-up, so the arrow points straight up. */}
-            <g data-export="skip" fontFamily="Inter, system-ui, sans-serif" pointerEvents="none"
-              dangerouslySetInnerHTML={{ __html: buildScreenFurnitureSvg({ vw: size.w, vh: size.h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL }) }} />
+            {/* On-screen sheet furniture (scale bar + north arrow) is no longer drawn
+                inside this canvas SVG — it's now rendered as DOM overlays anchored to
+                the VISIBLE canvas corners (see below), so it can never scroll off-screen
+                or hide behind the status bar. The export still composites its own
+                frame-anchored copy via buildSheetFurnitureSvg. */}
 
             {/* print-frame crop overlay (screen space) */}
             {printMode && printFrame && (() => {
@@ -5595,6 +5794,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onPointerDown={(e) => { if (e.button === 0) { e.stopPropagation(); onOvCalibClick(p2f(e.clientX, e.clientY)); } }} />
             )}
           </svg>
+
+          {/* Scale bar + north arrow as DOM overlays anchored to the VISIBLE canvas
+              corners (not the SVG coordinate space) so they are ALWAYS fully on screen,
+              never scrolled off or hidden behind the bottom status bar. Each plate sits
+              clear of the status bar (30px) and its neighbour (calibration pill / zoom
+              controls, which were nudged to make room). pointerEvents:none so they never
+              swallow a click. data-export="skip" — the export draws its own copy. */}
+          {(() => {
+            const furn = screenFurniturePlates({ ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: PAL });
+            const plate = (p) => (
+              <svg width={p.plateW} height={p.plateH} viewBox={`0 0 ${p.plateW} ${p.plateH}`}
+                fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
+                dangerouslySetInnerHTML={{ __html: p.markup }} />
+            );
+            return (
+              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: 7 }}>
+                <div style={{ position: "absolute", left: 14, bottom: 40 }}>{plate(furn.north)}</div>
+                <div style={{ position: "absolute", right: 14, bottom: 40 }}>{plate(furn.scaleBar)}</div>
+              </div>
+            );
+          })()}
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
           {origin && (
@@ -5708,7 +5928,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const warn = calibrationState === "uncalibrated";
             return (
               <div onClick={warn ? () => { setShowAerial(true); setTool("calibrate"); setCalib(null); } : undefined}
-                style={{ position: "absolute", left: 12, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
+                style={{ position: "absolute", left: 56, bottom: 40, display: "flex", alignItems: "center", gap: 8, background: cfg.bg, color: "#fff", padding: "5px 11px", borderRadius: 99, fontSize: 11.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.22)", cursor: warn ? "pointer" : "default", zIndex: 6 }}>
                 <span style={{ width: 7, height: 7, borderRadius: 99, background: cfg.dot, animation: warn ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
                 {cfg.text}{cfg.sub && <span style={{ fontWeight: 400, opacity: 0.85, fontFamily: "ui-monospace, monospace" }}>· {cfg.sub}</span>}
               </div>
@@ -5720,7 +5940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "rgba(255,255,255,0.92)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
             return (
-              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 78, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
+              <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0, fontSize: 14 }} onClick={fit}>⤢</button>
@@ -5750,8 +5970,76 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </label>
                 )}
                 <span style={{ width: 1, height: 18, background: PAL.panelLine }} />
+                <div ref={printOptAnchor} style={{ position: "relative" }}>
+                  <button style={{ ...chip, fontWeight: 600, background: printOptsOpen ? PAL.accentSoft : "#fff" }} onClick={() => setPrintOptsOpen((o) => !o)}
+                    title="Clear-height & slab defaults and per-building overrides that drive the printed buildings table">Options ▾</button>
+                </div>
                 <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
                 <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
+                {/* B199 — print options flyout: edit the global clear-height/slab rules (B198)
+                    and per-building overrides; portal-mounted (AnchoredMenu) so it escapes
+                    the toolbar's stacking context. */}
+                <AnchoredMenu open={printOptsOpen} onClose={() => setPrintOptsOpen(false)} anchorRef={printOptAnchor} placement="below-right" gap={8} width={344} panelStyle={menuPanel}>
+                  {(() => {
+                    const rules = normalizeRules(settings.buildingRules);
+                    const rows = buildingRows();
+                    const lbl = { fontSize: 10.5, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "8px 4px 4px" };
+                    const tinyNum = { ...numInput, width: 70, padding: "4px 7px", fontSize: 11.5 };
+                    const valNum = { ...numInput, width: 46, padding: "4px 7px", fontSize: 11.5 };
+                    const tierRow = (key, t, i, unit) => (
+                      <div key={`${key}${i}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", fontSize: 11.5, color: PAL.ink }}>
+                        {t.upTo != null ? (
+                          <><span style={{ color: PAL.muted }}>under</span><NumInput style={tinyNum} value={t.upTo} min={1} onCommit={(n) => setRuleTier(key, i, "upTo", n)} /><span style={{ color: PAL.muted }}>sf</span></>
+                        ) : (
+                          <span style={{ color: PAL.muted, flex: "0 0 auto" }}>{rules[key][i - 1] ? `${(rules[key][i - 1].upTo || 0).toLocaleString()} sf & above` : "and above"}</span>
+                        )}
+                        <span style={{ flex: 1 }} />
+                        <span style={{ color: PAL.muted }}>→</span>
+                        <NumInput style={valNum} value={t.value} min={1} onCommit={(n) => setRuleTier(key, i, "value", n)} /><span style={{ color: PAL.muted, width: 16 }}>{unit}</span>
+                      </div>
+                    );
+                    return (
+                      <div style={{ padding: "2px 2px 4px" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Defaults by building size</div>
+                        <div style={lbl}>Clear height</div>
+                        {rules.clearHeight.map((t, i) => tierRow("clearHeight", t, i, "ft"))}
+                        <div style={lbl}>Slab thickness</div>
+                        {rules.slab.map((t, i) => tierRow("slab", t, i, "in"))}
+                        <button style={{ ...chip, width: "100%", marginTop: 7, fontSize: 11.5, padding: "5px 8px" }} onClick={resetBuildingRules}>Reset to defaults</button>
+                        <div style={{ height: 1, background: PAL.panelLine, margin: "10px 2px 4px" }} />
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink, padding: "2px 4px" }}>Per-building overrides</div>
+                        {rows.length === 0 ? (
+                          <div style={{ fontSize: 11.5, color: PAL.muted, padding: "6px 4px" }}>No buildings yet — draw a building to set its clear height & slab.</div>
+                        ) : rows.map((r) => (
+                          <div key={r.id} style={{ borderTop: `1px solid ${PAL.panelLine}`, padding: "6px 4px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                              <input value={r.el.name || ""} placeholder={`Building ${r.n}`} onChange={(e) => setBuildingProp(r.id, "name", e.target.value)}
+                                style={{ ...numInput, flex: 1, width: "auto", fontFamily: "inherit", fontSize: 12, padding: "4px 8px" }} />
+                              <span style={{ fontSize: 11, color: PAL.muted, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{f0(r.sf)} sf</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ fontSize: 11, color: PAL.muted }}>Clear</span>
+                                <NumInput style={valNum} value={r.clearHeight.value} min={1} onCommit={(n) => setBuildingProp(r.id, "clearHeightOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
+                                {r.clearHeight.overridden
+                                  ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "clearHeightOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                                  : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
+                              </span>
+                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ fontSize: 11, color: PAL.muted }}>Slab</span>
+                                <NumInput style={valNum} value={r.slab.value} min={1} onCommit={(n) => setBuildingProp(r.id, "slabThicknessOverride", n)} /><span style={{ fontSize: 11, color: PAL.muted }}>in</span>
+                                {r.slab.overridden
+                                  ? <button title="Revert to auto" onClick={() => setBuildingProp(r.id, "slabThicknessOverride", null)} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>set ↺</button>
+                                  : <span style={{ fontSize: 10, color: PAL.muted }}>auto</span>}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 8, padding: "0 4px" }}>Auto values come from the size rules above; an override pins a value until you revert it. These print in the buildings table.</div>
+                      </div>
+                    );
+                  })()}
+                </AnchoredMenu>
               </div>
             );
           })()}
@@ -6278,6 +6566,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </select>
                     </Field>
                   )}
+                  {/* B198 — clear height + slab, auto-assigned by sf with an optional override
+                      (also editable in the print Options flyout, B199; printed in the table, B197). */}
+                  {isBuilding(selEl) && (() => {
+                    const sf = buildingSqft(selEl);
+                    const p = effectiveBuildingProps(selEl, sf, buildingRules);
+                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
+                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
+                    return (
+                      <>
+                        <Field label="Clear height (ft)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={p.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                            {p.clearHeight.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+                        <Field label="Slab (in)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={p.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                            {p.slab.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+                      </>
+                    );
+                  })()}
                   {selEl.type === "building" && (
                     <div style={{ marginTop: 4 }}>
                       <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
@@ -6541,7 +6857,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
                 const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
-                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip} />;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                  isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} />;
               })()}
             </Section>
           )}
@@ -6556,7 +6873,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const picked = combineSel.includes(pc.id);
                     const inactive = pc.active === false;
                     return (
-                      // Per-row Active checkbox (B170): checked = participates in yield / coverage /
+                      // Per-row Active checkbox (B175): checked = participates in yield / coverage /
                       // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
                       // The `active` flag persists per-parcel via the Site Model (same path as B100).
                       <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
@@ -7354,8 +7671,12 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       ? { style: { cursor: "text" }, onPointerDown: (e) => e.stopPropagation(), onClick: (e) => { e.stopPropagation(); editDimWidth(el.id, e); } }
       : {};
     const dim = [];
+    // NEW-1: a road's width dimension anchors to the MIDPOINT of the measured span
+    // (centred along the road's length), not 18% in from one end — otherwise the
+    // "24′" label drifts toward the left edge instead of sitting on the centreline.
+    const posF = el.type === "road" ? 0.5 : 0.18;
     if (horizLong) { // short side is vertical (h)
-      const x = tl.x + w * 0.18, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
+      const x = tl.x + w * posF, y0 = tl.y, y1 = tl.y + h, my = (y0 + y1) / 2;
       if (moved) dim.push(<line key="ld" x1={x} y1={my} x2={x + ox} y2={my + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
       const X = x + ox, Y0 = y0 + oy, Y1 = y1 + oy, MY = my + oy;
       dim.push(<line key="dl" x1={X} y1={Y0} x2={X} y2={Y1} stroke={RED} strokeWidth={1.25} />);
@@ -7365,7 +7686,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       // number OUTBOARD of the line (away from the centred label) so it doesn't clutter by default
       dim.push(<text key="tx" x={X - 6} y={MY} transform={`rotate(${-el.rot} ${X - 6} ${MY})`} textAnchor="end" fontSize={fz} fontFamily="ui-monospace, Menlo, monospace" fill={RED} stroke="#fff" strokeWidth={2.5} paintOrder="stroke" dominantBaseline="middle" fontWeight="600" {...numHandlers}>{txt}</text>);
     } else { // short side is horizontal (w)
-      const y = tl.y + h * 0.18, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
+      const y = tl.y + h * posF, x0 = tl.x, x1 = tl.x + w, mx = (x0 + x1) / 2;
       if (moved) dim.push(<line key="ld" x1={mx} y1={y} x2={mx + ox} y2={y + oy} stroke={RED} strokeWidth={0.75} strokeDasharray="3 3" opacity={0.55} />);
       const Y = y + oy, X0 = x0 + ox, X1 = x1 + ox, MX = mx + ox;
       dim.push(<line key="dl" x1={X0} y1={Y} x2={X1} y2={Y} stroke={RED} strokeWidth={1.25} />);

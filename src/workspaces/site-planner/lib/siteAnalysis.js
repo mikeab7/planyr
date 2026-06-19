@@ -39,6 +39,7 @@ const DAY = 24 * 3600 * 1000;
 export const ANALYSIS_SOURCES = [
   {
     id: "flood", category: "Floodplain", label: "FEMA flood zones", kind: "polygon",
+    mapLayer: "fema", // overlay id in lib/layers.js (B190 "show on map")
     // NFHL layer 28 = Flood Hazard Zones (S_Fld_Haz_Ar) — the canonical queryable SFHA
     // polygons; the app already uses this MapServer for the flood overlay.
     url: "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer",
@@ -53,42 +54,57 @@ export const ANALYSIS_SOURCES = [
   },
   {
     id: "wetlands", category: "Wetlands", label: "USFWS NWI wetlands", kind: "polygon",
+    mapLayer: "wetlands",
     // NWI staging split layers (B135): 1 = CONUS East, 2 = CONUS West (Texas is West).
-    // Query both. NOT marked verified — the staging host's /query reliability is
-    // unconfirmed (B133/B135), so an empty answer stays honest "unknown", never a
-    // fabricated "no wetlands" on a real site.
+    // These are JOINED layers (Wetlands ⋈ NWI_Wetland_Codes), so the server reports every
+    // field TABLE-QUALIFIED (e.g. "Wetlands_CONUS_West.WETLAND_TYPE"). Asking for the bare
+    // names made ArcGIS reject the query with HTTP 400 "Failed to execute query." (B189) —
+    // and the qualifier differs per layer (East vs West), so we request outFields:"*" and
+    // strip the table prefix in normalizeAttrs(). Now VERIFIED: the /query executes and
+    // returns real features (58 polygons over Sheldon Lake, confirmed live 2026-06-19), so
+    // an empty result is a trustworthy "none found", not a fabricated all-clear.
     url: "https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer",
-    layers: [1, 2],
+    layers: [1, 2], outFields: "*",
     fields: { type: "WETLAND_TYPE", attr: "ATTRIBUTE", acres: "ACRES" },
-    ttl: 7 * DAY, verified: false,
+    ttl: 7 * DAY, verified: true,
     sourceName: "USFWS National Wetlands Inventory",
+    absentLabel: "No NWI-mapped wetlands on the site (screening only — not a delineation)",
     caveat: "NWI is a desktop screen — NOT a jurisdictional delineation. A consultant delineation + USACE verification is required for any real determination.",
     summarize: (rows) => wetlandSummary(rows),
     detail: (rows) => wetlandDetail(rows),
   },
   {
     id: "oilgas", category: "Oil & gas wells", label: "TxRRC well surface locations", kind: "polygon",
-    // Texas Railroad Commission wells, mirrored on the Harris County GIS host the app
-    // already uses. Not verified (sublayer/coverage unconfirmed) → empty = unknown.
+    mapLayer: "txrrc_wells",
+    // Texas Railroad Commission surface wells, mirrored on the Harris County GIS host the
+    // app already uses. The registry asked for LEASE_NAME, which this layer does NOT have
+    // (its fields are SYMNUM/API/RELIAB/SURFACE_ID/WELLID/…), so every query 400'd (B189).
+    // Fixed to real fields; VERIFIED — empty = no wells on the site, not "unknown".
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer",
     layer: 0,
-    fields: { status: "SYMNUM", api: "API", lease: "LEASE_NAME" },
-    ttl: 30 * DAY, verified: false, countMode: true,
+    fields: { status: "SYMNUM", api: "API", id: "WELLID" },
+    ttl: 30 * DAY, verified: true, countMode: true,
     sourceName: "Texas Railroad Commission (via Harris County GIS)",
+    absentLabel: "No mapped oil & gas wells on the site",
     caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). An RRC records search — possibly a survey — is the real check.",
     summarize: (rows) => `${rows.length} well${rows.length === 1 ? "" : "s"} on or adjacent to the site`,
-    detail: (rows) => rows.slice(0, 8).map((r) => [r.LEASE_NAME, r.API].filter(Boolean).join(" · ")).filter(Boolean),
+    detail: (rows) => uniq(rows.map((r) => (r.API ? "API " + r.API : ""))).slice(0, 8),
   },
   {
     id: "pipelines", category: "Pipelines", label: "TxRRC T-4 pipelines", kind: "polygon",
+    mapLayer: "txrrc_pipe",
+    // The registry asked for OPERATOR/COMMODITY, which don't exist on this layer (real
+    // fields: OPER_NM, CMDTY_DESC, DIAMETER), so every query 400'd "Failed to execute
+    // query." (B189). Fixed + VERIFIED (779 segments over the Ship Channel, live 2026-06-19).
     url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Pipelines/MapServer",
     layer: 0,
-    fields: { operator: "OPERATOR", commodity: "COMMODITY", diameter: "DIAMETER" },
-    ttl: 30 * DAY, verified: false,
+    fields: { operator: "OPER_NM", commodity: "CMDTY_DESC", diameter: "DIAMETER" },
+    ttl: 30 * DAY, verified: true,
     sourceName: "Texas Railroad Commission (via Harris County GIS)",
+    absentLabel: "No mapped TxRRC pipelines crossing the site",
     caveat: "RRC T-4 permit routes are SCHEMATIC, not surveyed alignments — and public pipeline data is deliberately low-resolution. Trigger 811 / one-call + operator outreach; never treat as a precise location.",
     summarize: (rows) => pipelineSummary(rows),
-    detail: (rows) => rows.slice(0, 6).map((r) => [r.OPERATOR, r.COMMODITY].filter(Boolean).join(" · ")).filter(Boolean),
+    detail: (rows) => uniq(rows.map((r) => [r.OPER_NM, r.CMDTY_DESC].filter(Boolean).join(" · "))).slice(0, 6),
   },
   {
     // Environmental contamination — TCEQ LPST + EPA. No confirmed CORS-clean REST
@@ -165,7 +181,11 @@ export function ringsSignature(rings) {
 // Build the ArcGIS /query params: the active parcels as a single multipolygon,
 // intersect test, attributes only (no geometry — we only need presence + fields).
 export function buildAnalysisParams(source, rings) {
-  const outFields = Object.values(source.fields || {}).filter(Boolean).join(",") || "*";
+  // `outFields:"*"` is required for JOINED layers whose field names are table-qualified
+  // and differ per sublayer (NWI East/West) — see the wetlands source. Otherwise we ask
+  // for just the fields we summarize (smaller response). A bad/renamed field name is what
+  // 400'd three sources (B189), so this stays driven off the verified registry.
+  const outFields = source.outFields || Object.values(source.fields || {}).filter(Boolean).join(",") || "*";
   return {
     f: "json",
     where: "1=1",
@@ -183,6 +203,20 @@ export function buildQueryUrl(base, layer, params) {
   const u = new URL(trimUrl(base) + (layer != null ? "/" + layer : "") + "/query");
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
   return u.toString();
+}
+
+// ArcGIS JOINED / related layers prefix each field with its source table
+// ("Wetlands_CONUS_West.WETLAND_TYPE"). Strip that qualifier so the summarizers can read
+// plain names (`r.WETLAND_TYPE`); on a collision keep the first non-empty value. A field
+// name never contains a dot otherwise, so this is a no-op for unjoined layers. Pure.
+export function normalizeAttrs(attrs) {
+  if (!attrs) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    const short = k.includes(".") ? k.slice(k.lastIndexOf(".") + 1) : k;
+    if (!(short in out) || out[short] == null || out[short] === "") out[short] = v;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +252,7 @@ function wetlandDetail(rows) {
 }
 
 export function pipelineSummary(rows) {
-  const ops = uniq(rows.map((r) => r.OPERATOR));
+  const ops = uniq(rows.map((r) => r.OPER_NM));
   const n = rows.length;
   const head = `${n} pipeline segment${n === 1 ? "" : "s"}`;
   return ops.length ? `${head} — ${ops.slice(0, 3).join(", ")}${ops.length > 3 ? "…" : ""}` : head;
@@ -237,9 +271,21 @@ export function classifyStatus(attrs, { error, verified }) {
 // ---------------------------------------------------------------------------
 async function defaultFetchJson(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
+  if (!res.ok) {
+    const e = new Error(`Server returned HTTP ${res.status}.`);
+    e.diag = { httpStatus: res.status, url };
+    throw e;
+  }
   const j = await res.json();
-  if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
+  if (j.error) {
+    // ArcGIS returns HTTP 200 with a JSON error body (e.g. code 400 "Failed to execute
+    // query." for a bad field name — the B189 bug). Carry the code + url on the Error so
+    // the failure is DIAGNOSABLE, not an opaque generic string.
+    const code = j.error.code != null ? ` (code ${j.error.code})` : "";
+    const e = new Error((j.error.message || "ArcGIS query error.") + code);
+    e.diag = { arcgisCode: j.error.code, details: j.error.details, url };
+    throw e;
+  }
   return j;
 }
 
@@ -249,12 +295,26 @@ function humanize(e) {
   return m || "Request failed.";
 }
 
+// Log the REAL failure (status / url / ArcGIS code) so an opaque "Failed to execute
+// query." is debuggable from the console; the UI still shows a clean message. Only fires
+// for real endpoint errors (a `diag` was attached) — test fakes throw plain Errors.
+function logQueryFailure(sourceId, err) {
+  const diag = err && err.diag;
+  if (!diag || typeof console === "undefined" || !console.warn) return;
+  console.warn(
+    `[siteAnalysis] "${sourceId}" query failed: ${err.message}` +
+    (diag.httpStatus ? `\n  http: ${diag.httpStatus}` : "") +
+    (diag.arcgisCode != null ? `\n  arcgis code: ${diag.arcgisCode}` : "") +
+    (diag.url ? `\n  url: ${diag.url}` : "")
+  );
+}
+
 function pendingFinding(source) {
   return {
     id: source.id, category: source.category, label: source.label,
     status: source.derived ? "info" : "pending", summary: null, detail: [], rows: null,
     sourceName: source.sourceName, ageMs: null, ts: null, error: null,
-    caveat: source.caveat, verified: false,
+    caveat: source.caveat, verified: false, mapLayer: source.mapLayer || null,
   };
 }
 
@@ -271,12 +331,13 @@ export function analyzeSource(source, rings, opts = {}) {
     const all = [];
     for (const L of layers) {
       const j = await fetchJson(buildQueryUrl(source.url, L, buildAnalysisParams(source, rings)));
-      for (const f of j.features || []) all.push(f.attributes || {});
+      for (const f of j.features || []) all.push(normalizeAttrs(f.attributes));
     }
     return all;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: source.ttl || 0 });
   return fresh.then((r) => {
+    if (r.error) logQueryFailure(source.id, r.error);
     const attrs = r.error ? null : (r.data || []);
     const error = r.error ? humanize(r.error) : null;
     const status = classifyStatus(attrs, { error, verified: source.verified });
@@ -287,7 +348,7 @@ export function analyzeSource(source, rings, opts = {}) {
       detail: status === "present" && source.detail ? source.detail(attrs) : [],
       rows: null,
       sourceName: source.sourceName, ageMs: r.ageMs ?? null, ts: r.ts ?? null,
-      error, caveat: source.caveat, verified: !!source.verified,
+      error, caveat: source.caveat, verified: !!source.verified, mapLayer: source.mapLayer || null,
     };
   });
 }
