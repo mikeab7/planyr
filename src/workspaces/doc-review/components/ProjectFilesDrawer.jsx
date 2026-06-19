@@ -15,7 +15,7 @@
  * the auto-filing index is stubbed behind the index-provider interface.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, DISCIPLINES } from "../lib/reviewStore.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
@@ -39,6 +39,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const [dropTarget, setDropTarget] = useState(false);
   const [busy, setBusy] = useState(false);
   const [placePlan, setPlacePlan] = useState(null); // { fileId, plan } — the cascade result to show
+  const [refileSel, setRefileSel] = useState({});   // fileId -> { projectId, discipline } for the one-click confirm
 
   const reqRef = useRef(0); // in-flight token (B44)
   const refresh = async () => {
@@ -78,6 +79,17 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
   };
   const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file and its stored PDF?")) return; await deleteReview(id); refresh(); };
+
+  // One-click confirm out of the "needs filing" holding area: assign a project +
+  // discipline to an unfiled file. Never auto-guesses (a misfiled drawing is worse than
+  // an unfiled one) — the user confirms each. (B189)
+  const doRefile = async (f) => {
+    const sel = refileSel[f.id] || {};
+    if (!sel.projectId) return;
+    const res = await refileReview(f.id, { projectId: sel.projectId, project: projName(sel.projectId), discipline: sel.discipline || "Other" });
+    if (res.ok) { setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; }); refresh(); }
+    else window.alert("Couldn't file: " + (res.error || "unknown error"));
+  };
 
   // NEW-3: run the placement cascade against the file's captured facts. Backend isn't
   // wired yet, so the facts are empty and the cascade honestly lands on manual
@@ -164,6 +176,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                             style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "3px 7px" }}>Place on map</button>}
                           <button onClick={(e) => del(e, f.id)} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
                         </div>
+                        {f.unfiled && <RefileRow projects={projects} value={refileSel[f.id]} onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />}
                         {showPlan && <PlacePlan plan={placePlan.plan} onGo={() => { onPlaceOnMap?.(reviews.find((x) => x.id === f.id) || f, placePlan.plan); setPlacePlan(null); onClose?.(); }} onDismiss={() => setPlacePlan(null)} />}
                       </div>
                     );
@@ -175,7 +188,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
               {unfiled.length > 0 && view !== "needs-filing" && (
                 <div style={{ marginTop: 8, padding: "8px", borderRadius: 8, border: `1px dashed #d6a64a`, background: "#fffbeb" }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>⚠ Needs filing · {unfiled.length}</div>
-                  <div style={{ fontSize: 10.5, color: "#92400e", lineHeight: 1.4 }}>Low-confidence / no-match files wait here for one-click confirm. Switch to the “Needs filing” view to triage.</div>
+                  <div style={{ fontSize: 10.5, color: "#92400e", lineHeight: 1.4 }}>Low-confidence / no-match files. Pick a project + discipline on each to file it — open the “Needs filing” view to triage them together.</div>
                 </div>
               )}
             </div>
@@ -186,6 +199,28 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
           Folders are saved views — queries over a tagged index. Files stay attached regardless of project status.
         </div>
       </div>
+    </div>
+  );
+}
+
+/* One-click confirm for an unfiled file (B189): pick a project + discipline and file it.
+ * Inline on every unfiled row so the "needs filing" holding area is actionable, not just
+ * a label. Never auto-guesses — a misfiled drawing is worse than an unfiled one. */
+function RefileRow({ projects, value = {}, onChange, onFile }) {
+  const ready = !!value.projectId;
+  const ctl = { fontSize: 10.5, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 5, padding: "2px 4px", color: PAL.ink, background: "#fff" };
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${PAL.line}` }}>
+      <span style={{ fontSize: 10, color: "#92400e", fontWeight: 700, flex: "none" }}>File to:</span>
+      <select value={value.projectId || ""} onChange={(e) => onChange({ ...value, projectId: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 0 }}>
+        <option value="">Project…</option>
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <select value={value.discipline || "Civil"} onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: "none" }}>
+        {DISCIPLINES.map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <button onClick={onFile} disabled={!ready} title={ready ? "File this document" : "Pick a project first"}
+        style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: ready ? "pointer" : "default", borderRadius: 6, border: `1px solid ${ready ? "#15803d" : PAL.line}`, background: ready ? "#15803d" : "#eee", color: ready ? "#fff" : PAL.muted, padding: "2px 9px" }}>File</button>
     </div>
   );
 }
