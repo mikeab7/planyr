@@ -67,7 +67,7 @@ export const layoutLabels = (items, opts = {}) => {
       const w0 = widthOf(lines, it.charW), h0 = lines.length * it.lh;
       const w = ca * w0 + sa * h0, h = sa * w0 + ca * h0; // rotated on-screen footprint
       // Fits inside the shape? Otherwise pull it out, centred above the shape, with a leader —
-      // UNLESS the label opts out of leadering (B190: a trailer strip sized to its own area), in
+      // UNLESS the label opts out of leadering (B195: a trailer strip sized to its own area), in
       // which case a label too big to fit overflows IN PLACE (centred on the shape, no leader);
       // we still prefer a smaller line count that fits inside before accepting that overflow.
       const inside = w <= halfW * 2 && h <= halfH * 2;

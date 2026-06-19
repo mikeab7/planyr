@@ -112,7 +112,7 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(rotated).toMatchObject({ x: 0, y: 0 });
   });
 
-  it("B190: a noLeader label that can't fit overflows IN PLACE instead of leadering out", () => {
+  it("B195: a noLeader label that can't fit overflows IN PLACE instead of leadering out", () => {
     // A small shape (halfW/halfH = 8px) with a label too wide to fit. A normal label is pulled
     // outside with a leader; a `noLeader` label (a trailer strip sized to its own area) instead
     // stays centred on the shape and overflows — controlled overflow rather than floating away.
@@ -124,7 +124,7 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(ovf).toMatchObject({ x: 50, y: 50 });       // overflows centred in place
   });
 
-  it("B190: a noLeader label drops a line to fit inside before it overflows", () => {
+  it("B195: a noLeader label drops a line to fit inside before it overflows", () => {
     // Tall enough for 1 line but not 2 (halfH small), wide enough that width never binds. The
     // engine drops the count line and shows the 1-line label INSIDE rather than overflowing.
     const p = layoutLabels([
