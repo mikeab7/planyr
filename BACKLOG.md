@@ -22,6 +22,24 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B184 — Site Analysis constraint queries failing (UNKNOWN / "Failed to execute query") `[Site Planner / Site Analysis]` (bug)  *(arrived as "NEW-1"; minted **B184** — highest B# across both files is B183, so this is the real next free ID)*
+`[ ]` **Repro (owner-reported 2026-06-19):** open Site Analysis on the active parcel (e.g. the 29.25 ac parcel). Floodplain resolves correctly (Zone X), but **Wetlands** (USFWS NWI) and **Pipelines** (TxRRC via Harris County GIS) both return "Failed to execute query." and display as **UNKNOWN**. Expected: each category executes and resolves to **PRESENT / NOT PRESENT** with its one key attribute; UNKNOWN+error is the correct fallback ONLY when a source is genuinely unreachable — never the steady state for a source that should work.
+- **Root cause is per-source (verified live against a known Katy/Sheldon-Lake parcel before patching — bug report's "verify-don't-assume"):**
+  - **Wetlands** — NWI split layers 1/2 are **joined** layers (`Wetlands ⋈ NWI_Wetland_Codes`), so the server reports every field **table-qualified** (`Wetlands_CONUS_West.WETLAND_TYPE`). Requesting the bare names (`WETLAND_TYPE,…`) → ArcGIS **HTTP 400 "Failed to execute query."** And the qualifier differs per layer (East vs West), so the fix is `outFields:"*"` + strip the table prefix in the connector.
+  - **Pipelines** — registry queried `OPERATOR`/`COMMODITY`, which **don't exist** on this layer (real fields: `OPER_NM`, `CMDTY_DESC`, `DIAMETER`) → HTTP 400.
+  - **Oil & gas wells (the below-the-fold third source the bug report told us to look for)** — registry queried `LEASE_NAME`, which **doesn't exist** on the Wells layer (real: `SYMNUM`/`API`/`WELLID`/…) → HTTP 400. So **three** categories were silently 400-ing, not two.
+- **Also:** flip the three fixed sources `verified:true` (an empty answer from a now-working query is a trustworthy "none found", so they resolve PRESENT/NOT PRESENT instead of conservative UNKNOWN — matches the bug report's "expected"); and **capture the real failure** (HTTP status + request URL + ArcGIS code) into a console log so an opaque "Failed to execute query." is diagnosable, never silent.
+> **Dedup:** this is the per-source debug of **B147**'s "🔲 Remaining (1) — verify + flip Wetlands / Pipelines / Oil&gas to confident absent-capable once their /query + correct sublayers are browser-confirmed." Distinct from **B133/B135** (those fixed the wetlands *map-overlay image* — `/export`; this fixes the Site Analysis `/query` connector — a different request path on the same host). Silent-error principle (HIGH severity): a wrong "all clear" on a live deal is liability, so a genuine error still resolves UNKNOWN, never "none."
+
+### B185 — Click a constraint card to toggle its layer on the map `[Site Planner / Site Analysis]` (feature)  *(arrived as "NEW-2"; minted **B185** — next free ID after B184)*
+`[ ]` Clicking a constraint category's **"Show on map"** control toggles the corresponding GIS layer on the planner's map so the user sees it spatially against the active parcel.
+- Constraint layers are **editable overlays above the immutable backdrop** — never touch the backdrop (they ride the existing shared overlay system, so they sit on the GIS overlay pane over the aerial, beneath the SVG markup).
+- **Toggle:** the card shows whether its layer is on; click again hides it; multiple layers can be on at once (independent toggles).
+- **On enable, frame to the active-parcel extent** (pan/zoom to parcel + margin) so the constraint isn't offscreen (FEMA/NWI are scale-gated and only draw zoomed in).
+- **UNKNOWN / failed / no-source categories have nothing to draw** → no blank toggle; the card surfaces the source error instead (only PRESENT/NOT-PRESENT categories with a mapped layer get the control).
+- **Explicit-click only** (same pattern as jurisdiction identify) — never auto-load all layers.
+> **Dedup:** reuses the **shared overlay system** (`lib/layers.js` `ALL_LAYERS` + `syncOverlayLayers`, the app-shared `overlays`/`setOverlays` state) — NOT a parallel renderer; the categories map 1:1 to layers that already exist (`flood→fema`, `wetlands→wetlands`, `pipelines→txrrc_pipe`, `oilgas→txrrc_wells`), each with its own agency symbology so overlapping layers stay legible. Distinct from **LayerPanel** (the full layer checklist on the Layers control) — this is a per-finding shortcut into the same state. Builds directly on **B184** (a category only offers the toggle once its query resolves).
+
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
      B180–B183 here; provisionally B176–B179, but concurrent `main` (#159) took B176 (shipped)
      + B177–B179 for the tax tranche, so these renumbered to the real next free IDs after
