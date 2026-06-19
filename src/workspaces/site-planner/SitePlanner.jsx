@@ -54,6 +54,10 @@ const GEO_BASEMAP = {
   maxNative: 19,
   attr: "Imagery &copy; Esri, Maxar",
 };
+// How far the basemap container overhangs the viewport on each side (px). The
+// extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
+// the basemap reveals already-loaded imagery instead of the backdrop (B65).
+const GEO_OVERSCAN = 320;
 const M_PER_FT = 0.3048;
 const EARTH_M = 40075016.686; // Web-Mercator world circumference (m) at the equator
 // Leaflet (fractional) zoom whose pixels-per-foot equals the planner's `ppf` at
@@ -4825,8 +4829,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
               brief tile gap during a zoom-level change reads as a subtle blink, not
               a bright (near-white) flash against the imagery (B65). With the aerial
-              OFF this stays PAL.paper so the planner background matches the SVG. */}
-          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: basemapOn ? "#3f3f3f" : PAL.paper, pointerEvents: "none" }} />}
+              OFF this stays PAL.paper so the planner background matches the SVG.
+              Structure (B65 follow-up): a STATIC clip box (inset:0, never moves, dark
+              bg) holds an OVERSIZED inner map div (inset:-GEO_OVERSCAN). During a
+              pan/zoom the inner div is CSS-transformed; because it overhangs the
+              viewport by GEO_OVERSCAN with extra tiles loaded (keepBuffer), the
+              reveal shows real imagery, and anything beyond it shows the static
+              dark backdrop — never the cream page behind the canvas. */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
+              <div ref={geoWrapRef} style={{ position: "absolute", inset: -GEO_OVERSCAN, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            </div>
+          )}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
