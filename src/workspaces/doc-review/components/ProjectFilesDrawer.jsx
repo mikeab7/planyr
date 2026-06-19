@@ -15,7 +15,7 @@
  * the auto-filing index is stubbed behind the index-provider interface.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview, DISCIPLINES } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview } from "../lib/reviewStore.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,

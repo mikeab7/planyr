@@ -17,6 +17,7 @@ import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
+import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
@@ -1017,6 +1018,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
+  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -4788,6 +4790,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
+      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
+      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+        🗂 Files
+      </button>
     </span>
   );
 
@@ -4860,6 +4867,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         saveSlot={plannerSaveSlot}
         authControl={authControl}
         toolbarContent={plannerToolbar}
+      />
+
+      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
+          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+      <ProjectFilesDrawer
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        signedIn={isCloudActive()}
+        projectId={groupId}
+        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 88, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
