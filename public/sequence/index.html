@@ -6803,36 +6803,48 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                 {(() => { return null; })()}
                 {isMilestone ? (<>
                   {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; return <span style={{position:"absolute",left:bx,transform:"translateX(-50%)",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
-                  <div style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:task.rowColor||h.ganttBar,border:task.rowColor?"1px solid rgba(0,0,0,0.25)":"none",zIndex:5}} />
+                  {(() => {
+                    // Milestone diamond — same monochrome language as task bars (B195): the task
+                    // gray (or a rowColor override), filled when complete, hollow outline otherwise.
+                    const hue = task.rowColor || "#94a3b8";
+                    const done = displayHealth === "green" || (task.percentComplete||0) >= 100;
+                    return <div style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:done?hue:"#fff",border:`1.25px solid ${hue}`,boxSizing:"border-box",zIndex:5}} />;
+                  })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
                     return (<>
                       {L && <span style={{position:"absolute",left:bx-8,transform:"translateX(-100%)",top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{L}</span>}
                       {R && <span style={{position:"absolute",left:bx+8,top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{R}</span>}
                     </>); })()}
-                </>) : isSummary ? (<>
-                  {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; const ctr=settings?.barLabels?.nameAlign==="center"; return <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
-                  {(() => {
-                    // Graduated roll-up bracket: slab weight, cap size and graphite shade all
-                    // step down by depth, so a top section reads heavier than a sub-sub-group
-                    // and leaves never out-weigh their parent. Structure stays neutral graphite
-                    // so status colors are reserved for actual task bars. rowColor override wins.
-                    const d = Math.min(task.level||0, 3);
-                    const SLAB = [0.31,0.27,0.23,0.195][d]*ROW_H;
-                    const CAP  = [0.14,0.12,0.10,0.085][d]*ROW_H;
-                    const col  = task.rowColor || ["#1f2937","#3f4a5a","#5b6878","#7d8a9a"][d];
-                    const capW = Math.max(4, CAP*1.1);
-                    const top  = ROW_H - (SLAB+CAP) - 1;
-                    return (
-                    <div style={{position:"absolute",left:bx,width:bw,top,height:SLAB+CAP,zIndex:5}}>
-                      <div style={{position:"absolute",left:0,right:0,top:0,height:SLAB,background:col,border:task.rowColor?"1px solid rgba(0,0,0,0.2)":"none",boxSizing:"border-box",borderRadius:1}} />
-                      <div style={{position:"absolute",left:0,top:0,height:SLAB,width:`${Math.min(100,progressMap[task.id]||0)}%`,background:"rgba(0,0,0,0.18)"}} />
-                      <div style={{position:"absolute",left:0,top:SLAB,width:0,height:0,borderTop:`${CAP}px solid ${col}`,borderRight:`${capW}px solid transparent`}} />
-                      <div style={{position:"absolute",right:0,top:SLAB,width:0,height:0,borderTop:`${CAP}px solid ${col}`,borderLeft:`${capW}px solid transparent`}} />
-                    </div>
-                    );
-                  })()}
-                </>) : (<>
+                </>) : isSummary ? (
+                  (() => {
+                    // Depth-stepped BRACKET (B194): a thin navy span with straight-down legs at
+                    // each end (no triangles). Three cues step together, top-of-tree strongest —
+                    // darkness (navy → lighter navy tint), span thickness, and leg length. Beyond
+                    // ~4 levels the ramp stops deepening (the table's indented name carries depth
+                    // from there). Neutral navy only: status hue is reserved for task bars (B195).
+                    // An explicit per-task rowColor override still wins.
+                    const d    = Math.min(task.level||0, 3);
+                    const NAVY = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
+                    const col  = task.rowColor || NAVY;
+                    const SPAN = [7,5,4,4][d];                    // horizontal span thickness, px
+                    const LEG  = [0.30,0.22,0.16,0.13][d]*ROW_H;  // downward leg length, steps by depth
+                    const legW = 1.5;                             // vertical leg stroke width
+                    const botY = ROW_H - 2;                       // baseline shared with leaf bars
+                    const spanTop = botY - LEG - SPAN;            // span sits above its legs
+                    const lg  = [{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][d];
+                    const ctr = settings?.barLabels?.nameAlign === "center";
+                    return (<>
+                      {/* Label centered over the span in the bar's own level-navy (no fill to print white onto) */}
+                      <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:Math.max(0,spanTop-10),fontSize:lg.fontSize,color:col,fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>
+                      <div style={{position:"absolute",left:bx,width:bw,top:spanTop,height:SPAN+LEG,zIndex:5,pointerEvents:"none"}}>
+                        <div style={{position:"absolute",left:0,right:0,top:0,height:SPAN,background:col,borderRadius:1}} />
+                        <div style={{position:"absolute",left:0,top:0,width:legW,height:SPAN+LEG,background:col}} />
+                        <div style={{position:"absolute",right:0,top:0,width:legW,height:SPAN+LEG,background:col}} />
+                      </div>
+                    </>);
+                  })()
+                ) : (<>
                   {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; const ctr=settings?.barLabels?.nameAlign==="center"; return <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
@@ -6843,20 +6855,28 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                   {/* Outline/stripe styles are reserved for status semantics (unscheduled / paused); an
                       explicit per-task fillColor override switches to a solid bar so the user's choice
                       isn't visually competing with status hatching. */}
-                  {task.rowColor ? (
-                    <div style={{position:"absolute",left:bx,top:ROW_H-LEAF_H-1,height:LEAF_H,width:bw,background:task.rowColor,border:"1px solid rgba(0,0,0,0.2)",boxSizing:"border-box",zIndex:5,overflow:"hidden",display:"flex",alignItems:"stretch",borderRadius:1}}>
-                      <div style={{width:`${task.percentComplete}%`,background:"rgba(0,0,0,0.18)",flexShrink:0}} />
-                    </div>
-                  ) : h.ganttStyle === "outline" ? (
-                    <div style={{position:"absolute",left:bx,top:ROW_H-LEAF_H-1,height:LEAF_H,width:bw,background:"transparent",border:"1.5px dashed #94a3b8",borderRadius:1,zIndex:5}} />
-                  ) : h.ganttStyle === "stripe" ? (
-                    <div style={{position:"absolute",left:bx,top:ROW_H-LEAF_H-1,height:LEAF_H,width:bw,zIndex:5,overflow:"hidden",borderRadius:1,
-                      background:`repeating-linear-gradient(45deg,#9ca3af 0px,#9ca3af 2px,#d1d5db 2px,#d1d5db 6px)`}} />
-                  ) : (
-                    <div style={{position:"absolute",left:bx,top:ROW_H-LEAF_H-1,height:LEAF_H,width:bw,background:h.ganttBar,zIndex:5,overflow:"hidden",display:"flex",alignItems:"stretch",borderRadius:1}}>
-                      <div style={{width:`${task.percentComplete}%`,background:"rgba(0,0,0,0.18)",flexShrink:0}} />
-                    </div>
-                  )}
+                  {(() => {
+                    // B195 — status as a single FILL treatment, not color. Every task bar keeps
+                    // one identity hue (the task gray, or an explicit per-task rowColor override);
+                    // 0→100% complete reads as hollow → partial → solid. The red/paused/overdue
+                    // signal stays in the row background + the table, so status never collides
+                    // with the navy hierarchy of the summary brackets.
+                    const hue = task.rowColor || "#94a3b8";
+                    const pct = displayHealth === "green" ? 100 : Math.max(0, Math.min(100, task.percentComplete||0));
+                    const top = ROW_H - LEAF_H - 1;
+                    const barW = Math.max(bw, 9);   // min-width floor: a 0% bar can't collapse to a sliver
+                    const base = {position:"absolute",left:bx,top,height:LEAF_H,width:barW,zIndex:5,borderRadius:LEAF_H/2,boxSizing:"border-box"};
+                    if (pct >= 100)
+                      return <div style={{...base,background:hue}} />;                                    // Complete → solid
+                    if (pct <= 0)
+                      return <div style={{...base,background:"#fff",border:`1.5px solid ${hue}`}} />;       // Not started → hollow pill
+                    return (                                                                               // In progress → partial fill
+                      <div style={{...base,background:"#fff",border:`1px solid ${hue}`,overflow:"hidden",display:"flex",alignItems:"stretch"}}>
+                        <div style={{width:`${pct}%`,background:hue,flexShrink:0}} />
+                        <div style={{flex:1,background:hue,opacity:0.22}} />
+                      </div>
+                    );
+                  })()}
                 </>)}
 
               </div>
@@ -8083,21 +8103,36 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       if(L) blText+=`<text x="${lx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`;
       if(R) blText+=`<text x="${rx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" font-family="Arial,sans-serif">${escapeHtml(R)}</text>`;
     }
+    // B194/B195 — match the on-screen Gantt: navy depth-stepped brackets for summaries,
+    // a single gray fill treatment (hollow → partial → solid) for task status.
+    const GRAY="#94a3b8";
+    const pct = t.health==="green" ? 100 : Math.max(0, Math.min(100, t.percentComplete||0));
     let barSvg;
     if(isMilestone){
-      barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${color}"/>`;
+      const done = pct>=100;
+      barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else if(isParent){
-      // Graduated roll-up bracket (matches on-screen Gantt): graphite, weight + cap step down by depth.
+      // Depth-stepped BRACKET (B194): a thin navy span + straight-down legs (no triangles);
+      // darkness, span thickness and leg length step together, top-of-tree strongest, to ~4 levels.
       const dd=Math.min(depth,3);
-      const SLAB=[0.31,0.27,0.23,0.195][dd]*ROW_H, CAP=[0.14,0.12,0.10,0.085][dd]*ROW_H, capW=Math.max(3,CAP*1.1);
-      const GRA=["#1f2937","#3f4a5a","#5b6878","#7d8a9a"][dd];
-      const sTop=midY-(SLAB+CAP)/2, sBot=sTop+SLAB;
-      barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SLAB}" rx="1" fill="${GRA}"/>`
-        +`<polygon points="${bx},${sBot} ${bx+capW},${sBot} ${bx},${sBot+CAP}" fill="${GRA}"/>`
-        +`<polygon points="${bx+bw},${sBot} ${bx+bw-capW},${sBot} ${bx+bw},${sBot+CAP}" fill="${GRA}"/>`;
+      const NAVY=["#2B3340","#46506A","#6E7790","#8A93A8"][dd];
+      const SPAN=[4.5,3.5,3,3][dd], LEG=[0.42,0.30,0.22,0.18][dd]*ROW_H, legW=1.1;
+      const sTop=y+ROW_H-2-LEG-SPAN;
+      barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/>`
+        +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
+        +`<rect x="${bx+bw-legW}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`;
     }else{
-      const LH=ROW_H*0.25;
-      barSvg=`<rect x="${bx}" y="${midY-LH/2}" width="${bw}" height="${LH}" rx="2" fill="${color}" opacity="0.9"/>`;
+      const LH=ROW_H*0.30, by=midY-LH/2, bw2=Math.max(bw,5), r=LH/2;
+      if(pct>=100){
+        barSvg=`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}"/>`;                         // Complete → solid
+      }else if(pct<=0){
+        barSvg=`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="#fff" stroke="${GRAY}" stroke-width="1.1"/>`; // Not started → hollow
+      }else{
+        const fw=Math.max(0.5, Math.min(bw2, bw2*pct/100));                                                                  // In progress → partial
+        barSvg=`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="${GRAY}" opacity="0.18"/>`
+          +`<rect x="${bx}" y="${by}" width="${fw}" height="${LH}" rx="${r}" fill="${GRAY}"/>`
+          +`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
+      }
     }
     return `<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>
 ${labelHtml}
