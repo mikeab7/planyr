@@ -54,6 +54,28 @@ doesn't write code. This is a standing rule, not a one-off.
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
 
+## Finish the job — IMPORTANT, standing rule (added 2026-06-19 after a miss)
+**When I ask you to fix a problem, fix it ALL the way through in the same session — do
+not stop at a diagnosis, a band-aid, or part of what I asked and defer the rest.** This
+is a hard rule, born from a real miss: I picked "both: quick fix now, then real fix" and
+the session shipped only the quick fix plus a writeup of the real one. That is exactly
+what NOT to do.
+- **"Fix it" means implement every part of the fix**, including the harder/real one —
+  go through all the relevant code, make the actual change, and verify it (build green +
+  the appropriate self-test/headless check). A diagnosis or a backlog note is **never**
+  a substitute for doing the work.
+- **If I pick a multi-part option (e.g. "do both"), do every part** before you report
+  back. Don't deliver part 1 and describe part 2.
+- **Default to taking it live.** I almost always want the fix merged (that's why "commit"
+  = ship the whole chain incl. merge — see Workflow & deploy). If you genuinely can't
+  merge (hard blocker), say so; otherwise carry it through to merged.
+- **Only stop early for a true blocker** — a hard technical blocker, a destructive/
+  irreversible action needing confirmation, or a genuine either/or product decision only
+  I can make. "This part is bigger/riskier" is NOT a reason to defer it; it's a reason to
+  do it carefully (own branch, verify, then merge), not to hand it back to me.
+- If a fix is genuinely too large to finish in one session, that itself is a blocker to
+  raise explicitly with a plan — not a silent stop after the easy half.
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
