@@ -16,6 +16,10 @@ import { formatAge } from "../lib/gisCache.js";
  *   parcelCount  — number of active parcels screened
  *   PAL          — the planner palette (passed so the panel matches the app chrome)
  *   chip         — the shared chip button style
+ *   isLayerOn    — (layerId) => bool: is the shared GIS overlay currently shown? (B190)
+ *   onToggleLayer— (layerId, wantOn) => void: toggle that overlay on the planner map (B190)
+ *   layerStatus  — shared per-overlay sync status map (id → {state}); for an honest
+ *                  "service not responding" hint when a just-enabled layer fails (B190)
  *   runAnalysis  — injectable for tests (defaults to the real runSiteAnalysis)
  */
 
@@ -27,7 +31,7 @@ const STATUS = {
   pending: { dot: "#8a8473", bg: "#f1efe9", border: "#e0dacb", label: "Not connected", glyph: "○" },
 };
 
-export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, runAnalysis = runSiteAnalysis }) {
+export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, runAnalysis = runSiteAnalysis }) {
   const [state, setState] = useState({ loading: false, findings: null, error: null, empty: !rings || !rings.length, at: null });
   const [open, setOpen] = useState({});
   const reqRef = useRef(0);
@@ -98,16 +102,36 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, run
           const st = STATUS[f.status] || STATUS.unknown;
           const isOpen = open[f.id];
           const hasDetail = (f.detail && f.detail.length) || (f.rows && f.rows.length) || f.caveat || f.sourceName;
+          const toggle = () => hasDetail && setOpen((o) => ({ ...o, [f.id]: !o[f.id] }));
+          // "Show on map" (B190): only for a category whose query RESOLVED (present/absent)
+          // AND that maps to a drawable shared overlay. UNKNOWN / failed / no-source
+          // categories have nothing to draw — no blank toggle; their error stays surfaced.
+          const canMap = !!f.mapLayer && !!onToggleLayer && (f.status === "present" || f.status === "absent");
+          const layerOn = canMap && !!isLayerOn && isLayerOn(f.mapLayer);
+          const mapFailed = layerOn && layerStatus?.[f.mapLayer]?.state === "failed";
           return (
             <div key={f.id} style={{ border: `1px solid ${st.border}`, borderRadius: 8, background: st.bg, overflow: "hidden" }}>
-              <button
-                onClick={() => hasDetail && setOpen((o) => ({ ...o, [f.id]: !o[f.id] }))}
-                style={{ width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: hasDetail ? "pointer" : "default", padding: "8px 10px", fontFamily: "inherit", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <div
+                role={hasDetail ? "button" : undefined} tabIndex={hasDetail ? 0 : undefined}
+                onClick={toggle}
+                onKeyDown={(e) => { if (hasDetail && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(); } }}
+                style={{ width: "100%", textAlign: "left", cursor: hasDetail ? "pointer" : "default", padding: "8px 10px", fontFamily: "inherit", display: "flex", gap: 8, alignItems: "flex-start" }}>
                 <span style={{ color: st.dot, fontSize: 13, lineHeight: 1.3, flex: "none" }}>{st.glyph}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <span style={{ fontWeight: 700, color: ink }}>{f.category}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: st.dot, textTransform: "uppercase", letterSpacing: "0.05em", flex: "none" }}>{st.label}</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "none" }}>
+                      {canMap && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onToggleLayer(f.mapLayer, !layerOn); }}
+                          title={layerOn ? "Hide this layer on the map" : "Show this layer on the map (frames to the site)"}
+                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
+                          {layerOn ? "◉ On map" : "◍ Map"}
+                        </button>
+                      )}
+                      <span style={{ fontSize: 10, fontWeight: 700, color: st.dot, textTransform: "uppercase", letterSpacing: "0.05em" }}>{st.label}</span>
+                    </span>
                   </span>
                   {/* primary line: presence summary, info rows, or honest unknown reason */}
                   {f.rows && f.rows.length ? (
@@ -126,9 +150,10 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, run
                     </span>
                   )}
                   {f.straddle && <span style={{ display: "block", marginTop: 2, color: "#9a3412", fontWeight: 600 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</span>}
+                  {mapFailed && <span style={{ display: "block", marginTop: 3, color: "#b45309", fontSize: 10.5, lineHeight: 1.4 }}>⚠ This layer's map service isn't responding right now — the screen result above still stands; try the map again shortly.</span>}
                 </span>
                 {hasDetail && <span style={{ color: muted, flex: "none", fontSize: 10 }}>{isOpen ? "▾" : "▸"}</span>}
-              </button>
+              </div>
 
               {isOpen && hasDetail && (
                 <div style={{ padding: "0 10px 9px 30px", fontSize: 11, color: ink }}>
@@ -147,7 +172,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, run
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "#1d4ed8" }}>◍ Map</b> on a finding to see that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
       </div>
     </div>
   );

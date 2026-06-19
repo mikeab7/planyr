@@ -22,6 +22,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
+     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
+
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
      B180–B183 here; provisionally B176–B179, but concurrent `main` (#159) took B176 (shipped)
      + B177–B179 for the tax tranche, so these renumbered to the real next free IDs after

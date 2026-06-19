@@ -61,6 +61,13 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V45 — Site Analysis: constraint queries resolve + click-to-show-on-map (B189 / B190) ✅ (self-verified, headless, with live GIS data)
+- **Added** 2026-06-19 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-19 ✅ (headless Chromium on the production build, live USFWS/FEMA/TxRRC endpoints) · **Next check** —
+- **Steps:** Site Planner with a located, active parcel → left rail **⚐ Analysis**. (1) Each constraint category resolves to **Present / None found** (NOT "UNKNOWN / Failed to execute query"). (2) On a resolved card, click **◍ Map** → the matching GIS overlay turns on, the view frames to the parcel, and the button reads **◉ On map**; click again to hide. UNKNOWN/info/no-source categories (e.g. Road authority, Contamination) show **no** Map toggle.
+- **Expect:** Floodplain, Wetlands, Pipelines, Oil & gas wells all execute. Before the fix, Wetlands + Pipelines (+ the below-the-fold Oil & gas) returned "Failed to execute query." → UNKNOWN; now they resolve.
+- **✅ Self-verified 2026-06-19 (`ui-audit/verify-analysis.mjs`, headless, logged-out):** seeded a located site over Sheldon Lake. Result: **Floodplain = PRESENT (Zone AE)**, **Wetlands = PRESENT (Lake, Freshwater Forested/Shrub Wetland)**, **Pipelines = NONE FOUND**, **Oil & gas = NONE FOUND** — zero "Failed to execute query." Clicking Wetlands **◍ Map** flipped to **◉ On map** and added the NWI overlay (`leaflet-image-layer` count 0→1), framed to the parcel (screenshot `ui-audit/screens/analysis-verify.png`). Root causes were per-source field bugs (NWI joined-layer table-qualified fields; TxRRC `OPERATOR`/`COMMODITY` and `LEASE_NAME` don't exist), each confirmed live (HTTP 400 old fields → 200 with real features) before patching.
+- **Note:** self-test runs logged-out; the screen works the same signed-in (it reads the same active-parcel rings). A signed-in click-through is a nice-to-have, not a blocker — the GIS query path is auth-independent.
+
 ### V44 — Jurisdictions overlay: county / city / ETJ / MUD boundary tiles actually paint (B176) ✅ (self-verified headless, fresh session 2026-06-19)
 - **Added** 2026-06-19 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-19 (✅ PASS, headless — fresh session; all four hosts reachable incl. the previously-blocked MUD host) · **Next check** — none (closed)
 - **Steps (on https://planyr.io, logged-out is fine):** Map finder (or planner) → **Layers** panel → **Jurisdictions** group. Toggle each of: **County boundaries**, **City limits**, **City ETJ (Houston region)**, **MUD / water districts**. Zoom into the Katy / Fort Bend area for MUD; zoom to ~county level for County boundaries.

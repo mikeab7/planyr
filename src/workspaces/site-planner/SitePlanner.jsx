@@ -11,7 +11,7 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -1419,6 +1419,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [fitNonce, setFitNonce] = useState(0);
   const requestFit = useCallback(() => setFitNonce((n) => n + 1), []);
   useEffect(() => { if (fitNonce) fit(); }, [fitNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
+     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
+     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
+     Used by the Site Analysis "show on map" toggle (B190). */
+  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
+    const pts = [];
+    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
+    if (pts.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
+    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
+  }, [parcels, size]);
+
+  /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
+     the same app-shared `overlays` state the Layers panel uses (one source of truth) —
+     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
+     geographic context, then frame to the active parcels so it isn't offscreen. */
+  const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
+    if (!layerId) return;
+    setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
+    if (wantOn) { setBasemapOn(true); frameToActiveParcels(); }
+  }, [setOverlays, frameToActiveParcels]);
 
   // Auto-select the single restored parcel so its handles are ready to use.
   useEffect(() => {
@@ -6593,7 +6620,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
                 const acres = act.reduce((s, p) => s + polyArea(p.points), 0) / SQFT_PER_ACRE;
-                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip} />;
+                return <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                  isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} />;
               })()}
             </Section>
           )}
