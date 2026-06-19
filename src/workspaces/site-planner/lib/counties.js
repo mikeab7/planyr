@@ -149,9 +149,10 @@ export const JURISDICTION_LAYERS = {
   fortbend: {
     label: "Fort Bend County",
     layers: {
-      // NOTE: Fort Bend's MUD/WCID/water-district boundaries moved into the global
-      // "Jurisdictions" overlay group (lib/layers.js JURISDICTIONS.jur_mud, B176) so the
-      // MUD toggle is available regardless of which county is in view — not duplicated here.
+      // NOTE: MUD/WCID/water-district boundaries live in the global "Jurisdictions"
+      // overlay group (lib/layers.js JURISDICTIONS.jur_mud, B176) — now a STATEWIDE TCEQ
+      // source (covers Fort Bend + Harris + everywhere), available regardless of which
+      // county is in view. The old Fort-Bend-only layer was removed here to avoid a dupe.
       fb_contours: {
         label: "1-ft contours (drainage)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
