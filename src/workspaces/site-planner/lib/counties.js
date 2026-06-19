@@ -150,7 +150,7 @@ export const JURISDICTION_LAYERS = {
     label: "Fort Bend County",
     layers: {
       // NOTE: Fort Bend's MUD/WCID/water-district boundaries moved into the global
-      // "Jurisdictions" overlay group (lib/layers.js JURISDICTIONS.jur_mud, B167) so the
+      // "Jurisdictions" overlay group (lib/layers.js JURISDICTIONS.jur_mud, B176) so the
       // MUD toggle is available regardless of which county is in view — not duplicated here.
       fb_contours: {
         label: "1-ft contours (drainage)",

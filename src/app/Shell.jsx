@@ -127,7 +127,7 @@ export default function Shell() {
   );
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: CHROME }}>
+    <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
       <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>

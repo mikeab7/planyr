@@ -118,7 +118,7 @@ export const EVIDENCE = {
   },
 };
 
-/* Jurisdiction BOUNDARY overlays (B167) — toggleable district lines for screening:
+/* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
  * county, city limits, city ETJ, and MUD / water districts. County / city / ETJ reuse
  * the SAME verified endpoints the jurisdiction *identify* uses (lib/jurisdiction.js), so
  * a boundary you see is the boundary the identify reports — one source of truth.
@@ -147,7 +147,7 @@ export const JURISDICTIONS = {
   jur_mud: {
     kind: "dynamic", label: "MUD / water districts (Fort Bend)",
     url: "https://gisweb.fortbendcountytx.gov/arcgis/rest/services/General/Water_Districts/MapServer", layers: null, opacity: 0.55,
-    note: "MUD / WCID / drainage-district BOUNDARIES (Fort Bend County GIS) — a taxing / authority boundary, NOT proof that water or sewer is connected to a parcel. Fort Bend coverage today; a Harris / Houston-region MUD source is pending verification (B167). Screening only.",
+    note: "MUD / WCID / drainage-district BOUNDARIES (Fort Bend County GIS) — a taxing / authority boundary, NOT proof that water or sewer is connected to a parcel. Fort Bend coverage today; a Harris / Houston-region MUD source is pending verification (B176). Screening only.",
   },
 };
 

@@ -1,4 +1,4 @@
-/* B167 verification — the "Jurisdictions" overlay group renders in the Layers panel
+/* B176 verification — the "Jurisdictions" overlay group renders in the Layers panel
  * with its four toggles (County / City limits / City ETJ / MUD) and toggling one
  * throws no JS errors. Boots the built app (vite preview) at the map finder, where
  * LayerPanel is shown directly. GIS tile RENDERING is verified on planyr.io (the

@@ -54,6 +54,10 @@ const GEO_BASEMAP = {
   maxNative: 19,
   attr: "Imagery &copy; Esri, Maxar",
 };
+// How far the basemap container overhangs the viewport on each side (px). The
+// extra margin (with keepBuffer tiles loaded) means a pan/zoom that CSS-transforms
+// the basemap reveals already-loaded imagery instead of the backdrop (B65).
+const GEO_OVERSCAN = 320;
 const M_PER_FT = 0.3048;
 const EARTH_M = 40075016.686; // Web-Mercator world circumference (m) at the equator
 // Leaflet (fractional) zoom whose pixels-per-foot equals the planner's `ppf` at
@@ -1008,6 +1012,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoMapRef = useRef(null);
   const geoBaseRef = useRef(null);
   const overlayRefs = useRef({});
+  const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
+  const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
+  const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -1031,7 +1038,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       zoomSnap: 0, fadeAnimation: false, zoomAnimation: false, inertia: false,
     }).setView([origin.lat, origin.lon], 17);
     geoMapRef.current = map;
-    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; };
+    geoCommitRef.current = null; // fresh map → no committed view yet (forces a snap on first sync)
+    return () => { try { map.remove(); } catch (_) {} geoMapRef.current = null; geoBaseRef.current = null; overlayRefs.current = {}; geoCommitRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
@@ -1040,7 +1048,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const map = geoMapRef.current;
     if (!map) return;
     if (basemapOn && !geoBaseRef.current) {
-      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
+      // detectRetina: on a HiDPI display (devicePixelRatio > 1) Leaflet requests
+      // one-zoom-higher native tiles and renders them at half size (downsampled =
+      // sharp) instead of upscaling 1x tiles (= blurry). This also sharpens this
+      // map's *fractional* zoom (zoomSnap:0, driven by ppfToZoom) since it prefers
+      // downsampling a higher-zoom tile over upscaling a lower one. It only changes
+      // which tiles are fetched + their display size — never the map's CRS zoom —
+      // so the SVG↔aerial scale lock is untouched. (B170)
+      const t = withTileRetry(L.tileLayer(GEO_BASEMAP.tiles, { maxNativeZoom: GEO_BASEMAP.maxNative, maxZoom: 24, detectRetina: true, attribution: GEO_BASEMAP.attr, keepBuffer: 4 }));
       t.setZIndex(1); t.addTo(map); geoBaseRef.current = t;
     } else if (!basemapOn && geoBaseRef.current) {
       try { map.removeLayer(geoBaseRef.current); } catch (_) {}
@@ -1056,16 +1071,86 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* drive the basemap zoom/center from the planner view so it stays locked to
      the SVG. ppf→zoom keeps the scale identical; the canvas-center feet point
-     projects to the map center. */
+     projects to the map center.
+
+     Anti-flash (B65): a real `map.setView` fires Leaflet's `viewreset`, whose
+     GridLayer handler wipes & reloads ALL tiles — so calling it on every wheel
+     step blanks the aerial for a frame each time (the white/dim flash). Two
+     defenses:
+     1. During a live gesture we hold Leaflet at a committed view and just
+        CSS-`transform` the whole map container (tiles AND the shared overlay
+        layers together, so they stay mutually aligned) to track the gesture with
+        the pixels already on screen — no reload, no flash.
+     2. When we DO re-render crisp (`commit`), we first clone the current tiles
+        into a frozen "ghost" overlay that stays on top until the fresh tiles
+        finish loading, THEN remove it — so the `setView` wipe never shows the
+        backdrop. This kills the "whole screen flashes to black on zoom-out"
+        (the wipe used to blank even already-loaded tiles).
+     The crisp re-render is debounced (gesture settles) and also forced once the
+     accumulated zoom delta passes ~0.75 levels, so the transform never scales the
+     aerial into a blurry mess — but because the commit is ghost-buffered, that
+     mid-gesture re-base no longer flashes. */
   useEffect(() => {
     const map = geoMapRef.current;
-    if (!map || !origin) return;
+    const wrap = geoWrapRef.current;
+    if (!map || !wrap || !origin) return;
     const fx = (size.w / 2 - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     const z = ppfToZoom(view.ppf, center[0]); // scale at the panned-to latitude
-    try { map.setView(center, z, { animate: false }); } catch (_) {}
-  }, [view, size, origin]);
+
+    // Snapshot the current tiles as a static overlay (cloned WITH the live
+    // transform, so it sits exactly where the basemap looks right now) and keep
+    // it until the post-setView reload reports `load` — then drop it. The new
+    // crisp tiles render underneath; swapping is invisible.
+    const spawnGhost = () => {
+      const clip = wrap.parentElement;
+      if (!clip || !basemapOn) return;
+      try {
+        if (geoGhostRef.current) { geoGhostRef.current.remove(); geoGhostRef.current = null; }
+        const g = wrap.cloneNode(true);
+        g.style.pointerEvents = "none";
+        clip.appendChild(g);
+        geoGhostRef.current = g;
+        const base = geoBaseRef.current;
+        const drop = () => { try { g.remove(); } catch (_) {} if (geoGhostRef.current === g) geoGhostRef.current = null; };
+        if (base) base.once("load", drop);
+        setTimeout(drop, 1400); // fallback: never leave a stale ghost up
+      } catch (_) { /* snapshot is best-effort; commit still proceeds */ }
+    };
+
+    const commit = (c, zoom, ghost) => {
+      if (ghost) spawnGhost();
+      wrap.style.transform = "";
+      try { map.setView(c, zoom, { animate: false }); } catch (_) {}
+      geoCommitRef.current = { center: c, zoom, w: size.w, h: size.h };
+    };
+
+    const prev = geoCommitRef.current;
+    const sizeChanged = !prev || prev.w !== size.w || prev.h !== size.h;
+    // First paint / resize → plain commit (no prior view worth ghosting).
+    if (sizeChanged) { clearTimeout(geoCommitTimer.current); commit(center, z, false); return; }
+
+    // Track the gesture by transforming the committed tiles to match.
+    try {
+      const scale = map.getZoomScale(z, prev.zoom);                 // 2^(z - prev.zoom)
+      const p = map.latLngToContainerPoint(L.latLng(center));        // where `center` sits now
+      const half = map.getSize().divideBy(2);
+      const tx = half.x - p.x * scale;
+      const ty = half.y - p.y * scale;
+      wrap.style.transformOrigin = "0 0";
+      wrap.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+    } catch (_) { commit(center, z, true); return; }
+
+    // Re-base to crisp tiles: immediately once the scale has drifted enough (so
+    // it never gets too blurry), otherwise shortly after the gesture stops. Both
+    // are ghost-buffered, so neither flashes.
+    clearTimeout(geoCommitTimer.current);
+    if (Math.abs(z - prev.zoom) > 0.75) { commit(center, z, true); }
+    else { geoCommitTimer.current = setTimeout(() => commit(center, z, true), 160); }
+  }, [view, size, origin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
   /* shared overlay layers (same source as the map finder) */
   useEffect(() => {
@@ -1691,12 +1776,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
-  const toggleMerge = (id) => setCombineSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // Inactive parcels are excluded from merge candidacy (B170) — they don't participate
+  // in yield/site analysis, so they shouldn't be combinable either. Allow de-selecting an
+  // already-picked id (e.g. one just toggled inactive) but never adding an inactive one.
+  const toggleMerge = (id) => setCombineSel((s) => {
+    if (s.includes(id)) return s.filter((x) => x !== id);
+    const pc = parcels.find((p) => p.id === id);
+    if (pc && pc.active === false) return s;
+    return [...s, id];
+  });
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
   // editable layer — a working merge for test-fit/yield, NOT a recorded legal
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
   const mergeParcels = () => {
-    const chosen = parcels.filter((p) => combineSel.includes(p.id));
+    const chosen = parcels.filter((p) => combineSel.includes(p.id) && p.active !== false); // inactive parcels never merge (B170)
     if (chosen.length < 2) return;
     let result = chosen[0].points;
     let remaining = chosen.slice(1).map((p) => p.points);
@@ -4761,7 +4854,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
-          {origin && <div ref={geoWrapRef} data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, background: PAL.paper, pointerEvents: "none" }} />}
+          {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
+              brief tile gap during a zoom-level change reads as a subtle blink, not
+              a bright (near-white) flash against the imagery (B65). With the aerial
+              OFF this stays PAL.paper so the planner background matches the SVG.
+              Structure (B65 follow-up): a STATIC clip box (inset:0, never moves, dark
+              bg) holds an OVERSIZED inner map div (inset:-GEO_OVERSCAN). During a
+              pan/zoom the inner div is CSS-transformed; because it overhangs the
+              viewport by GEO_OVERSCAN with extra tiles loaded (keepBuffer), the
+              reveal shows real imagery, and anything beyond it shows the static
+              dark backdrop — never the cream page behind the canvas. */}
+          {origin && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
+              <div ref={geoWrapRef} style={{ position: "absolute", inset: -GEO_OVERSCAN, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            </div>
+          )}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
@@ -6328,12 +6435,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {parcels.map((pc, i) => {
                     const on = selParcel?.id === pc.id;
                     const picked = combineSel.includes(pc.id);
+                    const inactive = pc.active === false;
                     return (
-                      <button key={pc.id} onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
-                        style={{ textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{pc.active === false ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
-                        <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
-                      </button>
+                      // Per-row Active checkbox (B170): checked = participates in yield / coverage /
+                      // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
+                      // The `active` flag persists per-parcel via the Site Model (same path as B100).
+                      <div key={pc.id} style={{ display: "flex", alignItems: "stretch", gap: 7 }}>
+                        <label
+                          title={inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
+                        >
+                          <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
+                            style={{ width: 15, height: 15, cursor: "pointer" }} />
+                        </label>
+                        <button onClick={(e) => { if (e.shiftKey) toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); }}
+                          style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "7px 9px", borderRadius: 8, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "#e2dccb"}`, background: picked ? "#eaf1fe" : on ? PAL.accentSoft : "#fff", cursor: "pointer", fontFamily: "inherit", opacity: inactive ? 0.55 : 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.addr || `Parcel ${i + 1}`}{inactive ? " · inactive" : ""}{picked ? " ✓" : ""}</div>
+                          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, monospace" }}>{f2(polyArea(pc.points) / SQFT_PER_ACRE)} ac{pc.acct ? ` · ${pc.acct}` : ""}</div>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
