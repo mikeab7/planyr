@@ -146,6 +146,10 @@ export default function AppHeader({
   onSelectProject,
   onNewProject,
   saveState,
+  // Optional: a workspace-supplied project list (B194 — Schedule feeds in its embedded
+  // scheduler's own projects) and a home-crumb label override (B195 — Site → "Map").
+  projects,
+  homeLabel,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -246,6 +250,8 @@ export default function AppHeader({
                 onSelectProject={onSelectProject}
                 onNewProject={onNewProject}
                 saveState={saveState}
+                projects={projects}
+                homeLabel={homeLabel}
               />
             </>
           )}
