@@ -208,10 +208,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
-  // First-run-only map hint (B105): the old persistent "Drag to move" card is now a one-time,
-  // dismissible bubble. Remembered in localStorage so it never returns once dismissed.
-  const [showMapHint, setShowMapHint] = useState(() => { try { return !localStorage.getItem("planarfit:mapHintDismissed:v1"); } catch (_) { return true; } });
-  const dismissMapHint = () => { setShowMapHint(false); try { localStorage.setItem("planarfit:mapHintDismissed:v1", "1"); } catch (_) {} };
+  // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
+  // request — the map loads with no instructional overlay. Only the contextual selection
+  // guidance and the error toast remain in the bottom-left slot (see B21/B105).
   // Sites panel: collapsible (persisted) + per-row hover-reveal of the crosshair/delete actions (B106).
   const [sitesPanelOpen, setSitesPanelOpen] = useState(() => { try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; } });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
@@ -289,7 +288,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (!map) return;
     const bm = BASEMAPS[basemap] || BASEMAPS.esri;
     // detectRetina: request 2x-density (one-zoom-higher) tiles on HiDPI displays
-    // so imagery is crisp instead of upscaled-and-soft. Keeps the Esri source. (B168)
+    // so imagery is crisp instead of upscaled-and-soft. Keeps the Esri source. (B170)
     const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, detectRetina: true, attribution: bm.attr }));
     layer.setZIndex(1);
     layer.addTo(map);
@@ -726,7 +725,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 const st = statusOf(s); const sty = statusStyle(st);
                 const showActions = hoverRow === s.id || isActive; // crosshair + delete reveal on hover (B106)
                 return (
-                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status)" : "Open site"}
+                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / delete)" : "Open site (right-click for status / delete)"}
                     onClick={() => onOpenSite && onOpenSite(s.id)}
                     onDoubleClick={() => flyToSite(s)}
                     onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
@@ -742,15 +741,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
                       <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
                     </div>
+                    {/* (B168) The single-click ✕ delete was removed — one stray click could destroy a
+                        project. Delete now lives in the right-click context menu (with Change status).
+                        Only the non-destructive locate (⊕) action stays here. */}
                     <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
                       {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
                         className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
                       </button>}
-                      <button title="Delete site and all its plans" aria-label="Delete site" onClick={(e) => { e.stopPropagation(); setConfirmDel(s); }}
-                        className="gbtn-danger" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-                      </button>
                     </div>
                   </div>
                 );
@@ -797,24 +795,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
               : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
           </div>
         )}
-        {/* first-run-only, dismissible hint — replaces the old persistent "Drag to move" card (B105) */}
-        {!err && !selectMode && showMapHint && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 360, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span>Drag to move the map. Hit “＋ Select parcels” to start adding lots.</span>
-            <button onClick={dismissMapHint} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
-          </div>
-        )}
+        {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely. */}
 
       </div>
-      {/* Right-click status picker — set the project's lifecycle stage. Current
-          state is checked; picking another persists it (via onSetStatus) and the
-          markers/legend re-render. Positioned at the cursor, clamped to viewport. */}
+      {/* Right-click context menu for a project — set its lifecycle stage (B7) or delete
+          it (B168). One menu, not two: the status picker now also carries Delete, which
+          routes through the existing confirmation modal (no single-click destruction).
+          Opened from a card row OR a map marker/boundary. Positioned at the cursor,
+          clamped to the viewport; the full-screen backdrop keeps it above all map layers. */}
       {statusMenu && (
         <div onClick={() => setStatusMenu(null)} onContextMenu={(e) => { e.preventDefault(); setStatusMenu(null); }}
           style={{ position: "fixed", inset: 0, zIndex: 4200 }}>
           <div onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
-              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 224),
+              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
               width: 180, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
@@ -830,6 +824,16 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 </button>
               );
             })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setConfirmDel(s); }}
+              title="Delete this project and all its plans"
+              style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                background: "transparent", color: "#b91c1c", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+              <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              </span>
+              <span style={{ flex: 1 }}>Delete project…</span>
+            </button>
           </div>
         </div>
       )}
