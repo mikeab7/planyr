@@ -98,4 +98,17 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     ]);
     expect(show.get("big")).toMatchObject({ x: 0, y: 0, leader: null });
   });
+
+  it("NEW-2/5: a rotated label is tested against the strip's rotated footprint and fits inside a thin vertical strip", () => {
+    // A thin VERTICAL strip: narrow across (halfW=8px) but tall (halfH=120px). The "5′ Landscape"
+    // label is ~66px wide horizontally — too wide to sit across the strip — but rotated 90° its
+    // length runs DOWN the strip's long axis, so it fits inside (no leader).
+    const item = { id: "ls", cx: 0, cy: 0, lines: ["5′ Landscape"], lh: 12, charW: 6, halfW: 8, halfH: 120, importance: 1 };
+    const flat = layoutLabels([{ ...item, rot: 0 }]).get("ls");
+    const rotated = layoutLabels([{ ...item, rot: 90 }]).get("ls");
+    expect(flat.leader).not.toBeNull();   // horizontal: overflows → pulled outside with a leader
+    expect(rotated.leader).toBeNull();     // rotated along the long axis: fits inside
+    expect(rotated.rot).toBe(90);          // render applies this rotation
+    expect(rotated).toMatchObject({ x: 0, y: 0 });
+  });
 });
