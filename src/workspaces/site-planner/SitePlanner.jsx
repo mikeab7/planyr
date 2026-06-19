@@ -684,9 +684,19 @@ const countyAcres = (attrs) => {
   const keys = Object.keys(attrs);
   const num = (k) => +attrs[k];
   const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
-  // 1) An explicit, already-in-acres field.
-  const acresKey = keys.find((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
-  if (acresKey) return { acres: num(acresKey), source: acresKey };
+  // 1) An explicit, already-in-acres field. A CAD record often carries SEVERAL acreage
+  //    fields — total tract PLUS sub-acreages like a HOMESITE carve-out, an ag-use
+  //    portion, or an exemption acreage. A "PT TR ... (HOMESITE)" parcel can show a
+  //    ~0.5 ac homesite field beside a 17 ac total; picking the first match grabbed the
+  //    homesite and falsely flagged the geometry ~3,300% off (B166). The total tract is
+  //    always the LARGEST of these, so take the max — never a partial-tract sub-acreage.
+  //    (Belt-and-suspenders: also skip fields whose name marks them as a homesite/
+  //    exemption/improvement sub-acreage even if they happened to be larger.)
+  const isSubAcre = (k) => /(home_?site|homestead|\bhs_|hmst|exempt|imprv|improv)/i.test(k);
+  const acresKeys = keys.filter((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
+  const totalKeys = acresKeys.filter((k) => !isSubAcre(k));
+  const pick = (totalKeys.length ? totalKeys : acresKeys);
+  if (pick.length) { const best = pick.reduce((a, b) => (num(b) > num(a) ? b : a)); return { acres: num(best), source: best }; }
   // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
   //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
   //    so we don't misread square-metres as square-feet (the old regex matched neither, then
@@ -6556,7 +6566,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
                 <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>Setbacks per edge</span>
-                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show</label>
+                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
               </div>
               {(() => {
                 const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
@@ -6626,7 +6636,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Grid (ft)"><NumInput style={numInput} value={settings.gridSize} min={1} onCommit={(n) => setSettings((s) => ({ ...s, gridSize: n }))} /></Field>
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }} title="Snap to grid & flush against neighbours — press S to toggle; hold Alt while dragging to place freely"><input type="checkbox" checked={settings.snap} onChange={(e) => setSnap(e.target.checked)} /> Snap to grid &amp; neighbours (S)</label>
             <Field label="Default setback"><NumInput style={numInput} value={settings.setback} min={0} onCommit={(n) => setSettings((s) => ({ ...s, setback: n }))} /></Field>
-            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, margin: "2px 0 6px", cursor: "pointer" }}><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
+            {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
+                next to the object it acts on — see B164. Not duplicated here. */}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
           </Section>
 
