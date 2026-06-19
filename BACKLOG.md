@@ -68,7 +68,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > **Dedup / align:** this **extends** the existing save-status-visibility guarantee (B125 — make cloud save status visible, no silent failures) to **Drive file operations**; it is the storage-layer contract, surfaced in the UI through the same honest-status pattern the persistence layer already uses (don't build a parallel status system — when the adapter is adopted, its `{ok:false}` feeds the existing save badge / banners).
 
 <!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
-     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
+     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md.
+     B210–B212 (Schedule Gantt brackets, task-fill, configurable columns) filed AND shipped
+     this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
 
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
      B180–B183 here; provisionally B176–B179, but concurrent `main` (#159) took B176 (shipped)
@@ -81,7 +83,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      NEW-3 rungs 1–2) follow the backend tranche and are stubbed behind a clean interface so
      the UI never blocks on missing infra. -->
 
-<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208, renumbered B210/B211/B212 after PR #175 raced for the same IDs) AND shipped the same
+<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208, renumbered B213/B214/B215 after PRs #175 and #177 both raced for the same IDs) AND shipped the same
      session — moved to BACKLOG-DONE.md (branch claude/sharp-edison-7gdn3y). -->
 
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*

@@ -1,8 +1,8 @@
-/* Edge "runs" — group a parcel's boundary edges into logical SIDES (B211).
+/* Edge "runs" — group a parcel's boundary edges into logical SIDES (B214).
  *
  * A surveyed/imported parcel side is often digitized as many near-collinear
  * segments (Mesa's east side ≈ 10 edges). Editing a setback per-edge is tedious
- * and stacks one dimension label per segment (B212). A "run" is a maximal chain
+ * and stacks one dimension label per segment (B215). A "run" is a maximal chain
  * of CONTIGUOUS edges whose bearing stays within a small tolerance of the run's
  * first edge — i.e. one logical side. Clicking any edge then selects its whole
  * run, a setback applies uniformly across the run, and the run gets ONE length
@@ -56,7 +56,7 @@ function pointAtArcLen(verts, target) {
  *   { edges:[i…], vertices:[{x,y}…], lengthFt, mid:{x,y} }
  * where `edges` is the ordered chain (may wrap, e.g. [n-1, 0, 1]), `vertices` is
  * start-of-first-edge … end-of-last-edge, `lengthFt` is the run's total length, and
- * `mid` is its arc-length midpoint (for placing one label/pill per side, B212).
+ * `mid` is its arc-length midpoint (for placing one label/pill per side, B215).
  */
 export function edgeRuns(points, tolDeg = 8) {
   const n = points ? points.length : 0;
