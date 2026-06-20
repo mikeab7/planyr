@@ -15,6 +15,8 @@ import { createIdMap } from "./idMap.js";
 import { createLinkProvider } from "./linkProvider.js";
 import { memoryBackend } from "./backends/memoryBackend.js";
 import { driveBackend } from "./backends/driveBackend.js";
+import { createDriveClient } from "./backends/driveClient.js";
+import { makeTokenProvider } from "../oauth/googleAuth.js";
 
 // Read storage config from server env (node). Kept tiny + side-effect-free so importing
 // this module never crashes when nothing is set yet.
@@ -31,10 +33,11 @@ export function storageConfig(env = (typeof process !== "undefined" ? process.en
   };
 }
 
-/* Build the storage adapter from config. `driveClientFactory` is injected so the actual
- * Google API client (and its dependency) only loads on the server when Drive is selected
- * — the scaffold stays dependency-free until then. */
-export function buildStorageAdapter(cfg = storageConfig(), { driveClientFactory = null } = {}) {
+/* Build the storage adapter from config. `driveClientFactory` is injected for tests; by
+ * default, when Drive is selected AND creds are present, it wires the real Drive REST
+ * client (refresh-token → access-token provider + driveClient). Missing creds → null →
+ * the backend reports "not connected" (a visible failure, never a silent success). */
+export function buildStorageAdapter(cfg = storageConfig(), { driveClientFactory = defaultDriveClientFactory } = {}) {
   const idMap = createIdMap(); // swap for a Supabase-Postgres-backed store in production
   let backend;
   if (cfg.backend === "drive") {
@@ -45,4 +48,14 @@ export function buildStorageAdapter(cfg = storageConfig(), { driveClientFactory 
   }
   const linkProvider = createLinkProvider({ kind: cfg.linkKind, backend });
   return createStorageAdapter({ backend, idMap, linkProvider });
+}
+
+// Default factory: a live Drive client when client id/secret/refresh token are all set,
+// else null (so the backend stays honestly "not connected" rather than half-wired).
+export function defaultDriveClientFactory(drive = {}) {
+  if (!(drive.clientId && drive.clientSecret && drive.refreshToken)) return null;
+  const getAccessToken = makeTokenProvider({
+    refreshToken: drive.refreshToken, clientId: drive.clientId, clientSecret: drive.clientSecret,
+  });
+  return createDriveClient({ getAccessToken });
 }
