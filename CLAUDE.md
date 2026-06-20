@@ -163,12 +163,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
-- **Deploy = GitHub Pages (production).** Because the suite is one app with an in-app
-  workspace switcher, "seeing both live" is one URL — you switch tabs inside it.
-- **Cloudflare Pages is optional and deferred.** Its only job is per-branch preview
-  URLs (seeing an unmerged branch live without merging to `main`). Not required to
-  build or to see both workspaces. (Don't conflate this with PR status checks, which
-  are a separate GitHub Actions concern.)
+- **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
+  app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
+  inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
+  deploy pipeline — ✅ DONE" near the end of this file; GitHub Actions now only runs the
+  build status check, it doesn't publish.)
+- **Per-branch preview URLs** (seeing an unmerged branch live without merging to `main`)
+  are a separate, optional Cloudflare concern — not required to build or to see both
+  workspaces. (Don't conflate this with PR status checks, which are a separate GitHub
+  Actions concern.)
 - End commit messages with the session link the harness provides. Don't include the
   model identifier in commits/PRs/code.
 
@@ -341,16 +344,40 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   roughly 10 of 14 layers were live.
 
 ## Two backends — don't conflate
-1. **Supabase** (built, managed BaaS): user accounts, auth, row-level security, and
-   cloud save/load of site data **and now Document Review state** (the `doc_reviews`
-   table + the `doc-review-files` Storage bucket, same anon client + private-by-default
-   RLS). The client talks to Supabase directly (anon key + RLS); little custom server code.
-2. **`/server`** (not built; coming with Document Review): custom backend for CAD
-   conversion (APS), Google Drive auto-filing, and the file index database. This
-   holds the third-party secrets that must stay isolated from the public Pages deploy.
+Two layers that talk **over the network** — one for **data**, one for **compute**. Never
+conflate them.
 
-So "the backend" is built for user data (Supabase) but not yet for CAD conversion and
-filing (`/server`). Keep these separate when reasoning about what exists.
+1. **Supabase — the data / auth / storage layer (BUILT).** Cloud Postgres, email/password
+   auth, row-level security, and cloud save/load of site data **and** Document Review state
+   (the `doc_reviews` table + the `doc-review-files` Storage bucket, same anon client +
+   private-by-default RLS). The **frontend talks to Supabase directly with the anon key** —
+   which is safe to ship in the browser **because RLS protects it** (a request can only
+   ever see/write the signed-in user's own rows). This is the **permanent home for user
+   data**; little custom server code.
+2. **`/server` on Google Cloud Run — the compute layer (built in-repo, NOT yet deployed).**
+   Scale-to-zero containers (idle = free; a request spins one up) for the heavy work that
+   can't live in the browser or a Supabase row:
+   - **DWG→DXF conversion** — **LibreDWG** primary (free, native binary compiled into the
+     container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG
+     failures (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned;
+     a LibreDWG failure with APS off returns an explicit error, never a silent success).
+     Code: `server/convert/` (B228). LibreDWG needs a real container (native binary +
+     filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
+   - **Google Drive auto-filing + bytes I/O** — the storage adapter (`server/storage/`,
+     B206–B209) that auto-filing writes through; the queryable **file-facts index lives in
+     Supabase Postgres**, not on `/server`. (The one-time Google OAuth *consent* callback is
+     a thin same-origin Cloudflare Pages Function, `functions/api/auth/google/*`; the heavy
+     compute is Cloud Run.)
+
+   **All third-party secrets stay server-side only** — the APS key, the Google credentials,
+   and the Supabase **service-role** key — **walled off from the public Cloudflare Pages
+   deploy**. The only Supabase key that reaches the frontend is the RLS-protected **anon**
+   key. `/server` is **additive compute layered onto** the permanent Supabase data home,
+   reached over the network in the backend tranche — never bundled into the browser build.
+
+So "the backend" is BUILT for user data (Supabase) while the CAD-conversion + filing compute
+(`/server` on Cloud Run) is built in-repo but not yet deployed. Keep the **data** layer and
+the **compute** layer separate when reasoning about what exists.
 
 ---
 
