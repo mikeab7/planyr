@@ -15,7 +15,7 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 5;
+export const SITE_MODEL_VERSION = 6;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -40,8 +40,8 @@ const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
 const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
-// an explicit status, so the version bump (→5 for parcelDrawings, B67) doesn't disturb
-// it. (saveSite re-normalizes through this, so the status it reads back is the explicit
+// an explicit status, so the version bump (→6 for the B276 delete-tombstones) doesn't
+// disturb it. (saveSite re-normalizes through this, so the status it reads back is the explicit
 // one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -49,6 +49,9 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+// Cap on retained delete-tombstones (B276). Each is just an id string, so this is generous
+// headroom — a real plan deletes a handful of items, never thousands.
+const MAX_TOMBSTONES = 5000;
 
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
@@ -86,6 +89,13 @@ export function createSiteModel(p = {}) {
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
+    // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
+    // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
+    // deleted item from a stale/other copy that still has it (the documented B126 trade-off
+    // — "a delete in only one copy can reappear once"). A tombstone makes a deletion win over
+    // presence in either copy, so a deleted overlay stays deleted across reload / tab / device.
+    // Ids are never reused (fresh uid() per add), so a plain id list is safe; bounded + deduped.
+    deletedIds: [...new Set(arr(p.deletedIds).filter((x) => typeof x === "string"))].slice(-MAX_TOMBSTONES),
     // elevation references (newly persisted; empty for legacy records)
     elevation: { crossSections: arr(p.elevation && p.elevation.crossSections) },
     // constraint metadata. `liveLayers` is RESERVED for future per-site layer
@@ -139,26 +149,32 @@ function healSrc(chosen, other) {
 // Reconcile two copies of the SAME site without ever dropping drawn work: scalar/meta
 // fields come from the NEWER copy; every drawn collection is UNIONED by id, so a
 // building (or markup, parcel, measure, overlay, cross-section) in EITHER copy survives.
-// Trade-off: a delete made in only one copy can be undone if a stale copy still has the
-// item (recoverable — just delete again); we accept that over silently losing work.
-// Per-item tombstones are the fully-correct future hardening.
+// Deletions are honored via tombstones (B276): a `deletedIds` id from EITHER copy wins,
+// so a deliberate delete is NOT undone by a stale/other copy that still has the item.
+// (Items not yet wired to record a tombstone keep the old union behavior — still no data
+// loss, just the recoverable "delete can reappear once" trade-off until they adopt it.)
 export function mergeSiteContent(a, b) {
   const A = createSiteModel(a || {});
   const B = createSiteModel(b || {});
   const newer = (A.updatedAt || 0) >= (B.updatedAt || 0) ? A : B;
   const older = newer === A ? B : A;
+  // Union the tombstones from BOTH copies, then drop any tombstoned id from every unioned
+  // collection so a deleted item can't be resurrected by the copy that still holds it.
+  const tomb = new Set([...arr(A.deletedIds), ...arr(B.deletedIds)]);
+  const live = (list) => (tomb.size ? arr(list).filter((it) => !(it && it.id != null && tomb.has(it.id))) : arr(list));
   const merged = {
     ...newer,
-    parcels: unionById(newer.parcels, older.parcels),
-    els: unionById(newer.els, older.els),
-    markups: unionById(newer.markups, older.markups),
-    measures: unionById(newer.measures, older.measures),
-    callouts: unionById(newer.callouts, older.callouts),
-    sheetOverlays: healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays),
-    parcelDrawings: healSrc(unionById(newer.parcelDrawings, older.parcelDrawings), older.parcelDrawings),
-    elevation: { crossSections: unionById(
+    parcels: live(unionById(newer.parcels, older.parcels)),
+    els: live(unionById(newer.els, older.els)),
+    markups: live(unionById(newer.markups, older.markups)),
+    measures: live(unionById(newer.measures, older.measures)),
+    callouts: live(unionById(newer.callouts, older.callouts)),
+    sheetOverlays: live(healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays)),
+    parcelDrawings: live(healSrc(unionById(newer.parcelDrawings, older.parcelDrawings), older.parcelDrawings)),
+    elevation: { crossSections: live(unionById(
       newer.elevation && newer.elevation.crossSections,
-      older.elevation && older.elevation.crossSections) },
+      older.elevation && older.elevation.crossSections)) },
+    deletedIds: [...tomb].slice(-MAX_TOMBSTONES),
   };
   // single-object underlay: keep the newer placement, but don't blank a real image with a stripped one
   if (newer.underlay && (!newer.underlay.src || newer.underlay.strippedForCloud) &&

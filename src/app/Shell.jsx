@@ -10,6 +10,7 @@ import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import { prefetchOnIdle } from "./modulePrefetch.js";
+import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -50,6 +51,10 @@ export default function Shell() {
   // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
   // instant. Lazy-loading still gates the first paint; this only runs after.
   useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
+
+  // B279 — tag telemetry rows with the workspace the user is in, so a reported error
+  // says WHERE it happened (site-planner / doc-review / scheduler).
+  useEffect(() => { setTelemetryModule(active); }, [active]);
 
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;

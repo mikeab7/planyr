@@ -49,10 +49,10 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }, 0)).toBe("set scale");
   });
 
-  // B281: linear measures (distance/perimeter) now carry one decimal so sub-foot precision
+  // B290: linear measures (distance/perimeter) now carry one decimal so sub-foot precision
   // isn't hidden by whole-foot rounding (a 150.6 ft line used to read "151 ft"); area keeps
   // its 2-dp acres · whole sf. Guards against a regression back to f0.
-  it("B281: calibrated linear labels show one decimal; area unchanged", () => {
+  it("B290: calibrated linear labels show one decimal; area unchanged", () => {
     // 10 page-units × 1.06 ft/unit = 10.6 ft → "10.6 ft" (was "11 ft")
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }, 1.06)).toBe("10.6 ft");
     // perimeter of a 3-4-5 triangle closed = 12 → "12.0 ft" (one decimal even when whole)
