@@ -658,7 +658,7 @@ const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimu
 /* --------------- county appraisal-district attribute view --------------- */
 // The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
 // now lives in ./lib/appraisal.js so the map finder's address-search info card shares
-// the exact same labelling (B226). countyAcres stays here (planner-only geometry check).
+// the exact same labelling (B231). countyAcres stays here (planner-only geometry check).
 // County stated acreage from the attributes. Prefer an explicit acres field;
 // fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
 // { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than

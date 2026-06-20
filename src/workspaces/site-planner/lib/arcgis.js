@@ -155,7 +155,7 @@ export async function identifyParcelAcross(candidates, lng, lat) {
 /* Same identify, but also reports how many candidate services actually RESPONDED,
  * so a caller can tell "couldn't reach any parcel service" (responded === 0) apart
  * from "a service answered, but there's no parcel at this point" (responded > 0,
- * hits empty) — two states that must read differently (B226). Returns
+ * hits empty) — two states that must read differently (B231). Returns
  * { hits:[{county,feature}], responded, errors }. */
 export async function identifyParcelDetailed(candidates, lng, lat) {
   const results = await Promise.allSettled(

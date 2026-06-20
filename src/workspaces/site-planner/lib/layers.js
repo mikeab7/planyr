@@ -170,7 +170,7 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
 
-/* NEW-5 (B229): per-layer SOURCE VINTAGE — the data's own effective / publication
+/* NEW-5 (B234): per-layer SOURCE VINTAGE — the data's own effective / publication
  * date or maintenance cadence, as documented by the provider. This is the
  * decision-relevant "current as of" stamp, and is DELIBERATELY DISTINCT from
  * "last refreshed" (when WE pulled the copy — that rides the gisCache age, and

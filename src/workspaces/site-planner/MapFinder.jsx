@@ -83,7 +83,7 @@ const REMOVE_CURSOR =
 
 /* Project-status visual language — color + glyph + shape per state now come from
  * the ONE shared token set (src/shared/ui/statusTokens.js), consumed identically
- * by the filter chips, the list-item markers, and the map pins below (B227). Two
+ * by the filter chips, the list-item markers, and the map pins below (B232). Two
  * redundant cues per state (color AND glyph/shape) so it still reads for
  * colorblind users and over a busy aerial. The module accent colors (Site/
  * Schedule/Markup) are deliberately NOT used here — they belong to the tab row. */
@@ -194,7 +194,7 @@ function ringsAcres(rings) {
  * family the app already uses for imagery + parcels — then falls back to OSM
  * Nominatim (also biased to a box around the map). Returns null if neither
  * resolves. The old code only used Nominatim with no biasing, which routinely
- * returned nothing for house-number addresses, so the map never moved (B225). */
+ * returned nothing for house-number addresses, so the map never moved (B230). */
 async function geocodeAddress(q, center) {
   const near = center ? `&location=${center.lng},${center.lat}` : "";
   // 1) Esri World Geocoding Service — single, non-stored lookup (keyless).
@@ -224,7 +224,7 @@ async function geocodeAddress(q, center) {
   return null;
 }
 
-// Curated "key appraisal attributes" matchers for the search info card (B226) —
+// Curated "key appraisal attributes" matchers for the search info card (B231) —
 // the headline facts beyond address/account that help identify a tract at a glance.
 const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
@@ -262,19 +262,19 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [hoverRow, setHoverRow] = useState(null);
   const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
-  // (B228) The chips are now POSITIVE filters: a status in this set is SHOWN; an
+  // (B233) The chips are now POSITIVE filters: a status in this set is SHOWN; an
   // empty set shows everything. The filter drives BOTH the list and the map pins,
   // so "show only Active" focuses both at once. (Replaces the old hide-on-map set.)
   const [statusFilter, setStatusFilter] = useState(() => new Set());
-  const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by site name (B228)
-  // Per-status section collapse in the list (B228). Settled stages start collapsed so
+  const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by site name (B233)
+  // Per-status section collapse in the list (B233). Settled stages start collapsed so
   // the handful that need a decision stay visible; persisted per device.
   const [groupCollapsed, setGroupCollapsed] = useState(() => {
     try { const v = JSON.parse(localStorage.getItem("planarfit:sitesGroups:v1") || "null"); if (v) return v; } catch (_) {}
     return { complete: true, dead: true };
   });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
-  const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key} — address-search result (B226)
+  const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key} — address-search result (B231)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
@@ -450,7 +450,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     sites.forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
-      if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B228)
+      if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B233)
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
       const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · ${STATUS_META[status]?.label || status} · click to open`;
@@ -567,7 +567,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
   /* Highlight + add ONE identified parcel to the selection (idempotent — never
      toggles off). The SINGLE parcel-pipeline both click-to-select and
-     address-search-select use, so they behave identically (B226). `at` is the
+     address-search-select use, so they behave identically (B231). `at` is the
      query point used only for the Chambers→true-county relabel. Returns
      { key, attrs, rings } or null if the record has no polygon. */
   const addParcelHit = (hit, at) => {
@@ -629,7 +629,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
   };
 
-  /* NEW-2 (B226): identify + select the parcel at a geocoded point and surface its
+  /* NEW-2 (B231): identify + select the parcel at a geocoded point and surface its
      info card. Reuses the SAME identify/select pipeline as a click. Distinguishes
      "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
      (none) — they mean different things and must read differently. */
@@ -657,7 +657,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     });
   };
 
-  // NEW-1 (B225) + NEW-2 (B226): geocode → recenter at parcel zoom → select the
+  // NEW-1 (B230) + NEW-2 (B231): geocode → recenter at parcel zoom → select the
   // parcel there + show its info. (The old version only flew to a Nominatim hit and
   // often got none for a bare street address, so the map never moved.)
   const goAddress = async () => {
@@ -699,7 +699,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   });
   const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
 
-  // One left-rail site row — shared by every status section (B228). Status marker,
+  // One left-rail site row — shared by every status section (B233). Status marker,
   // name (struck through when Dead), status + acreage, and the hover "show on map" ⊕.
   const siteRow = (s) => {
     const isActive = s.id === activeSiteId;
@@ -736,7 +736,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   // Sites matching the active chip + name filters (for the panel header count).
   const shownCount = sites.filter((s) => passStatus(s) && passName(s)).length;
 
-  // One label/value row for the address-search parcel info card (B226).
+  // One label/value row for the address-search parcel info card (B231).
   const infoRow = (label, value) => (
     <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
       <span style={{ fontSize: 11, color: PAL.muted, flex: "none" }}>{label}</span>
@@ -864,7 +864,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           <span style={{ width: 4 }} />
         </div>
 
-        {/* NEW-2 (B226): address-search parcel info card — drops in under the search
+        {/* NEW-2 (B231): address-search parcel info card — drops in under the search
             pill after a "Go". Three distinct states: found (parcel ID + key appraisal
             facts), none (centered, but no parcel at that point), and unavailable
             (couldn't reach the parcel service) — the last two read differently. */}
@@ -918,14 +918,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
               <span style={{ color: PAL.ink, fontWeight: 700 }}>{(statusFilter.size || nf) ? `${shownCount}/${sites.length}` : sites.length}</span>
             </button>
             {sitesPanelOpen && (<>
-            {/* Type-to-filter the list by name (B228). */}
+            {/* Type-to-filter the list by name (B233). */}
             <div style={{ padding: "0 8px 6px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
                 style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: 7, color: PAL.ink, background: "#fff", fontFamily: "inherit", outline: "none" }} />
             </div>
-            {/* Status chips = POSITIVE multi-select filters (B228): tap to show only those
+            {/* Status chips = POSITIVE multi-select filters (B233): tap to show only those
                 statuses (list + map pins both). None selected = show everything. Colors +
-                glyphs come from the shared status tokens (B227). */}
+                glyphs come from the shared status tokens (B232). */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 8px 8px" }}>
               {STATUSES.filter((st) => (statusCounts[st] || 0) > 0).map((st) => {
                 const t = statusToken(st); const on = statusFilter.has(st); const anySel = statusFilter.size > 0; const n = statusCounts[st] || 0;
@@ -941,9 +941,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 );
               })}
             </div>
-            {/* Collapsible status sections (B228). Active/Pursuit/On Hold expanded by
+            {/* Collapsible status sections (B233). Active/Pursuit/On Hold expanded by
                 default; Complete/Dead collapsed so settled projects go quiet. Headers
-                use the shared status tokens (B227). */}
+                use the shared status tokens (B232). */}
             <div style={{ maxHeight: 340, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
               {(() => {
                 if (shownCount === 0) return <div style={{ fontSize: 11.5, color: PAL.muted, padding: "10px 12px" }}>No sites match{nf ? ` “${nameFilter.trim()}”` : ""}.</div>;
@@ -951,7 +951,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                   const rows = sites.filter((s) => statusOf(s) === st && passName(s));
                   if (!rows.length) return null;
                   // While a name filter is active, force matching sections open so a
-                  // match in a settled (collapsed) group isn't hidden (B228).
+                  // match in a settled (collapsed) group isn't hidden (B233).
                   const t = statusToken(st); const collapsed = !!groupCollapsed[st] && !nf;
                   return (
                     <div key={st}>
