@@ -22,6 +22,24 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-3 — Document Review STITCH + MARKUP safety
+     guards. Minted **B288–B290** (highest B# across both files was B287; the "B2038"/"B25431"-style
+     matches elsewhere are NOT B#s — e.g. "SB2038" is a Texas Senate Bill). **Filed AND fixed +
+     headless-verified + pushed THIS session** (branch `claude/admiring-hypatia-xjv8a1`), per Standing
+     Rule #1 — full [x] blocks live in BACKLOG-DONE.md:
+       • B288 (NEW-1) — Stitcher Align had no degenerate-baseline guard; coincident clicks flung the
+         sheet because solveM's `Math.hypot(vb)||1` masked a zero baseline → extreme transform. FIXED.
+       • B289 (NEW-2) — measuring over a not-yet-aligned sheet silently used the composite (sheet-1)
+         scale. FIXED — per-sheet `aligned` state + visual flag + a warn-on-measure banner.
+       • B290 (NEW-3) — a 2-point Area (0 sf) / 2-point Perimeter (single segment) was committable.
+         FIXED — finishDraft now needs ≥3 pts via `canCommitMeasure`.
+     Deduped — all net-new: no existing item covers the stitch alignment math or the measure-commit
+     guards. NOT duplicates of B181/B182/B183 (the *map* auto-placement / calibration cascade — a
+     different surface) or B130/B131 (parking). B288/B289 added a pure `lib/stitchGeom.js` (extracted
+     from Stitcher.jsx so the transform math is unit-testable); B290 extended `lib/takeoff.js`.
+     lint 0 · 637 tests (10 new) · build green · headless `ui-audit/verify-b288-b290.mjs` 14/14 (note:
+     PDF.js 6.x needs chromium-1228, not the harnesses' default 1194 — `Map.prototype.getOrInsertComputed`). -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — an **Infra / automated-testing** tranche
      (Playwright regression net, error telemetry, seeded test account, CI wiring). Filed at **B278–B281**.
      ⚠ NUMBERING / COLLISION NOTE (renumbered TWICE by concurrent `main`): first filed B271–B274, then

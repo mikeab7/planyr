@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
 import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
-import { measureLabel, rollup, dist } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, canCommitMeasure } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
@@ -397,8 +397,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const finishDraft = () => {
     if (!draft) return;
     const { kind, pts } = draft;
-    if (kind === "count" && pts.length >= 1) commit({ kind, pts });
-    else if ((kind === "area" || kind === "perimeter") && pts.length >= 2) commit({ kind, pts });
+    // Area + perimeter need ≥3 points to be real polygons; a 2-point area is 0 sf and a
+    // 2-point perimeter is a single segment, both meaningless in the takeoff (B290).
+    if ((kind === "count" || kind === "area" || kind === "perimeter") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
     else setDraft(null);
   };
   const onDbl = () => finishDraft();

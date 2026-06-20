@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength } from "./lib/takeoff.js";
+import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
@@ -23,22 +24,8 @@ const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
-
-// page-units → world, and inverse
-const fwd = (M, p) => ({ x: M.A * p.x - M.B * p.y + M.e, y: M.B * p.x + M.A * p.y + M.f });
-const inv = (M, w) => { const det = M.A * M.A + M.B * M.B || 1; const dx = w.x - M.e, dy = w.y - M.f; return { x: (M.A * dx + M.B * dy) / det, y: (-M.B * dx + M.A * dy) / det }; };
-// similarity transform mapping b1→A1, b2→A2 (page-units → world)
-function solveM(b1, b2, A1, A2) {
-  const vb = { x: b2.x - b1.x, y: b2.y - b1.y }, vA = { x: A2.x - A1.x, y: A2.y - A1.y };
-  const lb = Math.hypot(vb.x, vb.y) || 1, scale = Math.hypot(vA.x, vA.y) / lb;
-  const theta = Math.atan2(vA.y, vA.x) - Math.atan2(vb.y, vb.x);
-  const A = scale * Math.cos(theta), B = scale * Math.sin(theta);
-  return { A, B, e: A1.x - (A * b1.x - B * b1.y), f: A1.y - (B * b1.x + A * b1.y) };
-}
-function sheetBBox(s) {
-  const c = [{ x: 0, y: 0 }, { x: s.baseW, y: 0 }, { x: s.baseW, y: s.baseH }, { x: 0, y: s.baseH }].map((p) => fwd(s.M, p));
-  return { minX: Math.min(...c.map((p) => p.x)), maxX: Math.max(...c.map((p) => p.x)), minY: Math.min(...c.map((p) => p.y)), maxY: Math.max(...c.map((p) => p.y)) };
-}
+// Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B288/B289 alignment guards) lives
+// in lib/stitchGeom.js so it can be unit-tested away from the component.
 
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -131,7 +118,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       setPlaced((arr) => {
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
-        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false }];
+        // The first sheet IS the world frame (auto-aligned). Every later sheet drops at
+        // identity scale offset to the right and must be Aligned before its measurements
+        // can be trusted — track that per sheet so we can flag + warn until it is (B289).
+        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0 }];
       });
     } finally { setBusy(false); }
   };
@@ -139,6 +129,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left - view.panX) / view.zoom, y: (e.clientY - r.top - view.panY) / view.zoom }; };
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
+
+  // Warn (don't block) when a measurement lands over a sheet that hasn't been aligned yet —
+  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B289).
+  const warnIfOverUnaligned = (pts) => {
+    if (measureOverUnaligned(placed, pts)) setErr("Heads up: that measurement is over a sheet that isn’t aligned yet — Align it first, or its length/area may be wrong.");
+  };
 
   const onDown = (e) => {
     const w = toWorld(e);
@@ -149,16 +145,25 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       else if (align.step === 2) setAlign({ ...align, step: 3, A2: w });
       else {
         const b2 = inv(sheet.M, w);
+        // B288 — reject a degenerate alignment (the two points on either sheet landed on
+        // ~the same spot): solveM would divide by a ~0 baseline and fling the sheet far away
+        // at huge scale, silently and with no undo. Leave the sheet untouched and restart
+        // this alignment (mirrors the Calibrate "line too short" guard).
+        if (alignBaselinesDegenerate(align.b1, b2, align.A1, align.A2)) {
+          setErr("Those two points are too close together — pick two points farther apart, then click the matching points again.");
+          setAlign({ sheetId: align.sheetId, step: 0 });
+          return;
+        }
         const M = solveM(align.b1, b2, align.A1, align.A2);
-        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M } : s)));
-        setAlign(null);
+        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M, aligned: true } : s)));
+        setAlign(null); setErr("");
       }
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
     if (tool === "calibrate" || tool === "distance") {
       if (!draft) setDraft({ kind: tool, pts: [w] });
-      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); setDraft(null); }
+      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); warnIfOverUnaligned(pts); } setDraft(null); }
       return;
     }
     if (tool === "area") setDraft((d) => (d && d.kind === "area" ? { ...d, pts: [...d.pts, w] } : { kind: "area", pts: [w] }));
@@ -181,7 +186,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
-  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); setDraft(null); };
+  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); warnIfOverUnaligned(draft.pts); } setDraft(null); };
 
   const doCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
@@ -209,7 +214,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -255,11 +260,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       suspendSave(); // re-park across this load's async commits (B19)
       setPdfs(srcEntries); pdfsRef.current = srcEntries;
       const out = [];
+      let idx = 0;
       for (const s of st.placed || []) {
         const e = srcEntries.find((x) => x.srcId === s.srcId);
         let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
         if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
+        // First placed sheet is always the world frame; older saves predate the `aligned`
+        // flag, so treat the rest as aligned (they were saved with a real transform) — only
+        // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B289)
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false });
+        idx++;
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
       suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
@@ -347,6 +357,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <g transform={G}>
               {placed.map((s) => {
                 const aligning = align && align.sheetId === s.id;
+                const unaligned = s.aligned === false && !aligning; // not yet aligned — flag it (B289)
                 const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
                 if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
                   return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
@@ -354,8 +365,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
                   </g>;
                 }
-                return <image key={s.id} href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
-                  transform={xf} opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />;
+                return <g key={s.id} transform={xf}>
+                  <image href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
+                    opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />
+                  {unaligned && <>
+                    <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={ls(2.5)} strokeDasharray={`${ls(12)} ${ls(8)}`} pointerEvents="none" />
+                    <text x={s.baseW / 2} y={ls(30)} fontSize={ls(22)} textAnchor="middle" fill="#b45309" fontWeight="700" pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(5) }}>⚠ Not aligned — click “Align”</text>
+                  </>}
+                </g>;
               })}
               {/* measures (world coords) */}
               {measures.map((m) => {
@@ -387,15 +404,20 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         {/* right panel: placed sheets + takeoff */}
         <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
-          {placed.map((s, i) => (
-            <div key={s.id} style={{ border: `1px solid ${align && align.sheetId === s.id ? PAL.accent : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6 }}>
+          {placed.map((s, i) => {
+            const isAligning = align && align.sheetId === s.id;
+            const needsAlign = i > 0 && s.aligned === false; // not aligned yet (B289)
+            return (
+            <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
+              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — measurements may be off</div>}
               <div style={{ display: "flex", gap: 6 }}>
-                {i > 0 && <button style={{ ...btn(align && align.sheetId === s.id), padding: "3px 8px", fontSize: 11 }} onClick={() => startAlign(s.id)}>Align</button>}
+                {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
                 <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {placed.length > 0 && (
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
