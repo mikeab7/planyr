@@ -1,11 +1,11 @@
-/* Self-verification for B221 + B222 (building feature-edit button visibility).
+/* Self-verification for B225 + B226 (building feature-edit button visibility).
  *
  * Seeds a single 400'×300' cross-dock building inside a parcel, boots the planner,
  * and verifies the combined visibility rule for the +/− feature-add buttons (truck
  * dock / sidewalk / bump-out — the coloured circles with an "Add …"/"Remove this"
  * <title>):
  *
- *   B221 — the buttons hide once the building's rendered ON-SCREEN footprint drops
+ *   B225 — the buttons hide once the building's rendered ON-SCREEN footprint drops
  *          below the legibility threshold (FEAT_BTN_MIN_PX = 72px), gated PER AXIS:
  *          a wall's +/− needs its perpendicular on-screen size ≥ 72px. So on a
  *          long/narrow on-screen footprint the long-side buttons persist while the
@@ -14,12 +14,12 @@
  *          At every zoom step we PREDICT the count from the measured px using the
  *          exact rule and compare to what's actually drawn.
  *
- *   B222 — the buttons render only for ONE building (selected, or — when nothing is
+ *   B226 — the buttons render only for ONE building (selected, or — when nothing is
  *          selected — hovered), never every building at once. We deselect, then show
  *          that hovering the building reveals its buttons and moving off hides them.
  *
  * Logged-out / this-device mode (no auth needed).
- * Run:  node ui-audit/verify-b221-b222.mjs   (preview server must be on :4173)
+ * Run:  node ui-audit/verify-b225-b222.mjs   (preview server must be on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -36,7 +36,7 @@ const DEMO_ID = "verify-b221";
 const els = [{ id: "b1", type: "building", cx: 0, cy: 0, w: 400, h: 300, rot: 0, dock: "cross", dockSide: "bottom" }];
 const parcel = { id: "pc1", locked: false, points: [{ x: -700, y: -450 }, { x: 700, y: -450 }, { x: 700, y: 450 }, { x: -700, y: 450 }] };
 const demoSite = {
-  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B221", name: "Plan 1",
+  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B225", name: "Plan 1",
   origin: null, county: null, parcels: [parcel], els, measures: [], callouts: [],
   markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
@@ -80,15 +80,15 @@ mx = m.cx; my = m.cy;
 // move there fires onMove and clears hover — NOT the side panel (no events there).
 const offPt = () => [Math.min(1390, m.cx + m.rw * 0.75 + 40), m.cy];
 
-// ---- B222 (tested FIRST — nothing is selected at boot, so no deselect needed): hover
+// ---- B226 (tested FIRST — nothing is selected at boot, so no deselect needed): hover
 //      reveals the buttons on the hovered building when nothing is selected ----
-console.log("== B222: selected-or-hovered (one building only) ==");
+console.log("== B226: selected-or-hovered (one building only) ==");
 console.log(`  (fit footprint ${m.rw.toFixed(0)}×${m.rh.toFixed(0)}px — ≥ ${MIN}px so the size gate passes)`);
 await page.mouse.move(...offPt()); await page.waitForTimeout(150);
 const offA = await measure();
 await page.mouse.move(mx, my); await page.waitForTimeout(150); // hover the building
 const onHover = await measure();
-await page.screenshot({ path: OUT + "b222-hover.png" });
+await page.screenshot({ path: OUT + "b226-hover.png" });
 await page.mouse.move(...offPt()); await page.waitForTimeout(150); // move off again
 const offB = await measure();
 console.log(`  nothing-selected+off=${offA.btn}  hovering=${onHover.btn}  off-again=${offB.btn}`);
@@ -101,8 +101,8 @@ if (offB.btn !== 0) { console.log("  ✗ buttons stayed after moving off the bui
 await page.mouse.click(mx, my);
 await page.waitForTimeout(200);
 
-// ---- B221: sweep from zoomed-IN down to deeply zoomed-OUT, asserting at each step ----
-console.log("== B221: footprint-gated feature buttons (selected building) ==");
+// ---- B225: sweep from zoomed-IN down to deeply zoomed-OUT, asserting at each step ----
+console.log("== B225: footprint-gated feature buttons (selected building) ==");
 let sawFull = false, sawPartial = false, sawNone = false;
 await zoom(-4); // start big
 for (let step = 0; step <= 18; step++) {
@@ -121,16 +121,16 @@ for (let step = 0; step <= 18; step++) {
     if (m.btn === 2 && m.rw >= MIN && m.rh < MIN) sawPartial = true; // long-side only: per-axis collision handling
     if (m.btn === 0 && Math.max(m.rw, m.rh) < MIN) sawNone = true;
   }
-  if (step === 1) await page.screenshot({ path: OUT + "b221-zoomed-in.png" });
-  if (m.btn === 2) await page.screenshot({ path: OUT + "b221-partial-longside.png" });
-  if (m.btn === 0 && m.rw > 0) await page.screenshot({ path: OUT + "b221-zoomed-out.png" });
+  if (step === 1) await page.screenshot({ path: OUT + "b225-zoomed-in.png" });
+  if (m.btn === 2) await page.screenshot({ path: OUT + "b225-partial-longside.png" });
+  if (m.btn === 0 && m.rw > 0) await page.screenshot({ path: OUT + "b225-zoomed-out.png" });
   await zoom(2);
 }
 if (!sawFull) { console.log("  ✗ never saw the full 8-button state (zoomed in)"); fail++; }
 if (!sawPartial) { console.log("  ✗ never saw the long-side-only (2-button) state — per-axis collision handling not demonstrated"); fail++; }
 if (!sawNone) { console.log("  ✗ never saw the all-hidden state (zoomed out)"); fail++; }
 
-console.log(fail === 0 ? "\n✓ ALL B221+B222 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
+console.log(fail === 0 ? "\n✓ ALL B225+B226 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 await ctx.close();
 await browser.close();
 process.exit(fail === 0 ? 0 : 1);
