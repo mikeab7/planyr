@@ -24,12 +24,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-20: owner dropped his old "Planar — Engineering Backlog" (2026-05-26 code review, re-verified
      2026-06-19) for the **Scheduler** app (`public/sequence/index.html`), said "log this" + "don't worry
      about the email feature." Filed under `[Scheduler]` as B246–B258. The safe wins (B246–B252) were filed
-     AND shipped this session → BACKLOG-DONE.md. Remaining below: B253 (a decision only Michael can make),
-     B254 (a refactor); B255–B258 are gated/optional/project items under 🕓 Later / Roadmap. Email excluded
-     per owner; the doc's already-shipped items (orig B2/B6/B8) were not re-filed. -->
-
-### B253 — Split-view Snap/Free chip lingers ~5s after you release the divider — confirm intent `[Scheduler / UI]` (bug?)  *(orig "B9"; minted **B253**)*
-`[?]` After dropping the grid/Gantt split divider, the floating **Snap/Free** chip stays up ~5s (`setTimeout(() => setDragging(false), 5000)` in `public/sequence/index.html`). The doc suspected a 500ms typo. **Inspected the code first:** that chip is an *interactive* Snap/Free toggle (a fixed portal, top-right) — the 5s keeps it clickable *after* the drag so you can flip snap mode for your next drag without re-grabbing the divider. So 5s is plausibly intentional, **not** a typo. **Question for Michael:** keep the ~5s window (time to use the toggle), or shorten it (the chip feels like clutter)? One-line change either way — left as a decision, deliberately **not** silently changed (shortening shrinks the window to actually click Snap/Free).
+     AND shipped this session → BACKLOG-DONE.md. Remaining below: B254 (a refactor); B255–B258 are
+     gated/optional/project items under 🕓 Later / Roadmap. B253 (the 5s Snap/Free chip) was resolved —
+     owner said leave it as-is (2026-06-20) → moved to BACKLOG-DONE.md. Email excluded per owner; the
+     doc's already-shipped items (orig B2/B6/B8) were not re-filed. -->
 
 ### B254 — Collapse the duplicate indent/outdent + column-autosize functions `[Scheduler / code health]` (task)  *(orig "M2"; minted **B254**)*
 `[ ]` Two near-identical copies each of: indent/outdent — keyboard `indentTask`/`outdentTask` vs right-click `indentTaskById`/`outdentTaskById` — and column autosize — `autoSizeCol` (grid) vs `autoSizeMCol` (master). Merge each pair into one helper that takes the task id / column set as a parameter (keyboard passes `selectedId`, menu passes the ctx id). **Verify equivalence first** (the doc warns they may have drifted; if they have, decide which behaviour is canonical before merging) and verify keyboard vs menu produce identical results. Pure maintainability — no user-visible change — so it was kept *out* of the B246–B251 bug-fix shipment to isolate refactor risk on a live tool; pick it up as its own focused pass.
