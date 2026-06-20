@@ -22,6 +22,26 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat, w/ 3 screenshots) that "Print" opens a blank `about:blank`
+     window and routes through the BROWSER's print dialog — which stamps a date/time header, the
+     about:blank URL, and a page number onto the output, bleeds a cream page background (more ink),
+     and (Letter content dropped on a Tabloid sheet) doesn't fill the page. Filed **B243** (arrived
+     as "NEW-1"; minted B228, renumbered **B243** — concurrent `main` took B228–B242 while this was
+     in flight, so B243 is the real next free ID after B242).
+     **Inspected the current print code first (as the owner asked):** the path ALREADY composes the
+     whole sheet as ONE SVG at the exact page size (B200/B197/B201) — the only problem is the final
+     DELIVERY step (`window.open` + `win.print()` hands it to the browser's print dialog; the cream
+     is `PAL.paper` bleeding into the sheet fill + the plan-clone bg rect). Fix keeps the composition,
+     replaces only the delivery: rasterize the sheet at 300 DPI → JPEG → a Planyr-built PDF download.
+     **Deduped:** NO existing open item covers this (the owner-suspected dupes — "per-layer print
+     inclusion list", "PDF export embedding plan data for re-importability" — do not exist as open
+     items; JSON re-import already ships as Export JSON). RELATED: **B131** (overlay-in-print toggle,
+     done) is PRESERVED — the `printOverlay` checkbox still gates the placed overlay in the export;
+     **B50** (export/print robustness) is partly SUPERSEDED for the print path (the old "don't strand
+     a blank Preparing… window" guard is moot — there's no window now). **B159/B160** are the
+     *Scheduler* Gantt PDF/Print export (a different module), not this. Filed AND shipped this same
+     session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION **V60**). -->
+
 <!-- 2026-06-20: owner-reported (chat, with finished artwork + brief) the new Planyr coral brand
      mark — the favicon/app-icon swap + coral tokens/BrandMark component. Arrived as "NEW-1"/"NEW-2";
      provisionally B230/B231, but `main` advanced repeatedly during the work (B230–B239: Bluebeam

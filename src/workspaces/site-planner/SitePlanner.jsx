@@ -50,6 +50,7 @@ import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
+import { jpegToPdf } from "./lib/imagePdf.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -782,6 +783,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
+  const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
@@ -3973,7 +3975,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame, includeOverlay = true) => {
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper) => {
     if (!svgRef.current) return null;
     let x, y, w, h;
     if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
@@ -4005,7 +4007,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clone.removeAttribute("style");
     const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
-    bg.setAttribute("fill", PAL.paper);
+    bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     clone.insertBefore(bg, clone.firstChild);
     // Always include the aerial underlay (even if it's hidden on screen), placed
     // beneath everything but the paper, so prints/exports keep the satellite.
@@ -4083,7 +4085,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((png) => {
-        if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Print to PDF."); return; }
+        if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Download PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
         aEl.download = `${sheetFileName({ project: siteLabel, plan: planLabel })}.png`; // B201
@@ -4093,30 +4095,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
       // used to reject silently (unhandled) with no download — now surfaced (B50).
-      alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Print to PDF.");
+      alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Download PDF.");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
-    // Timing instrumentation (B202): surface where prep spends its time so a future
-    // stall is diagnosable rather than a mystery 60-second "Preparing print…".
+  // Resolution / quality knobs for the rasterized PDF. 300 DPI keeps text crisp and the
+  // aerial photo-grade at print size; the pixel cap guards memory on big sheets (Tabloid
+  // @300 ≈ 16.8M px, under the cap; only larger custom sizes would scale down).
+  const PDF_DPI = 300, PDF_MAX_PX = 22e6, PDF_JPEG_Q = 0.92;
+  // exportPDF (NEW-1) — REPLACES the old browser-print path (window.open + window.print
+  // on a blank window). That path handed our composed sheet to the BROWSER's print
+  // dialog, which stamps on chrome we can't strip (a date/time header, the about:blank
+  // URL, a page number) and bleeds the on-screen cream page colour onto paper. Here we
+  // keep the exact same single-SVG sheet composition (B200/B197) but DELIVER it as a real
+  // PDF we build ourselves: rasterize the sheet at high DPI, JPEG-encode it, wrap it with
+  // jpegToPdf, and download it. Generating the PDF ourselves is what removes the injected
+  // chrome; the page size is declared explicitly (no Letter-on-Tabloid float); paper is
+  // forced white (the cream is a screen-only page colour).
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
-    const mark = (label, since = t0) => { try { console.debug(`[print] ${label}: ${Math.round(now() - since)}ms`); } catch (_) {} };
-    const built = buildExportSvg(printFrame, includeOverlay);
-    if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
-    // Open the window synchronously (before any await) so it isn't pop-up-blocked.
-    const win = window.open("", "_blank");
-    if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
-    win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
+    const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff"); // force WHITE paper for print/PDF
+    if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
+    setExportingPDF(true);
     try {
-      const tIn = now();
-      await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked); time-boxed (B202)
-      mark("inline images", tIn);
-      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg>
-      // sized to the layout's plan box (it keeps its own viewBox), then the title
-      // block, the buildings table (B197) and the metrics live in the SAME outer SVG
-      // coordinate system — one viewBox, one scaling transform, so every layer scales
-      // together at any print zoom and prints as one cohesive PDF.
+      // Embed the aerial (and any placed overlay) as data URLs; DROP any we can't fetch so
+      // a cross-origin image can't taint the canvas and abort the whole export (B202).
+      await inlineImages(built.clone, true);
+      mark("inline images");
+      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
+      // the layout's plan box (it keeps its own viewBox); the title block, buildings table
+      // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
       const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
       const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
@@ -4142,31 +4151,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         metrics: metricPairs,
         note: "Concept site plan — planning-level estimates, not a survey.",
         buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
-        pal: PAL,
+        pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
       });
-      // Suggested PDF filename comes from the document <title> (B201) — date · project · plan name.
-      const fileName = sheetFileName({ project: siteLabel, plan: planLabel });
-      const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-      const pageCss = paper === "tabloid"
-        ? (orient === "portrait" ? "11in 17in" : "17in 11in")
-        : (orient === "portrait" ? "letter portrait" : "letter landscape");
-      // @page margin 0 + the SVG's intrinsic inch size = exactly one page; the inset
-      // border in the sheet keeps content off the printer's unprintable edge.
-      win.document.open();
-      win.document.write(`<!doctype html><html><head><title>${escAttr(fileName)}</title><style>
-        @page { size: ${pageCss}; margin: 0; }
-        html,body{margin:0;padding:0;background:#fff}
-        svg{display:block;margin:0 auto}
-      </style></head><body>${sheetSvg}</body></html>`);
-      win.document.close();
-      mark("ready");
-      // Print once the aerial has loaded (or after a beat if it's cached/absent).
-      const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
-      if (win.document.readyState === "complete") go(); else win.onload = go;
+      // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
+      // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
+      const { page } = layout;
+      let pxW = Math.round(page.wIn * PDF_DPI), pxH = Math.round(page.hIn * PDF_DPI);
+      if (pxW * pxH > PDF_MAX_PX) { const k = Math.sqrt(PDF_MAX_PX / (pxW * pxH)); pxW = Math.round(pxW * k); pxH = Math.round(pxH * k); }
+      const url = URL.createObjectURL(new Blob([sheetSvg], { type: "image/svg+xml" }));
+      try {
+        const image = new Image();
+        await new Promise((res, rej) => { image.onload = res; image.onerror = () => rej(new Error("sheet render failed")); image.src = url; });
+        const canvas = document.createElement("canvas");
+        canvas.width = pxW; canvas.height = pxH;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, pxW, pxH); // JPEG has no alpha — paint white, not black
+        ctx.drawImage(image, 0, 0, pxW, pxH);
+        mark("rasterized");
+        const jpegBlob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", PDF_JPEG_Q));
+        const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
+        const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
+        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName });
+        const aEl = document.createElement("a");
+        aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+        aEl.download = `${fileName}.pdf`;
+        aEl.click();
+        mark("downloaded");
+        setTimeout(() => URL.revokeObjectURL(aEl.href), 8000);
+      } finally { URL.revokeObjectURL(url); }
     } catch (_) {
-      try { win.close(); } catch (e2) {} // don't strand a blank "Preparing…" window if inlining/serialization threw (B50)
-      alert("Couldn't prepare the print view — the aerial basemap may have blocked it. Turn the basemap off and retry.");
-    }
+      // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
+      alert("Couldn't build the PDF — the aerial basemap can block it (cross-origin). Turn the basemap off and retry.");
+    } finally { setExportingPDF(false); }
   };
 
   /* ------------ print-frame placement ------------ */
@@ -4198,7 +4214,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printAspectKey]);
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
-  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => printPDF(p, o, ov), 60); };
+  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -5295,7 +5311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
           </AnchoredMenu>
@@ -6215,6 +6231,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* NEW-1 — "Preparing PDF…" pill while the sheet is composed/rasterized/downloaded
+              (replaces the old blank "Preparing print…" pop-up window). */}
+          {exportingPDF && (
+            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 9, background: "rgba(25,22,19,0.94)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 6px 22px rgba(0,0,0,0.28)", zIndex: 10 }}>
+              <span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+              Preparing PDF…
+            </div>
+          )}
+
           {/* print-frame toolbar */}
           {printMode && (() => {
             const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
@@ -6241,7 +6266,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...chip, fontWeight: 600, background: printOptsOpen ? PAL.accentSoft : "#fff" }} onClick={() => setPrintOptsOpen((o) => !o)}
                     title="Clear-height & slab defaults and per-building overrides that drive the printed buildings table">Options ▾</button>
                 </div>
-                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
+                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint} title="Build a finished PDF and download it — no browser print dialog, no headers, white background">Download PDF</button>
                 <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
                 {/* B199 — print options flyout: edit the global clear-height/slab rules (B198)
                     and per-building overrides; portal-mounted (AnchoredMenu) so it escapes
