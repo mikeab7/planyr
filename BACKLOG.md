@@ -22,15 +22,26 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: B228 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+<!-- 2026-06-20: B230 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
      right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
      dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
-     measures / markup poly-line / easements) + B229 (cartographic detention pond — radial steel-teal
+     measures / markup poly-line / easements) + B231 (cartographic detention pond — radial steel-teal
      gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
-     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B228/B229** — concurrent `main` (PRs #184/#186/
-     #188/#189) took B221–B227 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-panel
-     redesign) while this was in flight, so B228/B229 are the real next free IDs after B227. Filed AND
-     shipped this same session — moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V55. -->
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B230/B231** — concurrent `main` (PRs #184/#186/
+     #188/#189/#191) took B221–B229 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-
+     panel redesign, dock-zone stack) while this was in flight, so B230/B231 are the real next free IDs
+     after B229. Filed AND shipped this same session — moved to BACKLOG-DONE.md; self-verified headless
+     (ui-audit/verify-b221-b222.mjs), V56. -->
+
+<!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
+     B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
+     feature-button visibility, #189 B227 yield panel, #184 B222–B224 Schedule) while this was in
+     flight, so renumbered to the real next free IDs **B228/B229** at merge time. Filed AND shipped
+     this same session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout
+     freeze) AND vs main's B225/B226 (#188 size-GATES these feature buttons — orthogonal: that's
+     button visibility, this is the zone stack the buttons drive). REUSES the existing court /
+     far-side-trailer / bump-out machinery rather than re-adding it. -->
 
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
