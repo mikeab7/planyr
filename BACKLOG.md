@@ -22,6 +22,40 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat, with finished artwork + brief) the new Planyr coral brand
+     mark — the favicon/app-icon swap + coral tokens/BrandMark component. Arrived as "NEW-1"/"NEW-2";
+     provisionally B230/B231, but `main` advanced repeatedly during the work (B230–B239: Bluebeam
+     vertex editing, detention pond, map-finder tranche, stale-chunk hardening, dock-zone fixes),
+     so renumbered to the real next free IDs **B240/B241** at merge time. Deduped: no prior favicon/
+     app-icon or brand-token/BrandMark item (B3 = brand *spelling*; B104/B10 = the unified-header
+     consolidation that B241's logo slot plugs into — orthogonal). Both filed AND shipped this same
+     session — moved to BACKLOG-DONE.md. Canonical artwork + the dependency-free icon generator live
+     in brand/. -->
+
+<!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
+     deal." Filed B228, renumbered B239 — concurrent `main` took B228–B238 while this was in flight, so B239 is the real next free ID.
+     Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
+     holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
+     NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
+     its chunk loads (ui-audit/diagnose-scheduler.mjs). B221 already auto-reloads, but two recovery gaps
+     let it still dead-end: (1) a plain location.reload() can be served the browser's OWN hard-cached
+     stale index.html → same dead chunk → cooldown → error screen (the no-cache _headers can't retro-fix
+     an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
+     dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
+     the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
+     same session — moved to BACKLOG-DONE.md: B239 (reloadFresh cache-busting reload + chunk-aware
+     ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
+     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V58). -->
+
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2"). Concurrent main took B227–B236 while
+     this was in flight, so these renumbered to **B237** (two-backend architecture doc) + **B238**
+     (DWG→DXF conversion service) — the real next free IDs after B236. Deduped before filing: NEW-1
+     RECONCILED the existing "Two backends — don't conflate" section in CLAUDE.md in place (no
+     duplicate section); NEW-2 ADDED server/convert/ to the ALREADY-EXISTING /server scaffold (the
+     B206–B209 Drive storage layer was there — /server was not absent), reusing the shared
+     no-silent-failure result.js. Both filed AND shipped this same session — full blocks moved to
+     BACKLOG-DONE.md. -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Renumbered twice
      under a hot `main` (B225–B229 → B230–B234 → **B232–B236**; concurrent PRs #188–#191 + #190
      took B225–B231). Filed AND shipped this same session on branch `claude/tender-goldberg-ax4n5w`
@@ -1125,7 +1159,6 @@ Original spec:
   - Coupled to **B11 / B13 / B36 / B137** (the county-resolution theme). **Not urgent** — the statewide fallback keeps Austin/DFW functional meanwhile; pick up when the owner is actively working those metros (start with Travis, Tarrant, Dallas).
 
 ---
-
 
 ## ✅ Done
 
