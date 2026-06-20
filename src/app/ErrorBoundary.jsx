@@ -18,6 +18,7 @@
  */
 import { Component } from "react";
 import { isChunkLoadError, reloadFresh } from "./chunkReload.js";
+import { reportClientError } from "../shared/telemetry/clientErrors.js";
 
 const S = {
   wrap: { height: "100%", display: "grid", placeItems: "center", padding: 24, background: "#efeadf", fontFamily: "system-ui, sans-serif", color: "#2b2620" },
@@ -43,6 +44,9 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // Surface for diagnosis; the visible fallback already tells the user what to do.
     console.error("[workspace error boundary] caught a render crash:", error, info && info.componentStack);
+    // Self-report to telemetry (B276) so a render crash isn't only visible to whoever
+    // happens to have the console open. Fail-safe — reportClientError never throws.
+    reportClientError(error, { source: "react", module: this.props.label, componentStack: info && info.componentStack });
   }
 
   reset = () => this.setState({ error: null });
