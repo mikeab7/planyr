@@ -60,6 +60,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V62 — Dropped overlay sizes sanely + "Size to view" rescue (B246) ✅ (self-verified headless — image path; ⏳ one real-browser PDF drop)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — a real-browser drop of an actual landscape **PDF** that carries both a plan scale and a vicinity/key-map scale, to confirm the scale-read guard fires end-to-end (the sandbox Chromium can't run pdf.js — `getOrInsertComputed` — so the PDF *raster* path couldn't be exercised headless here).
+- **Harness:** `ui-audit/verify-overlay-fix.mjs` — seeds a 26.33-ac parcel + Katy origin (aerial on), logged-out.
+- **✅ Fresh drop is sane:** dropping an **image** runs the real `addOverlayFile` path → the overlay lands **535 px** wide on a 1440 px view (≈60% fit), never splattered, no error dialog (`screens/verify-A-image-drop.png`).
+- **✅ Rescue works:** a seeded **mis-scaled** overlay (simulated 1″=600′ misread, **14279×9519 px** — the reported "title block all over the map") shrinks to **535 px** with one click of the new **"Size to view"** button (`screens/verify-B-before.png` → `verify-B-after.png`).
+- **Deterministic logic** (the ≤4×/≥0.04× viewport scale guard, fit fallback, reasons) is covered by `test/overlayScale.test.js` (`chooseOverlayScale`, 7 cases) — all green.
+- **⏳ Remaining:** the one real-browser PDF drop above; everything else is fully self-verified.
+
 ### V61 — County parcel fetch survives a county-server outage (TxGIO statewide fallback) (B244 / B245) ✅ (self-verified headless — fully done; ⏳ optional signed-in confirm)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, live HCAD + TxGIO; FBCAD simulated down) · **Next check** — optional: a signed-in click-through on planyr.io (the resilience path is auth-independent, so logged-out coverage is representative).
 - **Harness:** `gis-verify/fbcad-outage-fallback-verify.mjs` — intercepts the **`gis.fbcad.org`** host as **HTTP 503** to reproduce the real 2026-06-19 FBCAD outage, then enters Select-parcels, recenters on Sugar Land (Fort Bend), and clicks a lot.
