@@ -6797,19 +6797,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                     </>
                   ) : isDockZone(selEl) ? (() => {
-                    // A dock-zone stack member (court / trailer / buffer): edit its DEPTH inline;
-                    // length + rotation are stack-controlled (full wall, flush-outward). Changing
-                    // it pushes the zones beyond it outward (B228).
+                    // A dock-zone stack member (court / trailer / buffer). Edit its DEPTH inline,
+                    // and — the button Michael relies on — a "＋" to add the NEXT outward zone on
+                    // THIS side (court → trailer parking → buffer), plus a direct remove. This is the
+                    // per-zone add restored (B239): selecting the truck court gives you "＋ Add trailer
+                    // parking" again, independent of the other dock side.
                     const b = els.find((x) => x.id === selEl.attachedTo);
                     const side = b && zoneSideOf(els, selEl);
                     const i = zoneIndexOf(selEl);
+                    const n = b && side ? stackCountIn(els, b, side) : 0; // zones present on this side (1..3)
+                    const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label : null; // the next one out
                     return (
                       <>
                         <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
-                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n) => b && side && setZoneDepthAll(b, i, n)} />
+                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
                         </Field>
+                        {b && side && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2, marginBottom: 4 }}>
+                            {nextLabel && (
+                              <button style={{ ...chip, textAlign: "left", color: "#0e7490" }}
+                                title={`Add ${Math.round(zoneDepthDefaults(settings)[n])}′ ${nextLabel.toLowerCase()} flush beyond this, on this dock side`}
+                                onClick={() => addZoneOnSide(b, side)}>＋ Add {nextLabel.toLowerCase()}</button>
+                            )}
+                            <button style={{ ...chip, textAlign: "left", color: "#b3361b" }}
+                              title={`Remove this ${DOCK_ZONES[i].label.toLowerCase()}${n > i + 1 ? " and the zones beyond it" : ""}`}
+                              onClick={() => removeFeature(selEl.id)}>－ Remove {DOCK_ZONES[i].label.toLowerCase()}{n > i + 1 ? " (+ outer)" : ""}</button>
+                          </div>
+                        )}
                         <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
-                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? " · both dock sides" : ""}. Select the building to add / remove zones.
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? "" : ""}. Or select the building to grow / shrink every dock side at once.
                         </div>
                       </>
                     );

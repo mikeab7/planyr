@@ -1,4 +1,4 @@
-/* Brand-icon verification (dev tool — not part of the app build). B239 + B240.
+/* Brand-icon verification (dev tool — not part of the app build). B240 + B241.
  *
  * Two parts:
  *  1) Assert the generated raster set is structurally correct: public/favicon.ico
