@@ -12,6 +12,7 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { prefetchOnIdle } from "./modulePrefetch.js";
+import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -24,7 +25,7 @@ const CHROME = "#14110e";
 const LINE   = "#2e2a23";
 const MUTED  = "#9b9482";
 
-// ── Account pill + dropdown styling (B272). The dropdown reuses AnchoredMenu — the
+// ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
 // same portal menu primitive as the project breadcrumb — so it escapes the header's
 // stacking/clipping context and lines up under the pill, consistent with that menu.
 const pill = {
@@ -73,7 +74,7 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
-  const [acctOpen,  setAcctOpen]  = useState(false); // account dropdown (signed-in pill, B272)
+  const [acctOpen,  setAcctOpen]  = useState(false); // account dropdown (signed-in pill, B298)
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
   const acctAnchor = useRef(null);
   // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
@@ -85,6 +86,14 @@ export default function Shell() {
   const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
   const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
   const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
+  // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
+  // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
+  // from the Site side can't be handed to a component that doesn't exist yet. We stash the
+  // requested review (token-stamped so a repeat click re-fires), switch to Document Review,
+  // and DR consumes the pending intent once it mounts. Without this the open is dropped and
+  // DR boots to its empty placeholder until a second click.
+  const [docIntent, setDocIntent] = useState(null);
+  const openReviewInDocReview = (row) => { setDocIntent({ kind: "open-review", row, token: Date.now() }); setActive("doc-review"); };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -99,11 +108,15 @@ export default function Shell() {
   // instant. Lazy-loading still gates the first paint; this only runs after.
   useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
 
+  // B279 — tag telemetry rows with the workspace the user is in, so a reported error
+  // says WHERE it happened (site-planner / doc-review / scheduler).
+  useEffect(() => { setTelemetryModule(active); }, [active]);
+
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;
 
   // Profile (name/org) for the signed-in user — sourced from the profiles table via
-  // the useProfile hook, with a never-blank display name (B271/B272).
+  // the useProfile hook, with a never-blank display name (B297/B298).
   const profileApi = useProfile(user);
   const who = profileApi.displayName;
 
@@ -114,7 +127,7 @@ export default function Shell() {
   // AppHeader always has the current user state without needing its own auth hook.
   const authControl = supabaseConfigured() ? (
     user ? (
-      // Signed in — the pill shows the user's name and opens an account dropdown (B272).
+      // Signed in — the pill shows the user's name and opens an account dropdown (B298).
       <>
         <button
           ref={acctAnchor}
@@ -235,9 +248,11 @@ export default function Shell() {
               onShellSwitch={setActive}
               authControl={authControl}
               navIntent={navIntent}
+              docIntent={docIntent}
               onGoDashboard={goDashboard}
               onOpenProject={openProjectInPlanner}
               onNewProject={newProjectInPlanner}
+              onOpenReviewInDocReview={openReviewInDocReview}
             />
           </Suspense>
         </ErrorBoundary>

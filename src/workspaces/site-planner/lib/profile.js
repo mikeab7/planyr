@@ -1,4 +1,4 @@
-/* User profile I/O (B271 / NEW-1) — read/write the signed-in user's row in
+/* User profile I/O (B297 / NEW-1) — read/write the signed-in user's row in
  * public.profiles, RLS-scoped so a request can only ever touch the caller's own
  * row. The names normally land via the signup trigger (handle_new_user, see
  * db/profiles.sql); this module reads them for display and lets the account panel

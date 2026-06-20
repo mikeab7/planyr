@@ -2,7 +2,7 @@
  * "set new password" form when arriving from a reset link. Logged IN: a tabbed
  * account panel — Profile (edit name + organization, saved to public.profiles) and
  * Settings (change password, cloud-sync note) — with Sign out always available
- * (B271/B272). Auth state is owned by the Shell; this calls the auth wrappers and
+ * (B297/B298). Auth state is owned by the Shell; this calls the auth wrappers and
  * the profile hook's save/reload passed in via `profileApi`. */
 import { useEffect, useRef, useState } from "react";
 import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";

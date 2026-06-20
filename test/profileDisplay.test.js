@@ -5,7 +5,7 @@ import { displayNameFor, firstNameFor, initialFor, orgFor } from "../src/shared/
 // never blank. The profiles table wins over signup metadata; metadata is the
 // fallback for the moment right after signup (before the row is readable) and any
 // backfill miss.
-describe("profile display name (B271/B272) — never-blank fallback chain", () => {
+describe("profile display name (B297/B298) — never-blank fallback chain", () => {
   const user = (email, meta) => ({ email, user_metadata: meta || {} });
 
   it("uses First + Last from the profile row when both present", () => {

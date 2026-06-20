@@ -1,5 +1,5 @@
-/* useProfile (B271 / NEW-1) — load + expose the signed-in user's profile (name, org)
- * from public.profiles, with a never-blank display name for the header pill (NEW-2).
+/* useProfile (B297 / NEW-1) — load + expose the signed-in user's profile (name, org)
+ * from public.profiles, with a never-blank display name for the header pill (B298).
  *
  * Pass the current auth user (the Shell already owns it via onAuthChange). The hook
  * fetches that user's profile row, recomputes when the user changes, and hands back

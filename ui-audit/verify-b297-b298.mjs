@@ -1,4 +1,4 @@
-/* Verify B271 (profiles/name capture) + B272 (identity pill → account dropdown).
+/* Verify B297 (profiles/name capture) + B298 (identity pill → account dropdown).
  *
  * The sandbox proxy CORS-blocks the Supabase network handshake, but supabase-js reads
  * its session from localStorage WITHOUT a network call. So we seed a well-formed local
@@ -95,7 +95,7 @@ const clickButton = async (page, re) => {
   log(hasEmail, "Dropdown shows the account email");
   const hasOrg = await page.evaluate(() => /Demo Dev Co/.test(document.body.innerText));
   log(hasOrg, "Dropdown shows the organization");
-  await page.screenshot({ path: OUT + "b272-account-dropdown.png", clip: { x: 980, y: 0, width: 460, height: 340 } });
+  await page.screenshot({ path: OUT + "b298-account-dropdown.png", clip: { x: 980, y: 0, width: 460, height: 340 } });
 
   // Escape closes the dropdown (shared AnchoredMenu affordance).
   await page.keyboard.press("Escape");
@@ -114,7 +114,7 @@ const clickButton = async (page, re) => {
   });
   log(profileModal.hasFirst && profileModal.hasLast, "Profile modal pre-fills First + Last name");
   log(profileModal.hasSave, "Profile modal has a 'Save profile' action");
-  await page.screenshot({ path: OUT + "b271-profile-modal.png", clip: { x: 470, y: 180, width: 500, height: 460 } });
+  await page.screenshot({ path: OUT + "b297-profile-modal.png", clip: { x: 470, y: 180, width: 500, height: 460 } });
   await clickButton(page, /Close ✕/);
 
   // Settings → modal opens on the Settings tab (Change password).
@@ -122,7 +122,7 @@ const clickButton = async (page, re) => {
   await clickButton(page, /^Settings$/);
   const onSettings = await page.evaluate(() => /Change password/.test(document.body.innerText));
   log(onSettings, "Settings tab shows 'Change password'");
-  await page.screenshot({ path: OUT + "b272-settings-tab.png", clip: { x: 470, y: 180, width: 500, height: 460 } });
+  await page.screenshot({ path: OUT + "b298-settings-tab.png", clip: { x: 470, y: 180, width: 500, height: 460 } });
 
   log(jsErrors.length === 0, `No uncaught JS errors during signed-in flow (${jsErrors.length})`);
   if (jsErrors.length) console.log("  errors:", jsErrors.slice(0, 4));
@@ -148,7 +148,7 @@ const clickButton = async (page, re) => {
     return { first: ph.some((p) => /first name/i.test(p)), last: ph.some((p) => /last name/i.test(p)), org: ph.some((p) => /organization/i.test(p)) };
   });
   log(signup.first && signup.last, "Sign-up form has First + Last name fields (capture at signup)");
-  await page.screenshot({ path: OUT + "b271-signup-form.png", clip: { x: 470, y: 120, width: 500, height: 560 } });
+  await page.screenshot({ path: OUT + "b297-signup-form.png", clip: { x: 470, y: 120, width: 500, height: 560 } });
 
   log(jsErrors.length === 0, `No uncaught JS errors during logged-out flow (${jsErrors.length})`);
   if (jsErrors.length) console.log("  errors:", jsErrors.slice(0, 4));

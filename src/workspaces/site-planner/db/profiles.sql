@@ -1,4 +1,4 @@
--- User profiles — one row per auth user, keyed to auth.uid() (B271 / NEW-1).
+-- User profiles — one row per auth user, keyed to auth.uid() (B297 / NEW-1).
 -- Run once in the Supabase SQL editor (project lyeqzkuiwngunutlkkmi). Idempotent:
 -- safe to re-run. Private by default, same RLS shape as public.sites / public.doc_reviews
 -- (each user only ever sees and edits their OWN row; no cross-user reads).
