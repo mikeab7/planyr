@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V66 — Opening a file from the global Project Files panel opens it in Markup on the FIRST click (B270) ✅ (self-verified headless — no-crash + mount/remount proven; ⏳ signed-in first-click open)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — one **signed-in** run on planyr.io (the file-list + open are auth-gated; the sandbox proxy blocks sign-in).
+- **Steps (signed-in, on planyr.io):** make sure **Markup** hasn't been opened yet this session → Site → open a project (e.g. Jacintoport) → top-bar **🗂 Files** → click a filed document (e.g. the MEP set). **Expect:** it switches to **Markup** and the document **opens on the first click** (sheets render), and the breadcrumb shows the project (not "Select a project"). Previously the first click landed on the empty "Open or drop a construction PDF" placeholder and only a second click worked.
+- **✅ No crash + clean mount/remount (headless, `ui-audit/verify-new1.mjs`):** Document Review mounts with the new `docIntent` prop + ref capture + intent-consuming effect + hardened `openReview` + error banner, and re-mounts after a tab switch-away/back, with **zero JS errors**. This gates the runtime risk in the patch.
+- **⏳ Signed-in first-click open:** the global Files panel only lists files when signed in (cloud), and opening fetches the review row + PDF over the network — neither runs logged-out, so the actual first-click open is the one live check. Low-risk (the open now rides the proven `navIntent`-style cross-workspace intent; the in-workspace open path was already working).
+
 ### V65 — Doc Review (Markup) sheets render crisp on HiDPI, not blurry (B265) ✅ (self-verified headless — mechanism proven; ⏳ optional live retina eyeball)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, generated 1-page PDF, driven at deviceScaleFactor 1 and 2) · **Next check** — optional: open a real structural/general-notes sheet on planyr.io on a Retina/HiDPI display and confirm note text is sharp at fit-to-page.
 - **Steps:** Markup tab → open/drop a PDF → read note text at fit-to-page, then zoom in.

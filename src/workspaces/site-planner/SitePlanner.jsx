@@ -759,7 +759,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -5462,13 +5462,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       />
 
       {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+          the file index needs a signed-in cloud session; reviews open in Document Review.
+          Clicking a file hands the whole review row up to the Shell, which stashes it and
+          switches to Document Review — DR opens it once it mounts. Passing only
+          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
+          (NEW-1). */}
       <ProjectFilesDrawer
         open={filesOpen}
         onClose={() => setFilesOpen(false)}
         signedIn={isCloudActive()}
         projectId={groupId}
-        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (

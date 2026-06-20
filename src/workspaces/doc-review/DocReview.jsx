@@ -16,6 +16,12 @@ import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDri
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 
+// Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
+// ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
+// in via the module tab would re-fire the previous open on mount. Mirrors SitePlannerApp's
+// lastConsumedNavToken. (NEW-1)
+let lastConsumedDocToken = null;
+
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -45,7 +51,7 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl, onGoDashboard, onNewProject } = {}) {
+export default function DocReview({ shellModule, onShellSwitch, authControl, onGoDashboard, onNewProject, docIntent = null } = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -59,6 +65,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (prev && prev !== next) { try { prev.destroy(); } catch (_) {} }
     pdfRef.current = next;
   };
+
+  // A fresh (unconsumed) cross-workspace "open this review" request handed down by the Shell
+  // when a file is clicked in the GLOBAL Project Files panel (e.g. from the Site side).
+  // Captured ONCE at mount (not per-render) so consuming it can't be undone by a later
+  // render, and so the resume-last-review boot can reliably stand down for it. (NEW-1)
+  const bootDocIntentRef = useRef(undefined);
+  if (bootDocIntentRef.current === undefined) {
+    bootDocIntentRef.current = (docIntent && docIntent.token !== lastConsumedDocToken && docIntent.kind === "open-review") ? docIntent : null;
+  }
 
   const [mode, setMode] = useState("review"); // review (single sheet) | stitch (multi-sheet)
   const [fileName, setFileName] = useState("");
@@ -81,13 +96,21 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
+  const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   // The project the header breadcrumb points at in Markup (B191). Follows the open
   // review's project; picking another project here browses its files in place (it does
   // NOT re-file the open review — browsing ≠ filing).
-  const [markupProject, setMarkupProject] = useState(null); // { id, name } | null
+  // Seed from a fresh cross-workspace open intent so the project context carries through the
+  // switch (no "Select a project" flash); loadSingleReview/openReview confirm it after load.
+  // project_id covers a listReviews row (snake_case), projectId a loaded record (camelCase).
+  const [markupProject, setMarkupProject] = useState(() => {
+    const r = bootDocIntentRef.current && bootDocIntentRef.current.row;
+    const pid = r && (r.project_id ?? r.projectId);
+    return pid ? { id: pid, name: r.project || r.title || "Project" } : null;
+  }); // { id, name } | null
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
 
@@ -240,18 +263,44 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setFileName(""); setNumPages(0); setPage(1); setScale(0);
     setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
   };
-  // Open a saved review from either toolbar; route single vs. stitch by kind.
+  // Open a saved review from either toolbar OR the global Project Files panel; route single
+  // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
+  // never fail silently again (NEW-1).
   const openReview = async (row) => {
-    const rec = await loadReview(row.id);
-    if (!rec) return;
+    if (!row || !row.id) return;
+    setOpenErr("");
+    let rec = null;
+    try { rec = await loadReview(row.id); } catch (_) { rec = null; }
+    if (!rec) {
+      setOpenErr(`Couldn't open “${row.title || row.item || "that file"}”. It may have been removed, or the cloud is unreachable — try again.`);
+      return;
+    }
+    // Carry the project context through so the breadcrumb reflects the opened file (single
+    // reviews are also set inside loadSingleReview; this also covers stitch).
+    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
+
+  // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
+  // the GLOBAL Project Files panel switches here AND hands us the review; because this
+  // workspace is lazy-mounted, we can only open it once we exist. Token-guarded (module-
+  // scoped) so a plain tab switch-back doesn't re-fire the last open.
+  useEffect(() => {
+    if (!docIntent || docIntent.token === lastConsumedDocToken) return;
+    lastConsumedDocToken = docIntent.token;
+    if (docIntent.kind === "open-review" && docIntent.row) openReview(docIntent.row);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docIntent]);
   // Resume the last review (and its mode) on mount, once. Stitch reviews are handed
   // to <Stitcher> via pendingStitch; single reviews load here.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return; booted.current = true;
+    // A cross-workspace open is incoming — let the docIntent effect load THAT review rather
+    // than also resuming the last one (the two are async and would race; resume could win
+    // and silently replace the file the user just clicked). (NEW-1)
+    if (bootDocIntentRef.current) return;
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -508,6 +557,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
           <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+        </div>
+      )}
+
+      {openErr && (
+        <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
+          <span>⚠ {openErr}</span>
+          <button onClick={() => { setOpenErr(""); setFilesOpen(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
