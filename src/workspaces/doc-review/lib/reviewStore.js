@@ -227,23 +227,23 @@ export async function downloadFromDrive(driveKey) {
   } catch (_) { return null; }
 }
 
-// File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
-// the bytes (Supabase + Drive), then upsert the indexed record. Returns { ok, id }.
+// File a dropped PDF as a new (single-sheet) review under a project/discipline. Drive is
+// the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
+// so a file is never left unstored AND the redundant Supabase copy stops consuming storage
+// on the happy path. Then upsert the indexed record. Returns { ok, id }.
 export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", blob, fileName }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
-  const up = await uploadSource(srcId, blob, projectId, discipline);
   const docDate = new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
-  // Also push a copy to Google Drive and record its key on the source, so the file can be
-  // READ BACK from Drive later (Drive-first, with the Supabase copy as fallback). Best-
-  // effort: a Drive failure never blocks filing — the Supabase copy already saved above.
+  // 1) Try Google Drive (the primary home).
   const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
-  // A non-oversize upload failure (network / RLS / transient 5xx) still files the work layer, but
-  // the bytes weren't stored — surface it so the caller can warn, rather than silently filing a
-  // document that can't be opened until it's re-dropped (storageKey stays null → re-drop on load).
-  const uploadFailed = !up.ok && !up.oversize;
+  // 2) Only if Drive didn't store it, fall back to Supabase Storage — so the file is
+  //    always stored somewhere (Drive ok → no duplicate; Drive down → Supabase safety net).
+  const up = drive.ok ? { ok: true, storageKey: null, oversize: false } : await uploadSource(srcId, blob, projectId, discipline);
+  // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
+  const uploadFailed = !drive.ok && !up.ok && !up.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate,
