@@ -23,14 +23,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 <!-- 2026-06-20: owner dropped his old "Planar — Engineering Backlog" (2026-05-26 code review, re-verified
      2026-06-19) for the **Scheduler** app (`public/sequence/index.html`), said "log this" + "don't worry
-     about the email feature." Filed under `[Scheduler]` as B246–B258. The safe wins (B246–B252) were filed
-     AND shipped this session → BACKLOG-DONE.md. Remaining below: B254 (a refactor); B255–B258 are
-     gated/optional/project items under 🕓 Later / Roadmap. B253 (the 5s Snap/Free chip) was resolved —
+     about the email feature." Filed under `[Scheduler]` as B247–B259. The safe wins (B247–B253) were filed
+     AND shipped this session → BACKLOG-DONE.md. Remaining below: B255 (a refactor); B256–B259 are
+     gated/optional/project items under 🕓 Later / Roadmap. B254 (the 5s Snap/Free chip) was resolved —
      owner said leave it as-is (2026-06-20) → moved to BACKLOG-DONE.md. Email excluded per owner; the
      doc's already-shipped items (orig B2/B6/B8) were not re-filed. -->
 
-### B254 — Collapse the duplicate indent/outdent + column-autosize functions `[Scheduler / code health]` (task)  *(orig "M2"; minted **B254**)*
-`[ ]` Two near-identical copies each of: indent/outdent — keyboard `indentTask`/`outdentTask` vs right-click `indentTaskById`/`outdentTaskById` — and column autosize — `autoSizeCol` (grid) vs `autoSizeMCol` (master). Merge each pair into one helper that takes the task id / column set as a parameter (keyboard passes `selectedId`, menu passes the ctx id). **Verify equivalence first** (the doc warns they may have drifted; if they have, decide which behaviour is canonical before merging) and verify keyboard vs menu produce identical results. Pure maintainability — no user-visible change — so it was kept *out* of the B246–B251 bug-fix shipment to isolate refactor risk on a live tool; pick it up as its own focused pass.
+### B255 — Collapse the duplicate indent/outdent + column-autosize functions `[Scheduler / code health]` (task)  *(orig "M2"; minted **B255**)*
+`[ ]` Two near-identical copies each of: indent/outdent — keyboard `indentTask`/`outdentTask` vs right-click `indentTaskById`/`outdentTaskById` — and column autosize — `autoSizeCol` (grid) vs `autoSizeMCol` (master). Merge each pair into one helper that takes the task id / column set as a parameter (keyboard passes `selectedId`, menu passes the ctx id). **Verify equivalence first** (the doc warns they may have drifted; if they have, decide which behaviour is canonical before merging) and verify keyboard vs menu produce identical results. Pure maintainability — no user-visible change — so it was kept *out* of the B247–B252 bug-fix shipment to isolate refactor risk on a live tool; pick it up as its own focused pass.
 
 <!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2") — resilient county parcel fetch. Minted
      **B244** (NEW-1: resilient fetch + TxGIO statewide fallback) + **B245** (NEW-2: validate the ArcGIS
@@ -1195,16 +1195,16 @@ Original spec:
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
 
-### B255 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B255**)*
+### B256 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B256**)*
 `[ ]` `cascadeDates`/`rollupParentDates` re-filter the task list repeatedly on each edit; `depLines` calls `tasks.indexOf` inside its loop; `rolledHealthMap`/`progressMap` recurse with `.filter`. Fine at the current ~180 tasks; will start to feel laggy past ~500. Fix: build an `id → index` map and a `parent → children[]` map once per recompute and reuse them — behaviour-preserving. **Verify** every task's start/end/duration is byte-identical before/after on the real production dataset. Gated by board size → Later until a board actually grows that large.
 
-### B256 — Optional: instant cross-device "newer version" banner via Supabase realtime `[Scheduler / cloud]` (feature)  *(orig "B2 follow-up"; minted **B256**)*
+### B257 — Optional: instant cross-device "newer version" banner via Supabase realtime `[Scheduler / cloud]` (feature)  *(orig "B2 follow-up"; minted **B257**)*
 `[ ]` The version-stamp guard + 20s polling already ship and work (the "newer version — Reload" banner appears within ~20s). Optional upgrade: enable Supabase **realtime** on the Scheduler data table and subscribe to row changes so the banner shows within ~1s; keep the 20s poll as a fallback if the channel drops. Needs a one-line SQL toggle on the Supabase project (owner/dashboard) — an external dependency — and it's polish, not a bug, so it sits in Later.
 
-### B257 — Incremental cleanup of inline styles / inner-defined helpers `[Scheduler / code health]` (task)  *(orig "P4"; minted **B257**)*
-`[ ]` Standing, opportunistic cleanup: as each Scheduler panel is touched for other work, hoist any helper components defined inside their parent to module scope (props-only) and lift repeated literal `style={{…}}` objects to module consts; memoize hot row renderers. B246 (the `Field` hoist) was the user-visible tip of this. Do it incrementally as code is touched — explicitly **not** one big sweep (UI must stay identical at each step), which is why it lives here rather than as a discrete Open task.
+### B258 — Incremental cleanup of inline styles / inner-defined helpers `[Scheduler / code health]` (task)  *(orig "P4"; minted **B258**)*
+`[ ]` Standing, opportunistic cleanup: as each Scheduler panel is touched for other work, hoist any helper components defined inside their parent to module scope (props-only) and lift repeated literal `style={{…}}` objects to module consts; memoize hot row renderers. B247 (the `Field` hoist) was the user-visible tip of this. Do it incrementally as code is touched — explicitly **not** one big sweep (UI must stay identical at each step), which is why it lives here rather than as a discrete Open task.
 
-### B258 — Scheduler off in-browser Babel → a real build step `[Scheduler / build]` (project)  *(orig "P1/M1"; minted **B258**)*
+### B259 — Scheduler off in-browser Babel → a real build step `[Scheduler / build]` (project)  *(orig "P1/M1"; minted **B259**)*
 `[ ]` The entire Scheduler (`public/sequence/index.html`, ~9.6k lines) is compiled by `@babel/standalone` in the browser on every load. Project-level work: move to a real build step / modularize. **Entangled** with the file's ability to save its own data back into itself (the File System Access auto-save rewrites the `<script id="planar-data">` block inside the HTML), so any change must preserve self-save. Plan deliberately; not required for any other Scheduler item. Deferred by design.
 
 - **Enforced merge gate via GitHub branch protection** (the settings half of **B63**): require a PR + a passing build check + "branch up to date before merging" on `main`, plus repo auto-merge. On the **private** repo this only *enforces* on a paid plan (GitHub Pro+); on Free the rules save but don't block — so B63's branch → PR → green discipline is the backstop until then. Keep it a manual owner toggle rather than granting the Claude Code app admin rights on a credential-bound repo.
