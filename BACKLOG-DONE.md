@@ -1,50 +1,50 @@
 ## ✅ Done
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 — Document Review (Markup) editing
-     safety + polish. Provisionally filed B283–B287, but on merge concurrent `main` had consumed
-     **B283–B296** (PR #221 coverage-aware GIS = B283–B287; the Doc-Review *viewer* batch = B288–B296)
-     plus **B297/B298** (auth profiles), so the batch was renumbered to the real next-free IDs
-     **B299–B303** ("NEW-#" labels are scratch). ALL FIVE built + headless-verified, then MERGED with
-     `main`'s viewer batch (branch `claude/stoic-faraday-th9mp8`) per STANDING RULE #1. Self-verified
-     live via `ui-audit/verify-b299-b303.mjs` (17/17, single-sheet viewer + Stitcher), VERIFICATION
-     **V74**. lint 0 · build green; the DocReview lazy chunk still splits.
+     safety + polish. Provisionally filed B283–B287, but a very hot `main` consumed everything through
+     **B299** while this was in flight (PR #221 coverage-aware GIS = B283–B287; the Doc-Review *viewer*
+     batch = B288–B296; auth profiles = B297/B298; **auto-filing = B299**), so the batch was renumbered
+     to the real next-free IDs **B300–B304** ("NEW-#" labels are scratch). ALL FIVE built + headless-
+     verified, then MERGED with `main` (branch `claude/stoic-faraday-th9mp8`) per STANDING RULE #1. Self-verified
+     live via `ui-audit/verify-b300-b304.mjs` (17/17, single-sheet viewer + Stitcher), VERIFICATION
+     **V75**. lint 0 · build green; the DocReview lazy chunk still splits.
      Merge note — these are net-new ON TOP of `main`'s viewer batch (B288–B296: zoom/pan, markup
      move B293, inline TEXT editor B293, fit-page B295, 1-dp linear labels B296). None of my five
      existed there; I re-applied them onto main's DocReview.jsx and extended undo to also cover the
      B293 move + text-edit. Dedup:
-       • B299 (undo/redo) — net-new (main's viewer batch added move/edit but NO history). REUSES the
+       • B300 (undo/redo) — net-new (main's viewer batch added move/edit but NO history). REUSES the
          Site Planner `pushHistory`/`histKey` pattern + B32's no-op-frame lesson.
-       • B300 (manual Calibrate validation) — net-new; distinct from B267/B268 (auto-scale). Clears the
+       • B301 (manual Calibrate validation) — net-new; distinct from B267/B268 (auto-scale). Clears the
          **calibration** half of the B155/B156 "no dialog boxes" note; main's B293 already made TEXT
          inline, so only ParcelDrawing's calibrate prompt now remains under B155.
-       • B301 (toolbar density) — net-new Doc-Review analog of the Site Planner B117/B118 rail density.
-       • B302 (sheet paging) — net-new; main's viewer kept zoom across sheets but added no Prev/Next or
+       • B302 (toolbar density) — net-new Doc-Review analog of the Site Planner B117/B118 rail density.
+       • B303 (sheet paging) — net-new; main's viewer kept zoom across sheets but added no Prev/Next or
          keyboard paging.
-       • B303 (label position) — net-new; coexists with main's B296 (1-dp linear label TEXT) — B303 is
+       • B304 (label position) — net-new; coexists with main's B296 (1-dp linear label TEXT) — B304 is
          about label POSITION, B296 about its numeric format. -->
 
-### B299 — Undo / redo for Document Review markups + calibration `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20 owner chat; provisionally B283, renumbered **B299** — concurrent `main` consumed B283–B298; batch B299–B303)*
+### B300 — Undo / redo for Document Review markups + calibration `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20 owner chat; provisionally B283, renumbered **B300** — concurrent `main` consumed B283–B299; batch B300–B304)*
 `[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro: place/delete/move a markup or measurement, press Ctrl/⌘-Z → nothing happened; the workspace had no history at all, so a mis-edit was unrecoverable. **Fix:** **Ctrl/⌘-Z undo, Ctrl/⌘-Shift-Z + Ctrl-Y redo** in BOTH `DocReview.jsx` (single sheet) and `Stitcher.jsx` (stitched set), plus on-canvas **↶ / ↷** buttons (disabled when there's nothing to undo/redo).
 - **Pattern reused, not reinvented:** mirrors the Site Planner's `pushHistory` — `pastRef`/`futureRef` of editable-state snapshots taken **by reference** (DocReview `{markups, calByPage, calInfo}`; Stitcher `{measures, ftPerUnit}`), with a `histKey` signature so `undo` **skips frames identical to the current state** — the **B32/B105 lesson** that a stray push can't make Ctrl-Z look like a no-op. `pushHistory()` fires only on a REAL mutation; the background stated-scale auto-scan (B267) deliberately does NOT push. History resets when the document context changes (open new PDF / load / new review).
 - **Covers `main`'s viewer edits too:** a markup **move** (B293, committed on pointer-up) and a **text create/edit/delete** (B293 inline editor) each push one frame, so the new editing affordances are undoable as well as plain draws.
 - **Poly-vertex placement:** mid-draw, Ctrl-Z (and Backspace/Delete) step back the **last placed vertex** of a polygon/area/count draft before falling through to full undo / delete-selection.
-- **Verified headless** (`ui-audit/verify-b299-b303.mjs`): draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; undo disabled before any edit; same proven in the Stitcher.
+- **Verified headless** (`ui-audit/verify-b300-b304.mjs`): draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; undo disabled before any edit; same proven in the Stitcher.
 
-### B300 — Manual Calibrate validates input (no more silent mis-calibration) `[Doc Review / Markup]` (bug)  *(arrived as "NEW-2" 2026-06-20 owner chat; provisionally B284, renumbered **B300**; batch B299–B303)*
+### B301 — Manual Calibrate validates input (no more silent mis-calibration) `[Doc Review / Markup]` (bug)  *(arrived as "NEW-2" 2026-06-20 owner chat; provisionally B284, renumbered **B301**; batch B300–B304)*
 `[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro: Calibrate → click two points → at the length prompt type a non-decimal form (e.g. **"1/8"** or **"1:240"**) → `parseFloat` returned **1** and the sheet calibrated to a wrong scale with NO warning, silently poisoning every downstream measurement; gibberish ("abc") silently did nothing. **Root cause:** `parseFloat(window.prompt(...))` stops at the first non-numeric char, and the invalid branch `return`ed with no feedback.
 - **Fix:** replaced `window.prompt` with an **inline on-canvas entry box** (honoring the owner "no dialog boxes" rule, like `main`'s B293 text editor) backed by a new tested parser **`parseFeet`** (`lib/parseLength.js`). It validates the WHOLE string: accepts plain feet (`120`, `120.5`, `120'`), **feet-and-inches** (`38'-7 3/4"`), and explicit fractional feet (`12 1/2 ft`); **rejects** scale ratios (`1:240`), bare ambiguous fractions (`1/8`), non-numeric junk, and zero/negative — each with a clear inline message. A bad entry keeps the box open to fix; a blank cancels. Applied in BOTH `DocReview.jsx` and `Stitcher.jsx`.
 - **Dedup:** distinct from **B267/B268** (auto-calibrate / scale cross-check) — the **manual-entry** path they don't cover. Clears the **calibration** half of the B155/B156 "no dialog boxes" note; `main`'s B293 already converted the **text** prompt, so only ParcelDrawing's calibrate prompt remains under B155.
 - **Verified:** unit — `test/parseLength.test.js` (7 cases incl. the exact "1/8" / "1:240" / "abc" bugs). Headless — the inline box opens (no prompt), **rejects "1/8" and stays uncalibrated**, rejects "1:240" as a ratio, and **accepts "100" → sheet calibrated** (single sheet + Stitcher).
 
-### B301 — Markup toolbar overcrowds; header buttons wrap into uneven multi-line labels `[Doc Review / Markup]` (bug)  *(arrived as "NEW-3" 2026-06-20 owner chat; provisionally B285, renumbered **B301**; batch B299–B303)*
+### B302 — Markup toolbar overcrowds; header buttons wrap into uneven multi-line labels `[Doc Review / Markup]` (bug)  *(arrived as "NEW-3" 2026-06-20 owner chat; provisionally B285, renumbered **B302**; batch B300–B304)*
 `[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro (confirmed live at 1568px wide): the header's "Open another…", "Stitch sheets ▸", "Library" buttons wrapped their labels onto 2–3 lines at uneven heights; the single toolbar row was too crowded and worsened as the window narrowed. **Fix (the B117/B118 density treatment):** every toolbar button now carries **`white-space: nowrap`** (labels never break mid-word) + tightened padding; the three file-action buttons are condensed (`Open…`, `Stitch ▸`, `📁 Library`) with full-text `title`s; sections are grouped with thin dividers (file · tools · undo/redo · zoom). `DocReview.jsx` + `Stitcher.jsx`.
-- **Verified headless:** the Open / Stitch / Library buttons compute `white-space:nowrap` and render as a **single 25px line** (≤34px) at 1440px — no wrapping. Screenshot `screens/b299-b303.png`.
+- **Verified headless:** the Open / Stitch / Library buttons compute `white-space:nowrap` and render as a **single 25px line** (≤34px) at 1440px — no wrapping. Screenshot `screens/b300-b304.png`.
 
-### B302 — Sheet paging: Prev/Next buttons + keyboard `[Doc Review / Markup]` (feature)  *(arrived as "NEW-4" 2026-06-20 owner chat; provisionally B286, renumbered **B302**; batch B299–B303)*
+### B303 — Sheet paging: Prev/Next buttons + keyboard `[Doc Review / Markup]` (feature)  *(arrived as "NEW-4" 2026-06-20 owner chat; provisionally B286, renumbered **B303**; batch B300–B304)*
 `[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro: on a 32-sheet set the only way to change sheets was clicking each entry in the left list — no Prev/Next, and arrow / PageUp / PageDown didn't flip sheets. **Fix** (`DocReview.jsx`): a **‹ N / total ›** pager above the sheet list, plus **← / → and PageUp/PageDown** keyboard paging (gated so they don't fire mid-draw or mid-calibrate-entry), and the sheet list **auto-scrolls to keep the current sheet in view** (`scrollIntoView`). A shared `goToPage` keeps the current zoom (matching `main`'s viewer behaviour) and drops any in-progress draft/selection.
 - **Verified headless:** Next advances 1/4→2/4; → / ← page 2/4→3/4→2/4; the indicator + active-sheet highlight track.
 
-### B303 — Measurement labels sit at the path midpoint / true centroid `[Doc Review / Markup]` (bug)  *(arrived as "NEW-5" 2026-06-20 owner chat; provisionally B287, renumbered **B303**; batch B299–B303)*
-`[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro: a Distance label rendered on the first endpoint (`pts[Math.floor((len-1)/2)]` resolves to `pts[0]` for a 2-point line); an Area label sat at the vertex average, which can fall outside a concave (L-shaped) region. **Fix** (new pure helpers in `lib/takeoff.js`): **`midOfPath(pts, closed)`** anchors distance/perimeter labels at the true **arc-length midpoint**; **`centroidOf(pts)`** anchors area labels at the **area-weighted centroid**, and when that lands outside a concave shape it drops to the midpoint of the widest interior scanline span so the label stays **inside**. Wired into `DocReview.jsx` (distance/perimeter/area) and `Stitcher.jsx` (area). Coexists with `main`'s B296 (the label's 1-dp numeric format) — B303 is the label's POSITION.
+### B304 — Measurement labels sit at the path midpoint / true centroid `[Doc Review / Markup]` (bug)  *(arrived as "NEW-5" 2026-06-20 owner chat; provisionally B287, renumbered **B304**; batch B300–B304)*
+`[x]` **Done 2026-06-20 (branch `claude/stoic-faraday-th9mp8`).** Repro: a Distance label rendered on the first endpoint (`pts[Math.floor((len-1)/2)]` resolves to `pts[0]` for a 2-point line); an Area label sat at the vertex average, which can fall outside a concave (L-shaped) region. **Fix** (new pure helpers in `lib/takeoff.js`): **`midOfPath(pts, closed)`** anchors distance/perimeter labels at the true **arc-length midpoint**; **`centroidOf(pts)`** anchors area labels at the **area-weighted centroid**, and when that lands outside a concave shape it drops to the midpoint of the widest interior scanline span so the label stays **inside**. Wired into `DocReview.jsx` (distance/perimeter/area) and `Stitcher.jsx` (area). Coexists with `main`'s B296 (the label's 1-dp numeric format) — B304 is the label's POSITION.
 - **Verified:** unit — `test/takeoff.test.js` (midpoint of a 2-pt line + an L; closed wrap-around; square centroid; concave-L centroid proven interior by ray-cast). Headless — a horizontal distance label renders at **x≈454** (midpoint ≈450), not ≈250 (pts[0]).
 
 <!-- 2026-06-20: filed from chat AND shipped same session (branch claude/eloquent-edison-6anmlb). Owner-dropped

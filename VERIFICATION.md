@@ -60,14 +60,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V74 — Document Review editing batch: undo/redo, Calibrate validation, toolbar, sheet paging, label position (B299–B303) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+### V75 — Document Review editing batch: undo/redo, Calibrate validation, toolbar, sheet paging, label position (B300–B304) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless **Chromium-1228** on the built app, `vite preview`, logged-out — these are browser-only editing features, no auth path). Re-applied + re-verified after merging `main`'s viewer batch (B288–B296).
-- **✅ Self-verified 2026-06-20 (`ui-audit/verify-b299-b303.mjs`, 17/17 checks, 0 page errors)** on a generated 4-sheet PDF (`ui-audit/make-sample-pdf.mjs` — the owner's real sets live on `mikeab7-patch-1`, B269, off this branch), covering BOTH the single-sheet viewer and the Stitcher:
-  - **B299 undo/redo** — draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; ↶/↷ disabled before any edit; Stitcher: draw distance → Ctrl-Z undoes. (Also extended to undo `main`'s B293 move + text-edit.)
-  - **B300 Calibrate validation** — inline box opens (no `window.prompt`); **"1/8" rejected + stays uncalibrated**, "1:240" rejected as a ratio, **"100" → sheet calibrated**; same in the Stitcher.
-  - **B301 toolbar** — Open/Stitch/Library compute `white-space:nowrap`, single 25px line, no wrapping.
-  - **B302 paging** — Next 1/4→2/4; → / ← keys page 3/4 / 2/4.
-  - **B303 label** — horizontal distance label at x≈454 (midpoint ≈450), not pts[0] (~250).
+- **✅ Self-verified 2026-06-20 (`ui-audit/verify-b300-b304.mjs`, 17/17 checks, 0 page errors)** on a generated 4-sheet PDF (`ui-audit/make-sample-pdf.mjs` — the owner's real sets live on `mikeab7-patch-1`, B269, off this branch), covering BOTH the single-sheet viewer and the Stitcher:
+  - **B300 undo/redo** — draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; ↶/↷ disabled before any edit; Stitcher: draw distance → Ctrl-Z undoes. (Also extended to undo `main`'s B293 move + text-edit.)
+  - **B301 Calibrate validation** — inline box opens (no `window.prompt`); **"1/8" rejected + stays uncalibrated**, "1:240" rejected as a ratio, **"100" → sheet calibrated**; same in the Stitcher.
+  - **B302 toolbar** — Open/Stitch/Library compute `white-space:nowrap`, single 25px line, no wrapping.
+  - **B303 paging** — Next 1/4→2/4; → / ← keys page 3/4 / 2/4.
+  - **B304 label** — horizontal distance label at x≈454 (midpoint ≈450), not pts[0] (~250).
 - **Sandbox browser:** use **`chromium-1228`** (pdf.js v6 render needs `Map.prototype.getOrInsertComputed`, absent in `chromium-1194`) — same note as V72.
 - **Why fully done logged-out:** all five are browser-only editing features (no cloud/auth path); the resulting state rides the already-verified doc-review save path.
 

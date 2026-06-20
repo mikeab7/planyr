@@ -1,13 +1,13 @@
-/* Verify the Document-Review editing batch B299–B303 against the REAL built app.
- *   B299 undo/redo (Ctrl-Z / Ctrl-Shift-Z / Ctrl-Y) over markups + calibration
- *   B300 manual Calibrate validates input (rejects "1/8" / "1:240"; accepts feet)
- *   B301 toolbar buttons don't wrap labels mid-word (white-space:nowrap, 1 line)
- *   B302 sheet paging — Prev/Next buttons + ← / → keyboard
- *   B303 measurement label sits at the path midpoint, not the first vertex
+/* Verify the Document-Review editing batch B300–B304 against the REAL built app.
+ *   B300 undo/redo (Ctrl-Z / Ctrl-Shift-Z / Ctrl-Y) over markups + calibration
+ *   B301 manual Calibrate validates input (rejects "1/8" / "1:240"; accepts feet)
+ *   B302 toolbar buttons don't wrap labels mid-word (white-space:nowrap, 1 line)
+ *   B303 sheet paging — Prev/Next buttons + ← / → keyboard
+ *   B304 measurement label sits at the path midpoint, not the first vertex
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
  *       node ui-audit/make-sample-pdf.mjs                (creates /tmp/samples/sample.pdf)
- *       node ui-audit/verify-b299-b303.mjs               (another shell)
+ *       node ui-audit/verify-b300-b304.mjs               (another shell)
  */
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
@@ -48,7 +48,7 @@ const badge = () => page.evaluate(() => {
   return els[0] ? els[0].textContent : "";
 });
 
-/* ---------- B301 — toolbar labels don't wrap ---------- */
+/* ---------- B302 — toolbar labels don't wrap ---------- */
 const tbBtns = await page.evaluate(() => {
   const want = ["Open", "Stitch", "Library"];
   return want.map((t) => {
@@ -59,9 +59,9 @@ const tbBtns = await page.evaluate(() => {
   });
 });
 const tbOk = tbBtns.every((b) => b.found && b.ws === "nowrap" && b.h <= 34);
-check("B301 toolbar buttons are single-line (nowrap, ≤34px)", tbOk, JSON.stringify(tbBtns));
+check("B302 toolbar buttons are single-line (nowrap, ≤34px)", tbOk, JSON.stringify(tbBtns));
 
-/* ---------- B302 — sheet paging ---------- */
+/* ---------- B303 — sheet paging ---------- */
 const start = await indicator();
 await page.locator('button[title="Next sheet (→)"]').click();
 await page.waitForTimeout(400);
@@ -72,14 +72,14 @@ const afterArrowR = await indicator();
 await page.keyboard.press("ArrowLeft");
 await page.waitForTimeout(400);
 const afterArrowL = await indicator();
-check("B302 Next button advances the sheet", start === "1 / 4" && afterNext === "2 / 4", `${start} → ${afterNext}`);
-check("B302 → / ← keys page the sheets", afterArrowR === "3 / 4" && afterArrowL === "2 / 4", `→ ${afterArrowR}, ← ${afterArrowL}`);
+check("B303 Next button advances the sheet", start === "1 / 4" && afterNext === "2 / 4", `${start} → ${afterNext}`);
+check("B303 → / ← keys page the sheets", afterArrowR === "3 / 4" && afterArrowL === "2 / 4", `→ ${afterArrowR}, ← ${afterArrowL}`);
 // back to sheet 1 for the drawing tests
 await page.locator('button:has-text("Sheet 1")').first().click();
 await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0; }, { timeout: 8000 });
 await page.waitForTimeout(400);
 
-/* ---------- B299 — undo / redo ---------- */
+/* ---------- B300 — undo / redo ---------- */
 const rectCount = () => overlay.locator("rect").count();
 const undoDisabledAtStart = await page.locator('button[title^="Undo"]').isDisabled();
 await page.locator('button:has-text("Rect")').first().click();
@@ -98,15 +98,15 @@ await page.waitForTimeout(150);
 await page.keyboard.press("Control+y");
 await page.waitForTimeout(250);
 const afterRedoY = await rectCount();
-check("B299 undo disabled before any edit", undoDisabledAtStart === true, `disabled=${undoDisabledAtStart}`);
-check("B299 draw → undo removes it", afterDraw === 1 && afterUndo === 0, `draw=${afterDraw}, undo=${afterUndo}`);
-check("B299 redo (Ctrl-Shift-Z and Ctrl-Y) restores it", afterRedoShift === 1 && afterRedoY === 1, `shiftZ=${afterRedoShift}, ctrlY=${afterRedoY}`);
+check("B300 undo disabled before any edit", undoDisabledAtStart === true, `disabled=${undoDisabledAtStart}`);
+check("B300 draw → undo removes it", afterDraw === 1 && afterUndo === 0, `draw=${afterDraw}, undo=${afterUndo}`);
+check("B300 redo (Ctrl-Shift-Z and Ctrl-Y) restores it", afterRedoShift === 1 && afterRedoY === 1, `shiftZ=${afterRedoShift}, ctrlY=${afterRedoY}`);
 // leave the canvas clean (undo the rect) for the label test
 await page.keyboard.press("Control+z");
 await page.waitForTimeout(250);
-check("B299 final undo leaves a clean sheet", (await rectCount()) === 0);
+check("B300 final undo leaves a clean sheet", (await rectCount()) === 0);
 
-/* ---------- B300 — manual Calibrate validation ---------- */
+/* ---------- B301 — manual Calibrate validation ---------- */
 await page.locator('button:has-text("Calibrate")').first().click();
 await overlay.click({ position: { x: 200, y: 500 } });
 await overlay.click({ position: { x: 500, y: 500 } });
@@ -130,12 +130,12 @@ await calInput.press("Enter");
 await page.waitForTimeout(300);
 const inputGone = await page.locator('input[placeholder*="38"]').count();
 const nowCalibrated = /Sheet \d+ calibrated/i.test(await badge());
-check("B300 inline Calibrate box opens (no window.prompt)", inputAppeared === 1);
-check("B300 rejects '1/8' with a message, stays uncalibrated", rejected >= 1 && stillUncal, `msg=${rejected}, uncal=${stillUncal}`);
-check("B300 rejects '1:240' as a scale ratio", ratioMsg >= 1);
-check("B300 accepts '100' → sheet calibrated, box closes", nowCalibrated && inputGone === 0, `cal=${nowCalibrated}, gone=${inputGone}`);
+check("B301 inline Calibrate box opens (no window.prompt)", inputAppeared === 1);
+check("B301 rejects '1/8' with a message, stays uncalibrated", rejected >= 1 && stillUncal, `msg=${rejected}, uncal=${stillUncal}`);
+check("B301 rejects '1:240' as a scale ratio", ratioMsg >= 1);
+check("B301 accepts '100' → sheet calibrated, box closes", nowCalibrated && inputGone === 0, `cal=${nowCalibrated}, gone=${inputGone}`);
 
-/* ---------- B303 — distance label at the midpoint, not pts[0] ---------- */
+/* ---------- B304 — distance label at the midpoint, not pts[0] ---------- */
 await page.locator('button:has-text("Distance")').first().click();
 const X1 = 250, X2 = 650, Y = 360;
 await overlay.click({ position: { x: X1, y: Y } });
@@ -148,9 +148,9 @@ const labelX = await page.evaluate(() => {
 });
 // midpoint ≈ (250+650)/2 = 450 (+4 nudge). pts[0] would be ≈ 250.
 const midOk = labelX != null && Math.abs(labelX - 454) < 40 && labelX > 330;
-check("B303 distance label sits near the midpoint (~450), not pts[0] (~250)", midOk, `labelX=${labelX}`);
+check("B304 distance label sits near the midpoint (~450), not pts[0] (~250)", midOk, `labelX=${labelX}`);
 
-await page.screenshot({ path: new URL("./screens/b299-b303.png", import.meta.url).pathname });
+await page.screenshot({ path: new URL("./screens/b300-b304.png", import.meta.url).pathname });
 
 /* ---------- Stitcher — same undo/redo + inline-calibrate fixes apply there too ---------- */
 await page.locator('button:has-text("Stitch ▸")').first().click();

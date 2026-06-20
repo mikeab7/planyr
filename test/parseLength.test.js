@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseFeet } from "../src/workspaces/doc-review/lib/parseLength.js";
 
-describe("parseFeet — manual Calibrate length entry (B300)", () => {
+describe("parseFeet — manual Calibrate length entry (B301)", () => {
   it("plain decimal feet, with or without a marker", () => {
     expect(parseFeet("120")).toEqual({ ok: true, ft: 120 });
     expect(parseFeet("120.5")).toEqual({ ok: true, ft: 120.5 });
