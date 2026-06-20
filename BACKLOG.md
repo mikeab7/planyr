@@ -23,24 +23,25 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-3 — Document Review STITCH + MARKUP safety
-     guards. Minted **B299–B301** (highest B# across both files was B298 after concurrent `main`'s
-     B288–B298 batches landed; my first-filed B288–B290 collided head-on with main's single-sheet-viewer
-     B288–B296 below, so renumbered to the next clear band **B299–B301** — the rules forbid two items
-     sharing a number). **Filed AND fixed + headless-verified + pushed THIS session** (branch
+     guards. Minted **B300–B302** (highest B# across both files was B299 after concurrent `main`'s
+     B288–B299 batches landed; my first-filed B288–B290 collided with main's single-sheet-viewer
+     B288–B296, then a second filing at B299–B301 collided with main's auto-filing **B299** (PR #222),
+     so renumbered to the next clear band **B300–B302** — the rules forbid two items sharing a number).
+     **Filed AND fixed + headless-verified + pushed THIS session** (branch
      `claude/admiring-hypatia-xjv8a1`), per Standing Rule #1 — full [x] blocks live in BACKLOG-DONE.md:
-       • B299 (NEW-1) — Stitcher Align had no degenerate-baseline guard; coincident clicks flung the
+       • B300 (NEW-1) — Stitcher Align had no degenerate-baseline guard; coincident clicks flung the
          sheet because solveM's `Math.hypot(vb)||1` masked a zero baseline → extreme transform. FIXED.
-       • B300 (NEW-2) — measuring over a not-yet-aligned sheet silently used the composite (sheet-1)
+       • B301 (NEW-2) — measuring over a not-yet-aligned sheet silently used the composite (sheet-1)
          scale. FIXED — per-sheet `aligned` state + visual flag + a warn-on-measure banner.
-       • B301 (NEW-3) — a 2-point Area (0 sf) / 2-point Perimeter (single segment) was committable via
+       • B302 (NEW-3) — a 2-point Area (0 sf) / 2-point Perimeter (single segment) was committable via
          Enter AND double-click. FIXED — both finish paths now need ≥3 pts via `canCommitMeasure`.
-     Deduped — all net-new: NOT duplicates of main's just-landed single-sheet-viewer **B288–B296** (zoom/
-     pan/markup-edit on the SAME DocReview.jsx, a different concern — the stitcher + the measure-commit
-     guards are untouched there), nor B181/B182/B183 (the *map* placement cascade) or B130/B131 (parking).
-     B299/B300 added a pure `lib/stitchGeom.js` (extracted from Stitcher.jsx so the transform math is
-     unit-testable); B301 extended `lib/takeoff.js` and tightened main's B291 double-click finish to the
-     same ≥3 gate. lint 0 · build green · headless `ui-audit/verify-b299-b301.mjs` 14/14 (chromium-1228,
-     per main's V72 note). -->
+     Deduped — all net-new: NOT duplicates of main's single-sheet-viewer **B288–B296** (zoom/pan/markup-
+     edit on the SAME DocReview.jsx, a different concern — the stitcher + the measure-commit guards are
+     untouched there) nor its auto-filing **B299** (server-side title-block read), nor B181/B182/B183
+     (the *map* placement cascade) or B130/B131 (parking). B300/B301 added a pure `lib/stitchGeom.js`
+     (extracted from Stitcher.jsx so the transform math is unit-testable); B302 extended `lib/takeoff.js`
+     and tightened main's B291 double-click finish to the same ≥3 gate. lint 0 · build green · headless
+     `ui-audit/verify-b300-b302.mjs` 14/14 (chromium-1228, per main's V72 note). -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
      interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B288–B296**
