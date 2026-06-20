@@ -281,6 +281,22 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     goPlan(id);
   };
 
+  // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
+  // Never removes the last plan in a group (that's the map's whole-site delete). If the
+  // deleted plan was the one open, switch to a sibling so the planner lands somewhere valid.
+  const deletePlan = (id) => {
+    const rec = loadSite(id);
+    if (!rec) return;
+    const siblings = loadPlansOfGroup(groupOf(rec));
+    if (siblings.length <= 1) return; // keep at least one plan per site
+    const wasActive = id === activeSiteId;
+    const next = siblings.find((s) => s.id !== id);
+    deleteSite(id);
+    refreshSites();
+    if (wasActive && next) goPlan(next.id);
+    else if (wasActive) { setActiveSiteId(null); setMode("map"); }
+  };
+
   const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
   const renamePlan = (id, name) => { saveSite({ id, name }); pushSiteToCloud(id).catch(() => {}); refreshSites(); };
 
@@ -390,6 +406,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}
             onDuplicateSite={duplicatePlan}
+            onDeletePlan={deletePlan}
             onRenameSite={renameSite}
             onRenamePlan={renamePlan}
             onSiteDropped={handleSiteDropped}
