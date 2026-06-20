@@ -1,4 +1,4 @@
-# Auto-filing service (`/server/filing`) — B297
+# Auto-filing service (`/server/filing`) — B299
 
 The **compute** half of auto-filing (distinct from the Supabase data layer). Drop a drawing →
 this service **reads its title block** with the Claude API → **matches it to one of the named

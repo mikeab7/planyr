@@ -1,4 +1,4 @@
-/* B297 verification — the Project Files drawer still opens cleanly after wiring the
+/* B299 verification — the Project Files drawer still opens cleanly after wiring the
  * auto-filing index provider (autofilingProvider) + the file-facts merge into the drawer.
  * Dev tool, not part of the build. Logged-out smoke (the sandbox proxy blocks sign-in, so the
  * signed-in drop→read→file round-trip is a separate live/CI-secret check):
@@ -10,7 +10,7 @@
  *     path is dormant until the backend is provisioned, exactly like APS/Drive).
  *
  * Run:  npm run build && npx vite preview --host --port 4173   (then, in another shell)
- *       node ui-audit/verify-b297-autofiling.mjs
+ *       node ui-audit/verify-b299-autofiling.mjs
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 import { mkdirSync } from "node:fs";

@@ -192,7 +192,7 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
-/* --------------------------- file-facts index (B297) ----------------------- */
+/* --------------------------- file-facts index (B299) ----------------------- */
 // The queryable auto-filing index (db/file_facts.sql): one small row per filed drawing, so the
 // library can answer "this project's Civil set, latest revision" WITHOUT re-reading the PDF.
 // Degrades gracefully — if the migration hasn't run (or the user's signed out) upsert no-ops

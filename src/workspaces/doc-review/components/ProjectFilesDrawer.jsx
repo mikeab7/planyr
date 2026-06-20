@@ -70,7 +70,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const refresh = async () => {
     const tok = ++reqRef.current;
     setBusy(true);
-    // Merge the auto-filing file-facts index (B297) onto the review rows so the list surfaces
+    // Merge the auto-filing file-facts index (B299) onto the review rows so the list surfaces
     // captured placement + needs-filing state. listFileFacts returns [] until the migration
     // runs, leaving the rows unchanged (no regression).
     try {
@@ -115,7 +115,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     const proj = activeProject || null;
     let target = proj ? projName(proj) : "Holding area";
     try {
-      // B297: when the auto-filing backend is live, read the title block → match a project →
+      // B299: when the auto-filing backend is live, read the title block → match a project →
       // route + name it. The matcher NEVER auto-guesses: an unmatched/ambiguous read falls back
       // to the active project (or the holding area when none is selected) for the one-click
       // confirm. When the backend is dormant (default), autofile SKIPS and this is identical to

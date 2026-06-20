@@ -1,4 +1,4 @@
-/* Auto-filing client provider (B297) — the seam the title-block backend plugs into.
+/* Auto-filing client provider (B299) — the seam the title-block backend plugs into.
  *
  * This is the real `createIndexProvider` (shared/files/fileFacts.js) implementation: it sends
  * a dropped drawing to the same-origin /api/file proxy (functions/api/file.js → the Cloud Run

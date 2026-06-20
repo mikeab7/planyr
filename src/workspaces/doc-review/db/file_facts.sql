@@ -1,4 +1,4 @@
--- Document Review — auto-filing file-facts index (B297).
+-- Document Review — auto-filing file-facts index (B299).
 -- Run once in the Supabase SQL editor after db/doc_reviews.sql + db/project_library.sql.
 -- Idempotent; safe to re-run. Mirrors the public.doc_reviews / public.sites RLS exactly —
 -- private by default, each user only ever sees their own rows.
