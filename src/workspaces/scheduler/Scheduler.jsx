@@ -9,12 +9,19 @@
  * of listing the Site Planner's sites and bouncing into the Site Planner. */
 import { useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 
 export default function Scheduler({ shellModule, onShellSwitch, authControl } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
   const [activeId, setActiveId] = useState(null);  // its active project id (aPid)
   const [section, setSection] = useState("projects"); // "projects" | "reports" (Dashboard)
+  // B220 — the iframe loads the heavy standalone Gantt app; show the "assembling
+  // schedule" loader over it until it's interactive, then cross-fade out. The
+  // embedded app emits planar:nav-state once its data is loaded + first paint is
+  // done, so the FIRST such message is our "ready" signal.
+  const [ready, setReady] = useState(false);
+  const [showLoader, setShowLoader] = useState(true);
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -25,10 +32,24 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl } = 
       setProjects(Array.isArray(m.projects) ? m.projects : []);
       setActiveId(m.activeId ?? null);
       setSection(m.section || "projects");
+      setReady(true);   // first nav-state ⇒ the embedded app is interactive
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, []);
+
+  // Safety net: never let the loader stick if the ready signal is missed.
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 9000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Once ready, let the cross-fade finish, then drop the overlay entirely.
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => setShowLoader(false), 450);
+    return () => clearTimeout(t);
+  }, [ready]);
 
   // Same-origin iframe, so target its exact origin (not "*").
   const post = (msg) => {
@@ -61,12 +82,27 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl } = 
         onDashboard={() => post({ type: "planar:nav-dashboard" })}
         onNewProject={() => post({ type: "planar:nav-new" })}
       />
-      <iframe
-        ref={iframeRef}
-        src="/sequence/"
-        title="Sequence Planyr"
-        style={{ flex: 1, border: "none", width: "100%", minHeight: 0, display: "block" }}
-      />
+      <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+        <iframe
+          ref={iframeRef}
+          src="/sequence/"
+          title="Sequence Planyr"
+          style={{ position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block" }}
+        />
+        {showLoader && (
+          <div
+            aria-hidden={ready}
+            style={{
+              position: "absolute", inset: 0, zIndex: 5,
+              opacity: ready ? 0 : 1,
+              transition: "opacity 0.45s ease",
+              pointerEvents: ready ? "none" : "auto",
+            }}
+          >
+            <ModuleLoader module="scheduler" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

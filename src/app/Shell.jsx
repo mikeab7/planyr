@@ -8,6 +8,8 @@ import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
+import { prefetchOnIdle } from "./modulePrefetch.js";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -43,6 +45,11 @@ export default function Shell() {
       if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
     });
   }, []);
+
+  // B219 — once boot is idle, quietly warm the non-active workspaces (chunk +,
+  // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
+  // instant. Lazy-loading still gates the first paint; this only runs after.
+  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
 
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;
@@ -144,13 +151,7 @@ export default function Shell() {
             modules gives a fresh boundary — a render crash in one workspace is
             contained (shell and the other workspaces keep working). */}
         <ErrorBoundary key={active} label={current.label}>
-          <Suspense
-            fallback={
-              <div style={{ height: "100%", display: "grid", placeItems: "center", color: MUTED, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>
-                Loading workspace…
-              </div>
-            }
-          >
+          <Suspense fallback={<ModuleLoader module={active} />}>
             <Active
               shellModule={active}
               onShellSwitch={setActive}
