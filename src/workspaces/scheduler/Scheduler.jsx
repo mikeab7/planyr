@@ -16,7 +16,7 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl } = 
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
   const [activeId, setActiveId] = useState(null);  // its active project id (aPid)
   const [section, setSection] = useState("projects"); // "projects" | "reports" (Dashboard)
-  // B220 — the iframe loads the heavy standalone Gantt app; show the "assembling
+  // B222 — the iframe loads the heavy standalone Gantt app; show the "assembling
   // schedule" loader over it until it's interactive, then cross-fade out. The
   // embedded app emits planar:nav-state once its data is loaded + first paint is
   // done, so the FIRST such message is our "ready" signal.

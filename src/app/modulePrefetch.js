@@ -1,5 +1,5 @@
 /* modulePrefetch — warm a workspace before the user opens it, so the tab click
- * feels instant without regressing initial boot. (B219)
+ * feels instant without regressing initial boot. (B221)
  *
  * Two costs are warmed:
  *   1. The lazy JS chunk for the workspace (same dynamic-import specifier the

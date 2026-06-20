@@ -46,7 +46,7 @@ export default function Shell() {
     });
   }, []);
 
-  // B219 — once boot is idle, quietly warm the non-active workspaces (chunk +,
+  // B221 — once boot is idle, quietly warm the non-active workspaces (chunk +,
   // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
   // instant. Lazy-loading still gates the first paint; this only runs after.
   useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);

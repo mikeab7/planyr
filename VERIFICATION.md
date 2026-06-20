@@ -61,6 +61,12 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V49 — Header cleanup + cartographic furniture restyle (B218 / B219) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, vite preview, logged-out, live Harris-county aerial) · **Next check** — none (pure UI; no auth/cloud path involved)
+- **Harness:** `ui-audit/verify-new1to2.mjs` (seeds a located demo site → boots into the planner → asserts the header + furniture DOM, captures console/page errors, screenshots the header and both furniture corners).
+- **✅ B218 (dead header controls removed):** on **both** the Site and Schedule modules the header has **0** `[aria-label="Menu"]` (hamburger) and **0** `[aria-label="Settings"]` (gear); the planyr wordmark + Site/Schedule/Markup tabs still render; Row 1 reflows clean (logo left, account right — no orphaned padding). **0 console errors.**
+- **✅ B219 (cartographic north arrow + scale bar):** the on-screen furniture renders as the two-tone surveyor's needle (**2 `<path>` halves, 0 `<circle>`** — no compass rose) + the thin segmented bar (6 `<rect>` = plate + 4 segments + north plate) with **FEET** + **N** labels on the new subtle warm plate (`rgba(249,248,244,0.84)`); corner screenshots confirm both read as clean cartographic furniture, legible over busy aerial imagery. Shared `lib/sheetFurniture.js` primitives, so the print/PNG export inherits the same look. **0 console errors.**
+
 ### V46 — Schedule Gantt brackets + task-fill + configurable columns (B210 / B211 / B212) ✅ self-verified headless · ⏳ one signed-in cloud check
 - **Added** 2026-06-19 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-19 ✅ (headless Chromium, static-served `public/sequence/`, logged-out seed) · **Next check** — one signed-in cloud round-trip (below)
 - **Harness:** `ui-audit/verify-sequence.mjs` (renders the embedded Schedule app, captures console/page errors, probes bar colors, screenshots). **Note for future sessions:** the Schedule app's CDN deps (React/Babel/Supabase) **are reachable** in this environment — serve `public/` statically and load `/sequence/` (the app falls back to its embedded `__PLANAR_DATA__` seed when logged-out). JSX-only syntax pre-check: `ui-audit/jsxcheck-sequence.mjs` (esbuild).
@@ -791,18 +797,18 @@ _Move items here with the date and who/what checked them._
   - lint 0 errors · **411 tests** (14 in `test/edgeRuns.test.js`) · build green; the original **B213–B215 acceptance still 7/7** (`ui-audit/verify-edge-runs.mjs`).
 - **Not covered (logged-out headless limits):** signed-in cloud-reload of an edited irregular-parcel setback (rides the same Site-Model persistence as the V46/V47 cases); self-touching / zero-area degenerate rings (guarded by `offsetPolygon` + the `edgeRuns` degenerate-input unit tests, not separately driven in-browser).
 
-### V49 — Row color fill no longer hides the Gantt bars (B218) ✅
+### V50 — Row color fill no longer hides the Gantt bars (B220) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the standalone `public/sequence/` app (logged-out seed) · **Cadence** once (bugfix acceptance)
 - **Steps:** intercepted the seed so the active project's first **leaf** task carries a row fill (`rowColor:#c7d2fe` Indigo) from first render, then probed every `<div>`'s computed background. Script `ui-audit/verify-rowfill-bars.mjs`.
 - **Result ✅:** the fill paints the **row bands** (grid + Gantt rows — `rowBands:2`) while **no bar-sized element shares the fill** (`barCollisions:0`); the filled leaf's own bar keeps its neutral identity — `bg rgb(148,163,184)` (`#94a3b8`) with the new **slate hairline edge** `rgb(71,85,105)` (`#475569`, 1px). Visual: the filled "Begin DD" row shows the Indigo tint with its marker fully visible on top (`ui-audit/screens/rowfill-bars-crop.png`). The summary brackets (navy) and milestone diamonds were de-coupled from `rowColor` in the same pass.
 - **Not covered (logged-out limits):** none material — the fix is render-only (no persistence); the PDF/Print export path (`buildGanttSVG`) already never colored bars from `rowColor`, so it had no collision to fix.
 
-### V50 — Schedule prefetch + the themed "assembling" loader (B219 + B220) ✅
+### V51 — Schedule prefetch + the themed "assembling" loader (B221 + B222) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (feature + perf acceptance)
 - **Steps:** loaded the built shell, waited for idle, then navigated to the **Schedule** tab; also reloaded with `prefers-reduced-motion: reduce` emulated. Script `ui-audit/verify-loader-prefetch.mjs`.
 - **Result ✅:**
-  - **B219 prefetch:** after boot-idle a `<link rel="prefetch" href="/sequence/">` is injected (warms the heavy iframe doc); hover-intent on the tab warms it too (same idempotent `prefetchModule`). Virtualization + in-session layout memoization were confirmed already present (`GridView`/`GanttView` windowing), so the prefetch is the net-new win.
-  - **B220 loader:** navigating to Schedule shows the loader (`role="status"`, `aria-label="Assembling schedule…"`) — a Gantt assembling itself: ghost name column, zebra bands, **12 task elements painted the `#7F77DD` accent**, milestone diamonds, and the playhead sweep — then it cross-fades out once the iframe posts its first nav-state. Screenshot `ui-audit/screens/loader-schedule.png`.
+  - **B221 prefetch:** after boot-idle a `<link rel="prefetch" href="/sequence/">` is injected (warms the heavy iframe doc); hover-intent on the tab warms it too (same idempotent `prefetchModule`). Virtualization + in-session layout memoization were confirmed already present (`GridView`/`GanttView` windowing), so the prefetch is the net-new win.
+  - **B222 loader:** navigating to Schedule shows the loader (`role="status"`, `aria-label="Assembling schedule…"`) — a Gantt assembling itself: ghost name column, zebra bands, **12 task elements painted the `#7F77DD` accent**, milestone diamonds, and the playhead sweep — then it cross-fades out once the iframe posts its first nav-state. Screenshot `ui-audit/screens/loader-schedule.png`.
   - **Reduced-motion:** with `prefers-reduced-motion`, the loader still renders but the cascade + sweep are dropped — **0 animated bars, no playhead** (`ui-audit/screens/loader-reduced-motion.png`).
   - 0 boot console errors; lint 0 · **416 tests** (5 new in `test/moduleLoaderTheme.test.js`) · build green; the `Scheduler` / `SitePlannerApp` / `DocReview` lazy chunks intact.
 - **Not covered (logged-out limits):** the signed-in path is identical (the loader/prefetch are auth-agnostic shell chrome); the Site-Planner skin (`#1D9E75` footprints) shares the one engine + is unit-tested, shown on the SitePlannerApp chunk's first load.
