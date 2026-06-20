@@ -1,55 +1,80 @@
-/* POST /api/files — upload a file's bytes to Google Drive (B207 / NEW-2 wiring).
+/* /api/files — file bytes to/from Google Drive (B207 / NEW-2 wiring).
  *
- * A Cloudflare Pages Function (server-side, where the Google creds live). The Project
- * Files drawer calls this to push a dropped PDF into the company Drive, in addition to
- * the existing Supabase filing — so files start appearing in Drive without changing the
- * app's current read/restore path (a safe, additive first increment).
+ * Cloudflare Pages Function (server-side, where the Google creds live). The Project Files
+ * drawer calls this to push a dropped PDF into the company Drive and to read it back.
  *
- * Auth: requires a valid Supabase session (Authorization: Bearer <access token>),
- * verified via the Supabase Auth API — so this write endpoint can't be abused. Files are
- * namespaced by the caller's user id inside the app's Drive folder tree.
+ *   POST   /api/files   — upload bytes (headers: X-Planyr-Key, X-Planyr-Folder,
+ *                          X-Planyr-Name; body: raw bytes) → { ok, planyrKey }
+ *   GET    /api/files?key=…  — download bytes back from Drive
+ *   DELETE /api/files?key=…  — remove the file + its mapping
  *
- * Body: the raw file bytes. Headers: X-Planyr-Key (stable key), X-Planyr-Folder,
- * X-Planyr-Name, Content-Type. Returns { ok, planyrKey } / { ok:false, error } — never a
- * silent success (B209).
+ * Auth: a valid Supabase session (Authorization: Bearer <access token>), verified via the
+ * Supabase Auth API. The Planyr-key↔Drive-id mapping persists in the drive_files table
+ * (db/drive_files.sql) so a file saved in one request can be fetched in a later one,
+ * scoped to the caller by RLS. Returns no-silent-failure results (B209).
  *
- * Needs deploy env: SUPABASE_URL, SUPABASE_ANON_KEY (for auth) + the Google creds +
- * PLANYR_STORAGE_BACKEND=drive (already set).
+ * Needs deploy env: SUPABASE_URL, SUPABASE_ANON_KEY + the Google creds +
+ * PLANYR_STORAGE_BACKEND=drive.
  */
 import { buildStorageAdapter, storageConfig } from "../../server/storage/index.js";
 import { verifySupabaseUser } from "../../server/auth/supabaseAuth.js";
+import { supabaseIdStore } from "../../server/storage/idStoreSupabase.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const slug = (s) => (s || "").toString().toLowerCase().replace(/[^a-z0-9/]+/g, "-").replace(/^-+|-+$/g, "") || "x";
 
-export async function onRequestPost(context) {
-  const { env, request } = context;
-
-  // 1) Auth — must be a real signed-in user.
+// Auth + adapter wired to the durable (Supabase-backed) id map, all scoped to the caller.
+async function context_(env, request) {
   const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   const v = await verifySupabaseUser({ token, supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY });
-  if (!v.ok) return json({ ok: false, error: v.error }, 401);
-
-  // 2) Drive must be the active backend.
+  if (!v.ok) return { error: json({ ok: false, error: v.error }, 401) };
   const cfg = storageConfig(env);
-  if (cfg.backend !== "drive") return json({ ok: false, error: 'Storage backend is not "drive".' }, 503);
+  if (cfg.backend !== "drive") return { error: json({ ok: false, error: 'Storage backend is not "drive".' }, 503) };
+  const idStore = supabaseIdStore({ supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, token });
+  return { user: v.user, adapter: buildStorageAdapter(cfg, { idStore }) };
+}
 
-  // 3) Inputs.
-  const planyrKey = request.headers.get("x-planyr-key");
-  if (!planyrKey) return json({ ok: false, error: "Missing X-Planyr-Key." }, 400);
+export async function onRequestPost(context) {
+  const { env, request } = context;
+  const c = await context_(env, request);
+  if (c.error) return c.error;
+
+  const rawKey = request.headers.get("x-planyr-key");
+  if (!rawKey) return json({ ok: false, error: "Missing X-Planyr-Key." }, 400);
   const name = request.headers.get("x-planyr-name") || "document.pdf";
   const contentType = request.headers.get("content-type") || "application/octet-stream";
-  // Namespace by user id so a single shared Drive keeps each user's files separate.
-  const folder = `${v.user.id}/${slug(request.headers.get("x-planyr-folder") || "")}`;
+  const folder = `${c.user.id}/${slug(request.headers.get("x-planyr-folder") || "")}`; // per-user inside the shared Drive
 
   let bytes;
   try { bytes = new Uint8Array(await request.arrayBuffer()); } catch (_) { return json({ ok: false, error: "Couldn't read the upload body." }, 400); }
   if (!bytes.length) return json({ ok: false, error: "Empty upload." }, 400);
 
-  // 4) Save to Drive through the adapter (no-silent-failure contract).
-  const adapter = buildStorageAdapter(cfg);
-  const r = await adapter.save({ planyrKey: `${v.user.id}/${planyrKey}`, bytes, contentType, name, folder });
+  const r = await c.adapter.save({ planyrKey: `${c.user.id}/${rawKey}`, bytes, contentType, name, folder });
   if (!r.ok) return json({ ok: false, error: r.error }, 502);
-  return json({ ok: true, planyrKey });
+  return json({ ok: true, planyrKey: rawKey });
+}
+
+export async function onRequestGet(context) {
+  const { env, request } = context;
+  const c = await context_(env, request);
+  if (c.error) return c.error;
+  const rawKey = new URL(request.url).searchParams.get("key");
+  if (!rawKey) return json({ ok: false, error: "Missing ?key=." }, 400);
+  const r = await c.adapter.fetch(`${c.user.id}/${rawKey}`);
+  if (!r.ok) return json({ ok: false, error: r.error }, 404);
+  return new Response(r.bytes, { status: 200, headers: {
+    "content-type": r.contentType || "application/octet-stream",
+    "cache-control": "private, no-store",
+  } });
+}
+
+export async function onRequestDelete(context) {
+  const { env, request } = context;
+  const c = await context_(env, request);
+  if (c.error) return c.error;
+  const rawKey = new URL(request.url).searchParams.get("key");
+  if (!rawKey) return json({ ok: false, error: "Missing ?key=." }, 400);
+  const r = await c.adapter.remove(`${c.user.id}/${rawKey}`);
+  return json({ ok: r.ok, error: r.ok ? undefined : r.error }, r.ok ? 200 : 502);
 }
