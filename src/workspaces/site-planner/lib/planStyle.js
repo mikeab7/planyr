@@ -17,7 +17,11 @@ export const TYPE = {
   paving: { fill: "#d6d1c7", stroke: "#9a9384", label: "Paving / Drive", weight: 1.25 },
   parking: { fill: "#cdd7dd", stroke: "#7d949e", label: "Car Parking", weight: 1.25 },
   trailer: { fill: "#e3d4b2", stroke: "#b09a6c", label: "Trailer Parking", weight: 1.25, pattern: "trailer" },
-  pond: { fill: "#9fc4d4", stroke: "#5d8497", label: "Detention Pond", weight: 1.25, water: true },
+  // B222 — cartographic water-body token (no wavy hatch). The fill is the EDGE tone of a
+  // radial steel-teal gradient that deepens toward the center (`#2F6675`) in the renderer;
+  // the outline is a constant-screen-pixel teal. `cartoWater` is the reusable style token so
+  // future water/basin features inherit the same treatment. No orange — that's the Markup accent.
+  pond: { fill: "#5B97A5", stroke: "#2C5D6B", label: "Detention Pond", weight: 2, cartoWater: true },
   sidewalk: { fill: "#eceae3", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
   road: { fill: "#b9b4a8", stroke: "#7c786d", label: "Road", weight: 1.25 },
@@ -38,7 +42,7 @@ export const elStyle = (el, settings) => {
     weight: base.weight ?? 1,
     shadow: !!base.shadow,
     hatch: !!base.hatch,
-    water: !!base.water,
+    cartoWater: !!base.cartoWater,
     pattern: base.pattern || null,
   };
 };

@@ -22,6 +22,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: B221 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+     right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
+     dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
+     measures / markup poly-line / easements) + B222 (cartographic detention pond — radial steel-teal
+     gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
+     "NEW-1"/"NEW-2", minted B221/B222 (highest across both files was B220). Filed AND shipped this same
+     session — moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V51. -->
+
 <!-- 2026-06-20: B220 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
      the planner-canvas fix that missed the map-finder call site). Minted B218, renumbered
      B220 — concurrent `main` PR #183 took B218 (dead header controls) + B219 (map-furniture
