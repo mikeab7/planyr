@@ -83,6 +83,16 @@ const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
+// B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
+// FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
+// footprint shrinks below them (zoomed out) the cluster grows larger than the
+// footprint and spills past the edges into an unreadable pile. Each button is gated on
+// the on-screen size of the wall it hangs off, in PIXELS (resolution-independent — real
+// building sizes vary too much for one zoom number): a wall's inset +/− only shows when
+// its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
+// each side means opposite buttons overlap below ~68px; this adds a small legibility
+// margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
 const PAL = {
@@ -746,7 +756,7 @@ const DEFAULT_SETTINGS = {
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
-  // Building-anchored dock-zone stack default depths (B221), outward from the dock
+  // Building-anchored dock-zone stack default depths (B228), outward from the dock
   // face: truck court → trailer parking → buffer. User-editable in Setup → Dock zones.
   truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
@@ -849,6 +859,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [cursor, setCursor] = useState(null);   // {x,y} feet
+  const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -2265,7 +2276,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
     const d = drag.current;
-    if (!d) return;
+    if (!d) {
+      // B226: when nothing is selected, preview the hovered building's feature-add
+      // buttons so they appear on the ONE building under the cursor (never all at
+      // once). Position-based (not SVG enter/leave) because the buttons sit INSIDE
+      // the footprint — moving onto one keeps the pointer over the building, so the
+      // hover never flickers off. Only runs while idle in select mode with no
+      // selection (selection otherwise drives the buttons), so there's no churn.
+      if (tool === "select" && !sel) {
+        const hovered = [...els].sort(byZ).reverse().find((x) => {
+          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) return false;
+          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          return fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh;
+        });
+        const hid = hovered ? hovered.id : null;
+        if (hid !== hoverElId) setHoverElId(hid);
+      } else if (hoverElId) setHoverElId(null);
+      return;
+    }
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
@@ -3185,7 +3213,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `oppSide` trailer; the dock-zone stack uses relayoutSide instead).
   const fitWallTrailer = (hostBox, side) => oppTrailerGeom(hostBox, side);
 
-  /* ---- Building-anchored dock-zone stack (B221): truck court → trailer parking →
+  /* ---- Building-anchored dock-zone stack (B228): truck court → trailer parking →
      buffer, stacked OUTWARD from each dock face. The building footprint is the
      control hub: one "+" walks the stack outward, one "−" peels the outermost off
      (LIFO). A single pure layout (lib/dockZones `layoutZone`) positions all three
@@ -3325,7 +3353,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id: b.id });
   };
   // Car parking on the building ENDS (non-dock short sides) — tracked OUTSIDE the
-  // dock-face LIFO stack, with its own add/remove. [B221 assumption, flagged for Michael.]
+  // dock-face LIFO stack, with its own add/remove. [B228 assumption, flagged for Michael.]
   const carEndsSides = (b) => (b.w >= b.h ? ["left", "right"] : ["top", "bottom"]);
   const carParkingEnds = (b) => els.filter((x) => x.attachedTo === b.id && x.sideParkSide && carEndsSides(b).includes(x.sideParkSide));
   const addCarParkingEnds = (b) => { carEndsSides(b).forEach((name) => addParkingRowSide(b, name)); };
@@ -4424,13 +4452,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
+  // one, or (when nothing is selected) the one under the cursor — never every building
+  // in view. featActiveId is that building; each node group below ALSO gates each button
+  // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
+  // they can cluster/spill when zoomed out.
+  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
   const sideAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / sidewalk / trailer handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -4438,6 +4473,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
+          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall's button. A long/narrow
+          // footprint thus keeps its long-side buttons and drops only the cramped short-end
+          // ones — overlap handled without a collapse menu.
+          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
@@ -4457,8 +4497,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
             park ? () => removeFeature(park.id) : null);
         })}
-        {/* dog-ear bump-outs at each corner of every dock side */}
-        {dockSides.flatMap((name) => {
+        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
           return [1, -1].map((sign) => {
@@ -4478,9 +4518,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
   // parking backs in. Adds striped trailer parking (stack zone 1), or removes it.
   const courtAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || !el.truckCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const existing = els.find((x) => x.forCourt === el.id);
     const [nx, ny] = SIDE_N[el.truckCourt.side];
     const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
@@ -4494,9 +4535,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+" / "−" on a selected TRAILER PARKING row, on its far (outer) edge — adds the
   // buffer (stack zone 2, the outermost), or removes it if present.
   const trailerAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "trailer" || !el.forCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const court = els.find((x) => x.id === el.forCourt);
     const b = court && els.find((x) => x.id === court.attachedTo);
     const side = court && court.truckCourt && court.truckCourt.side;
@@ -4578,9 +4620,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -6811,7 +6854,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   ) : isDockZone(selEl) ? (() => {
                     // A dock-zone stack member (court / trailer / buffer): edit its DEPTH inline;
                     // length + rotation are stack-controlled (full wall, flush-outward). Changing
-                    // it pushes the zones beyond it outward (B221).
+                    // it pushes the zones beyond it outward (B228).
                     const b = els.find((x) => x.id === selEl.attachedTo);
                     const side = b && zoneSideOf(els, selEl);
                     const i = zoneIndexOf(selEl);
@@ -6885,7 +6928,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     );
                   })()}
                   {selEl.type === "building" && !selEl.dogEar && (() => {
-                    // B222 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
+                    // B229 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
                     // car parking, and the visually-distinct bump-outs footprint modifier),
                     // then the active dock-face zones listed in outward order with inline depths
                     // + the LIFO "−". The footprint/dock-doors summary stays at the bottom (below).
@@ -7449,44 +7492,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* metrics */}
           {leftPanel === "yield" && (<>
-          <Section title="Site yield" accent={PAL.accent}>
-            {/* hero stat tiles */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
-              {[
-                ["Site", `${f2(siteSqft / SQFT_PER_ACRE)}`, "ac"],
-                ["Building", `${f0(bldg / 1000)}k`, "sf"],
-                ["Coverage", `${f0(cov)}`, "%"],
-              ].map(([k, v, u]) => (
-                <div key={k} style={{ background: "linear-gradient(160deg,#fbf8f2,#f3eee3)", border: "1px solid #ece4d4", borderRadius: 9, padding: "8px 9px" }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{k}</div>
-                  <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: PAL.ink, fontSize: 16, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{v}<span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 500, marginLeft: 2 }}>{u}</span></div>
-                </div>
-              ))}
-            </div>
-            {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
-            {parcels.some((p) => p.active === false) && (
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
-                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
-              </div>
-            )}
-            {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-            {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
-            {metricRow("FAR", f2(far), "(1-story)")}
-            {metricRow("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
-            {metricRow("Trailer stalls", f0(trailers))}
-            {metricRow("Impervious", `${f0(impPct)}%`)}
-            {metricRow("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
-            {metricRow("Detention %", `${f0(detPct)}%`)}
-            {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
-            {easeAll.length > 0 && <>
-              {metricRow("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
-              {metricRow("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "")}
-              {easePaveArea > 0 && metricRow("· Restrict paving", `${f0(easePaveArea)} sf`)}
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" }}>
-                Gross of overlaps; subtracted from buildable area by the future yield engine.
-              </div>
-            </>}
-          </Section>
+          <YieldPanel
+            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
+            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
+            bumpCount={bumpCount} bumpArea={bumpArea}
+            inactiveCount={parcels.filter((p) => p.active === false).length}
+            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
+          />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
             // (LF, both sides), split by curb type so each rides its own unit price.
@@ -7545,7 +7557,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
           </Section>
 
-          {/* Default depths for the building-anchored dock-zone stack (B221), outward from
+          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
               the dock face. Editable per plan — the building "+" reads these. */}
           <Section title="Dock zones" collapsed>
             <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
@@ -8123,5 +8135,174 @@ function NumInput({ value, onCommit, min, max, style, placeholder }) {
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); } }}
     />
+  );
+}
+
+// ---- Site Yield panel (B225) ----------------------------------------------
+// Presentational reskin of the yield readout: an identity-tile header, the three
+// KPI cards, a composition donut + legend, and grouped detail rows. Every value is
+// passed in from the engine's existing computation — nothing is recomputed here
+// except the donut's four partition percentages, and those are derived from engine
+// OUTPUTS (coverage %, impervious %, detention %), never from raw geometry. One
+// semantic colour = one meaning across the donut arcs, the legend swatches, and the
+// group dots, so the eye carries the same mapping everywhere.
+const YMONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const YIELD_PAL = {
+  building: "#C45A32", buildingAccent: "#C0532E", // terracotta — footprint coverage
+  paving: "#B6AB9B",                               // warm taupe — paving / parking
+  green: "#4FA587",                                // sage — open / green
+  detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
+  panelBg: "#FBF8F2", border: "#E7DFD2", cardBg: "#F2ECE1",
+  text: "#3A352D", rowLabel: "#6F675B", muted: "#A89C8C", faint: "#B4A99B",
+  hairline: "#EBE3D6", track: "#ECE3D5", iconTile: "#F6E7DD",
+};
+
+function YieldPanel({
+  siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  bumpCount, bumpArea, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+}) {
+  const [openPanel, setOpenPanel] = useState(!collapsed);
+  const Y = YIELD_PAL;
+  const acres = siteSqft / SQFT_PER_ACRE;
+  const hasSite = siteSqft > 0;
+
+  // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
+  // to 100 by construction (open is the clamped remainder), so the ring always closes.
+  const buildingPct = hasSite ? cov : 0;
+  const pavingPct = hasSite ? Math.max(0, impPct - cov) : 0;
+  const detentionPct = hasSite ? detPct : 0;
+  const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
+  const slices = [
+    { key: "building", label: "Building", pct: buildingPct, color: Y.building },
+    { key: "paving", label: "Paving", pct: pavingPct, color: Y.paving },
+    { key: "green", label: "Open / green", pct: openPct, color: Y.green },
+    { key: "detention", label: "Detention", pct: detentionPct, color: Y.detention },
+  ];
+  // Donut geometry: ~100px circle, 13px stroke. Each arc is a dashed full circle —
+  // dash = its share of the circumference, offset = −(sum of earlier arcs) so they
+  // butt up contiguously; the group is rotated −90° so the first arc starts at top.
+  const R = 43.5, C = 2 * Math.PI * R;
+  let cumLen = 0;
+  const arcs = slices.map((s) => {
+    const len = (Math.max(0, s.pct) / 100) * C;
+    const node = { ...s, len, offset: -cumLen };
+    cumLen += len;
+    return node;
+  });
+
+  const kpi = (label, value, unit) => (
+    <div style={{ background: Y.cardBg, borderRadius: 11, padding: "9px 10px" }}>
+      <div style={{ fontSize: 9.5, color: Y.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontFamily: YMONO, fontWeight: 700, color: Y.text, fontSize: 17, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>
+        {value}<span style={{ fontSize: 10, color: Y.muted, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+      </div>
+    </div>
+  );
+  const groupHead = (color, label) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "13px 0 5px" }}>
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flex: "none" }} />
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: Y.rowLabel }}>{label}</span>
+    </div>
+  );
+  const row = (label, value, sub, muted) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+      <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
+      <span style={{ fontFamily: YMONO, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
+        {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+      </span>
+    </div>
+  );
+  const note = (text) => <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+
+  return (
+    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* header — identity tile + label + collapse chevron (collapse preserved) */}
+      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
+            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
+            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+          </svg>
+        </span>
+        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10 }}>▶</span>
+      </div>
+
+      {openPanel && (
+        <div style={{ padding: "0 12px 13px" }}>
+          {/* KPI cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
+            {kpi("Site", f2(acres), "ac")}
+            {kpi("Building", `${f0(bldg / 1000)}k`, "sf")}
+            {kpi("Coverage", `${f0(cov)}`, "%")}
+          </div>
+
+          {/* composition donut + legend */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 0 4px" }}>
+            <svg width="100" height="100" viewBox="0 0 100 100" style={{ flex: "none" }}>
+              <circle cx="50" cy="50" r={R} fill="none" stroke={Y.track} strokeWidth="13" />
+              <g transform="rotate(-90 50 50)">
+                {hasSite && arcs.map((a) => (
+                  <circle key={a.key} cx="50" cy="50" r={R} fill="none" stroke={a.color} strokeWidth="13"
+                    strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
+                ))}
+              </g>
+              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: YMONO, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: "tabular-nums" }}>{f2(acres)}</text>
+              <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
+            </svg>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+              {slices.map((s) => {
+                const zero = Math.round(s.pct) === 0;
+                // A zeroed share is present-and-zero, never hidden — Detention especially
+                // always shows, with a muted hollow swatch to read as "0%, not omitted".
+                const sw = s.key === "detention" && zero
+                  ? { background: Y.detZeroFill, border: `1px solid ${Y.detZeroBorder}` }
+                  : { background: s.color };
+                return (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
+                    <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
+                    <span style={{ fontFamily: YMONO, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: "tabular-nums" }}>{Math.round(s.pct)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* hairline divider */}
+          <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
+
+          {/* grouped detail rows — one semantic dot per group */}
+          {groupHead(Y.green, "Land")}
+          {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
+          {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
+          {row("FAR", f2(far), "(1-story)")}
+          {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+
+          {groupHead(Y.building, "Building")}
+          {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`, true)}
+          {row("Coverage", `${f0(cov)}%`)}
+
+          {groupHead(Y.paving, "Parking")}
+          {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
+          {row("Trailer stalls", f0(trailers))}
+
+          {groupHead(Y.detention, "Stormwater")}
+          {row("Impervious", `${f0(impPct)}%`)}
+          {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+          {row("Detention %", `${f0(detPct)}%`)}
+
+          {easeAll.length > 0 && (<>
+            {groupHead(Y.faint, "Easements")}
+            {row("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
+            {row("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "", true)}
+            {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} sf`, "", true)}
+            {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
+          </>)}
+        </div>
+      )}
+    </div>
   );
 }

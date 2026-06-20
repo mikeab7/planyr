@@ -5,7 +5,7 @@ import {
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
-describe("DOCK_ZONES — fixed outward order (B221)", () => {
+describe("DOCK_ZONES — fixed outward order (B228)", () => {
   it("is court → trailer parking → buffer, outward from the dock face", () => {
     expect(DOCK_ZONES.map((z) => z.key)).toEqual(["court", "trailer", "buffer"]);
     expect(MAX_DOCK_ZONES).toBe(3);

@@ -1,4 +1,4 @@
-/* Self-verification for B221 + B222 — building-anchored dock-zone stack (truck court →
+/* Self-verification for B228 + B229 — building-anchored dock-zone stack (truck court →
  * trailer parking → buffer) with a LIFO "+/−" and inline depths, driven from the Dock
  * features panel. Seeds a cross-dock building, boots the planner logged-out, selects the
  * building, then:

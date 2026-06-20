@@ -1,4 +1,4 @@
-/* Building-anchored dock-zone stack (B221).
+/* Building-anchored dock-zone stack (B228).
  *
  * The building footprint is the control hub for the dock-side site elements.
  * Three zones stack OUTWARD from each dock face, in a fixed order:
