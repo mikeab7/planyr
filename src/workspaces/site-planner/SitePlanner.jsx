@@ -285,7 +285,7 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
-// B227 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
+// B228 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
 // drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
 // old fixed midpoint. Returns the point + its distance for hit-testing.
 const projToSeg = (p, a, b) => {
@@ -1005,7 +1005,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
-  // B227 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
+  // B228 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
   // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
   // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
   // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
@@ -1595,7 +1595,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
-      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B227: a selected control point → delete just that vertex (not the whole shape)
+      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B228: a selected control point → delete just that vertex (not the whole shape)
       if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
@@ -1604,7 +1604,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
 
-  // B227 — track the Shift modifier (for the candidate-insertion dot) independent of the big
+  // B228 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
   useEffect(() => {
     const sync = (e) => setShiftHeld(e.shiftKey);
@@ -2101,7 +2101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Attribute edit on the selected easement (re-derives the ring so width edits re-offset live).
   const setSelEasement = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? withEaseRing(m, patch) : m)); };
-  // B227 — drag an easement path vertex (the active control point). Inserting / deleting a
+  // B228 — drag an easement path vertex (the active control point). Inserting / deleting a
   // control point is handled by the shared edge/vertex affordances (Shift-click / right-click an
   // edge to add; right-click a vertex or press Delete to remove), not a per-handle "+" / Shift-click.
   const startEaseVertex = (ev, id, index) => {
@@ -2126,7 +2126,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ parcel vertex editing (B227: drag only; insert/delete via shared edge/vertex) ------------ */
+  /* ------------ parcel vertex editing (B228: drag only; insert/delete via shared edge/vertex) ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     if (parcels.find((p) => p.id === id)?.locked) { e.stopPropagation(); setSel({ kind: "parcel", id }); return; }
@@ -2178,7 +2178,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ B227: shared Bluebeam vertex editing across EVERY editable path ------------
+  /* ------------ B228: shared Bluebeam vertex editing across EVERY editable path ------------
      One resolver + one hit-test + one insert/delete, so Shift-click / right-click / Delete
      behaves identically on a parcel, a polygon element, a measurement, a markup poly/line, or
      an easement — no per-type forks. The always-on "+" midpoint handles are gone; a control
@@ -4248,7 +4248,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
-    // B228 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
+    // B229 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
     // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
     const carto = d.carto;
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
@@ -4574,7 +4574,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   })();
 
-  // B227 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
+  // B228 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
   // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
   // point instead. The active control point (the Delete-key target) is shown inverted.
   const vtxRect = (key, c, on, cursor, onDown) => (
@@ -4635,13 +4635,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     }
     if (m.kind === "easement") {
-      // B227 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
+      // B228 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
       // spine). Insert via Shift-click / right-click an edge; the old "+" midpoint dots are gone.
       const px = easeEditPath(m).map(f2p);
       return <g>{px.map((p, i) => vtxRect(`ev${i}`, p, isSelVtx("ease", m.id, i), "move", (e) => startEaseVertex(e, m.id, i)))}</g>;
     }
     if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
-    // B227 — line/polyline/polygon control points as draggable squares (no "+" dots).
+    // B228 — line/polyline/polygon control points as draggable squares (no "+" dots).
     const px = mkPts(m).map(f2p);
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
@@ -5220,7 +5220,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
               </pattern>
-              {/* B228 — cartographic water body: a radial steel-teal gradient that deepens
+              {/* B229 — cartographic water body: a radial steel-teal gradient that deepens
                   toward the center so a pond reads as water with volume (replaces the old
                   decorative wavy-line hatch). objectBoundingBox units → auto-fits each pond. */}
               <radialGradient id="grad-water" cx="50%" cy="50%" r="62%">
@@ -5697,7 +5697,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && tool === "select" && (
                       <g>
-                        {/* B227: draggable SQUARE control points (no "+" dots) — Shift-click /
+                        {/* B228: draggable SQUARE control points (no "+" dots) — Shift-click /
                             right-click an edge inserts a point; right-click / Delete removes one.
                             The active control point (Delete target) is shown inverted. */}
                         {pts.map((p, k) => {
@@ -5831,7 +5831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parcelHandles}
                 {elPolyHandles}
                 {markupHandles}
-                {/* B227 — transient candidate-insertion dot, snapped to the nearest point on the
+                {/* B228 — transient candidate-insertion dot, snapped to the nearest point on the
                     edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
                 {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
                 {attachHint && (() => {
@@ -7202,44 +7202,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* metrics */}
           {leftPanel === "yield" && (<>
-          <Section title="Site yield" accent={PAL.accent}>
-            {/* hero stat tiles */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
-              {[
-                ["Site", `${f2(siteSqft / SQFT_PER_ACRE)}`, "ac"],
-                ["Building", `${f0(bldg / 1000)}k`, "sf"],
-                ["Coverage", `${f0(cov)}`, "%"],
-              ].map(([k, v, u]) => (
-                <div key={k} style={{ background: "linear-gradient(160deg,#fbf8f2,#f3eee3)", border: "1px solid #ece4d4", borderRadius: 9, padding: "8px 9px" }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{k}</div>
-                  <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: PAL.ink, fontSize: 16, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{v}<span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 500, marginLeft: 2 }}>{u}</span></div>
-                </div>
-              ))}
-            </div>
-            {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
-            {parcels.some((p) => p.active === false) && (
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
-                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
-              </div>
-            )}
-            {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-            {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
-            {metricRow("FAR", f2(far), "(1-story)")}
-            {metricRow("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
-            {metricRow("Trailer stalls", f0(trailers))}
-            {metricRow("Impervious", `${f0(impPct)}%`)}
-            {metricRow("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
-            {metricRow("Detention %", `${f0(detPct)}%`)}
-            {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
-            {easeAll.length > 0 && <>
-              {metricRow("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
-              {metricRow("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "")}
-              {easePaveArea > 0 && metricRow("· Restrict paving", `${f0(easePaveArea)} sf`)}
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" }}>
-                Gross of overlaps; subtracted from buildable area by the future yield engine.
-              </div>
-            </>}
-          </Section>
+          <YieldPanel
+            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
+            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
+            bumpCount={bumpCount} bumpArea={bumpArea}
+            inactiveCount={parcels.filter((p) => p.active === false).length}
+            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
+          />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
             // (LF, both sides), split by curb type so each rides its own unit price.
@@ -7571,7 +7540,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {/* B227 — Add / Delete control-point menu, portal-mounted at the document root so it can
+      {/* B228 — Add / Delete control-point menu, portal-mounted at the document root so it can
           never be clipped or trapped behind the canvas / tool-rail stacking contexts. */}
       {vtxMenu && createPortal(
         <>
@@ -7667,7 +7636,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;
-  // B228 — cartographic water body (detention pond): a radial steel-teal gradient fill at
+  // B229 — cartographic water body (detention pond): a radial steel-teal gradient fill at
   // ~80% opacity + a constant-screen-pixel teal outline. NEVER orange (the Markup accent), so
   // a pond never reads as redline — selection is shown by a thicker teal stroke + the vertex
   // handles, not a colour change.
@@ -7882,5 +7851,174 @@ function NumInput({ value, onCommit, min, max, style, placeholder }) {
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); } }}
     />
+  );
+}
+
+// ---- Site Yield panel (B225) ----------------------------------------------
+// Presentational reskin of the yield readout: an identity-tile header, the three
+// KPI cards, a composition donut + legend, and grouped detail rows. Every value is
+// passed in from the engine's existing computation — nothing is recomputed here
+// except the donut's four partition percentages, and those are derived from engine
+// OUTPUTS (coverage %, impervious %, detention %), never from raw geometry. One
+// semantic colour = one meaning across the donut arcs, the legend swatches, and the
+// group dots, so the eye carries the same mapping everywhere.
+const YMONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const YIELD_PAL = {
+  building: "#C45A32", buildingAccent: "#C0532E", // terracotta — footprint coverage
+  paving: "#B6AB9B",                               // warm taupe — paving / parking
+  green: "#4FA587",                                // sage — open / green
+  detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
+  panelBg: "#FBF8F2", border: "#E7DFD2", cardBg: "#F2ECE1",
+  text: "#3A352D", rowLabel: "#6F675B", muted: "#A89C8C", faint: "#B4A99B",
+  hairline: "#EBE3D6", track: "#ECE3D5", iconTile: "#F6E7DD",
+};
+
+function YieldPanel({
+  siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  bumpCount, bumpArea, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+}) {
+  const [openPanel, setOpenPanel] = useState(!collapsed);
+  const Y = YIELD_PAL;
+  const acres = siteSqft / SQFT_PER_ACRE;
+  const hasSite = siteSqft > 0;
+
+  // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
+  // to 100 by construction (open is the clamped remainder), so the ring always closes.
+  const buildingPct = hasSite ? cov : 0;
+  const pavingPct = hasSite ? Math.max(0, impPct - cov) : 0;
+  const detentionPct = hasSite ? detPct : 0;
+  const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
+  const slices = [
+    { key: "building", label: "Building", pct: buildingPct, color: Y.building },
+    { key: "paving", label: "Paving", pct: pavingPct, color: Y.paving },
+    { key: "green", label: "Open / green", pct: openPct, color: Y.green },
+    { key: "detention", label: "Detention", pct: detentionPct, color: Y.detention },
+  ];
+  // Donut geometry: ~100px circle, 13px stroke. Each arc is a dashed full circle —
+  // dash = its share of the circumference, offset = −(sum of earlier arcs) so they
+  // butt up contiguously; the group is rotated −90° so the first arc starts at top.
+  const R = 43.5, C = 2 * Math.PI * R;
+  let cumLen = 0;
+  const arcs = slices.map((s) => {
+    const len = (Math.max(0, s.pct) / 100) * C;
+    const node = { ...s, len, offset: -cumLen };
+    cumLen += len;
+    return node;
+  });
+
+  const kpi = (label, value, unit) => (
+    <div style={{ background: Y.cardBg, borderRadius: 11, padding: "9px 10px" }}>
+      <div style={{ fontSize: 9.5, color: Y.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontFamily: YMONO, fontWeight: 700, color: Y.text, fontSize: 17, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>
+        {value}<span style={{ fontSize: 10, color: Y.muted, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+      </div>
+    </div>
+  );
+  const groupHead = (color, label) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "13px 0 5px" }}>
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flex: "none" }} />
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: Y.rowLabel }}>{label}</span>
+    </div>
+  );
+  const row = (label, value, sub, muted) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+      <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
+      <span style={{ fontFamily: YMONO, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
+        {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+      </span>
+    </div>
+  );
+  const note = (text) => <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+
+  return (
+    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* header — identity tile + label + collapse chevron (collapse preserved) */}
+      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
+            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
+            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+          </svg>
+        </span>
+        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10 }}>▶</span>
+      </div>
+
+      {openPanel && (
+        <div style={{ padding: "0 12px 13px" }}>
+          {/* KPI cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
+            {kpi("Site", f2(acres), "ac")}
+            {kpi("Building", `${f0(bldg / 1000)}k`, "sf")}
+            {kpi("Coverage", `${f0(cov)}`, "%")}
+          </div>
+
+          {/* composition donut + legend */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 0 4px" }}>
+            <svg width="100" height="100" viewBox="0 0 100 100" style={{ flex: "none" }}>
+              <circle cx="50" cy="50" r={R} fill="none" stroke={Y.track} strokeWidth="13" />
+              <g transform="rotate(-90 50 50)">
+                {hasSite && arcs.map((a) => (
+                  <circle key={a.key} cx="50" cy="50" r={R} fill="none" stroke={a.color} strokeWidth="13"
+                    strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
+                ))}
+              </g>
+              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: YMONO, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: "tabular-nums" }}>{f2(acres)}</text>
+              <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
+            </svg>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+              {slices.map((s) => {
+                const zero = Math.round(s.pct) === 0;
+                // A zeroed share is present-and-zero, never hidden — Detention especially
+                // always shows, with a muted hollow swatch to read as "0%, not omitted".
+                const sw = s.key === "detention" && zero
+                  ? { background: Y.detZeroFill, border: `1px solid ${Y.detZeroBorder}` }
+                  : { background: s.color };
+                return (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
+                    <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
+                    <span style={{ fontFamily: YMONO, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: "tabular-nums" }}>{Math.round(s.pct)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* hairline divider */}
+          <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
+
+          {/* grouped detail rows — one semantic dot per group */}
+          {groupHead(Y.green, "Land")}
+          {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
+          {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
+          {row("FAR", f2(far), "(1-story)")}
+          {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+
+          {groupHead(Y.building, "Building")}
+          {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`, true)}
+          {row("Coverage", `${f0(cov)}%`)}
+
+          {groupHead(Y.paving, "Parking")}
+          {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
+          {row("Trailer stalls", f0(trailers))}
+
+          {groupHead(Y.detention, "Stormwater")}
+          {row("Impervious", `${f0(impPct)}%`)}
+          {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+          {row("Detention %", `${f0(detPct)}%`)}
+
+          {easeAll.length > 0 && (<>
+            {groupHead(Y.faint, "Easements")}
+            {row("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
+            {row("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "", true)}
+            {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} sf`, "", true)}
+            {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
+          </>)}
+        </div>
+      )}
+    </div>
   );
 }

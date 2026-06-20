@@ -22,15 +22,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: B227 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+<!-- 2026-06-20: B228 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
      right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
      dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
-     measures / markup poly-line / easements) + B228 (cartographic detention pond — radial steel-teal
+     measures / markup poly-line / easements) + B229 (cartographic detention pond — radial steel-teal
      gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
-     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B227/B228** — concurrent `main` (PRs #184/#186/
-     #188) took B221–B226 (lazy-chunk recovery, Schedule fixes, building-button gating) while this was in
-     flight, so B227/B228 are the real next free IDs after B226. Filed AND shipped this same session —
-     moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V54. -->
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B228/B229** — concurrent `main` (PRs #184/#186/
+     #188/#189) took B221–B227 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-panel
+     redesign) while this was in flight, so B228/B229 are the real next free IDs after B227. Filed AND
+     shipped this same session — moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V55. -->
 
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
