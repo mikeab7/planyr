@@ -78,15 +78,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
-  const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B289)
-  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B283)
-  const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B287)
-  const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B287)
+  const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B290)
+  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B284)
+  const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B288)
+  const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B288)
   const scaleRef = useRef(scale); scaleRef.current = scale; // live scale for the once-bound wheel handler
-  const pendingAnchor = useRef(null); // { pageX, pageY, viewX, viewY } pinned across a zoom (B282/B284)
-  const panRef = useRef(null);        // active pan drag { sx, sy, sl, st } (B283)
-  const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B287)
-  const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B287)
+  const pendingAnchor = useRef(null); // { pageX, pageY, viewX, viewY } pinned across a zoom (B283/B285)
+  const panRef = useRef(null);        // active pan drag { sx, sy, sl, st } (B284)
+  const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B288)
+  const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B288)
 
   // --- cloud persistence (single-sheet review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
@@ -185,7 +185,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const availH = (wrap?.clientHeight || 600) - 24;
       const sW = availW / base.width;
       // 'page' fits the WHOLE sheet so a tall/portrait sheet is visible at once; 'width'
-      // (the long-standing default) fits the width only and lets height overflow. (B289)
+      // (the long-standing default) fits the width only and lets height overflow. (B290)
       const s = fitMode === "page" ? Math.min(sW, availH / base.height) : sW;
       if (live) setScale(Math.max(0.2, Math.min(4, s)));
     })();
@@ -217,14 +217,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
   }, []);
 
-  /* ---- zoom/pan viewport (B282/B283/B284) ---- */
+  /* ---- zoom/pan viewport (B283/B284/B285) ---- */
   const clampScale = (s) => Math.max(0.2, Math.min(6, s));
   // Zoom by `factor`, keeping the page-point under (clientX,clientY) — or the viewport
   // centre when no cursor is given — pinned in place. We re-rasterize at the new scale,
   // then a layout effect (keyed on the fresh dims) nudges the scroller so the anchor lands
   // back under the cursor. Same idea as the Stitcher's cursor-anchored wheel zoom, adapted
   // to this view's scroll/re-raster model (it redraws the PDF at `scale`, it doesn't transform
-  // a fixed-res image, so the anchor rides the scrollbars, not a pan/zoom matrix). (B282/B284)
+  // a fixed-res image, so the anchor rides the scrollbars, not a pan/zoom matrix). (B283/B285)
   const zoomAround = (factor, clientX, clientY) => {
     const wrap = wrapRef.current, canvas = canvasRef.current;
     if (!wrap || !canvas) { setScale((s) => clampScale((s || 1) * factor)); return; }
@@ -251,7 +251,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
   // and so it attaches exactly when the scroll viewport mounts (it only exists once a PDF is
-  // open). Ctrl/Cmd+wheel and trackpad pinch both arrive here as wheel events. (B282)
+  // open). Ctrl/Cmd+wheel and trackpad pinch both arrive here as wheel events. (B283)
   const wheelCleanup = useRef(null);
   const attachWrap = useCallback((node) => {
     if (wheelCleanup.current) { wheelCleanup.current(); wheelCleanup.current = null; }
@@ -383,7 +383,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const openEditor = (ed) => { editDoneRef.current = false; setEditing(ed); };
   const closeEditor = (save) => {
-    if (editDoneRef.current) return; // a prior Enter/Esc already handled it; ignore the unmount blur (B287)
+    if (editDoneRef.current) return; // a prior Enter/Esc already handled it; ignore the unmount blur (B288)
     editDoneRef.current = true;
     const ed = editing; setEditing(null);
     if (!save || !ed) return;
@@ -395,7 +395,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const onDown = (e) => {
     if (!dims) return;
-    if (panMode()) { // hand tool / hold-Space: drag the scroll viewport (B283)
+    if (panMode()) { // hand tool / hold-Space: drag the scroll viewport (B284)
       const wrap = wrapRef.current; if (!wrap) return;
       panRef.current = { sx: e.clientX, sy: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
@@ -405,13 +405,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (tool === "select") {
       const id = hitTest(p);
       setSel(id);
-      if (id) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B287)
+      if (id) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B288)
         const m = pageMarks.find((mm) => mm.id === id);
         if (m) { dragRef.current = { id, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
       }
       return;
     }
-    if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B287)
+    if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B288)
     if (tool === "calibrate" || tool === "distance" || tool === "rect" || tool === "cloud") {
       if (!draft) setDraft({ kind: tool, pts: [p] });
       else {
@@ -429,14 +429,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onMove = (e) => {
-    if (panRef.current) { // panning: scroll opposite the drag (B283)
+    if (panRef.current) { // panning: scroll opposite the drag (B284)
       const wrap = wrapRef.current; if (!wrap) return;
       wrap.scrollLeft = panRef.current.sl - (e.clientX - panRef.current.sx);
       wrap.scrollTop = panRef.current.st - (e.clientY - panRef.current.sy);
       return;
     }
     const p = toPage(e);
-    if (dragRef.current) { // moving a markup: translate its page-unit points live (B287)
+    if (dragRef.current) { // moving a markup: translate its page-unit points live (B288)
       const dx = p.x - dragRef.current.start.x, dy = p.y - dragRef.current.start.y;
       if (!dragRef.current.moved && Math.hypot(dx * scale, dy * scale) < 3) { setCursor(p); return; }
       dragRef.current.moved = true;
@@ -451,7 +451,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B287)
+      if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B288)
         const p = toPage(e), dx = p.x - d.start.x, dy = p.y - d.start.y;
         setMarkups((a) => a.map((m) => (m.id === d.id ? { ...m, pts: d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m)));
       }
@@ -460,7 +460,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     }
     // Text places on release: opening the inline editor here (not on pointer-down) means the
     // click's own focus change has already happened, so autofocus sticks and the empty editor
-    // isn't immediately blurred + discarded. (B287)
+    // isn't immediately blurred + discarded. (B288)
     if (tool === "text") openEditor({ id: null, page, pt: toPage(e), text: "" });
   };
 
@@ -476,7 +476,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     else setDraft(null);
   };
   const onDbl = (e) => {
-    if (tool === "select") { // double-click a text note → edit it inline (B287)
+    if (tool === "select") { // double-click a text note → edit it inline (B288)
       const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
       if (m && m.kind === "text") openEditor({ id: m.id, page, pt: m.pts[0], text: m.text });
       return;
@@ -484,7 +484,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (!draft) return;
     // The browser fires TWO pointerdowns before a dblclick, each appending a coincident
     // point at the finish spot — strip that trailing run so a Count isn't inflated and a
-    // poly isn't distorted. Enter (no extra downs) keeps every point. (B285)
+    // poly isn't distorted. Enter (no extra downs) keeps every point. (B286)
     if (draft.kind === "area" || draft.kind === "perimeter" || draft.kind === "count") {
       const d = toPage(e), tol = 6 / scale;
       const pts = draft.pts.slice();
@@ -543,7 +543,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const onKeyRef = useRef(null);
   onKeyRef.current = (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-    if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B283)
+    if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B284)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; }
     else if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
@@ -556,7 +556,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, []);
 
-  const zoom = (f) => zoomAround(f, null, null); // ± buttons hold the viewport centre fixed (B284)
+  const zoom = (f) => zoomAround(f, null, null); // ± buttons hold the viewport centre fixed (B285)
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
@@ -723,7 +723,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             style={{ flex: 1, minWidth: 0, overflow: "auto", background: "#cfc8ba", display: "flex", padding: 12 }}>
             {/* margin:auto centres the sheet when it fits but resolves to 0 (top-left aligned,
                 fully scrollable) when it overflows — unlike place-items:center, which makes the
-                top/left overflow unreachable and breaks zoom-anchoring + pan. (B282/B283/B284) */}
+                top/left overflow unreachable and breaks zoom-anchoring + pan. (B283/B284/B285) */}
             <div style={{ position: "relative", width: dims?.w, height: dims?.h, margin: "auto", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
               <canvas ref={canvasRef} style={{ display: "block" }} />
               {dims && (

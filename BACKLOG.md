@@ -23,15 +23,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
-     interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B282–B290**
+     interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B283–B291**
      (renumbered from a first-filed B273–B281: by merge time concurrent `main` had consumed B273–B281
      outright — the Infra/E2E tranche B278/B280/B281 + telemetry B279, the data-integrity B274/B275, and
      filing/lockout B271–B273/B276/B277 — so two items would share a number, which the rules forbid; this
-     batch lands at the next clear band **B282–B290**). NOTE: a SEPARATE, earlier 2026-06-20 batch already
+     batch lands at the next clear band **B283–B291**). NOTE: a SEPARATE, earlier 2026-06-20 batch already
      landed as B265–B269 (devicePixelRatio render, title-block sheet labels, scale-callout calibration,
      scale cross-check, fixture cleanup); same file (DocReview.jsx), different concern.
      Deduped before filing — none duplicate an existing Open or Done item:
-       • B282/B283/B284 (wheel/ctrl/pinch zoom · drag-pan · cursor-anchored ±) — NO open item covers the
+       • B283/B284/B285 (wheel/ctrl/pinch zoom · drag-pan · cursor-anchored ±) — NO open item covers the
          single-sheet viewport nav. The Stitcher already ships exactly this (cursor-anchored `onWheel`
          L171 + pointer-drag pan L158/L168) — PORT it, adapted to DocReview's re-rasterize/scroll model
          (it redraws the PDF to a `<canvas>` at `scale` inside an `overflow:auto` scroller rather than
@@ -39,59 +39,59 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
          from B265 (DONE — devicePixelRatio render fidelity, a different "blurry" bug). The pan work cross-
          references B271 (main: frozen grab/hand cursor after an interrupted gesture) — release
          pointer-capture + clear state on pointerup/pointercancel so we don't reintroduce it.
-       • B285 (double-click phantom points) — net-new; takeoff-correctness, HIGH. Mirror the Site Planner
+       • B286 (double-click phantom points) — net-new; takeoff-correctness, HIGH. Mirror the Site Planner
          finish path (`finishActiveDrawing()`/`removeLastVertex()` L2747/L2761; `finishMkPoly` already
          filters consecutive-coincident vertices L2066).
-       • B287 (move + edit a placed markup) — ADJACENT to the open B155 (shared interior hit-testing) +
-         B156 (hover highlight): B155 makes a markup SELECTABLE, B287 makes a selected one MOVABLE +
+       • B288 (move + edit a placed markup) — ADJACENT to the open B155 (shared interior hit-testing) +
+         B156 (hover highlight): B155 makes a markup SELECTABLE, B288 makes a selected one MOVABLE +
          (text) EDITABLE. B155's end-state vision already lists "interior drag moves / double-click edits";
-         B287 ships that on the Doc Review surface now (B155's cross-surface shared-`hitTest` refactor stays
-         open). B287 also moves Doc Review's text create/edit off `window.prompt` to an inline editor —
+         B288 ships that on the Doc Review surface now (B155's cross-surface shared-`hitTest` refactor stays
+         open). B288 also moves Doc Review's text create/edit off `window.prompt` to an inline editor —
          satisfying the KEY DECISION "no dialog-box edits" rule + the B155 note (calibrate's prompt stays,
          tracked under B155).
-       • B286/B288/B289/B290 — net-new, no overlap.
+       • B287/B289/B290/B291 — net-new, no overlap.
      Per STANDING RULE #1 filed AND fixed the same session, then SHIPPED via **PR #220 → `main`** (branch
-     `claude/amazing-fermi-e2xul4`). Headless-verified 13/13 in a real browser (VERIFICATION **V70**,
-     `ui-audit/verify-b282-b290.mjs`, 0 page errors) — incl. cursor-anchored wheel zoom (0.4px drift),
-     exact drag-pan, the B285 phantom-point fix (3 dots not 5), markup move, and inline text create/edit;
-     B290 has a unit test, B288 reuses the proven `openFile` path. lint 0 · 563 tests · build green. NB the
+     `claude/amazing-fermi-e2xul4`). Headless-verified 13/13 in a real browser (VERIFICATION **V71**,
+     `ui-audit/verify-b283-b291.mjs`, 0 page errors) — incl. cursor-anchored wheel zoom (0.4px drift),
+     exact drag-pan, the B286 phantom-point fix (3 dots not 5), markup move, and inline text create/edit;
+     B291 has a unit test, B289 reuses the proven `openFile` path. lint 0 · 563 tests · build green. NB the
      older sandbox Chromium-1194 can't raster pdf.js (it throws `getOrInsertComputed`); the newer
      **chromium-1228** build runs it — Doc-Review headless checks must use 1228 (corrects the V63/V65
      "can't run pdf.js" note). These 9 are shipped — eligible to move to BACKLOG-DONE.md on a future pass. -->
 
-### B282 — Single-sheet review can't be zoomed by wheel / pinch / Ctrl-scroll (only the ± buttons) `[Doc Review / Markup]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B282** — renumbered from B273, consumed by concurrent `main`)*
+### B283 — Single-sheet review can't be zoomed by wheel / pinch / Ctrl-scroll (only the ± buttons) `[Doc Review / Markup]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B283** — renumbered from B273, consumed by concurrent `main`)*
 `[x]` **Repro (confirmed live on planyr.io 2026-06-20):** open a PDF in Document Review (single-sheet, not Stitch) → wheel / pinch / Ctrl+scroll over the drawing → nothing (stuck at 31%); the only zoom is the toolbar ±. **Expected:** wheel / Ctrl-scroll / pinch zoom the drawing, anchored on the cursor. The fix already exists here — the Stitcher's `onWheel` (`Stitcher.jsx` ~L171) does cursor-anchored zoom; port it to the single-sheet view (`DocReview.jsx`). Primary "can't zoom" complaint.
-> ✅ Shipped (PR #220 → `main`). A native non-passive `wheel` listener on the scroll viewport → `zoomAround(factor, cursorX, cursorY)`: changes `scale`, stashes the page-unit point under the cursor, then a `useLayoutEffect` keyed on the re-rendered `dims` nudges `scrollLeft/Top` so that point stays under the cursor. Ctrl/Cmd+wheel and plain wheel both zoom (trackpad pinch arrives as Ctrl+wheel). Shares the anchor path with B284. Headless-verified (V70).
+> ✅ Shipped (PR #220 → `main`). A native non-passive `wheel` listener on the scroll viewport → `zoomAround(factor, cursorX, cursorY)`: changes `scale`, stashes the page-unit point under the cursor, then a `useLayoutEffect` keyed on the re-rendered `dims` nudges `scrollLeft/Top` so that point stays under the cursor. Ctrl/Cmd+wheel and plain wheel both zoom (trackpad pinch arrives as Ctrl+wheel). Shares the anchor path with B285. Headless-verified (V71).
 
-### B283 — No drag-to-pan in single-sheet review `[Doc Review / Markup]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B283** — renumbered from B274)*
+### B284 — No drag-to-pan in single-sheet review `[Doc Review / Markup]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B284** — renumbered from B274)*
 `[x]` Zoomed in, there's no way to grab-and-drag the drawing to move around — no hand tool, no space-drag — so navigation relies entirely on the scrollbars. (Scrollbars do work and reach the whole sheet, so this is a usability gap, not a blocker.) **Expected:** drag-to-pan (a Pan/hand tool and/or hold-Space to pan), matching the Stitcher, which already pans via pointer-drag (`Stitcher.jsx` ~L158/L168).
-> ✅ Shipped (PR #220 → `main`). New **Pan** tool (hand) + **hold-Space** in any tool; pointer-drag adjusts the scroller's `scrollLeft/Top` by the negative pointer delta (pointer-capture so a fast drag doesn't drop). Cursor shows grab/grabbing. Releases capture + clears state on pointerup/pointercancel (so it can't reproduce B271's frozen-cursor lockout). Headless-verified (V70).
+> ✅ Shipped (PR #220 → `main`). New **Pan** tool (hand) + **hold-Space** in any tool; pointer-drag adjusts the scroller's `scrollLeft/Top` by the negative pointer delta (pointer-capture so a fast drag doesn't drop). Cursor shows grab/grabbing. Releases capture + clears state on pointerup/pointercancel (so it can't reproduce B271's frozen-cursor lockout). Headless-verified (V71).
 
-### B284 — ± zoom isn't cursor-anchored `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-3" 2026-06-20; minted **B284** — renumbered from B275)*
-`[x]` `zoom()` only changes `scale`; it doesn't hold a focal point, so the detail you were looking at drifts and you re-scroll after each step. **Expected:** zoom toward the cursor (or hold the viewport center fixed), like the Stitcher's cursor-anchored wheel zoom. Pairs with B282.
-> ✅ Shipped (PR #220 → `main`). The ± buttons now call `zoomAround(factor)` with the viewport centre as the anchor (same scroll-anchor path as B282), so the centre of what you're looking at stays put across a zoom step. Headless-verified centre drift 0.6px (V70).
+### B285 — ± zoom isn't cursor-anchored `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-3" 2026-06-20; minted **B285** — renumbered from B275)*
+`[x]` `zoom()` only changes `scale`; it doesn't hold a focal point, so the detail you were looking at drifts and you re-scroll after each step. **Expected:** zoom toward the cursor (or hold the viewport center fixed), like the Stitcher's cursor-anchored wheel zoom. Pairs with B283.
+> ✅ Shipped (PR #220 → `main`). The ± buttons now call `zoomAround(factor)` with the viewport centre as the anchor (same scroll-anchor path as B283), so the centre of what you're looking at stays put across a zoom step. Headless-verified centre drift 0.6px (V71).
 
-### B285 — Double-click to finish a Count/Area/Perimeter adds 1–2 phantom points (inflates counts, distorts areas) `[Doc Review / Markup]` (bug) — takeoff correctness, HIGH  *(arrived as "NEW-4" 2026-06-20; minted **B285** — renumbered from B276)*
+### B286 — Double-click to finish a Count/Area/Perimeter adds 1–2 phantom points (inflates counts, distorts areas) `[Doc Review / Markup]` (bug) — takeoff correctness, HIGH  *(arrived as "NEW-4" 2026-06-20; minted **B286** — renumbered from B276)*
 `[x]` **Repro:** pick Count, click N items, then double-click to finish (as the tool hint instructs) → the count reads N+2 with two stray dots at the double-click spot; same root cause distorts Area/Perimeter (extra/duplicate vertices at the closing click). Cause: each pointerdown appends a point (`DocReview.jsx` onDown), and a double-click fires TWO pointerdowns before `onDoubleClick`→`finishDraft` commits. Enter finishes cleanly; only the advertised double-click path is broken. **Expected:** double-click finishes without adding the doubled vertices. The Site Planner already solved this with a shared `finishActiveDrawing()` + `removeLastVertex()` — reuse that approach.
-> ✅ Shipped (PR #220 → `main`). `onDbl(e)` strips any trailing draft points coincident (≤ ~6px screen) with the double-click location before committing the poly/count, so the two pointerdowns the browser fires for a double-click can't survive as phantom vertices. Enter path unchanged. Headless-verified: 3 clicks + double-click → exactly 3 count dots, not 5 (V70).
+> ✅ Shipped (PR #220 → `main`). `onDbl(e)` strips any trailing draft points coincident (≤ ~6px screen) with the double-click location before committing the poly/count, so the two pointerdowns the browser fires for a double-click can't survive as phantom vertices. Enter path unchanged. Headless-verified: 3 clicks + double-click → exactly 3 count dots, not 5 (V71).
 
-### B286 — Zoom level resets to fit-width every time you switch sheets `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-5" 2026-06-20; minted **B286** — renumbered from B277)*
+### B287 — Zoom level resets to fit-width every time you switch sheets `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-5" 2026-06-20; minted **B287** — renumbered from B277)*
 `[x]` **Repro (confirmed live 2026-06-20):** zoom Sheet 1 to 134%, click Sheet 2 → it snaps back to 31% (fit-width); zoom is lost on every sheet change. Cause: the sheet button calls `setScale(0)`. **Expected:** keep the current zoom across sheet switches when reviewing a set.
-> ✅ Shipped (PR #220 → `main`). The sheet button no longer forces `setScale(0)`; switching sheets re-renders the new page at the current scale. The fit pass still runs on first open and on the explicit Fit / Fit-page buttons. (Merged cleanly with main's B267 per-sheet scale tooltip on the same button.) Headless-verified (V70).
+> ✅ Shipped (PR #220 → `main`). The sheet button no longer forces `setScale(0)`; switching sheets re-renders the new page at the current scale. The fit pass still runs on first open and on the explicit Fit / Fit-page buttons. (Merged cleanly with main's B267 per-sheet scale tooltip on the same button.) Headless-verified (V71).
 
-### B287 — Can't move or edit a markup after placing it (Select only allows delete) `[Doc Review / Markup]` (feature)  *(arrived as "NEW-6" 2026-06-20; minted **B287** — renumbered from B278)*
+### B288 — Can't move or edit a markup after placing it (Select only allows delete) `[Doc Review / Markup]` (feature)  *(arrived as "NEW-6" 2026-06-20; minted **B288** — renumbered from B278)*
 `[x]` Today Select supports delete only — a misplaced redline/measurement/text note has to be deleted and redrawn, and placed text can't be re-edited. Key design points: drag a selected markup to reposition it (commit once on pointer-up, coords stay in page units); double-click a text note to edit it. The ParcelDrawing surface already implements move + edit-text (B67) — mirror it here.
-> ✅ Shipped (PR #220 → `main`). Select-mode interior drag translates a markup's page-unit points live and commits once on pointer-up (a sub-3px drag is still a plain click-select; interior drag moves, never pans — per B155's locked rule). Double-click a text note opens an **inline `<input>` overlay** at the note (Enter/blur commit, Esc cancel); text **creation** routes through the same inline editor (opening on pointer-UP so the click's own focus change can't blur+discard it), removing Doc Review's `window.prompt` for text (KEY DECISION "no dialog-box edits" + the B155 note). Calibrate's prompt is left as-is (tracked under B155). Adjacent to B155 + B156, which stay open. Headless-verified move + create + edit (V70).
+> ✅ Shipped (PR #220 → `main`). Select-mode interior drag translates a markup's page-unit points live and commits once on pointer-up (a sub-3px drag is still a plain click-select; interior drag moves, never pans — per B155's locked rule). Double-click a text note opens an **inline `<input>` overlay** at the note (Enter/blur commit, Esc cancel); text **creation** routes through the same inline editor (opening on pointer-UP so the click's own focus change can't blur+discard it), removing Doc Review's `window.prompt` for text (KEY DECISION "no dialog-box edits" + the B155 note). Calibrate's prompt is left as-is (tracked under B155). Adjacent to B155 + B156, which stay open. Headless-verified move + create + edit (V71).
 
-### B288 — Dropping a PDF only works on the empty screen, not once a document is open `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-7" 2026-06-20; minted **B288** — renumbered from B279)*
+### B289 — Dropping a PDF only works on the empty screen, not once a document is open `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-7" 2026-06-20; minted **B289** — renumbered from B279)*
 `[x]` **Repro:** with a PDF open, drag another PDF onto the canvas → nothing (you must use "Open another…"). The drop handler is bound only to the empty-state view; the Stitcher accepts drops anywhere. **Expected:** dropping a PDF over the open document opens it (reuse the existing re-drop/source-binding path).
 > ✅ Shipped (PR #220 → `main`). The canvas/viewport now carries the same `onDragOver`/`onDrop` as the empty state, routed through the existing `openFile` (which already re-binds a re-dropped source by name so its markups stay attached). (Verified by code + the proven openFile path; a synthetic file-drop isn't in the headless harness.)
 
-### B289 — "Fit" only fits width; tall/portrait sheets can't be viewed whole `[Doc Review / Markup]` (feature, minor)  *(arrived as "NEW-8" 2026-06-20; minted **B289** — renumbered from B280)*
+### B290 — "Fit" only fits width; tall/portrait sheets can't be viewed whole `[Doc Review / Markup]` (feature, minor)  *(arrived as "NEW-8" 2026-06-20; minted **B290** — renumbered from B280)*
 `[x]` The fit logic computes width-only (`avail / base.width`), so a portrait/tall sheet overflows vertically and can't be seen in one view. Add a fit-to-page option (min of width-fit and height-fit) alongside fit-width.
-> ✅ Shipped (PR #220 → `main`). New **Fit page** button next to **Fit**; the fit pass reads a `fitMode` ('width' | 'page') and uses `min(availW/baseW, availH/baseH)` for page-fit. Headless-verified Fit-page fits the whole sheet where Fit-width overflows (V70).
+> ✅ Shipped (PR #220 → `main`). New **Fit page** button next to **Fit**; the fit pass reads a `fitMode` ('width' | 'page') and uses `min(availW/baseW, availH/baseH)` for page-fit. Headless-verified Fit-page fits the whole sheet where Fit-width overflows (V71).
 
-### B290 — Linear measurements round to whole feet, inconsistent with area's 2-decimal acres `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-9" 2026-06-20; minted **B290** — renumbered from B281)*
+### B291 — Linear measurements round to whole feet, inconsistent with area's 2-decimal acres `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-9" 2026-06-20; minted **B291** — renumbered from B281)*
 `[x]` `measureLabel` prints distance/perimeter via `f0` (whole feet) while area shows 2-dp acres (`takeoff.js`) — a 150.6 ft line reads "151 ft". For takeoff precision, show at least one decimal on linear measures.
 > ✅ Shipped (PR #220 → `main`). `measureLabel` now formats distance/perimeter with one decimal (`f1`); area (acres 2-dp / sf whole) unchanged. Covered by a unit test (`test/takeoff.test.js`).
 

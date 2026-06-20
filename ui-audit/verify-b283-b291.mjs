@@ -1,23 +1,23 @@
-/* Verify the 2026-06-20 Doc Review single-sheet interaction batch B282–B290 against the
+/* Verify the 2026-06-20 Doc Review single-sheet interaction batch B283–B291 against the
  * REAL built viewer (vite preview on :4173). Generates a 2-page Letter PDF, opens it in
  * the Markup workspace, then drives each behaviour and asserts the DOM:
  *
- *   B282 — wheel zooms (cursor-anchored): a wheel-up over the canvas grows the on-screen
+ *   B283 — wheel zooms (cursor-anchored): a wheel-up over the canvas grows the on-screen
  *          canvas (zoom in), and the page-point under the cursor stays put.
- *   B284 — the + button is cursor/centre-anchored: scale grows AND the content point at the
+ *   B285 — the + button is cursor/centre-anchored: scale grows AND the content point at the
  *          viewport centre stays at the centre (no drift).
- *   B283 — Pan tool drag scrolls the viewport by the (negated) drag delta.
- *   B286 — switching sheets keeps the current zoom (no snap back to fit-width).
- *   B289 — "Fit page" fits the WHOLE sheet in view (cssH ≤ available height) where plain
+ *   B284 — Pan tool drag scrolls the viewport by the (negated) drag delta.
+ *   B287 — switching sheets keeps the current zoom (no snap back to fit-width).
+ *   B290 — "Fit page" fits the WHOLE sheet in view (cssH ≤ available height) where plain
  *          "Fit" (width) overflows vertically.
- *   B285 — Count: 3 clicks then a double-click finishes with exactly 3 points (NOT 5) — the
+ *   B286 — Count: 3 clicks then a double-click finishes with exactly 3 points (NOT 5) — the
  *          double-click's two phantom pointerdowns are stripped. (takeoff-correctness, HIGH)
- *   B287 — a placed Rect can be dragged to a new position (Select-mode interior drag), and a
+ *   B288 — a placed Rect can be dragged to a new position (Select-mode interior drag), and a
  *          Text note is created through an inline editor (no window.prompt) and re-edited on
  *          double-click.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
- *       node ui-audit/verify-b282-b290.mjs              (another)
+ *       node ui-audit/verify-b283-b291.mjs              (another)
  */
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
@@ -31,9 +31,9 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-lin
 const PDF_PATH = "/tmp/b273-test.pdf";
 
 /* A structurally-valid TWO-page PDF (612×792 Letter each) with exact xref byte-offsets so
- * PDF.js parses it without a rebuild. Two pages so the sheet-switch test (B286) has a Sheet 2. */
+ * PDF.js parses it without a rebuild. Two pages so the sheet-switch test (B287) has a Sheet 2. */
 function buildPdf() {
-  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B282..B290 interaction test) Tj ET";
+  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B283..B291 interaction test) Tj ET";
   const s2 = "BT /F1 20 Tf 60 700 Td (SHEET TWO - second page for sheet-switch test) Tj ET";
   const objs = [
     "<< /Type /Catalog /Pages 2 0 R >>",
@@ -85,7 +85,7 @@ try {
   await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0 && c.getBoundingClientRect().width > 0; }, { timeout: 12000 });
   await page.waitForTimeout(500);
 
-  // ---- B282: wheel-up over the canvas zooms IN, anchored on the cursor ----
+  // ---- B283: wheel-up over the canvas zooms IN, anchored on the cursor ----
   {
     const g0 = await geom(page);
     const cx = g0.canL + g0.cssW * 0.4, cy = g0.canT + g0.cssH * 0.4; // a point off-centre so anchoring is visible
@@ -98,11 +98,11 @@ try {
     const grew = g1.cssW / g0.cssW;
     const anchorX = g1.canL + fx * g1.cssW, anchorY = g1.canT + fy * g1.cssH; // where that content point sits now
     const drift = Math.hypot(anchorX - cx, anchorY - cy);
-    ok("B282 wheel zooms in", grew > 1.08, `canvas ${Math.round(g0.cssW)}→${Math.round(g1.cssW)}px (×${grew.toFixed(2)})`);
-    ok("B282 wheel is cursor-anchored", drift < 14, `point under cursor drifted ${drift.toFixed(1)}px`);
+    ok("B283 wheel zooms in", grew > 1.08, `canvas ${Math.round(g0.cssW)}→${Math.round(g1.cssW)}px (×${grew.toFixed(2)})`);
+    ok("B283 wheel is cursor-anchored", drift < 14, `point under cursor drifted ${drift.toFixed(1)}px`);
   }
 
-  // ---- B284: the + button grows scale AND holds the viewport centre fixed ----
+  // ---- B285: the + button grows scale AND holds the viewport centre fixed ----
   {
     const g0 = await geom(page);
     const cx = g0.wrapL + g0.wrapW / 2, cy = g0.wrapT + g0.wrapH / 2;
@@ -114,11 +114,11 @@ try {
     const grew = g1.cssW / g0.cssW;
     const anchorX = g1.canL + fx * g1.cssW, anchorY = g1.canT + fy * g1.cssH;
     const drift = Math.hypot(anchorX - cx, anchorY - cy);
-    ok("B284 + button zooms in", grew > 1.08, `×${grew.toFixed(2)}`);
-    ok("B284 + holds the viewport centre", drift < 14, `centre drifted ${drift.toFixed(1)}px`);
+    ok("B285 + button zooms in", grew > 1.08, `×${grew.toFixed(2)}`);
+    ok("B285 + holds the viewport centre", drift < 14, `centre drifted ${drift.toFixed(1)}px`);
   }
 
-  // ---- B283: Pan tool drag scrolls the viewport ----
+  // ---- B284: Pan tool drag scrolls the viewport ----
   {
     await page.getByRole("button", { name: "Pan", exact: true }).click();
     // seed a mid scroll position so a drag has room to move in both directions
@@ -131,19 +131,19 @@ try {
     await page.waitForTimeout(150);
     const g1 = await geom(page);
     const dL = g0.scrollLeft - g1.scrollLeft, dT = g0.scrollTop - g1.scrollTop; // dragging right/down reveals left/up → scroll decreases
-    ok("B283 drag-to-pan scrolls the viewport", dL > 60 && dT > 35, `scroll Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
+    ok("B284 drag-to-pan scrolls the viewport", dL > 60 && dT > 35, `scroll Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
   }
 
-  // ---- B286: switching sheets keeps the current zoom ----
+  // ---- B287: switching sheets keeps the current zoom ----
   {
     const before = (await geom(page)).cssW;
     await page.locator('button:has-text("Sheet 2")').first().click();
     await page.waitForTimeout(600);
     const after = (await geom(page)).cssW;
-    ok("B286 sheet switch keeps zoom", Math.abs(after - before) < 4, `Sheet1 ${Math.round(before)}px → Sheet2 ${Math.round(after)}px (would snap to ~fit-width if broken)`);
+    ok("B287 sheet switch keeps zoom", Math.abs(after - before) < 4, `Sheet1 ${Math.round(before)}px → Sheet2 ${Math.round(after)}px (would snap to ~fit-width if broken)`);
   }
 
-  // ---- B289: "Fit page" fits the whole sheet; plain "Fit" (width) overflows height ----
+  // ---- B290: "Fit page" fits the whole sheet; plain "Fit" (width) overflows height ----
   {
     await page.getByRole("button", { name: "Fit", exact: true }).click();
     await page.waitForTimeout(500);
@@ -153,11 +153,11 @@ try {
     const gp = await geom(page);
     const widthFitOverflows = gw.cssH > gw.wrapH + 2;          // portrait Letter, fit-width is taller than the viewport
     const pageFits = gp.cssH <= gp.wrapH - 24 + 6 && gp.cssW <= gp.wrapW + 2; // whole sheet visible
-    ok("B289 Fit page fits the whole sheet", pageFits, `Fit-page canvas ${Math.round(gp.cssW)}×${Math.round(gp.cssH)} in viewport ${gp.wrapW}×${gp.wrapH}`);
-    ok("B289 plain Fit (width) overflowed height", widthFitOverflows, `Fit-width canvas h=${Math.round(gw.cssH)} vs viewport h=${gw.wrapH}`);
+    ok("B290 Fit page fits the whole sheet", pageFits, `Fit-page canvas ${Math.round(gp.cssW)}×${Math.round(gp.cssH)} in viewport ${gp.wrapW}×${gp.wrapH}`);
+    ok("B290 plain Fit (width) overflowed height", widthFitOverflows, `Fit-width canvas h=${Math.round(gw.cssH)} vs viewport h=${gw.wrapH}`);
   }
 
-  // ---- B285: Count finishes with N points on double-click, not N+2 (HIGH) ----
+  // ---- B286: Count finishes with N points on double-click, not N+2 (HIGH) ----
   {
     await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet on-screen so every click lands
     await page.waitForTimeout(500);
@@ -170,10 +170,10 @@ try {
     await page.waitForTimeout(300);
     // committed count points render as <circle r="7"> in the OVERLAY svg (scope past header icons)
     const dots = await page.evaluate(() => document.querySelectorAll('canvas + svg circle[r="7"]').length);
-    ok("B285 double-click count = clicks (no phantom)", dots === 3, `3 clicks + dblclick → ${dots} count dots (5 = the bug)`);
+    ok("B286 double-click count = clicks (no phantom)", dots === 3, `3 clicks + dblclick → ${dots} count dots (5 = the bug)`);
   }
 
-  // ---- B287: move a placed Rect; create + edit a Text note inline ----
+  // ---- B288: move a placed Rect; create + edit a Text note inline ----
   {
     await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet visible
     await page.waitForTimeout(500);
@@ -192,7 +192,7 @@ try {
     await page.mouse.move(ix + 120, iy + 20, { steps: 6 }); await page.mouse.up();
     await page.waitForTimeout(200);
     const xAfter = await rectX();
-    ok("B287 drag moves a placed markup", xBefore != null && xAfter != null && (xAfter - xBefore) > 80, `rect x ${xBefore == null ? "?" : Math.round(xBefore)} → ${xAfter == null ? "?" : Math.round(xAfter)} for a +120px drag`);
+    ok("B288 drag moves a placed markup", xBefore != null && xAfter != null && (xAfter - xBefore) > 80, `rect x ${xBefore == null ? "?" : Math.round(xBefore)} → ${xAfter == null ? "?" : Math.round(xAfter)} for a +120px drag`);
 
     // create a text note via the inline editor (no window.prompt)
     await page.getByRole("button", { name: "Text", exact: true }).click();
@@ -202,7 +202,7 @@ try {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(250);
     const hasHello = await page.evaluate(() => [...document.querySelectorAll("canvas + svg text")].some((t) => (t.textContent || "").includes("HELLO")));
-    ok("B287 inline text create (no prompt)", hasHello, `rendered <text>HELLO</text> = ${hasHello}`);
+    ok("B288 inline text create (no prompt)", hasHello, `rendered <text>HELLO</text> = ${hasHello}`);
 
     // edit it on double-click
     await page.getByRole("button", { name: "Select", exact: true }).click();
@@ -213,10 +213,10 @@ try {
     await page.keyboard.press("Enter");
     await page.waitForTimeout(250);
     const edited = await page.evaluate(() => { const ts = [...document.querySelectorAll("canvas + svg text")].map((t) => t.textContent || ""); return ts.some((t) => t.includes("WORLD")) && !ts.some((t) => t.includes("HELLO")); });
-    ok("B287 double-click edits a text note", edited, `text now reads WORLD (not HELLO) = ${edited}`);
+    ok("B288 double-click edits a text note", edited, `text now reads WORLD (not HELLO) = ${edited}`);
   }
 
-  await page.screenshot({ path: new URL("./screens/b282-b290.png", import.meta.url).pathname });
+  await page.screenshot({ path: new URL("./screens/b283-b291.png", import.meta.url).pathname });
 } catch (e) {
   ok("harness", false, "threw: " + e.message);
 }
