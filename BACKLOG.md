@@ -22,6 +22,24 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-supplied UI spec (chat) to reskin the Site Yield panel — composition donut +
+     identity icon + grouped rows + a semantic palette. Arrived as "NEW-1"; minted **B225** — highest
+     B# across both BACKLOG files is B224 (PR #184), so this is the real next free ID. Deduped against
+     the existing Yield-panel content items (the easement encumbrance readout — BACKLOG-DONE; the
+     "Excludes N inactive parcel(s)" note; the road-cost takeoff Section): those are numbers already
+     shown — this item is a PRESENTATIONAL reskin of the same values (no new metric, no engine change).
+     Filed AND shipped this same session — moved to BACKLOG-DONE.md. -->
+
+### B225 — Redesign Site Yield panel: composition donut, identity icon, grouped rows, semantic palette `[Site Planner]` (feature)  *(arrived as "NEW-1"; minted **B225** — next free ID after B224)*
+[ ] Restyle the existing Site Yield panel in Site Planner — **presentational only.** Reuse every computed yield value and the existing collapse/expand behavior; do NOT touch the yield engine, data model, RLS, or persistence (stays per-user/private exactly as today). Reskin the panel in place — no parallel panel.
+- **Layout (top→bottom):** (1) header row = identity icon in a ~32px soft rounded tile (`#F6E7DD`) + "SITE YIELD" label (uppercase, tracking ~.09em) + collapse chevron at right (keep the existing collapse toggle); (2) the three existing KPI cards — SITE (ac) · BUILDING (sf, abbreviated e.g. "227k") · COVERAGE (%), card bg `#F2ECE1`, radius ~11px, uppercase micro-label + large tabular-mono value + small muted unit; (3) **composition donut + legend** (new); (4) hairline divider (`#EBE3D6`); (5) **grouped detail rows** replacing the current flat list.
+- **Composition donut (new):** how total site area partitions into Building / Paving / Open-green / Detention, read from engine OUTPUTS (no recompute): `buildingPct = coverage%`; `pavingPct = max(0, impervious% − coverage%)`; `detentionPct = detentionSf/siteSf×100`; `openPct = 100 − the other three (clamp ≥0)` — sum to 100. SVG (~100px, ~13px stroke): faint track `#ECE3D5` + four `stroke-dasharray` arcs, group rotated −90° to start at top, butt caps, contiguous; center = site acreage (mono) over "acres". Legend beside it: swatch + label + rounded %, **always render the Detention row even at 0%** (zero ≠ absent).
+- **Identity icon:** parcel-with-footprint glyph — rounded-square lot outline (terracotta stroke `#C0532E`) + filled footprint block (`#C0532E`) + a small secondary structure at ~0.5 opacity; inline SVG in the header tile.
+- **Semantic palette (one color = one meaning across donut arcs, legend swatches, group dots):** Building terracotta `#C45A32`/accent `#C0532E` · Paving warm taupe `#B6AB9B` · Open/green sage `#4FA587` · Detention dusty blue `#6E94AB` (zero-state swatch fill `#DCE5EB`/border `#C2D2DC`). Surfaces: panel `#FBF8F2`, border `#E7DFD2`, card `#F2ECE1`, text `#3A352D`, row-label `#6F675B`, muted `#A89C8C`, faint `#B4A99B`, hairline `#EBE3D6`, donut track `#ECE3D5`, icon tile `#F6E7DD`. All numerals tabular mono.
+- **Grouped rows (replace the flat list), each = small leading dot in its category color + uppercase tracked label, rows beneath (label left, mono value right), all wired to LIVE values:** Land (sage) → Site area · FAR · Open/green; Building (terracotta) → Building · Coverage; Parking (taupe) → Car stalls · Trailer stalls; Stormwater (blue) → Impervious · Detention · Detention %. Preserve the existing extras in their natural group (bump-out sub-line + inactive-parcel note under Land/Building; the easement encumbrance readout as a subordinate trailing block).
+- **Out of scope:** the headroom/limit bars + scheme-compare view explored in chat (set aside). Keep all current numbers + units — only layout + visualization change.
+- **Verify:** open a real site; donut closes to a full ring, legend % match the detail rows, Building card abbreviates (227k) while the Building row shows full sf, Detention 0 shows explicitly rather than disappearing.
+
 <!-- 2026-06-20: owner-reported (chat) "Document Review (and all lazy modules) fail to load after a
      deploy — Failed to fetch dynamically imported module." Arrived as "NEW-1"; provisionally B218,
      renumbered **B221** — concurrent `main` (PR #183) took B218 (dead header controls) + B219
