@@ -1,4 +1,4 @@
-/* Fallback DWG→DXF engine — Autodesk APS Model Derivative (B228). DORMANT BY DEFAULT.
+/* Fallback DWG→DXF engine — Autodesk APS Model Derivative (B238). DORMANT BY DEFAULT.
  *
  * This is the hard-failure fallback for when free LibreDWG can't read a drawing. It is
  * gated behind APS_ENABLED (default OFF) and stays dormant until the Autodesk account is

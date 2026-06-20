@@ -1,11 +1,11 @@
-/* DWG→DXF conversion HTTP service (B228) — the Cloud Run entrypoint.
+/* DWG→DXF conversion HTTP service (B238) — the Cloud Run entrypoint.
  *
  * A tiny, dependency-free Node HTTP server (built-ins only, so the container needs no npm
  * install). Two routes:
  *   GET  /health          → readiness probe (Cloud Run pings this).
  *   POST /convert         → body = DWG bytes; success returns the DXF bytes, failure returns
  *                           a JSON error with an honest status code (never a 200 with a junk
- *                           body — a silent failure is treated as a crash, B228).
+ *                           body — a silent failure is treated as a crash, B238).
  *
  * Scales to zero on Cloud Run: idle instances cost nothing, a request spins one up. All
  * config (incl. whether the APS fallback is armed) comes from server env via config.js.

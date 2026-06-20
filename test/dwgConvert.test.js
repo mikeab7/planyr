@@ -10,7 +10,7 @@ import { createConvertServer } from "../server/convert/server.js";
 
 const bytes = (s) => Buffer.from(s);
 
-describe("convertConfig — env parsing, APS dormant by default (B228)", () => {
+describe("convertConfig — env parsing, APS dormant by default (B238)", () => {
   it("APS fallback is OFF unless explicitly enabled", () => {
     expect(convertConfig({}).aps.enabled).toBe(false);
     expect(convertConfig({ APS_ENABLED: "false" }).aps.enabled).toBe(false);
@@ -28,7 +28,7 @@ describe("convertConfig — env parsing, APS dormant by default (B228)", () => {
   });
 });
 
-describe("convertWithLibreDwg — primary engine, no silent failures (B228)", () => {
+describe("convertWithLibreDwg — primary engine, no silent failures (B238)", () => {
   // A fake runner that writes a DXF to the requested output path and exits with `code`.
   const writingRunner = (code, content = "0\nSECTION\n") => async (_bin, args) => {
     const outPath = args[args.indexOf("-o") + 1];
@@ -71,7 +71,7 @@ describe("convertWithLibreDwg — primary engine, no silent failures (B228)", ()
   });
 });
 
-describe("convertDwgToDxf — engine policy (B228)", () => {
+describe("convertDwgToDxf — engine policy (B238)", () => {
   const cfg = convertConfig({});
   const okLibre = async () => ({ ok: true, dxf: bytes("DXF"), engine: "libredwg" });
   const failLibre = async () => ({ ok: false, error: "unreadable r2018 drawing", engine: "libredwg" });
@@ -116,7 +116,7 @@ describe("convertDwgToDxf — engine policy (B228)", () => {
   });
 });
 
-describe("convertWithAps — dormant fallback contract (B228)", () => {
+describe("convertWithAps — dormant fallback contract (B238)", () => {
   it("fails clearly when disabled", async () => {
     const r = await convertWithAps(bytes("DWG"), { enabled: false });
     expect(r.ok).toBe(false);
@@ -145,7 +145,7 @@ describe("convertWithAps — dormant fallback contract (B228)", () => {
 });
 
 // Drive the real HTTP server with an injected converter (no native binary needed).
-describe("convert HTTP server — routes + honest status codes (B228)", () => {
+describe("convert HTTP server — routes + honest status codes (B238)", () => {
   const listen = (server) => new Promise((res) => { server.listen(0, "127.0.0.1", () => res(`http://127.0.0.1:${server.address().port}`)); });
 
   it("GET /health → 200 with engine info", async () => {
@@ -224,7 +224,7 @@ describe("convert HTTP server — routes + honest status codes (B228)", () => {
 // Light integration: if a real dwg2dxf is on PATH, prove the actual engine path end-to-end.
 // Skipped automatically where the binary isn't installed (e.g. CI) — the container test
 // covers the native path there.
-describe("convertWithLibreDwg — real binary smoke (B228)", () => {
+describe("convertWithLibreDwg — real binary smoke (B238)", () => {
   it("rejects clearly-non-DWG bytes through the real binary when present", async () => {
     let dir;
     try {

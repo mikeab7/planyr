@@ -1,4 +1,4 @@
-/* Primary DWG→DXF engine — LibreDWG's `dwg2dxf` (B228).
+/* Primary DWG→DXF engine — LibreDWG's `dwg2dxf` (B238).
  *
  * dwg2dxf is a native binary baked into the container image (free, GPL; see Dockerfile).
  * We write the uploaded DWG to a temp file, run `dwg2dxf -y -o out.dxf in.dwg`, and read

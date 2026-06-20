@@ -361,7 +361,7 @@ conflate them.
      container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG
      failures (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned;
      a LibreDWG failure with APS off returns an explicit error, never a silent success).
-     Code: `server/convert/` (B228). LibreDWG needs a real container (native binary +
+     Code: `server/convert/` (B238). LibreDWG needs a real container (native binary +
      filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
    - **Google Drive auto-filing + bytes I/O** — the storage adapter (`server/storage/`,
      B206–B209) that auto-filing writes through; the queryable **file-facts index lives in
