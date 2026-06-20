@@ -60,6 +60,16 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V76 — Document Review editing batch: undo/redo, Calibrate validation, toolbar, sheet paging, label position (B303–B307) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless **Chromium-1228** on the built app, `vite preview`, logged-out — these are browser-only editing features, no auth path). Re-applied + re-verified after merging `main`'s viewer batch (B288–B296).
+- **✅ Self-verified 2026-06-20 (`ui-audit/verify-b303-b307.mjs`, 17/17 checks, 0 page errors)** on a generated 4-sheet PDF (`ui-audit/make-sample-pdf.mjs` — the owner's real sets live on `mikeab7-patch-1`, B269, off this branch), covering BOTH the single-sheet viewer and the Stitcher:
+  - **B303 undo/redo** — draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; ↶/↷ disabled before any edit; Stitcher: draw distance → Ctrl-Z undoes. (Also extended to undo `main`'s B293 move + text-edit.)
+  - **B304 Calibrate validation** — inline box opens (no `window.prompt`); **"1/8" rejected + stays uncalibrated**, "1:240" rejected as a ratio, **"100" → sheet calibrated**; same in the Stitcher.
+  - **B305 toolbar** — Open/Stitch/Library compute `white-space:nowrap`, single 25px line, no wrapping.
+  - **B306 paging** — Next 1/4→2/4; → / ← keys page 3/4 / 2/4.
+  - **B307 label** — horizontal distance label at x≈454 (midpoint ≈450), not pts[0] (~250).
+- **Sandbox browser:** use **`chromium-1228`** (pdf.js v6 render needs `Map.prototype.getOrInsertComputed`, absent in `chromium-1194`) — same note as V72.
+- **Why fully done logged-out:** all five are browser-only editing features (no cloud/auth path); the resulting state rides the already-verified doc-review save path.
 ### V75 — Doc Review stitch + markup safety guards: degenerate-align reject, unaligned-sheet flag/warn, ≥3-pt Area/Perimeter (B300 / B301 / B302) ✅ (self-verified headless — fully done, no signed-in check needed)
 - **Added** 2026-06-20 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium-1228 on the built app, `vite preview`, logged-out — the stitch/markup core is browser-only) · **Next check** — none required (all three are auth-independent client logic).
 - **Steps:** Document Review (**Markup**). **B302:** open a PDF → **Area** → click **2** points + Enter or double-click ⇒ nothing commits (takeoff stays "No measurements yet"); click **3** points + Enter ⇒ one area commits. **Then Stitch sheets ▸**, open a multi-page PDF, add two sheets. **B301:** the 2nd sheet shows an amber **"Not aligned — click Align"** overlay + a panel chip; drawing a Distance/Area over it raises **"…isn't aligned yet — Align it first…"**. **B300:** click **Align** on the 2nd sheet and click the two moving-sheet points on ~the same spot ⇒ banner **"Those two points are too close together…"** and the sheet **does not move**; a real Align (distinct points) then succeeds and clears the flag.
