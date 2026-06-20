@@ -168,6 +168,18 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (drag.current) { setView((v) => ({ ...v, panX: drag.current.panX + (e.clientX - drag.current.sx), panY: drag.current.panY + (e.clientY - drag.current.sy) })); }
   };
   const onUp = (e) => { if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
+  // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window
+  // blur, tab hidden, or a devtools/remote-debugger attaching) rather than ending with a
+  // normal pointer-up, so the stitcher canvas can never be left stuck mid-pan with pointer-
+  // capture held and a frozen grab cursor that swallows clicks.
+  const abortGesture = (pid) => { if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} } drag.current = null; };
+  useEffect(() => {
+    const recover = () => abortGesture();
+    const onVis = () => { if (document.hidden) recover(); };
+    window.addEventListener("blur", recover);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); setDraft(null); };
 
@@ -330,7 +342,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         {/* world canvas */}
         <div style={{ flex: 1, minWidth: 0, position: "relative", background: "#cfc8ba" }}>
           <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? "grab" : "crosshair", touchAction: "none" }}
-            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={finishArea}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>
             <g transform={G}>
               {placed.map((s) => {
