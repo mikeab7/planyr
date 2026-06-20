@@ -12,20 +12,40 @@ export async function loadPdf(fileOrBuffer) {
   return pdfjsLib.getDocument({ data }).promise;
 }
 
-/* Render one page into `canvas` at `scale`. Returns the canvas px size and the
- * page's base (scale-1) size — markups are stored in base/page units so they
- * survive zoom (multiply by scale to draw). */
+/* Pick how dense to render the canvas backing store. We draw at the device's pixel
+ * ratio (so note text is crisp on HiDPI / Retina screens instead of a blurry upscale),
+ * but cap it to a pixel budget so a big E-size sheet at high zoom can't blow up canvas
+ * memory. Never below 1× — i.e. never worse than a plain render. (B247) */
+function backingScale(baseW, baseH, scale) {
+  const cssW = Math.max(1, baseW * scale), cssH = Math.max(1, baseH * scale);
+  const want = Math.min((typeof window !== "undefined" && window.devicePixelRatio) || 1, 2);
+  const budget = Math.sqrt(24e6 / (cssW * cssH)); // ≤ ~24 MP backing store (~96 MB RGBA)
+  return Math.max(1, Math.min(want, budget));
+}
+
+/* Render one page into `canvas` at `scale`. Returns the canvas's ON-SCREEN (CSS) px
+ * size and the page's base (scale-1) size — markups are stored in base/page units so
+ * they survive zoom (multiply by scale to draw).
+ *
+ * The backing store is rendered `dpr×` denser than the CSS size and then sampled down by
+ * the browser, so text stays sharp at the same on-screen size. The returned w/h (and the
+ * canvas's CSS size) stay at the logical scale× size, so the markup SVG overlay — which
+ * positions in page-units × scale — lines up exactly as before. (B247) */
 export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask) {
   const page = await pdf.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
   const base = page.getViewport({ scale: 1 });
+  const dpr = backingScale(base.width, base.height, scale);
+  const viewport = page.getViewport({ scale: scale * dpr });
   const ctx = canvas.getContext("2d");
-  canvas.width = Math.floor(viewport.width);
+  canvas.width = Math.floor(viewport.width);   // dense backing store (scale × dpr)
   canvas.height = Math.floor(viewport.height);
+  const cssW = Math.floor(base.width * scale), cssH = Math.floor(base.height * scale); // on-screen size (scale only)
+  canvas.style.width = cssW + "px";            // map the dense bitmap into the logical box → crisp
+  canvas.style.height = cssH + "px";
   const task = page.render({ canvasContext: ctx, viewport });
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
-  return { w: canvas.width, h: canvas.height, baseW: base.width, baseH: base.height };
+  return { w: cssW, h: cssH, baseW: base.width, baseH: base.height };
 }
 
 /* Rasterize a page to a PNG data URL (for the stitcher — placed as an <image> and

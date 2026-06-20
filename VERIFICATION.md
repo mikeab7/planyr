@@ -60,6 +60,13 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V62 — Doc Review (Markup) sheets render crisp on HiDPI, not blurry (B247) ✅ (self-verified headless — mechanism proven; ⏳ optional live retina eyeball)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, generated 1-page PDF, driven at deviceScaleFactor 1 and 2) · **Next check** — optional: open a real structural/general-notes sheet on planyr.io on a Retina/HiDPI display and confirm note text is sharp at fit-to-page.
+- **Steps:** Markup tab → open/drop a PDF → read note text at fit-to-page, then zoom in.
+- **✅ Backing store honours devicePixelRatio:** at **deviceScaleFactor 2** the canvas backing store renders **2.000×** the on-screen size (1054→2108 px) — a dense, crisp bitmap instead of an upscaled 1× one; at **deviceScaleFactor 1** it's **1.000×** (never worse than before). `ui-audit/verify-new2-dpr.mjs`.
+- **✅ No overlay regression:** the on-screen (CSS) size is **identical across both densities** (1054×1364) and `renderPageToCanvas` returns the same `dims.w/h` as before, so markups/measurements land unchanged.
+- **⏳ Optional live confirm:** the crispness *gain* only manifests on real HiDPI hardware (headless DPR-forcing proves the 2× mechanism but renders on a 1×-equivalent surface); one eyeball on a Retina display on planyr.io would close it fully. Low-risk.
+
 ### V61 — County parcel fetch survives a county-server outage (TxGIO statewide fallback) (B244 / B245) ✅ (self-verified headless — fully done; ⏳ optional signed-in confirm)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, live HCAD + TxGIO; FBCAD simulated down) · **Next check** — optional: a signed-in click-through on planyr.io (the resilience path is auth-independent, so logged-out coverage is representative).
 - **Harness:** `gis-verify/fbcad-outage-fallback-verify.mjs` — intercepts the **`gis.fbcad.org`** host as **HTTP 503** to reproduce the real 2026-06-19 FBCAD outage, then enters Select-parcels, recenters on Sugar Land (Fort Bend), and clicks a lot.
