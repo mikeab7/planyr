@@ -21,6 +21,20 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+<!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
+     deal." Filed B228, renumbered B237 — concurrent `main` took B228–B236 while this was in flight, so B237 is the real next free ID.
+     Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
+     holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
+     NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
+     its chunk loads (ui-audit/diagnose-scheduler.mjs). B221 already auto-reloads, but two recovery gaps
+     let it still dead-end: (1) a plain location.reload() can be served the browser's OWN hard-cached
+     stale index.html → same dead chunk → cooldown → error screen (the no-cache _headers can't retro-fix
+     an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
+     dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
+     the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
+     same session — moved to BACKLOG-DONE.md: B237 (reloadFresh cache-busting reload + chunk-aware
+     ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
+     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V58). -->
 
 <!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2"). Concurrent main took B227–B236 while
      this was in flight, so these renumbered to **B237** (two-backend architecture doc) + **B238**
@@ -1134,7 +1148,6 @@ Original spec:
   - Coupled to **B11 / B13 / B36 / B137** (the county-resolution theme). **Not urgent** — the statewide fallback keeps Austin/DFW functional meanwhile; pick up when the owner is actively working those metros (start with Travis, Tarrant, Dallas).
 
 ---
-
 
 ## ✅ Done
 
