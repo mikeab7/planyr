@@ -108,6 +108,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   const grpBtn = await clickByTitle(/Group the selected items/);
   log(!!grpBtn, `B247 Group command available with 2 selected (clicked "${grpBtn}")`);
   log(await hasGroupBox(), "B247 group bounding-box (⊞ Group) renders after grouping");
+  // the group box is a pure "stays-together" indicator — NO whole-group resize handles
+  const boxRects = await page.evaluate(() => { const g = [...document.querySelectorAll("svg g")].find((gg) => [...gg.querySelectorAll(":scope > text")].some((t) => (t.textContent || "").includes("Group"))); return g ? g.querySelectorAll(":scope > rect").length : -1; });
+  log(boxRects === 1, `B247 group box has NO resize handles (just the outline; rects=${boxRects}) — a group never scales as a whole`);
 
   // move the group as one unit: click empty, then drag the building — BOTH should move
   await page.keyboard.press("Escape"); await page.waitForTimeout(150);

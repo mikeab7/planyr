@@ -1692,9 +1692,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ...els.filter((e) => e.groupId === gid).map((e) => ({ kind: "el", id: e.id })),
     ...markups.filter((m) => m.groupId === gid).map((m) => ({ kind: "markup", id: m.id })),
   ];
-  // Every piece of geometry a group resize must scale: its member els + each member's
-  // attached children (building assemblies) + its member markups.
-  const groupScaleSet = (gid) => {
+  // The geometry a group spans: its member els + each member's attached children
+  // (building assemblies) + its member markups. Used to draw the group's outline.
+  const groupGeom = (gid) => {
     const memEls = els.filter((e) => e.groupId === gid);
     const memElIds = new Set(memEls.map((e) => e.id));
     const childEls = els.filter((e) => e.attachedTo && memElIds.has(e.attachedTo) && !memElIds.has(e.id));
@@ -2081,18 +2081,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
     return { ...m, cx: m.cx + dx, cy: m.cy + dy };
   };
-  // Uniform-scale a markup about anchor A by factor s (for group resize, B247).
-  const scaleMarkup = (m, A, s) => {
-    const sp = (p) => ({ x: A.x + (p.x - A.x) * s, y: A.y + (p.y - A.y) * s });
-    const sc = (arr) => (arr || []).map(sp);
-    if (m.kind === "utilRoute") return { ...m, pts: sc(m.pts), corridor: sc(m.corridor), pad: sc(m.pad), width: m.width != null ? m.width * s : m.width };
-    if (m.kind === "encumbrance") return { ...m, pts: sc(m.pts), centerline: sc(m.centerline) };
-    if (m.kind === "easement") return { ...m, pts: sc(m.pts), centerline: m.centerline ? sc(m.centerline) : m.centerline, width: m.width != null ? m.width * s : m.width };
-    if (m.pts) return { ...m, pts: sc(m.pts) };
-    if (m.a) return { ...m, a: sp(m.a), b: sp(m.b) };
-    const c = sp({ x: m.cx, y: m.cy });
-    return { ...m, cx: c.x, cy: c.y, w: Math.max(1, m.w * s), h: Math.max(1, m.h * s) };
-  };
   const startMoveMarkup = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -2136,28 +2124,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
     };
     drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig };
-    svgRef.current.setPointerCapture(e.pointerId);
-  };
-  // Resize a whole group as one unit (B247): UNIFORM scale about the opposite corner
-  // (`anchor`), so every member + attached child + markup scales by the same factor and
-  // all their relationships — flush edges, gaps, relative sizes — are preserved.
-  const startGroupResize = (e, gid, anchor, grab) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    const { elList, mkList } = groupScaleSet(gid);
-    const bw = Math.abs(grab.x - anchor.x) || 1, bh = Math.abs(grab.y - anchor.y) || 1;
-    pushHistory();
-    drag.current = {
-      mode: "groupResize", anchor,
-      d0: Math.hypot(grab.x - anchor.x, grab.y - anchor.y) || 1,
-      minS: Math.max(20 / bw, 20 / bh, 0.05), // keep the group ≥ ~20′ on its short side
-      orig: {
-        els: elList.map((x) => x.points
-          ? { id: x.id, points: x.points }
-          : { id: x.id, cx: x.cx, cy: x.cy, w: x.w, h: x.h, ...(x.travelW != null ? { travelW: x.travelW } : {}) }),
-        markups: mkList.map((m) => ({ ...m })),
-      },
-    };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
@@ -2507,23 +2473,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
       return;
     }
-    if (d.mode === "groupResize") { // uniform scale the whole group about the fixed opposite corner
-      let s = Math.hypot(fp.x - d.anchor.x, fp.y - d.anchor.y) / d.d0;
-      s = Math.max(d.minS, Math.min(20, s));
-      const A = d.anchor, sp = (p) => ({ x: A.x + (p.x - A.x) * s, y: A.y + (p.y - A.y) * s });
-      const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
-      setEls((a) => a.map((el) => {
-        if (!eids.has(el.id)) return el;
-        const o = d.orig.els.find((x) => x.id === el.id);
-        if (o.points) return { ...el, points: o.points.map(sp) };
-        const c = sp({ x: o.cx, y: o.cy });
-        const next = { ...el, cx: c.x, cy: c.y, w: Math.max(1, o.w * s), h: Math.max(1, o.h * s) };
-        if (o.travelW != null) next.travelW = Math.max(1, o.travelW * s);
-        return next;
-      }));
-      setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; return scaleMarkup(d.orig.markups.find((x) => x.id === m.id), A, s); }));
-      return;
-    }
     if (d.mode === "mkDraw") {
       let b = snapPt(fp);
       if (e.shiftKey) {
@@ -2719,7 +2668,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
-    if (d && (d.mode === "groupMove" || d.mode === "groupResize")) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
       let mk = null;
@@ -5853,30 +5802,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <rect key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} width={Math.abs(p1.x - p0.x) + 4} height={Math.abs(p1.y - p0.y) + 4} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />;
               })}
               {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill={PAL.accent} fillOpacity={0.08} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />; })()}
-              {/* persistent GROUP chrome (B247): an enclosing box that reads as one unit,
-                  with corner handles that resize the whole group uniformly. Hidden while
-                  drilled into a member (then the member shows its own selection). */}
+              {/* persistent GROUP outline (B247): a dashed enclosing box that reads "these
+                  stay together" — a pure indicator, NO resize handles (a group never scales
+                  as a whole — site elements are real feet; resize a member by double-clicking
+                  into it). Hidden while drilled into a member (then it shows its own selection). */}
               {(() => {
                 if (drillId) return null;
                 const gid = selectedGroupId(); if (!gid) return null;
-                const { elList, mkList } = groupScaleSet(gid);
+                const { elList, mkList } = groupGeom(gid);
                 const all = [...elList, ...mkList]; if (all.length < 2) return null;
                 let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
                 all.forEach((o) => { const b = featBBox(o); if (b) { x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); } });
                 if (!isFinite(x0)) return null;
                 const p0 = f2p({ x: x0, y: y0 }), p1 = f2p({ x: x1, y: y1 });
                 const rx = Math.min(p0.x, p1.x) - 5, ry = Math.min(p0.y, p1.y) - 5, rw = Math.abs(p1.x - p0.x) + 10, rh = Math.abs(p1.y - p0.y) + 10;
-                const cpt = (sx, sy) => f2p({ x: sx < 0 ? x0 : x1, y: sy < 0 ? y0 : y1 });
                 return (
-                  <g>
-                    <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill="none" stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="2 3" pointerEvents="none" />
-                    <text x={rx + 2} y={ry - 4} fontSize="10.5" fontFamily="ui-sans-serif, system-ui" fontWeight="700" fill={PAL.accent} pointerEvents="none">⊞ Group</text>
-                    {tool === "select" && [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy], i) => {
-                      const c = cpt(sx, sy);
-                      return <rect key={`grh${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
-                        style={{ cursor: sx * sy > 0 ? "nwse-resize" : "nesw-resize" }}
-                        onPointerDown={(e) => startGroupResize(e, gid, { x: sx < 0 ? x1 : x0, y: sy < 0 ? y1 : y0 }, { x: sx < 0 ? x0 : x1, y: sy < 0 ? y0 : y1 })} />;
-                    })}
+                  <g pointerEvents="none">
+                    <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill="none" stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="2 3" />
+                    <text x={rx + 2} y={ry - 4} fontSize="10.5" fontFamily="ui-sans-serif, system-ui" fontWeight="700" fill={PAL.accent}>⊞ Group</text>
                   </g>
                 );
               })()}
