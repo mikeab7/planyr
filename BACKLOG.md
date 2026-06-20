@@ -22,6 +22,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat) — Esri imagery shows the gray "Map data not yet
+     available" placeholder on zoom-in. Arrived as "NEW-1"; minted B218 — highest B# across
+     both files was B217, so this is the real next free ID. This is the RECURRENCE the owner
+     flagged: the now-done B182 fixed the identical retina over-zoom placeholder but ONLY on
+     the planner-canvas backdrop (SitePlanner.jsx GEO_BASEMAP); the map-finder imagery layer
+     (MapFinder.jsx) never got the matching retina clamp. Deduped against B182/B170/B169/B171
+     (no open imagery-placeholder item existed; B182 is closed). Filed AND shipped this same
+     session — moved to BACKLOG-DONE.md. -->
+
+### B218 — Esri imagery shows "Map data not yet available" placeholder on over-zoom (map finder) `[Site Planner]` (bug)  *(arrived as "NEW-1"; minted **B218** — next free ID after B217. RECURRENCE/completion of the now-done B182, which fixed only the planner-canvas call site.)*
+`[ ]` **Repro:** Site Planner map finder, Esri imagery selected, zoom in on a Houston-area site (e.g. the Wilcrest/Wycliffe extent) past the area's native imagery ceiling → the whole canvas fills with Esri's gray "Map data not yet available" tiles while street labels still render on top. **Expected:** past native max zoom, Leaflet upscales the sharpest available real tile so the photo stays visible (slightly soft, never blank).
+- **Root cause:** Esri World Imagery returns gray placeholder tiles as **HTTP 200** (not errors) past the per-area imagery ceiling, so Leaflet's error-tile fallback never fires. On a retina/HiDPI display `detectRetina` (added in B170 for sharpness) fetches one zoom level **higher** than the display zoom (zoomOffset +1), so a plain `maxNativeZoom: 19` lets deep zoom request **z20** — the placeholder. Labels keep rendering because the reference/labels overlay (World_Transportation) is a separate layer with a higher ceiling than the imagery raster — the diagnostic tell.
+- **Recurrence — confirmed root:** **B182 already fixed this exact bug**, but its retina clamp (`L.Browser.retina ? maxNative-1 : maxNative`) was applied **only to the planner-canvas backdrop** (`SitePlanner.jsx` GEO_BASEMAP detail layer). The **map-finder** imagery layer (`MapFinder.jsx`) got `detectRetina` from B170 but **never the matching clamp**, so the placeholder still appears there. Not a refactor revert — an incomplete original fix across the two call sites.
+- **Fix:** apply the same retina-offset clamp to the map-finder imagery `L.tileLayer` — for **every source in the Imagery dropdown** via `bm.maxNative` (Esri 19→18, USGS 16→15 on retina) — keeping `maxZoom: 21` so Leaflet **upscales** past native instead of fetching placeholder tiles. Cap the labels/reference overlay at the imagery native ceiling (`maxNativeZoom: 19`) so the two layers don't diverge at deep zoom. Durable code comments at the config + both layer sites so a future restructure can't silently drop them.
+> **Dedup:** RECURRENCE/completion of **B182** (done — planner-canvas placeholder fix) across the second call site; builds on **B170** (detectRetina) + **B169** (blur diagnostic). Distinct from **B171** (gated high-res-source eval — correctly NOT triggered; the source isn't the problem) and **B162** (label zoom gating).
+
 <!-- 2026-06-19: owner-reported (chat) "can't access my scheduling projects — this is imperative."
      Filed B203–B205 (arrived as B194–B196, but concurrent `main` #169–#172 minted B194–B202 for
      the project switcher / trailer labels / scale bar / print tranche, so renumbered to the real
