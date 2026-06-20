@@ -21,6 +21,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2") — resilient county parcel fetch. Minted
+     **B244** (NEW-1: resilient fetch + TxGIO statewide fallback) + **B245** (NEW-2: validate the ArcGIS
+     response BODY, not just HTTP status) — concurrent `main` took B239–B243 while this was in flight, so
+     B244/B245 are the real next free IDs after B243. Deduped before filing: B244 is the RESILIENCE layer
+     on top of the already-done **B137** (which made TxGIO a queryable *candidate* — coverage); B244 adds
+     the 8s AbortController timeout (the ~45s freeze fix), a per-source circuit breaker, honest "statewide
+     backup" labeling, the search-side county-scoped fallback, and TxGIO field normalization. B245 extends
+     **B233**'s "unavailable vs no-parcel" split down into the fetch layer (typed ParcelFetchError) and
+     reuses the `probeService` body-parse principle (HTTP 200 + .error = failed). Distinct from **B36e**
+     (AbortControllers on the busy-gated evidence-fetch path). Both filed AND shipped this same session —
+     full blocks moved to BACKLOG-DONE.md; live headless verified with FBCAD simulated down → Fort Bend
+     lot selected from TxGIO in 1.2s + backup notice shown (VERIFICATION V61). -->
 
 <!-- 2026-06-20: owner-reported (chat, w/ 3 screenshots) that "Print" opens a blank `about:blank`
      window and routes through the BROWSER's print dialog — which stamps a date/time header, the

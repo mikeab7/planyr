@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { outerRingsLngLat } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import {
+  outerRingsLngLat, queryAtPoint, identifyParcelDetailed,
+  ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError,
+} from "../src/workspaces/site-planner/lib/arcgis.js";
+
+const LAYER = "https://example.test/MapServer/0";
+const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
 // outerRingsLngLat returns EVERY outer-boundary ring of a (possibly multipart)
 // ArcGIS polygon feature, dropping holes. This is the fix for the Pearland bug
@@ -54,5 +60,80 @@ describe("outerRingsLngLat — multipart parcel support (Pearland B36c fix)", ()
     expect(outerRingsLngLat(null)).toEqual([]);
     expect(outerRingsLngLat({})).toEqual([]);
     expect(outerRingsLngLat({ geometry: { rings: [] } })).toEqual([]);
+  });
+});
+
+// A parcel fetch must validate the RESPONSE BODY, not just the HTTP status, and must
+// distinguish a SERVER failure (typed ParcelFetchError → "unavailable") from a healthy
+// "no parcel at this point" (an empty feature list → null, NOT an error). This is the
+// classification the fallback + circuit breaker key off (B244/B245).
+describe("queryAtPoint — body validation + typed failures (B245)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("a healthy empty result returns null (no parcel here ≠ an error)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok({ features: [] })));
+    await expect(queryAtPoint(LAYER, -95, 29)).resolves.toBeNull();
+  });
+
+  it("HTTP 200 with a JSON error body (e.g. 499 Token Required) is a failure, not success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ok({ error: { message: "Token Required", code: 499 } })));
+    await expect(queryAtPoint(LAYER, -95, 29)).rejects.toMatchObject({ kind: "arcgis", status: 499, unavailable: true });
+  });
+
+  it("a non-OK HTTP status (503) becomes a typed http failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })));
+    await expect(queryAtPoint(LAYER, -95, 29)).rejects.toMatchObject({ kind: "http", status: 503, unavailable: true });
+  });
+
+  it("a network/CORS throw becomes a typed network failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await expect(queryAtPoint(LAYER, -95, 29)).rejects.toMatchObject({ kind: "network", unavailable: true });
+  });
+
+  it("a hung request is aborted at the timeout (the ~45s tab-freeze fix, B244)", async () => {
+    vi.useFakeTimers();
+    // fetch that never resolves on its own — only the AbortController can end it.
+    vi.stubGlobal("fetch", vi.fn((_url, { signal }) => new Promise((_res, rej) => {
+      signal.addEventListener("abort", () => { const e = new Error("aborted"); e.name = "AbortError"; rej(e); });
+    })));
+    const p = queryAtPoint(LAYER, -95, 29).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(PARCEL_FETCH_TIMEOUT_MS + 10);
+    const err = await p;
+    expect(err).toBeInstanceOf(ParcelFetchError);
+    expect(err.kind).toBe("timeout");
+    vi.useRealTimers();
+  });
+});
+
+describe("identifyParcelDetailed — per-source outcomes feed the breaker (B244)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("separates a down source from an empty one from a hit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      if (url.includes("/down/")) return { ok: false, status: 503, json: async () => ({}) };
+      if (url.includes("/empty/")) return ok({ features: [] });
+      return ok({ features: [{ geometry: { rings: [] }, attributes: { OBJECTID: 1 } }] });
+    }));
+    const res = await identifyParcelDetailed([
+      { county: "a", url: "https://x.test/down/MapServer/0" },
+      { county: "b", url: "https://x.test/empty/MapServer/0" },
+      { county: "c", url: "https://x.test/hit/MapServer/0" },
+    ], -95, 29);
+    expect(res.responded).toBe(2);          // b + c answered (one empty, one hit)
+    expect(res.errors).toBe(1);             // a was down
+    expect(res.hits).toHaveLength(1);
+    const byCounty = Object.fromEntries(res.sources.map((s) => [s.county, s]));
+    expect(byCounty.a.ok).toBe(false);      // breaker should count this a failure
+    expect(byCounty.b.ok).toBe(true);       // healthy, just no parcel → NOT a failure
+    expect(byCounty.c.hit).toBe(true);
+  });
+});
+
+describe("humanizeError — plain wording per failure kind", () => {
+  it("a timeout reads as the server not responding (not a generic error)", () => {
+    expect(humanizeError(new ParcelFetchError("timeout", "x"))).toMatch(/isn.t responding/i);
+  });
+  it("an arcgis body error surfaces the server's own message", () => {
+    expect(humanizeError(new ParcelFetchError("arcgis", "Token Required", 499))).toBe("Token Required");
   });
 });

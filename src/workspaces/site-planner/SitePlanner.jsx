@@ -21,11 +21,10 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
-import { COUNTIES, COUNTIES_MAP, detectField, resolveTaxRates } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
+import { lookupParcels } from "./lib/parcelQuery.js";
 import {
-  getLayerInfo,
   resolveLayerUrl,
-  queryFeatures,
   queryAtPoint,
   largestRingLngLat,
   outerRingsLngLat,
@@ -2932,40 +2931,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!v) { setLookupErr("Type an account number or address to search."); return; }
     setLookupBusy(true);
     try {
-      const layerUrl = await resolveLayerUrl(lookupUrl.trim());
-      const meta = await getLayerInfo(layerUrl);
-      const idField = detectField(meta.fields, "id") || COUNTIES[county]?.idField;
-      const addrField = detectField(meta.fields, "address") || COUNTIES[county]?.addrField;
-      // The field NAME gets interpolated into the where-clause and comes from live (or a
-      // user-pasted) layer's metadata — reject anything that isn't a plain identifier so a
-      // hostile/compromised endpoint can't inject SQL that escapes the county scope (B47).
-      const okField = (f) => /^[A-Za-z0-9_.]+$/.test(f || "");
-      if (idField && !okField(idField)) throw new Error("Unexpected parcel-ID field name on this layer.");
-      if (addrField && !okField(addrField)) throw new Error("Unexpected address field name on this layer.");
-      const esc = v.replace(/'/g, "''");
-      let where;
-      if (searchMode === "id") {
-        if (!idField) throw new Error("No account/parcel-id field on this layer — try an address search.");
-        const fld = meta.fields.find((f) => f.name === idField);
-        const numeric = fld && /integer|double|single|oid|smallinteger/i.test(fld.type);
-        where = numeric && /^\d+$/.test(v) ? `${idField} = ${v}` : `UPPER(${idField}) LIKE UPPER('%${esc}%')`;
-      } else {
-        if (!addrField) throw new Error("No address field on this layer — try an account/ID search.");
-        where = `UPPER(${addrField}) LIKE UPPER('%${esc}%')`;
-      }
-      // Statewide services (Chambers rides TxGIO's all-Texas parcel layer) need a county
-      // scope, or an ID/address search could match a like-named/numbered parcel in another
-      // county. Apply it only when the scope's field actually exists on this layer, so a
-      // single-county override URL pasted in the box is left untouched (self-healing).
-      const scope = COUNTIES[county]?.scopeWhere;
-      if (scope) {
-        const scopeField = scope.split("=")[0].trim().toLowerCase();
-        if (meta.fields.some((f) => (f.name || "").toLowerCase() === scopeField))
-          where = `(${scope}) AND (${where})`;
-      }
-      const feats = await queryFeatures(layerUrl, { where, count: 10, outSR: 4326 }); // lon/lat so importFeature projects via the shared 365223 model (B57c)
-      if (!feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
-      setLookupRes(feats.map((ft) => ({ ft, layerUrl, idField, addrField })));
+      // One shared lookup: builds the (county-scoped, injection-safe) where-clause and,
+      // if the county's own CAD server is down, automatically retries the statewide
+      // TxGIO layer scoped to this one county so the search still answers and can't
+      // match a like-named parcel elsewhere (B244/B245).
+      const r = await lookupParcels({ county, lookupUrl: lookupUrl.trim(), mode: searchMode, value: v });
+      if (!r.feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
+      if (r.backup) setLookupErr(`Using the statewide backup (TxGIO) for ${r.backupCounty} — the county’s own server is unavailable; results may lag county updates.`);
+      setLookupRes(r.feats.map((ft) => ({ ft, layerUrl: r.layerUrl, idField: r.idField, addrField: r.addrField })));
     } catch (err) {
       setLookupErr(humanizeError(err));
     } finally {

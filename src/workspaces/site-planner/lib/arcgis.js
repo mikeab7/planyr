@@ -4,16 +4,59 @@
  */
 import { FEET_WKID } from "./counties.js";
 
+/* A typed failure from a parcel/ArcGIS request. Lets a caller tell a SERVER problem
+ * (timeout / HTTP error / ArcGIS error body / network or CORS block) apart from a
+ * healthy "no parcel at this point" — which is NOT an error (the query returns an
+ * empty feature list, never a throw). So every ParcelFetchError means the source was
+ * UNAVAILABLE; `.unavailable` is the flag the circuit breaker (sourceHealth.js) and
+ * the honest "statewide backup" labeling key off (B244/B245). `kind`:
+ * 'timeout' | 'http' | 'arcgis' | 'network'. */
+export class ParcelFetchError extends Error {
+  constructor(kind, message, status = null) {
+    super(message);
+    this.name = "ParcelFetchError";
+    this.kind = kind;
+    this.status = status;
+    this.unavailable = true;
+  }
+}
+
+/* How long to wait before abandoning a county GIS request. County servers sometimes
+ * hang — the TCP connection opens but no response ever comes (FBCAD did exactly this
+ * on 2026-06-19, freezing the tab ~45s on a single parcel click). An AbortController
+ * cap turns an indefinite hang into a prompt, typed 'timeout' failure so the fallback
+ * chain can take over instead of locking the UI (B244). */
+export const PARCEL_FETCH_TIMEOUT_MS = 8000;
+
 async function fetchJson(url, params) {
   const u = new URL(url);
   u.searchParams.set("f", "json");
   if (params)
     for (const [k, v] of Object.entries(params))
       if (v != null) u.searchParams.set(k, String(v));
-  const res = await fetch(u.toString());
-  if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PARCEL_FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(u.toString(), { signal: ctrl.signal });
+  } catch (e) {
+    if (e && e.name === "AbortError")
+      throw new ParcelFetchError("timeout", `The county server didn't respond within ${Math.round(PARCEL_FETCH_TIMEOUT_MS / 1000)}s.`);
+    throw new ParcelFetchError("network", "Couldn't reach the county server (network or CORS block).");
+  } finally {
+    clearTimeout(timer);
+  }
+  // Validate the RESPONSE BODY, not just the HTTP status: ArcGIS routinely returns
+  // HTTP 200 with a JSON `{error:…}` body (e.g. 499 Token Required) for a failed
+  // query, which must read as a failure — not a silent success (B245).
+  if (!res.ok) throw new ParcelFetchError("http", `The county server returned HTTP ${res.status}.`, res.status);
+  let j;
+  try {
+    j = await res.json();
+  } catch (_) {
+    throw new ParcelFetchError("arcgis", "The county server returned an unreadable response.");
+  }
+  if (j && j.error) throw new ParcelFetchError("arcgis", j.error.message || "ArcGIS query error.", j.error.code ?? null);
   return j;
 }
 
@@ -155,19 +198,29 @@ export async function identifyParcelAcross(candidates, lng, lat) {
 /* Same identify, but also reports how many candidate services actually RESPONDED,
  * so a caller can tell "couldn't reach any parcel service" (responded === 0) apart
  * from "a service answered, but there's no parcel at this point" (responded > 0,
- * hits empty) — two states that must read differently (B233). Returns
- * { hits:[{county,feature}], responded, errors }. */
+ * hits empty) — two states that must read differently (B233). Also returns a
+ * per-source outcome list so the caller can update each source's circuit-breaker
+ * health (B244): `ok` = the server answered (a hit OR an honest empty), false = it
+ * failed (timeout / HTTP / ArcGIS error / network). Returns
+ * { hits:[{county,feature}], responded, errors, sources:[{county,ok,hit,error}] }. */
 export async function identifyParcelDetailed(candidates, lng, lat) {
+  const list = candidates || [];
   const results = await Promise.allSettled(
-    (candidates || []).map(async ({ county, url }) => {
+    list.map(async ({ county, url }) => {
       const feature = await queryAtPoint(url, lng, lat);
       return feature ? { county, feature } : null;
     })
   );
+  const sources = results.map((r, i) => ({
+    county: list[i].county,
+    ok: r.status === "fulfilled",
+    hit: r.status === "fulfilled" && !!r.value,
+    error: r.status === "rejected" ? r.reason : null,
+  }));
   const hits = results.filter((r) => r.status === "fulfilled" && r.value).map((r) => r.value);
-  const responded = results.filter((r) => r.status === "fulfilled").length;
-  const errors = results.filter((r) => r.status === "rejected").length;
-  return { hits, responded, errors };
+  const responded = sources.filter((s) => s.ok).length;
+  const errors = sources.filter((s) => !s.ok).length;
+  return { hits, responded, errors, sources };
 }
 
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
@@ -280,6 +333,17 @@ export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
 
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
+  // Typed parcel-fetch failures (B244/B245) carry a `kind` — give each its own plain
+  // wording so "the server is down" reads differently from "no parcel here".
+  if (e && e.kind) {
+    if (e.kind === "timeout")
+      return "The county parcel server isn't responding. Trying the statewide backup where possible — otherwise trace the parcel from the Aerial underlay.";
+    if (e.kind === "http")
+      return `The county parcel server returned an error (HTTP ${e.status ?? "?"}) — it may be down. Trying the statewide backup where possible, or use the Aerial underlay.`;
+    if (e.kind === "network")
+      return "Couldn't reach the county server (network or CORS block). The endpoint may have moved, or your network is blocking it — meanwhile use the Aerial underlay to trace the parcel by hand.";
+    return e.message; // 'arcgis' — surface the server's own message
+  }
   const m = String(e?.message || e);
   if (/failed to fetch|networkerror|load failed|cors/i.test(m))
     return "Couldn't reach the county server (network or CORS block). The endpoint may have moved, or your network is blocking it — meanwhile use the Aerial underlay to trace the parcel by hand.";
