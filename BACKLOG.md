@@ -40,8 +40,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      finish this run" carve-out, NOT shipped this session; raised plainly in chat. -->
 
 ### B273 — Light / dark / system theme with cool-gray light palette `[AppHeader / theming]` (feature) — foundation-scale  *(owner-dropped 2026-06-20; arrived as "NEW-3"; minted **B273** — next free after B272)*
-`[?]` Add a theme selector with three modes — **Light**, **Dark**, **System** (`prefers-color-scheme`). App is currently hard-locked to one look; this adds the switch. Light mode = cool gray-white surfaces; Dark mode keeps the existing locked dark palette unchanged.
-> **`[?]` AMBIGUITY — confirm before building (don't guess):** the app today is **not literally all-dark** — content surfaces are a warm **cream/paper** ("drafting") palette (`body #efeadf`, panels `#f6f3ec`, ink `#26231e`) sitting under **dark graphite chrome** (top bars + rail, `#14110e`/`#191613`). The spec says "Dark mode keeps the existing locked dark palette unchanged." Confirm what "the existing dark" means: **(a)** preserve today's warm-cream-content + dark-chrome look as the "Dark" theme, or **(b)** build a genuine dark-*surface* mode (dark content panels) as "Dark" and retire the cream. This materially changes the work and the token values. (Owner to decide.)
+`[ ]` Add a theme selector with three modes — **Light**, **Dark**, **System** (`prefers-color-scheme`). App is currently hard-locked to one look; this adds the switch. **Both modes are net-new full surface palettes** (owner decision 2026-06-20, see below): Light = cool gray-white surfaces; Dark = a genuine dark-*surface* mode (dark content panels), **retiring** today's warm cream/paper work area.
+> **✓ DECISION (owner, 2026-06-20) — "build a true dark mode":** the app today is **not all-dark** — content surfaces are a warm **cream/paper** ("drafting") palette (`body #efeadf`, panels `#f6f3ec`, ink `#26231e`) under **dark graphite chrome** (top bars + rail, `#14110e`/`#191613`). Asked whether "keep the existing dark unchanged" meant preserve today's cream-content + dark-chrome look, or build a real dark-*surface* mode, the owner chose the latter: build a **genuine dark-surface** Dark mode (dark content panels) and **retire the cream**, alongside the cool-gray Light. **Consequence for scope:** *both* themes are net-new surface palettes — the only "existing dark" that survives is the dark **chrome** (bars/rail); the dark **content-surface** values (dark equivalents of surface-page / surface-raised / borders / text) **don't exist yet and must be designed**, and every one of the ~886 color spots needs a proper two-way (light↔dark) mapping, not a one-way "add light." This increases effort vs. preserving the current look and reinforces the multi-pass-foundation plan below.
 
 **Mechanics (from the owner's spec):**
 - Drive theming off `data-theme="light|dark"` on `<html>`. All colors as CSS variables, both themes fully defined.
@@ -62,6 +62,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 | text-primary | `#1B1E26` | existing |
 | text-secondary (muted) | `#565E6E` | existing |
 | text-tertiary (hints) | `#8B92A1` | existing |
+
+> ⚠ **Per the decision above, "Dark value = existing" for the *surface* rows is now a net-new true-dark surface palette to be designed** (dark page / dark cards / dark borders / light-on-dark text), NOT the current cream. Only the dark **chrome** (bars/rail) pre-exists. The owner's Light column is fixed; the Dark surface column needs its cool-neutral dark equivalents specced as part of the build.
 
 **Accent pair model:** each module accent is **two tokens** — a **fill/brand** value (unchanged, locked hexes — these already live in `src/shared/ui/moduleAccent.js` as `MODULE_ACCENT`) and an **on-light text** value (tuned, AA-passing as foreground). The `-text` token is theme-dependent.
 
