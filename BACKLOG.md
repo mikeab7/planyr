@@ -22,6 +22,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat, with finished artwork + brief) the new Planyr coral brand
+     mark. Filed B230 (replace the favicon/app icon) + B231 (coral palette tokens + a reusable
+     BrandMark component). Arrived as "NEW-1"/"NEW-2"; highest B# across both files was B229, so
+     B230/B231 are the real next free IDs. Deduped: no prior favicon/app-icon or brand-token/
+     BrandMark item (B3 = brand *spelling*; B104/B10 = the unified-header consolidation that B231's
+     logo slot plugs into — orthogonal). Both filed AND shipped this same session — moved to
+     BACKLOG-DONE.md. Canonical artwork + the dependency-free icon generator live in brand/. -->
+
 <!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
      panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
      B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
