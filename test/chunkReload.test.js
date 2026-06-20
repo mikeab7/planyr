@@ -41,9 +41,9 @@ describe("chunk-reload guard decision (B221)", () => {
   });
 });
 
-// B228 — distinguish a stale/missing chunk (recover by reloading the fresh build) from
+// B237 — distinguish a stale/missing chunk (recover by reloading the fresh build) from
 // an ordinary render crash (where reloading the same code won't help).
-describe("isChunkLoadError (B228)", () => {
+describe("isChunkLoadError (B237)", () => {
   it("matches the dynamic-import failures across browsers", () => {
     [
       "Failed to fetch dynamically imported module: https://planyr.io/assets/Scheduler-733N4NOD.js", // Chrome
@@ -65,9 +65,9 @@ describe("isChunkLoadError (B228)", () => {
   });
 });
 
-// B228 — the recovery reload must defeat a hard-cached stale index.html, so it changes
+// B237 — the recovery reload must defeat a hard-cached stale index.html, so it changes
 // the cache key (adds a throwaway ?_r=) and uses replace() (no back-button trap).
-describe("reloadFresh (B228)", () => {
+describe("reloadFresh (B237)", () => {
   const makeWin = (href) => {
     const calls = { replace: [], reload: 0 };
     return [{ location: { href, replace: (u) => calls.replace.push(u), reload: () => { calls.reload++; } } }, calls];
@@ -96,8 +96,8 @@ describe("reloadFresh (B228)", () => {
   });
 });
 
-// B228 — the throwaway param is tidied off the address bar on the recovered load.
-describe("stripReloadParam (B228)", () => {
+// B237 — the throwaway param is tidied off the address bar on the recovered load.
+describe("stripReloadParam (B237)", () => {
   const makeWin = (href) => {
     const replaceState = [];
     return [{ location: { href }, history: { state: { a: 1 }, replaceState: (s, t, url) => replaceState.push(url) } }, replaceState];

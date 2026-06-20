@@ -8,7 +8,7 @@
  *
  * Must be a class component — React has no hook equivalent for error boundaries.
  *
- * Stale-chunk awareness (B228): the most common way this boundary appears is NOT a
+ * Stale-chunk awareness (B237): the most common way this boundary appears is NOT a
  * code bug but a stale deploy — the tab is holding an old index.html and a lazy
  * workspace chunk it points at was replaced by a newer build (e.g. "Failed to fetch
  * dynamically imported module: …/Scheduler-<hash>.js"). For that case the only thing

@@ -21,9 +21,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
-
 <!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
-     deal." Filed B228 — highest B# across both files was B227, so this is the real next free ID.
+     deal." Filed B228, renumbered B237 — concurrent `main` took B228–B236 while this was in flight, so B237 is the real next free ID.
      Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
      holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
      NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
@@ -33,9 +32,43 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
      dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
      the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
-     same session — moved to BACKLOG-DONE.md: B228 (reloadFresh cache-busting reload + chunk-aware
+     same session — moved to BACKLOG-DONE.md: B237 (reloadFresh cache-busting reload + chunk-aware
      ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
-     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V55). -->
+     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V58). -->
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Renumbered twice
+     under a hot `main` (B225–B229 → B230–B234 → **B232–B236**; concurrent PRs #188–#191 + #190
+     took B225–B231). Filed AND shipped this same session on branch `claude/tender-goldberg-ax4n5w`
+     — all five moved to BACKLOG-DONE.md: B232 (address search recenters — Esri geocoder biased to
+     the map, replaces the no-bias Nominatim that returned nothing for bare street addresses), B233
+     (address search selects the parcel + shows its appraisal info, reusing the click pipeline + the
+     planner's appraisal labeller; source-unavailable ≠ no-parcel-here), B234 (one shared status-
+     token set — color + glyph per state — across chips, list markers, and map pins; module accents
+     confined to the tab row; amends B161's pins), B235 (left rail: chips-as-filters + type-to-filter
+     + collapsible status groups, Complete/Dead collapsed by default; consumes B234), and B236
+     (per-layer source-vintage stamp, distinct from refreshed-age; "vintage unknown" never
+     fabricated; the ship-now half of B96's data-age surfacing). All self-verified headless (V57). -->
+
+<!-- 2026-06-20: B230 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+     right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
+     dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
+     measures / markup poly-line / easements) + B231 (cartographic detention pond — radial steel-teal
+     gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B230/B231** — concurrent `main` (PRs #184/#186/
+     #188/#189/#191) took B221–B229 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-
+     panel redesign, dock-zone stack) while this was in flight, so B230/B231 are the real next free IDs
+     after B229. Filed AND shipped this same session — moved to BACKLOG-DONE.md; self-verified headless
+     (ui-audit/verify-b221-b222.mjs), V56. -->
+
+<!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
+     B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
+     feature-button visibility, #189 B227 yield panel, #184 B222–B224 Schedule) while this was in
+     flight, so renumbered to the real next free IDs **B228/B229** at merge time. Filed AND shipped
+     this same session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout
+     freeze) AND vs main's B225/B226 (#188 size-GATES these feature buttons — orthogonal: that's
+     button visibility, this is the zone stack the buttons drive). REUSES the existing court /
+     far-side-trailer / bump-out machinery rather than re-adding it. -->
 
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
@@ -1106,7 +1139,6 @@ Original spec:
   - Coupled to **B11 / B13 / B36 / B137** (the county-resolution theme). **Not urgent** — the statewide fallback keeps Austin/DFW functional meanwhile; pick up when the owner is actively working those metros (start with Travis, Tarrant, Dallas).
 
 ---
-
 
 ## ✅ Done
 

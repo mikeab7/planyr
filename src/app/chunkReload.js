@@ -1,4 +1,4 @@
-/* Stale-chunk-after-deploy recovery (B221, hardened in B228).
+/* Stale-chunk-after-deploy recovery (B221, hardened in B237).
  *
  * The app is code-split: each workspace (Site Planner, Document Review, Sequence)
  * loads as its own content-hashed chunk, e.g. /assets/Scheduler-a1b2c3.js — the hash
@@ -14,7 +14,7 @@
  * code-split chunk) fails to load. We listen for it and reload ONCE. Because the
  * listener is global, this covers EVERY lazy workspace, not just one.
  *
- * WHY A CACHE-BUSTING RELOAD (B228): a plain location.reload() re-requests the SAME
+ * WHY A CACHE-BUSTING RELOAD (B237): a plain location.reload() re-requests the SAME
  * URL and the browser may answer it from its own cached copy of index.html. If that
  * cached HTML is the stale build, the reload lands right back on the deleted chunk and
  * dead-ends (preloadError → cooldown → ErrorBoundary). This is the real-world failure

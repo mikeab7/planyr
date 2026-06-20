@@ -5,7 +5,7 @@
  * opacity slider, a live status indicator (loading/loaded/empty/failed-with-reason)
  * and a disclaimer note. */
 import { useEffect, useState } from "react";
-import { STATEWIDE, JURISDICTIONS, EVIDENCE, jurisdictionFor } from "../lib/layers.js";
+import { STATEWIDE, JURISDICTIONS, EVIDENCE, jurisdictionFor, layerVintage } from "../lib/layers.js";
 import { mapillaryToken, setMapillaryToken, subscribeMapillaryToken } from "../lib/evidenceLayers.js";
 import { formatAge } from "../lib/gisCache.js";
 
@@ -47,6 +47,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     const ls = st.on ? layerStatus[k] : null;
     const meta = ls && STATUS[ls.state];
     const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
+    const vintage = layerVintage(k, cfg); // NEW-5 (B236): source vintage, distinct from refreshed-age
     return (
       <div key={k} style={{ marginBottom: 5 }}>
         <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
@@ -66,6 +67,15 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             title="Layer opacity" aria-label={`${cfg.label} opacity`}
             onChange={(e) => set(k, { opacity: +e.target.value })}
             style={{ width: "100%", marginTop: 2 }} />
+        )}
+        {/* NEW-5 (B236): source VINTAGE — the data's own currency, low-weight + honest
+            ("vintage unknown" when the source exposes none). Kept distinct from the
+            "refreshed Xm ago" cache-age above (that's when WE pulled the copy). */}
+        {st.on && (
+          <div title={`Source vintage — ${cfg.label}'s own effective / publication date (when the underlying data is current as of). This is NOT when we last fetched it${age ? ` (that's the “${age}” stamp by the name)` : ""}.`}
+            style={{ fontSize: 9.5, color: MUTED, lineHeight: 1.35, marginTop: 1, fontStyle: vintage ? "normal" : "italic" }}>
+            as of: {vintage || "vintage unknown"}
+          </div>
         )}
         {/* status reason (failed / empty) */}
         {meta && (ls.state === "failed" || ls.state === "empty") && (
