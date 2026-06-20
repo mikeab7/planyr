@@ -6,16 +6,21 @@
  */
 
 // Curated field order: regex that matches a county's column name → the label we show.
+// Patterns cover both the per-county CAD columns AND the statewide TxGIO columns
+// (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
+// mkt_value, stat_land_use, year_built) so a parcel answered by the statewide backup
+// surfaces the same curated rows as one from its home county (B244).
 export const APPR_FIELDS = [
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
   [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
   [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre)/i, "Acreage"],
+  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area)/i, "Acreage"],
   [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
   [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
-  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt)/i, "Total value"],
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type)/i, "Land use"],
+  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt|mkt_?val|mkt_?value)/i, "Total value"],
+  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type|stat_?land_?use)/i, "Land use"],
   [/zoning/i, "Zoning"],
+  [/(year_?built|yr_?built)/i, "Year built"],
   [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
 ];
 
