@@ -26,7 +26,7 @@
  *    array (see shared/files/uploadQueue.js), not two separate lists.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, pushFileToDrive, DISCIPLINES } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, DISCIPLINES } from "../lib/reviewStore.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
@@ -107,19 +107,16 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     const target = proj ? projName(proj) : "Holding area";
     try {
       // Auto-file by title block is the backend tranche; until then, file under the active
-      // project (or the holding area when none is selected). The index provider captures
-      // placement facts at filing time through the same interface.
+      // project (or the holding area when none is selected). fileNewReview stores the bytes
+      // (Drive-first, Supabase fallback — the B207 cutover) and captures placement facts
+      // through the index provider; a Drive failure never blocks filing.
       const r = await fileNewReview({ projectId: proj, project: proj ? projName(proj) : "", discipline: "Other", blob: item.file, fileName: item.name });
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
-      // Filed. A degraded byte-store (oversize / upload failure) is non-fatal — the work
-      // layer saved; flag "re-drop on open" rather than failing the whole row.
+      // Filed. A degraded byte-store is non-fatal — flag it on the row, don't fail it.
       let warn = null;
       if (r.oversize) warn = "too large to store (50 MB cap) — re-drop on open to view";
-      else if (r.uploadFailed) warn = "upload failed — re-drop on open to view";
-      // Additive: push a copy to Google Drive (B207). Best-effort — the file is already
-      // filed; a genuine Drive error is a soft warn, but "not enabled yet" stays silent.
-      const drive = await pushFileToDrive(item.file, { projectId: proj, discipline: "Other", fileName: item.name });
-      if (!drive.ok && !drive.skipped) warn = warn ? `${warn}; Drive copy failed` : "Drive copy failed";
+      else if (r.uploadFailed) warn = "couldn’t be stored — re-drop on open to view";
+      else if (r.driveError) warn = "filed; Drive copy failed";
       patchItem(item.uploadId, {
         status: proj ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,
         reviewId: r.id, filedAt: Date.now(), warn, target,

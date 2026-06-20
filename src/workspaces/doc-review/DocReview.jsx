@@ -12,7 +12,7 @@ import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 
@@ -203,7 +203,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (!src) return;
     if (tok != null && tok !== loadTok.current) return; // superseded before fetching
     if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
-    const buf = src.storageKey ? await downloadSource(src.storageKey) : null;
+    // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
+    // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
+    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+    if (tok != null && tok !== loadTok.current) return; // superseded while downloading
+    if (!buf) buf = src.storageKey ? await downloadSource(src.storageKey) : null;
     if (tok != null && tok !== loadTok.current) return; // a newer review opened while downloading
     if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
     const pdf = await loadPdf(buf);

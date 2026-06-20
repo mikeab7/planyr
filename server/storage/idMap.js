@@ -32,7 +32,7 @@ export function createIdMap(store = memoryIdStore()) {
     // backend id → Planyr key (used to translate a backend listing back to Planyr keys;
     // a backend object with no Planyr binding is intentionally invisible to the app).
     reverse: async (backendId) => store.getByBackend(backendId),
-    bind: async (planyrKey, backendId) => store.set(planyrKey, backendId),
+    bind: async (planyrKey, backendId, meta) => store.set(planyrKey, backendId, meta),
     unbind: async (planyrKey) => store.del(planyrKey),
     list: async () => store.all(),
   };

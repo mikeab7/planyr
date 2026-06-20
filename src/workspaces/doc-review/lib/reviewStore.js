@@ -187,10 +187,10 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
-/* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Additive:
- * the file is already filed in Supabase by fileNewReview; this puts a copy in the company
- * Drive so it shows up there. Best-effort — returns { ok } / { ok:false, error } and never
- * throws. No-op (skipped:true) when the Drive backend isn't wired yet on the deploy. */
+/* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Returns
+ * { ok, driveKey } on success (driveKey = the stable key to read it back with),
+ * { ok:false, skipped:true } when Drive isn't enabled yet, or { ok:false, error }.
+ * Best-effort — never throws. */
 export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   let token = null;
@@ -198,40 +198,61 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
   const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
   const name = fileName || "document.pdf";
+  const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
   try {
     const resp = await fetch("/api/files", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": file.type || "application/pdf",
-        "x-planyr-key": `${folder}/${name}`, "x-planyr-folder": folder, "x-planyr-name": name },
+        "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name },
       body: file,
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
-    return resp.ok && jr.ok ? { ok: true } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+    return resp.ok && jr.ok ? { ok: true, driveKey } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
-// File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
-// the bytes, then upsert the indexed record. Returns { ok, id }.
+/* Read a file's bytes back FROM Google Drive (B207 read-back). Returns an ArrayBuffer
+ * (ready for loadPdf) or null — null lets the caller fall back to Supabase Storage so a
+ * pre-Drive file (or any Drive miss) still opens. Never throws. */
+export async function downloadFromDrive(driveKey) {
+  if (!supabase || !driveKey) return null;
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return null; }
+  if (!token) return null;
+  try {
+    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!resp.ok) return null;
+    return await resp.arrayBuffer();
+  } catch (_) { return null; }
+}
+
+// File a dropped PDF as a new (single-sheet) review under a project/discipline. Drive is
+// the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
+// so a file is never left unstored AND the redundant Supabase copy stops consuming storage
+// on the happy path. Then upsert the indexed record. Returns { ok, id }.
 export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", blob, fileName }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
-  const up = await uploadSource(srcId, blob, projectId, discipline);
   const docDate = new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
-  // A non-oversize upload failure (network / RLS / transient 5xx) still files the work layer, but
-  // the bytes weren't stored — surface it so the caller can warn, rather than silently filing a
-  // document that can't be opened until it's re-dropped (storageKey stays null → re-drop on load).
-  const uploadFailed = !up.ok && !up.oversize;
+  // 1) Try Google Drive (the primary home).
+  const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
+  // 2) Only if Drive didn't store it, fall back to Supabase Storage — so the file is
+  //    always stored somewhere (Drive ok → no duplicate; Drive down → Supabase safety net).
+  const up = drive.ok ? { ok: true, storageKey: null, oversize: false } : await uploadSource(srcId, blob, projectId, discipline);
+  // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
+  const uploadFailed = !drive.ok && !up.ok && !up.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate,
-    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: up.storageKey || null, oversize: !!up.oversize }],
+    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: up.storageKey || null, oversize: !!up.oversize, driveKey: drive.ok ? drive.driveKey : null }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf" };
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf",
+    driveError: !drive.ok && !drive.skipped ? drive.error : null };
 }
 
 /* --------------------------- source PDFs (Storage) -------------------------- */
