@@ -22,6 +22,11 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: B221 (building-anchored dock-zone stack with LIFO +/−) + B222 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2". Filed AND shipped this same
+     session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout freeze);
+     REUSES the existing court / far-side-trailer / bump-out machinery rather than re-adding it. -->
+
 <!-- 2026-06-20: B220 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
      the planner-canvas fix that missed the map-finder call site). Minted B218, renumbered
      B220 — concurrent `main` PR #183 took B218 (dead header controls) + B219 (map-furniture
