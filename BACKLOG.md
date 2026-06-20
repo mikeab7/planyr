@@ -22,6 +22,88 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — an **Infra / automated-testing** tranche
+     (Playwright regression net, error telemetry, seeded test account, CI wiring). Filed at **B278–B281**.
+     ⚠ NUMBERING / COLLISION NOTE (renumbered TWICE by concurrent `main`): first filed B271–B274, then
+     B275–B278 when open PR #217 took B271–B273 — but on merge `main` had consumed **B271–B277** outright
+     (pointer-lockout B271, main-thread-stall B272, filing-practice B273, stale-save B274, multi-tab B275,
+     and PR #217's overlay B276/B277). Two items sharing a number across the two files = the one thing the
+     rules forbid, so this tranche lands at the next clear band **B278–B281**. (Owner flagged exactly this:
+     "make sure no one else is working on B271." They were — heavily.) The "NEW-#" labels are scratch.
+     **B279 (error telemetry) — BUILT + headless-verified + SHIPPED this session; full block in
+     BACKLOG-DONE.md.** B278 / B280 / B281 stay Open below.
+     Deduped before filing:
+       • B278 (Playwright @playwright/test suite) — NET-NEW. NOT the `ui-audit/*.mjs` harnesses (ad-hoc
+         single-purpose Chromium screenshot/verify scripts vs a deterministic regression suite); package.json
+         carries vitest only. REUSE the ui-audit cert-proxy launch flag (`--ignore-certificate-errors`).
+       • B279 (error telemetry) — NET-NEW; its "stale-chunk fix" reference is ALREADY SHIPPED (B221's
+         `vite:preloadError` guard in `src/app/chunkReload.js`), so it hooked telemetry onto that EXISTING
+         handler — no open stale-chunk item to wait on. (Built this session.)
+       • B280 (seeded test account) — NET-NEW. Distinct from B269's real-PDF Doc-Review build fixtures.
+       • B281 (CI + auto-file @claude issue) — NET-NEW; the "previously-parked @claude workflow" it cites was
+         never filed in either file. Extends `.github/workflows/build.yml`.
+     Inter-deps: B278 ↔ B280 (the seed values are the assertion contract); B281 depends on B278 + B280. -->
+
+### B278 — Playwright regression harness against preview deploys `[Infra / E2E]` (task)  *(arrived as "NEW-1" 2026-06-20 owner chat; filed **B278** — jumped past B271–B277, consumed by concurrent `main` + PR #217; batch B278–B281)*
+`[ ]` Stand up Playwright as the **deterministic regression net** — headless in CI, **not** via Cowork. **Why not Cowork:** its vision/screenshot tokens cost multiples more per run; reserve Cowork for exploratory discovery + live sign-off, use Playwright for the repeatable assertions.
+- **Approach:** add `@playwright/test`; config targets the Cloudflare **per-branch preview URL** (read from an env var so CI injects the branch's preview). Log in via a **dedicated test account** (B280), never the owner's real creds.
+- **First flows (highest-severity paths):** (1) login succeeds + app comes up **Cloud on** — assert the "Cloud off" state is NOT present (the silent `VITE_SUPABASE_URL`/`ANON_KEY`-missing build is a known crash-severity incident); (2) load a **Pearland** parcel → assert correct county resolution (point-in-polygon: Brazoria/Harris/Fort Bend) → guards the boundary-mismatch bug; (3) draw a measurement → save → reload → assert value persisted → directly tests silent-save-failure; (4) run **Site Analysis** on a multi-parcel selection → assert *source unavailable* renders distinct from *not present*.
+- **Gotchas:** tests must run against a **properly built preview** (env vars baked in pre-build) or flow (1) will *correctly* fail — that's the point, but document it so a red run isn't misread as a harness bug. Use stable **`data-testid`** selectors, not text/CSS that the brand refactor will churn.
+- **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
+- **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
+- **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
+> **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
+
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
+`[ ]` Create a **dedicated test user** with deterministic seeded data on a preview/staging deploy; **never** use the owner's real login in automated loops.
+- **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
+- **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
+- **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
+> Do alongside B278 — its assertions are blocked without these fixed values.
+
+### B281 — CI wiring: Playwright on preview + failure auto-files an @claude issue `[Infra / CI]` (feature) — depends on B278 + B280  *(arrived as "NEW-4" 2026-06-20 owner chat; filed **B281**; batch B278–B281)*
+`[ ]` Run B278 in **GitHub Actions** on each preview branch; on failure, **auto-open an issue tagged `@claude`** so Claude Code picks it up async — the genuinely remote/async scenario the previously-parked `@claude` workflow was reserved for.
+- **Dependency:** requires **B278** (the suite) + **B280** (the seeded account). **Defer until those land.**
+- **Edge case:** **dedupe issue creation** — don't open a fresh issue every run for the same persistent failure; update/reuse the existing one.
+- **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
+> Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
+     overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
+     drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
+     was in flight, so the batch was renumbered to the real next free IDs **B274–B277**. Deduped — all
+     four net-new (no existing OPEN item covers them), each REUSING prior art:
+       • B274 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
+         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold): those reconcile on
+         the CLIENT by union; B274 adds a SERVER-side version guard that REJECTS a stale write with a
+         loud "reload before saving" prompt — the gate B134 #4 ("409 conflict") + #5 only gestured at.
+         Reusable: the foundation for the DEFERRED multi-user team-workspace feature.
+       • B275 (multi-tab warning + optional single-editor lock) — pairs with B274; B127 made two
+         same-browser tabs silently CONVERGE, B275 makes it VISIBLE (BroadcastChannel banner) +
+         optionally elects one editor (Web Locks). Same-browser only; cross-device = B274.
+       • B276 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" returns on reload);
+         the per-item tombstone B126 deferred. (Distinct from B260, the overlay *scale* misread, done.)
+       • B277 (overlay visibility toggle) — B131 reserved the `visible !== false` shape; B277 implements
+         the per-overlay show/hide the print path already honours. Distinct from B276's delete.
+     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **B276 + B277 fixed + shipped (PR #217 →
+     `main`)** — moved to BACKLOG-DONE.md (owner-reported overlay bug + its companion toggle). **B274 +
+     B275 are being built THIS session** (owner said go ahead): the larger data-integrity pair — B274 is
+     a server-side change to the critical save path (the B124/B126/B127/B134 incident surface) + the
+     foundation for the deferred multi-user feature, and B275 depends on it. -->
+
+### B274 — Reject stale saves (optimistic concurrency on the save path) `[Platform / Persistence]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B274** — concurrent `main` consumed B270–B273; batch B274–B277)*
+`[ ]` Repro: open the same project in two tabs/sessions; edit the same object (e.g. Building 1 footprint) in both; save from tab A, then save from tab B. Tab B **silently overwrites** tab A (last-write-wins), and a reload/interleave can produce an inconsistent object (dimension label, geometry, and sf drawn from different edit states). Expected: saves carry a version (or `updated_at`) guard; a save against a stale version is **rejected, not applied**, and surfaces a loud "this project was changed in another session — reload to get the latest before saving" prompt. No silent clobber.
+- **Impl:** add a `version` (integer) to the relevant Supabase tables (`public.sites`, `public.doc_reviews`); conditional update `WHERE id = ? AND version = ?` (or compare `updated_at`); **0 rows affected → return a typed conflict to the client**, which surfaces the loud reload prompt instead of applying; bump `version` on every successful write. Migration in the existing one-shot idempotent SQL pattern (client degrades to current behaviour until it's run, like `project_library.sql`).
+- **Reuse, don't duplicate:** the client already content-merges copies (B126 `mergeSiteContent` union-by-id; B127 two-tab fold) — those stay as the *local* reconciliation; B270 is the *server* gate on top. Build the version/conflict primitive **reusable** — it is the foundation for the **DEFERRED multi-user team-workspace** feature, not a one-off.
+> **Data-safety sensitive:** touches the exact save path behind the B124/B126/B127/B134 incidents. Keep the union-merge intact, and prove a stale write is *rejected* (not lost, not silently merged-away) before shipping. Coordinate with B276's tombstones (a delete is a write that must advance the version).
+
+### B275 — Multi-tab open warning + optional single-editor lock `[App Shell]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B275** — concurrent `main` consumed B270–B273; batch B274–B277)*
+`[ ]` Detect when the same Planyr origin/project is already open in another tab of the same browser via **BroadcastChannel** (or the **Web Locks API**). Show a non-blocking banner in the AppHeader: "Planyr is open in another tab — editing in multiple tabs can conflict." Optionally elect a single active-editor tab via Web Locks; non-leader tabs go read-only with a "make this tab active" affordance. Banner clears when the other tab closes. **Known limitation: same-browser only** — cross-device conflicts are caught by **B274**'s server-side guard, not this. Pairs with B274.
+> Builds on B127 (which made two same-browser tabs silently *converge*) by making the multi-tab state *visible*; it doesn't replace it. Depends on B274 for the cross-device half, so sequence it after B274.
+
+<!-- B276 (overlay delete doesn't persist) + B277 (overlay visibility toggle) were fixed +
+     shipped this session → moved to BACKLOG-DONE.md. B274 + B275 (above) are being built next. -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
      and re-used every ID in between (dock-zone build-out, the Scheduler backlog + its B261–B264 renumber,
