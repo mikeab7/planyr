@@ -2,7 +2,7 @@
  * raw county GIS attributes (the ones that ride along with a map-identified parcel)
  * into curated, human-labelled rows. Used by BOTH the planner's "Appraisal data"
  * panel (SitePlanner.jsx) and the map finder's address-search parcel info card
- * (MapFinder.jsx), so the two never diverge (B231). No React here — just data.
+ * (MapFinder.jsx), so the two never diverge (B233). No React here — just data.
  */
 
 // Curated field order: regex that matches a county's column name → the label we show.

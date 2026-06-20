@@ -47,7 +47,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
     const ls = st.on ? layerStatus[k] : null;
     const meta = ls && STATUS[ls.state];
     const age = ls && ls.ts ? formatAge(Date.now() - ls.ts) : "";
-    const vintage = layerVintage(k, cfg); // NEW-5 (B234): source vintage, distinct from refreshed-age
+    const vintage = layerVintage(k, cfg); // NEW-5 (B236): source vintage, distinct from refreshed-age
     return (
       <div key={k} style={{ marginBottom: 5 }}>
         <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
@@ -68,7 +68,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             onChange={(e) => set(k, { opacity: +e.target.value })}
             style={{ width: "100%", marginTop: 2 }} />
         )}
-        {/* NEW-5 (B234): source VINTAGE — the data's own currency, low-weight + honest
+        {/* NEW-5 (B236): source VINTAGE — the data's own currency, low-weight + honest
             ("vintage unknown" when the source exposes none). Kept distinct from the
             "refreshed Xm ago" cache-age above (that's when WE pulled the copy). */}
         {st.on && (

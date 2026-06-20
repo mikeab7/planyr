@@ -2,17 +2,17 @@
  * deal stage looks. Each state gets EXACTLY ONE color + ONE marker shape/glyph;
  * every surface (left-rail filter chips, left-rail list markers, map pins, the
  * status-section headers, the right-click status menu) reads from here so the
- * three can never drift apart again (B232). Pure constants — no React — so JSX
+ * three can never drift apart again (B234). Pure constants — no React — so JSX
  * chrome and pure helpers/tests can all share them (same pattern as moduleAccent).
  *
  * IMPORTANT — two DIFFERENT color axes, never mixed:
  *   • STATUS color (here): the deal stage of a project. Used on dots/chips/pins.
  *   • MODULE accent (moduleAccent.js: Site #1D9E75 / Schedule #7F77DD / Markup
  *     #EF9F27): which workspace you're in. Confined to the top tab row — NEVER a
- *     status dot, chip, or pin. (Before B232 the pins wrongly borrowed the module
+ *     status dot, chip, or pin. (Before B234 the pins wrongly borrowed the module
  *     greens/ambers for status, which is the mismatch this set closes.)
  *
- * Reassignment rationale (B232): Complete moved green→gray so GREEN reads as
+ * Reassignment rationale (B234): Complete moved green→gray so GREEN reads as
  * "Active" only; settled stages (Complete/Dead) recede while the stages that need
  * a decision (Pursuit/Active/On&nbsp;Hold) stand out. Dead is a deliberate red ✕ with
  * a struck-through label — a killed deal you can still see but that reads as closed.
