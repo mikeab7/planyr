@@ -21,6 +21,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — the "deliberate Group" tranche for the Site
+     Planner. Minted **B247–B250** (highest B# across both files was B246, so these are the real next free
+     IDs). Deduped before filing: no prior OPEN item covers a Group tool / snap-alignment-only / snap-pref-
+     stickiness / per-plan delete. The relevant prior art is the DONE **B114** (Shift-drag snap+bond + the
+     S-key snap toggle) — B247 replaces its *bonding* half with an explicit Group, B248 strips the bond so
+     snap only aligns, and B249 fixes the snap pref's global stickiness; B114's toggle + Alt-bypass survive.
+     The owner-mentioned "earlier split-snap item" was that B114 family (done), not a separate open item.
+     The still-open, owner-gated **B115** (keyboard-shortcuts pass) referenced the now-removed ⇧-drag bond
+     gesture; its in-app shortcut table was updated here (B115 itself stays open for the deliberate remap
+     pass). All four filed AND shipped this same session on branch `claude/eager-keller-1ueisx` — full
+     blocks moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b247-b250.mjs, 14/14, 0 page
+     errors), VERIFICATION **V62**. lint 0 · 537 tests · build green. -->
 <!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2") — resilient county parcel fetch. Minted
      **B244** (NEW-1: resilient fetch + TxGIO statewide fallback) + **B245** (NEW-2: validate the ArcGIS
      response BODY, not just HTTP status) — concurrent `main` took B239–B243 while this was in flight, so

@@ -147,7 +147,7 @@ const ToolIcon = ({ id, size = 15 }) => (
 );
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Move/resize/rotate • Shift-drag an element to snap & bond it to a neighbour (green +); hold Alt to bypass snap & place freely • toggle snap with S • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
+  { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
@@ -179,7 +179,9 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
 // element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
-const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+// `groupId` is included so a LONE paste/duplicate starts ungrouped (B247) — duplicating a
+// whole group is a separate path that re-stamps a fresh shared group id (duplicateGroup).
+const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
@@ -728,13 +730,21 @@ const ensureIdAbove = (ids) => {
   });
 };
 
-// Snap is a global drafting preference (a tool mode), NOT a per-site attribute —
-// default OFF so elements move freely; the choice persists across sites/reloads once
-// turned on. We still mirror it into `settings.snap` so every read site is unchanged,
-// but the per-site saved value is ignored on load/import in favour of this pref.
+// Snap is a per-SESSION drafting preference (a tool mode), NOT a per-site attribute.
+// It defaults OFF every time the app is opened and is remembered only within the
+// current browser-tab session (sessionStorage) — so it stays put while you switch
+// plans/projects this session, but never silently carries over to the next session
+// or to a freshly opened tab (B249: it used to be globally sticky in localStorage, so
+// it could be on without anyone enabling it "this session"). We still mirror it into
+// `settings.snap` so every read site is unchanged, but the per-site saved value is
+// ignored on load/import in favour of this pref. Snap only ALIGNS positions (grid /
+// flush against neighbours) — it never bonds or groups anything (B247/B248).
 const SNAP_PREF_KEY = "planarfit:snap";
-const loadSnapPref = () => { try { return localStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; } };
-const saveSnapPref = (on) => { try { localStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
+const loadSnapPref = () => {
+  try { localStorage.removeItem(SNAP_PREF_KEY); } catch (_) {} // retire the old globally-sticky key (B249)
+  try { return sessionStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; }
+};
+const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
@@ -749,7 +759,7 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -787,6 +797,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const printOptAnchor = useRef(null);
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
+  const [planDelArm, setPlanDelArm] = useState(null);    // B250: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
@@ -823,12 +834,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [easeTypeMenu, setEaseTypeMenu] = useState(false); // attributes-panel type popover open
   const [attachFor, setAttachFor] = useState(null);     // element id awaiting a "click a host" to attach to
   const [alignFor, setAlignFor] = useState(null);       // element id awaiting a "click a target" to align rotation to
-  const [attachHint, setAttachHint] = useState(null);   // {x,y} feet — green "+" while a drag is about to bond
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
+  // B247: while a persistent group is selected, double-clicking a member "drills in" to
+  // edit just that one element in place (without ungrouping). drillId = that member's id,
+  // or null when we're operating on the group as a whole.
+  const [drillId, setDrillId] = useState(null);
   // Live mirrors of the selection. The window keydown listener is re-bound by a passive
   // effect, so right after a selecting click it can briefly still hold the PREVIOUS
   // render's `sel`/`multi` closure — which made Delete need a second press (NEW-1). The
@@ -1262,8 +1276,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
+  // B250: when THIS plan is being deleted, suppress every save path (debounced autosave,
+  // the leave/unmount persist, the beforeunload/visibility flush, and flushSite) so the
+  // unmounting planner can't immediately re-write the row we just deleted.
+  const deletedSelfRef = useRef(false);
   useEffect(() => {
-    if (!siteId) return;
+    if (!siteId || deletedSelfRef.current) return;
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
@@ -1291,7 +1309,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
   const persistOrDrop = () => {
-    if (!siteId) return;
+    if (!siteId || deletedSelfRef.current) return; // B250: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
     if (isBlankSite(s) && !loadSite(siteId)?.origin) { deleteSite(siteId); onSiteDropped?.(siteId); }
     else saveSite({ id: siteId, ...metaRef.current, ...s });
@@ -1305,7 +1323,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // page is closing/navigating, so a change made just before leaving isn't lost.
   useEffect(() => {
     if (!siteId) return;
-    const flush = () => { const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
@@ -1548,7 +1566,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B247: Group / Ungroup
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
       if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
@@ -1571,7 +1590,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -1581,7 +1600,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -1658,6 +1677,89 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls((a) => [...a, el]);
     setSel({ kind: "el", id: el.id });
   };
+
+  /* ------------ explicit element groups (B247: a deliberate Group, no content lock) ------------ */
+  // A persistent group = a shared `groupId` on ≥2 els/markups. It is DISTINCT from a
+  // temporary multi-selection (which evaporates on the next click) and from the building-
+  // host `attachedTo` assembly (a rigid child→host bind that resize-refits). Grouped
+  // members move / copy / delete and SELECT as one unit, but are NOT content-locked: a
+  // double-click drills into a member to edit it in place, and each member keeps its own
+  // properties. Grouping happens ONLY from the explicit Group command — never from a plain
+  // drag or click, and snap never bonds (B248).
+  const newGroupId = () => "g" + uid();
+  const objOf = (ref) => (ref && ref.kind === "el" ? els.find((x) => x.id === ref.id) : ref && ref.kind === "markup" ? markups.find((x) => x.id === ref.id) : null);
+  const groupRefs = (gid) => [
+    ...els.filter((e) => e.groupId === gid).map((e) => ({ kind: "el", id: e.id })),
+    ...markups.filter((m) => m.groupId === gid).map((m) => ({ kind: "markup", id: m.id })),
+  ];
+  // Every piece of geometry a group resize must scale: its member els + each member's
+  // attached children (building assemblies) + its member markups.
+  const groupScaleSet = (gid) => {
+    const memEls = els.filter((e) => e.groupId === gid);
+    const memElIds = new Set(memEls.map((e) => e.id));
+    const childEls = els.filter((e) => e.attachedTo && memElIds.has(e.attachedTo) && !memElIds.has(e.id));
+    return { elList: [...memEls, ...childEls], mkList: markups.filter((m) => m.groupId === gid) };
+  };
+  // The one groupId shared by the current selection (multi, else sel), or null.
+  const selectedGroupId = () => {
+    const refs = multi.length ? multi : (sel && (sel.kind === "el" || sel.kind === "markup") ? [sel] : []);
+    const gids = new Set(refs.map((r) => objOf(r)?.groupId).filter(Boolean));
+    return gids.size === 1 ? [...gids][0] : null;
+  };
+  // Group the current temporary multi-selection (≥2 items) into one persistent group.
+  const groupSel = () => {
+    const refs = multiRef.current;
+    if (refs.length < 2) return;
+    const gid = newGroupId();
+    pushHistory();
+    const elIds = new Set(refs.filter((m) => m.kind === "el").map((m) => m.id));
+    const mkIds = new Set(refs.filter((m) => m.kind === "markup").map((m) => m.id));
+    setEls((a) => a.map((e) => elIds.has(e.id) ? { ...e, groupId: gid } : e));
+    setMarkups((a) => a.map((m) => mkIds.has(m.id) ? { ...m, groupId: gid } : m));
+    setDrillId(null); // selection stays as the new group (multi unchanged)
+  };
+  // Ungroup: drop the groupId from every member of the given group id(s).
+  const ungroupGroup = (gids) => {
+    const set = gids instanceof Set ? gids : new Set([gids].filter(Boolean));
+    if (!set.size) return;
+    pushHistory();
+    const strip = (o) => { const { groupId, ...rest } = o; return rest; };
+    setEls((a) => a.map((e) => e.groupId && set.has(e.groupId) ? strip(e) : e));
+    setMarkups((a) => a.map((m) => m.groupId && set.has(m.groupId) ? strip(m) : m));
+    setDrillId(null);
+  };
+  const ungroupSel = () => {
+    const refs = multiRef.current.length ? multiRef.current : (selRef.current ? [selRef.current] : []);
+    ungroupGroup(new Set(refs.map((r) => objOf(r)?.groupId).filter(Boolean)));
+  };
+  // Duplicate a whole group (its members + each member's attached children) as a NEW
+  // group, offset together so the copy lands clear of the original.
+  const duplicateGroup = (gid) => {
+    const memEls = els.filter((e) => e.groupId === gid);
+    const memMk = markups.filter((m) => m.groupId === gid);
+    if (memEls.length + memMk.length < 1) return;
+    const memElIds = new Set(memEls.map((e) => e.id));
+    const childEls = els.filter((e) => e.attachedTo && memElIds.has(e.attachedTo) && !memElIds.has(e.id));
+    const allEls = [...memEls, ...childEls];
+    const off = settings.gridSize || 10;
+    const ng = newGroupId();
+    const idMap = new Map(allEls.map((e) => [e.id, uid()]));
+    const cloneEl = (e) => {
+      const c = { ...e, id: idMap.get(e.id) };
+      if (e.attachedTo && idMap.has(e.attachedTo)) c.attachedTo = idMap.get(e.attachedTo); else if (e.attachedTo) delete c.attachedTo;
+      if (memElIds.has(e.id)) c.groupId = ng; else delete c.groupId; // top-level members carry the new group; children ride their host
+      if (e.points) c.points = e.points.map((p) => ({ x: p.x + off, y: p.y + off }));
+      else { c.cx = e.cx + off; c.cy = e.cy + off; }
+      return c;
+    };
+    const newEls = allEls.map(cloneEl);
+    const newMks = memMk.map((m) => ({ ...translateMarkup(m, off, off), id: uid(), groupId: ng }));
+    pushHistory();
+    setEls((a) => [...a, ...newEls]);
+    setMarkups((a) => [...a, ...newMks]);
+    const refs = [...newEls.filter((e) => e.groupId === ng).map((e) => ({ kind: "el", id: e.id })), ...newMks.map((m) => ({ kind: "markup", id: m.id }))];
+    setMulti(refs); setSel(refs[0] || null); setDrillId(null);
+  };
   const selectMeasure = (e, i) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -1725,7 +1827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         svgRef.current.setPointerCapture(e.pointerId);
         return;
       }
-      setSel(null); setMulti([]);
+      setSel(null); setMulti([]); setDrillId(null);
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       svgRef.current.setPointerCapture(e.pointerId);
@@ -1979,17 +2081,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (m.a) return { ...m, a: { x: m.a.x + dx, y: m.a.y + dy }, b: { x: m.b.x + dx, y: m.b.y + dy } };
     return { ...m, cx: m.cx + dx, cy: m.cy + dy };
   };
+  // Uniform-scale a markup about anchor A by factor s (for group resize, B247).
+  const scaleMarkup = (m, A, s) => {
+    const sp = (p) => ({ x: A.x + (p.x - A.x) * s, y: A.y + (p.y - A.y) * s });
+    const sc = (arr) => (arr || []).map(sp);
+    if (m.kind === "utilRoute") return { ...m, pts: sc(m.pts), corridor: sc(m.corridor), pad: sc(m.pad), width: m.width != null ? m.width * s : m.width };
+    if (m.kind === "encumbrance") return { ...m, pts: sc(m.pts), centerline: sc(m.centerline) };
+    if (m.kind === "easement") return { ...m, pts: sc(m.pts), centerline: m.centerline ? sc(m.centerline) : m.centerline, width: m.width != null ? m.width * s : m.width };
+    if (m.pts) return { ...m, pts: sc(m.pts) };
+    if (m.a) return { ...m, a: sp(m.a), b: sp(m.b) };
+    const c = sp({ x: m.cx, y: m.cy });
+    return { ...m, cx: c.x, cy: c.y, w: Math.max(1, m.w * s), h: Math.max(1, m.h * s) };
+  };
   const startMoveMarkup = (e, id) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
     if (e.shiftKey) {
-      setMulti((s) => inMulti("markup", id) ? s.filter((m) => !(m.kind === "markup" && m.id === id)) : [...s, { kind: "markup", id }]);
+      setMulti((s) => inMulti("markup", id) ? s.filter((mm) => !(mm.kind === "markup" && mm.id === id)) : [...s, { kind: "markup", id }]);
       setSel({ kind: "markup", id });
+      setDrillId(null);
       return;
     }
     if (multi.length > 1 && inMulti("markup", id)) { startGroupMove(e); return; }
+    // Persistent group: a single click selects & moves the whole group as one unit
+    // (unless drilled into this member to edit it in place).
+    if (m && m.groupId && drillId !== id) {
+      const refs = groupRefs(m.groupId);
+      setMulti(refs);
+      setSel({ kind: "markup", id });
+      setDrillId(null);
+      if (!m.locked) startGroupMove(e, refs);
+      return;
+    }
     if (multi.length) setMulti([]);
-    const m = markups.find((x) => x.id === id);
     if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
     setSel({ kind: "markup", id });
     pushHistory();
@@ -1997,17 +2122,42 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "mkMove", id, fx: fp.x, fy: fp.y, orig: m };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  // Start moving every member of the multi-selection together (respecting assemblies).
-  const startGroupMove = (e) => {
+  // Start moving a set of items together (respecting building assemblies). Uses an
+  // explicit ref list when given (a persistent group click), else the temp multi-selection.
+  const startGroupMove = (e, explicitRefs = null) => {
+    const refs = explicitRefs || multi;
     pushHistory();
     const fp = p2f(e.clientX, e.clientY);
     const elIds = new Set();
-    multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
+    refs.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
+    const mkIds = new Set(refs.filter((m) => m.kind === "markup").map((m) => m.id));
     const orig = {
       els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
-      markups: markups.filter((m) => inMulti("markup", m.id)).map((m) => ({ ...m })),
+      markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
     };
     drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  // Resize a whole group as one unit (B247): UNIFORM scale about the opposite corner
+  // (`anchor`), so every member + attached child + markup scales by the same factor and
+  // all their relationships — flush edges, gaps, relative sizes — are preserved.
+  const startGroupResize = (e, gid, anchor, grab) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const { elList, mkList } = groupScaleSet(gid);
+    const bw = Math.abs(grab.x - anchor.x) || 1, bh = Math.abs(grab.y - anchor.y) || 1;
+    pushHistory();
+    drag.current = {
+      mode: "groupResize", anchor,
+      d0: Math.hypot(grab.x - anchor.x, grab.y - anchor.y) || 1,
+      minS: Math.max(20 / bw, 20 / bh, 0.05), // keep the group ≥ ~20′ on its short side
+      orig: {
+        els: elList.map((x) => x.points
+          ? { id: x.id, points: x.points }
+          : { id: x.id, cx: x.cx, cy: x.cy, w: x.w, h: x.h, ...(x.travelW != null ? { travelW: x.travelW } : {}) }),
+        markups: mkList.map((m) => ({ ...m })),
+      },
+    };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
@@ -2357,6 +2507,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
       return;
     }
+    if (d.mode === "groupResize") { // uniform scale the whole group about the fixed opposite corner
+      let s = Math.hypot(fp.x - d.anchor.x, fp.y - d.anchor.y) / d.d0;
+      s = Math.max(d.minS, Math.min(20, s));
+      const A = d.anchor, sp = (p) => ({ x: A.x + (p.x - A.x) * s, y: A.y + (p.y - A.y) * s });
+      const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
+      setEls((a) => a.map((el) => {
+        if (!eids.has(el.id)) return el;
+        const o = d.orig.els.find((x) => x.id === el.id);
+        if (o.points) return { ...el, points: o.points.map(sp) };
+        const c = sp({ x: o.cx, y: o.cy });
+        const next = { ...el, cx: c.x, cy: c.y, w: Math.max(1, o.w * s), h: Math.max(1, o.h * s) };
+        if (o.travelW != null) next.travelW = Math.max(1, o.travelW * s);
+        return next;
+      }));
+      setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; return scaleMarkup(d.orig.markups.find((x) => x.id === m.id), A, s); }));
+      return;
+    }
     if (d.mode === "mkDraw") {
       let b = snapPt(fp);
       if (e.shiftKey) {
@@ -2422,22 +2589,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (d.mode === "move") {
       const dx = fp.x - d.fx, dy = fp.y - d.fy;
-      const shift = e.shiftKey; // live — works whether Shift is held before or mid-drag
       if (d.kind === "el") {
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
+        // Snap here only ALIGNS position (grid + flush against neighbours) — it NEVER
+        // bonds or groups elements (grouping is now the explicit Group tool, B247/B248).
         const g = d.members.find((m) => m.id === d.id);
-        let effDx, effDy, hint = null, newRot = null;
+        let effDx, effDy;
         const gel = els.find((x) => x.id === d.id);
         const gbox = ortho(gel); // effective box (handles 90/180/270)
         if (g.cx !== undefined) {
           let ncx = snap(g.cx + dx), ncy = snap(g.cy + dy);
           const ids = new Set(d.members.map((m) => m.id));
-          if (shift && d.canAttach && !gel.points) {
-            // Shift: align to a nearby host's angle and snap flush in its frame
-            const cands = els.filter((x) => !ids.has(x.id) && !x.points && rootIdOf(x.id) !== d.id);
-            const res = alignSnap(gel, ncx, ncy, cands, Math.min(40, 24 / view.ppf));
-            if (res) { ncx = res.cx; ncy = res.cy; newRot = res.rot; hint = { id: res.hostId, x: res.hintX, y: res.hintY }; }
-          } else if (snapOn && gbox) { // ambient flush-snap along world axes (does NOT bond)
+          if (snapOn && gbox) { // ambient flush-snap along world axes (pure alignment, no bond)
             const others = els.filter((x) => !ids.has(x.id)).map(ortho).filter(Boolean);
             const sc = edgeSnapCenter({ cx: ncx, cy: ncy, w: gbox.w, h: gbox.h }, others, Math.min(20, 10 / view.ppf));
             ncx = sc.cx; ncy = sc.cy;
@@ -2447,17 +2610,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           effDx = snap(g.points[0].x + dx) - g.points[0].x;
           effDy = snap(g.points[0].y + dy) - g.points[0].y;
         }
-        d.bondTarget = hint ? hint.id : null; // remember for the drop (els may lag a frame)
-        d.bondRot = newRot; // remember the aligned angle for the drop
         setEls((a) => a.map((el) => {
           const m = d.members.find((x) => x.id === el.id);
           if (!m) return el;
           if (m.points) return { ...el, points: m.points.map((p) => ({ x: p.x + effDx, y: p.y + effDy })) };
-          const moved = { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
-          if (newRot != null && el.id === d.id) moved.rot = newRot; // align to host angle
-          return moved;
+          return { ...el, cx: m.cx + effDx, cy: m.cy + effDy };
         }));
-        setAttachHint(hint ? { x: hint.x, y: hint.y } : null);
       } else {
         setParcels((a) => a.map((pc) => pc.id === d.id ? { ...pc, points: d.opts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : pc));
       }
@@ -2561,7 +2719,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
-    if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (d && (d.mode === "groupMove" || d.mode === "groupResize")) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
       let mk = null;
@@ -2606,13 +2764,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       setDraftRect(null);
     }
-    // Bond on drop: if a flush bond target was found during the drag (Shift held,
-    // or Snap on), attach so they move together. Alt drops it free.
-    if (d && d.mode === "move" && d.kind === "el" && d.canAttach && d.bondTarget && !e.altKey) {
-      const root = rootIdOf(d.bondTarget);
-      if (root !== d.id) setEls((a) => a.map((x) => x.id === d.id ? { ...x, attachedTo: root, ...(d.bondRot != null ? { rot: d.bondRot } : {}) } : x));
-    }
-    setAttachHint(null);
+    // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
+    // B247/B248. A plain/Shift drag only moves; snap only aligns position.)
     drag.current = null;
     setPanning(false);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -2971,7 +3124,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // move and rotate as one assembly and can't be separated by dragging.
   const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
   const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
-  const isAxisRect = (el) => !el.points && (((el.rot % 360) + 360) % 360) === 0;
   // Axis-aligned bounding box of a rect element at any quarter-turn (0/90/180/270),
   // swapping w/h for 90/270. Returns {cx,cy,w,h,rot:0} or null if not orthogonal.
   const ortho = (el) => {
@@ -2980,30 +3132,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (r % 90 !== 0) return null;
     const swap = r === 90 || r === 270;
     return { id: el.id, cx: el.cx, cy: el.cy, w: swap ? el.h : el.w, h: swap ? el.w : el.h, rot: 0 };
-  };
-  // Align a dragged rect to a nearby host's angle and snap it flush in the host's
-  // own frame — so an off-angle element drops onto a rotated building/sidewalk.
-  // Returns { cx, cy, rot, hostId, hintX, hintY } or null.
-  const alignSnap = (gel, ncx, ncy, cands, thr) => {
-    let best = null;
-    for (const host of cands) {
-      const th = host.rot || 0;
-      const q = (((Math.round((gel.rot - th) / 90)) % 4) + 4) % 4; // quarter-turns off the host
-      const swap = q === 1 || q === 3;
-      const gbw = swap ? gel.h : gel.w, gbh = swap ? gel.w : gel.h;
-      const loc = rot2(ncx - host.cx, ncy - host.cy, -th);          // grabbed centre in host frame
-      const box = [{ id: host.id, cx: 0, cy: 0, w: host.w, h: host.h, rot: 0 }];
-      const sc = edgeSnapCenter({ cx: loc.x, cy: loc.y, w: gbw, h: gbh }, box, thr);
-      const hit = flushContact({ cx: sc.cx, cy: sc.cy, w: gbw, h: gbh, rot: 0 }, box, 6);
-      if (!hit) continue;
-      const back = rot2(sc.cx, sc.cy, th);
-      const cx = host.cx + back.x, cy = host.cy + back.y, move2 = (cx - ncx) ** 2 + (cy - ncy) ** 2;
-      if (!best || move2 < best.move2) {
-        const hp = rot2(hit.x, hit.y, th);
-        best = { cx, cy, rot: ((th + q * 90) % 360 + 360) % 360, hostId: host.id, hintX: host.cx + hp.x, hintY: host.cy + hp.y, move2 };
-      }
-    }
-    return best;
   };
   const attachTo = (childId, hostId) => {
     if (childId === hostId) return;
@@ -3016,29 +3144,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const detach = (id) => {
     pushHistory();
     setEls((a) => a.map((e) => { if (e.id !== id) return e; const { attachedTo, ...rest } = e; return rest; }));
-  };
-  // Find an axis-aligned rect element that `m` is sitting flush against (a shared
-  // edge with real overlap). Returns { id, x, y } where x,y is the contact-edge
-  // midpoint (for the snap/attach indicator), or null.
-  const flushContact = (m, others, eps) => {
-    if (m.points || !isAxisRect(m)) return null;
-    const mx0 = m.cx - m.w / 2, mx1 = m.cx + m.w / 2, my0 = m.cy - m.h / 2, my1 = m.cy + m.h / 2;
-    let best = null;
-    for (const t of others) {
-      if (t.points || !isAxisRect(t)) continue;
-      const tx0 = t.cx - t.w / 2, tx1 = t.cx + t.w / 2, ty0 = t.cy - t.h / 2, ty1 = t.cy + t.h / 2;
-      const ya = Math.max(my0, ty0), yb = Math.min(my1, ty1), yov = yb - ya;
-      const xa = Math.max(mx0, tx0), xb = Math.min(mx1, tx1), xov = xb - xa;
-      if (yov > 5) {
-        if (Math.abs(mx0 - tx1) <= eps && (!best || yov > best.ov)) best = { id: t.id, x: tx1, y: (ya + yb) / 2, ov: yov };
-        if (Math.abs(mx1 - tx0) <= eps && (!best || yov > best.ov)) best = { id: t.id, x: tx0, y: (ya + yb) / 2, ov: yov };
-      }
-      if (xov > 5) {
-        if (Math.abs(my0 - ty1) <= eps && (!best || xov > best.ov)) best = { id: t.id, x: (xa + xb) / 2, y: ty1, ov: xov };
-        if (Math.abs(my1 - ty0) <= eps && (!best || xov > best.ov)) best = { id: t.id, x: (xa + xb) / 2, y: ty0, ov: xov };
-      }
-    }
-    return best;
   };
   // Sidewalks / parking / trailer fields attached to a building track the wall
   // they hug when the building is resized. At drag start, capture each child in
@@ -3530,31 +3635,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
+    if (!el) return;
     const fp = p2f(e.clientX, e.clientY);
-    if (e.shiftKey) { // Shift-click toggles into the multi-selection
+    // Explicit attach/align flows (click a host/target) take precedence.
+    if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
+    if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
+    if (e.shiftKey) { // Shift-click toggles into the temporary multi-selection
       setMulti((s) => inMulti("el", id) ? s.filter((m) => !(m.kind === "el" && m.id === id)) : [...s, { kind: "el", id }]);
       setSel({ kind: "el", id });
+      setDrillId(null);
       return;
     }
-    if (multi.length > 1 && inMulti("el", id)) { startGroupMove(e); return; } // drag a member → move the group
+    if (multi.length > 1 && inMulti("el", id)) { startGroupMove(e); return; } // drag a member → move the current selection as a unit
+    // Persistent group (B247): a single click selects & moves the WHOLE group as one
+    // unit — unless we've drilled into this exact member (double-click) to edit it in place.
+    if (el.groupId && drillId !== id) {
+      const refs = groupRefs(el.groupId);
+      setMulti(refs);
+      setSel({ kind: "el", id });
+      setDrillId(null);
+      if (el.locked) return;
+      startGroupMove(e, refs);
+      return;
+    }
     if (multi.length) setMulti([]);
-    if (attachFor) { // bonding: this click picks the host to attach to
-      if (el) attachTo(attachFor, el.id);
-      setAttachFor(null);
-      return;
-    }
-    if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
-    if (el && el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
+    if (el.locked) { setSel({ kind: "el", id }); return; } // locked: select only, don't move
     setSel({ kind: "el", id });
     pushHistory();
-    // Snapshot every member of the assembly so they move together.
+    // Snapshot every member of the assembly (attachedTo children) so they move together.
     const members = assemblyOf(id).map((m) => m.points
       ? { id: m.id, points: m.points }
       : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
-    // Bonding (Shift-drag / snap) can only attach a free, rectangular element
-    // that isn't already a host of something else. Shift is read live in onMove.
-    const canAttach = !el.attachedTo && !el.points && !els.some((x) => x.attachedTo === id);
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canAttach };
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
@@ -3728,12 +3840,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "rotate", id, pivot, startPtr, start };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  // Double- or right-click an element to open its actions menu (dock / sidewalk / attach).
+  // Double-click an element: if it's in a group, "drill in" to edit just that member in
+  // place (without ungrouping, B247). Otherwise open its actions menu (dock/sidewalk/…).
   const onElDouble = (e, id) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el) return;
+    if (el.groupId) { setMulti([]); setDrillId(id); setSel({ kind: "el", id }); return; }
     setSel({ kind: "el", id });
+    setTypeMenu({ id, x: e.clientX, y: e.clientY });
+  };
+  // Right-click an element always opens its actions menu (so a grouped element can still
+  // reach Ungroup / Duplicate group / etc). Keeps an active group selection intact so the
+  // menu's "Group selection" applies when right-clicking within a multi-selection.
+  const onElContext = (e, id) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!(multi.length > 1 && inMulti("el", id))) setSel({ kind: "el", id });
     setTypeMenu({ id, x: e.clientX, y: e.clientY });
   };
   const toggleLock = (id) => {
@@ -3922,8 +4045,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => { metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin: restored?.origin ?? null }; });
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
-  const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); };
+  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
   // Version history (automatic local backups, B126): open the dialog with this plan's
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
   // version — and the thinner state it replaces is itself snapshotted, so a restore is
@@ -3941,6 +4064,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
   const handleNewPlan = () => { closeHdrMenus(); flushSite(); onNewPlanSameParcel?.(siteId); };
+  // Delete a single plan (B250). Never the last plan in a site (that's the whole-site delete
+  // from the map). If we're deleting the current plan, suppress its flush so the delete sticks.
+  const handleDeletePlan = (id) => {
+    if (plansHere.length <= 1) return;
+    if (id === siteId) deletedSelfRef.current = true;
+    closeHdrMenus();
+    onDeletePlan?.(id);
+  };
   const fileSlug = () => (siteName || "site-plan").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site-plan";
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ parcels, els, measures, callouts, markups, settings, underlay }, null, 2)], { type: "application/json" });
@@ -5222,19 +5353,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
         </button>
-        <AnchoredMenu open={planMenu} onClose={() => setPlanMenu(false)} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
+        <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Plans in this site</div>
-          {plansHere.map((s) => (
-            <button key={s.id} style={menuItem(s.id === siteId)} onClick={() => (s.id === siteId ? setPlanMenu(false) : handleOpenSite(s.id))}>
-              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
-                {s.id === siteId && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-              </span>
-            </button>
-          ))}
+          {plansHere.map((s) => {
+            const cur = s.id === siteId;
+            if (planDelArm === s.id) return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", margin: "1px 0", borderRadius: 7, background: "rgba(179,54,27,0.08)" }}>
+                <span style={{ flex: 1, fontSize: 12, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Delete “{s.name || "Untitled plan"}”?</span>
+                <button style={{ ...chip, color: "#b3361b", padding: "2px 9px" }} onClick={() => { setPlanDelArm(null); handleDeletePlan(s.id); }}>Delete</button>
+                <button style={{ ...chip, padding: "2px 9px" }} onClick={() => setPlanDelArm(null)}>Cancel</button>
+              </div>
+            );
+            return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <button style={{ ...menuItem(cur), flex: 1, minWidth: 0 }} onClick={() => (cur ? setPlanMenu(false) : handleOpenSite(s.id))}>
+                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "Untitled plan"}</span>
+                    {cur && <span style={{ color: PAL.accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
+                  </span>
+                </button>
+                {plansHere.length > 1 && (
+                  <button title="Delete this plan" aria-label={`Delete plan ${s.name || "Untitled plan"}`} onClick={(e) => { e.stopPropagation(); setPlanDelArm(s.id); }}
+                    style={{ flex: "none", width: 24, height: 24, lineHeight: 1, borderRadius: 6, border: "1px solid transparent", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13 }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = "#b3361b"; e.currentTarget.style.background = "rgba(179,54,27,0.10)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = PAL.muted; e.currentTarget.style.background = "transparent"; }}>✕</button>
+                )}
+              </div>
+            );
+          })}
           <div style={{ display: "flex", gap: 6, marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
             <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
             <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
@@ -5286,10 +5435,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
       <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
-        onClick={() => setSnap(!settings.snap)} title="Snap to grid & flush against neighbours — click or press S to toggle; hold Alt while dragging to place freely">
+        onClick={() => setSnap(!settings.snap)} title="Snap only ALIGNS position to the grid & flush against neighbours — it never groups or bonds anything. Click or press S to toggle (this browser session only; off by default); hold Alt while dragging to place freely.">
         <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
-        {settings.snap ? `Snap ${settings.gridSize}′` : "Snap off"}
+        {settings.snap ? `Snap ${settings.gridSize}′ on` : "Snap off"}
       </button>
+      {tool === "select" && (() => {
+        const canG = multi.length > 1, canU = !!selectedGroupId();
+        if (!canG && !canU) return null;
+        return (
+          <>
+            {vSep}
+            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              {canG && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={groupSel} title="Group the selected items so they move, copy & select as one unit — you can still double-click a member to edit it in place (Ctrl+G)">⊞ Group</button>}
+              {canU && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={ungroupSel} title="Ungroup — split this group back into individual items (Ctrl+Shift+G)">⊟ Ungroup</button>}
+            </div>
+          </>
+        );
+      })()}
       {vSep}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         <div ref={exportAnchor} style={{ position: "relative" }}>
@@ -5573,7 +5735,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
@@ -5691,6 +5853,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <rect key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} width={Math.abs(p1.x - p0.x) + 4} height={Math.abs(p1.y - p0.y) + 4} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />;
               })}
               {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill={PAL.accent} fillOpacity={0.08} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />; })()}
+              {/* persistent GROUP chrome (B247): an enclosing box that reads as one unit,
+                  with corner handles that resize the whole group uniformly. Hidden while
+                  drilled into a member (then the member shows its own selection). */}
+              {(() => {
+                if (drillId) return null;
+                const gid = selectedGroupId(); if (!gid) return null;
+                const { elList, mkList } = groupScaleSet(gid);
+                const all = [...elList, ...mkList]; if (all.length < 2) return null;
+                let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+                all.forEach((o) => { const b = featBBox(o); if (b) { x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); } });
+                if (!isFinite(x0)) return null;
+                const p0 = f2p({ x: x0, y: y0 }), p1 = f2p({ x: x1, y: y1 });
+                const rx = Math.min(p0.x, p1.x) - 5, ry = Math.min(p0.y, p1.y) - 5, rw = Math.abs(p1.x - p0.x) + 10, rh = Math.abs(p1.y - p0.y) + 10;
+                const cpt = (sx, sy) => f2p({ x: sx < 0 ? x0 : x1, y: sy < 0 ? y0 : y1 });
+                return (
+                  <g>
+                    <rect x={rx} y={ry} width={rw} height={rh} rx={3} fill="none" stroke={PAL.accent} strokeWidth={1.75} strokeDasharray="2 3" pointerEvents="none" />
+                    <text x={rx + 2} y={ry - 4} fontSize="10.5" fontFamily="ui-sans-serif, system-ui" fontWeight="700" fill={PAL.accent} pointerEvents="none">⊞ Group</text>
+                    {tool === "select" && [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy], i) => {
+                      const c = cpt(sx, sy);
+                      return <rect key={`grh${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+                        style={{ cursor: sx * sy > 0 ? "nwse-resize" : "nesw-resize" }}
+                        onPointerDown={(e) => startGroupResize(e, gid, { x: sx < 0 ? x1 : x0, y: sy < 0 ? y1 : y0 }, { x: sx < 0 ? x0 : x1, y: sy < 0 ? y0 : y1 })} />;
+                    })}
+                  </g>
+                );
+              })()}
               {/* markup draft */}
               {mkRect && (() => {
                 const a = f2p(mkRect.a), b = f2p(mkRect.b), sw = mkStyle.weight;
@@ -6014,16 +6203,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
                     edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
                 {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
-                {attachHint && (() => {
-                  const p = f2p(attachHint);
-                  return (
-                    <g pointerEvents="none">
-                      <circle cx={p.x} cy={p.y} r={9} fill="#16a34a" stroke="#ffffff" strokeWidth={1.75} />
-                      <line x1={p.x - 4.5} y1={p.y} x2={p.x + 4.5} y2={p.y} stroke="#ffffff" strokeWidth={1.75} />
-                      <line x1={p.x} y1={p.y - 4.5} x2={p.x} y2={p.y + 4.5} stroke="#ffffff" strokeWidth={1.75} />
-                    </g>
-                  );
-                })()}
               </g>
             </g>
 
@@ -7588,10 +7767,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 ["Tools", ""], ["V", "Select"], ["H", "Pan (hand)"], ["Space-drag", "Pan temporarily"], ["S", "Toggle snap"], ["L", "Line"], ["R", "Rectangle"], ["E", "Ellipse"],
                 ["⇧P", "Polygon"], ["⇧N", "Polyline"], ["Q", "Callout"], ["T", "Text box"],
                 ["Edit", ""], ["Ctrl/⌘ Z", "Undo"], ["Ctrl/⌘ ⇧Z", "Redo"], ["Ctrl/⌘ C / X / V", "Copy / Cut / Paste"],
-                ["Ctrl/⌘ D", "Duplicate"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
+                ["Ctrl/⌘ D", "Duplicate"], ["Ctrl/⌘ G", "Group selection"], ["Ctrl/⌘ ⇧G", "Ungroup"], ["Delete / ⌫", "Delete selection"], ["Esc", "Cancel / deselect"],
                 ["While drawing", ""], ["⇧ drag", "Constrain (square / circle / 45°)"], ["Double-click / Enter", "Finish polygon / polyline"], ["Click 1st dot", "Close a shape"],
                 ["Gestures", ""], ["Drag a dot", "Move a vertex"], ["＋ on an edge", "Add a vertex"], ["⇧-click a dot", "Delete a vertex"],
-                ["Double-click element", "Change type / actions"], ["⇧ drag element", "Bond to a neighbour"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
+                ["Right-click element", "Actions menu"], ["Double-click in a group", "Edit that member in place"], ["Drag a group", "Move as one unit"], ["Alt drag", "Bypass snap (place freely)"], ["?", "This panel"],
               ].map(([k, v], i) => v === "" ? (
                 <div key={i} style={{ gridColumn: "1 / -1", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.muted, marginTop: i ? 12 : 0, marginBottom: 2 }}>{k}</div>
               ) : (
@@ -7889,6 +8068,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>
                     </>
                   )}
+                  {(multi.length > 1 || t.groupId) && (
+                    <>
+                      <div style={hdr(true)}>Group</div>
+                      {multi.length > 1 && <button style={menuItem(false)} onClick={() => { groupSel(); setTypeMenu(null); }}>⊞ Group selection ({multi.length})</button>}
+                      {t.groupId && <button style={menuItem(false)} onClick={() => { duplicateGroup(t.groupId); setTypeMenu(null); }}>Duplicate group</button>}
+                      {t.groupId && <button style={menuItem(false)} onClick={() => { ungroupGroup(t.groupId); setTypeMenu(null); }}>⊟ Ungroup</button>}
+                    </>
+                  )}
                   <div style={hdr(true)}>Edit</div>
                   <button style={menuItem(false)} onClick={() => { duplicateEl(typeMenu.id); setTypeMenu(null); }}>Duplicate</button>
                   <button style={menuItem(!!t.locked)} onClick={() => { toggleLock(typeMenu.id); setTypeMenu(null); }}>{t.locked ? "Unpin" : "Pin"}</button>
@@ -7910,7 +8097,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext) {
   // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
   // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
   // defined" inside the els.map during render and blanked the whole page on any
@@ -7938,7 +8125,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
-        onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>
+        onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
         <path d={dPath} fill={waterFill} fillOpacity={waterOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
@@ -8085,7 +8272,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   }
   return <g key={el.id} transform={`rotate(${el.rot} ${c.x} ${c.y})`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
     onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
-    onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>{parts}</g>;
+    onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{parts}</g>;
 }
 
 /* ----------------------------- small UI ----------------------------- */

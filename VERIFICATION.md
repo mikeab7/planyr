@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V62 — Deliberate Group tool + snap-aligns-only + per-session snap + per-plan delete (B247 / B248 / B249 / B250) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, two seeded plans) · **Next check** — none (pure planner-canvas / header-menu UI; no auth or cloud path involved).
+- **Harness:** `ui-audit/verify-b247-b250.mjs` (seeds a plan with a building + parking field, and a second site with two plans; boots the planner logged-out; drives the SVG canvas + the Plan ▾ menu; captures console/page errors; screenshots `screens/b247-groups.png` + `b250-plan-delete.png`).
+- **✅ Self-verified 2026-06-20 (14/14 checks, 0 page errors):** **B249** — fresh session shows **"Snap off"** and no global `localStorage:planarfit:snap`; toggling writes `sessionStorage` only. **B248** — with snap ON, dragging the building flush against the parking then away left the parking untouched (Δ=0px — no implicit bond). **B247** — Shift-click both → **Group** → the "⊞ Group" box renders → dragging one member moved **both** (108px each) → **Ungroup** removed the box → members then moved independently again. **B250** — a 2-plan site → ✕ armed an inline "Delete …?" confirm (no browser dialog) → Delete removed the **current** plan and switched to its sibling (it did NOT resurrect) → the lone remaining plan has no ✕. lint **0 errors** · **537 tests** · build green.
+
 ### V61 — County parcel fetch survives a county-server outage (TxGIO statewide fallback) (B244 / B245) ✅ (self-verified headless — fully done; ⏳ optional signed-in confirm)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, live HCAD + TxGIO; FBCAD simulated down) · **Next check** — optional: a signed-in click-through on planyr.io (the resilience path is auth-independent, so logged-out coverage is representative).
 - **Harness:** `gis-verify/fbcad-outage-fallback-verify.mjs` — intercepts the **`gis.fbcad.org`** host as **HTTP 503** to reproduce the real 2026-06-19 FBCAD outage, then enters Select-parcels, recenters on Sugar Land (Fort Bend), and clicks a lot.
