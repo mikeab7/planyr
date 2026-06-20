@@ -20,6 +20,41 @@ export const scaleForFtPerPoint = (ftPerPt) => ftPerPt * POINTS_PER_INCH;
 // Common civil engineer's scales (feet per inch) offered in the picker.
 export const COMMON_SCALES = [10, 20, 30, 40, 50, 60, 100, 200];
 
+// How far an auto-applied scale may stray from the viewport before we distrust it.
+// A correctly-scaled sheet of the site you're looking at lands ~0.5–1.5× the viewport;
+// a misread vicinity/key-map scale lands 10–30× too big. 4× upper / 0.04× lower cleanly
+// separates the two while leaving generous headroom for a tight or wide zoom.
+const SCALE_MAX_VIEWPORTS = 4;
+const SCALE_MIN_VIEWPORTS = 0.04;
+
+/* Choose an overlay's initial feet-per-point on import. A printed scale note is only a
+ * CLAIM about the original plot — it breaks under "fit to page" / copier resize, and a
+ * vicinity- or key-map scale printed on the same sheet can be misread as the plan scale.
+ * So trust it ONLY when it lands the sheet at a sane on-screen size; otherwise fall back
+ * to "size to fit" (a fraction of the viewport) and let the user set the real scale by
+ * hand (the panel's scale picker / "Trace a length"). Without this guard a misread scale
+ * placed the drawing 10–30× too large, blanketing the whole map with its title block (the
+ * "file name all over the map" bug). Pure + browser-free so it's unit-tested.
+ *
+ *   detectedScale  feet-per-inch read from the sheet (or null/0)
+ *   sheetStd       true when the page matches a standard plot size (scale trustworthy)
+ *   imgW           page width in points (intrinsic, scale-1)
+ *   ppf            current view pixels-per-foot
+ *   screenW        canvas width in pixels
+ *   fitFrac        viewport-width fraction for a "fit" overlay (default 0.6)
+ * Returns { ftPerPx, trusted, reason }: reason ∈ no-scale|ok|too-big|too-small.
+ */
+export function chooseOverlayScale({ detectedScale, sheetStd, imgW, ppf, screenW, fitFrac = 0.6 }) {
+  const safeImgW = Math.max(1, imgW || 1);
+  const fit = Math.max(0.01, ((screenW / Math.max(1e-6, ppf)) * fitFrac) / safeImgW);
+  if (!detectedScale || !sheetStd) return { ftPerPx: fit, trusted: false, reason: "no-scale" };
+  const scaled = ftPerPointForScale(detectedScale);
+  const wPx = safeImgW * scaled * ppf; // on-screen width the auto-scaled sheet would take
+  if (wPx > screenW * SCALE_MAX_VIEWPORTS) return { ftPerPx: fit, trusted: false, reason: "too-big" };
+  if (wPx < screenW * SCALE_MIN_VIEWPORTS) return { ftPerPx: fit, trusted: false, reason: "too-small" };
+  return { ftPerPx: scaled, trusted: true, reason: "ok" };
+}
+
 // Standard plot sheet sizes in inches (order-independent; compared sorted).
 const STD_SHEETS = [
   { in: [8.5, 11], label: "ANSI A (8.5×11)" },
