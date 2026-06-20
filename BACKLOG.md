@@ -22,7 +22,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 <!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
-     deal." Filed B228, renumbered B237 — concurrent `main` took B228–B236 while this was in flight, so B237 is the real next free ID.
+     deal." Filed B228, renumbered B239 — concurrent `main` took B228–B238 while this was in flight, so B239 is the real next free ID.
      Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
      holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
      NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
@@ -32,7 +32,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
      dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
      the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
-     same session — moved to BACKLOG-DONE.md: B237 (reloadFresh cache-busting reload + chunk-aware
+     same session — moved to BACKLOG-DONE.md: B239 (reloadFresh cache-busting reload + chunk-aware
      ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
      ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V58). -->
 
