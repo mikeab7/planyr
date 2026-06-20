@@ -86,6 +86,53 @@ describe("mergeSiteContent — a thinner copy can never erase a fuller one (B126
   });
 });
 
+// B276 — a deliberate delete records a tombstone (`deletedIds`); the merge must honor it so a
+// stale/other copy that still has the item can't resurrect it (the documented B126 trade-off, fixed).
+describe("mergeSiteContent — delete-tombstones keep a deletion deleted (B276)", () => {
+  const ov = (id) => ({ id, name: "sheet", src: "data:img", imgW: 100, imgH: 100, x: 0, y: 0, ftPerPx: 1 });
+
+  it("does NOT resurrect an overlay the newer copy tombstoned, though the older copy still has it", () => {
+    const older = site("s", 100, [], { sheetOverlays: [ov("o1")] });            // pre-delete copy still has it
+    const newer = site("s", 500, [], { sheetOverlays: [], deletedIds: ["o1"] }); // deleted here
+    const m = mergeSiteContent(older, newer);
+    expect(m.sheetOverlays.map((o) => o.id)).toEqual([]); // stays deleted
+    expect(m.deletedIds).toContain("o1");                  // tombstone carried forward
+  });
+
+  it("a tombstone in the OLDER copy still wins (a deletion isn't undone by any copy that still has the item)", () => {
+    const older = site("s", 100, [], { sheetOverlays: [], deletedIds: ["o1"] });
+    const newer = site("s", 500, [], { sheetOverlays: [ov("o1")] }); // still carries the stale item
+    const m = mergeSiteContent(older, newer);
+    expect(m.sheetOverlays.map((o) => o.id)).toEqual([]); // either-copy tombstone wins
+  });
+
+  it("unions the tombstone sets from both copies", () => {
+    const a = site("s", 200, [], { deletedIds: ["o1"] });
+    const b = site("s", 100, [], { deletedIds: ["o2"] });
+    expect(mergeSiteContent(a, b).deletedIds.sort()).toEqual(["o1", "o2"]);
+  });
+
+  it("leaves non-tombstoned overlays alone — the normal union still keeps work from either copy (no regression)", () => {
+    const a = site("s", 200, [], { sheetOverlays: [ov("keep")] });
+    const b = site("s", 100, [], { sheetOverlays: [ov("alsoKeep")], deletedIds: ["gone"] });
+    const m = mergeSiteContent(a, b);
+    expect(m.sheetOverlays.map((o) => o.id).sort()).toEqual(["alsoKeep", "keep"]);
+  });
+
+  it("generalizes to any drawn item — a tombstoned building stays deleted", () => {
+    const older = site("s", 100, [bld("a"), bld("b")]);
+    const newer = site("s", 500, [bld("a")], { deletedIds: ["b"] });
+    expect(mergeSiteContent(older, newer).els.map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("end-to-end via mergePulledSites: a locally-deleted overlay isn't brought back by a cloud copy that still has it", () => {
+    const localDeleted = site("s", 500, [bld("a")], { sheetOverlays: [], deletedIds: ["o1"] });
+    const cloudStillHas = site("s", 100, [bld("a")], { sheetOverlays: [ov("o1")] });
+    const { map } = mergePulledSites({ s: localDeleted }, [cloudStillHas]);
+    expect(map.s.sheetOverlays.map((o) => o.id)).toEqual([]); // tombstone survives the cloud pull
+  });
+});
+
 describe("mergePulledSites — content merge end-to-end (B126)", () => {
   it("a newer-but-thinner cloud copy cannot thin a fuller local one; the union re-pushes", () => {
     const existing = { s: site("s", 100, [bld("a"), bld("b"), bld("c"), bld("d"), bld("e")]) };
