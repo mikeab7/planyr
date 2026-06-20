@@ -22,6 +22,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2"). Highest B# across BACKLOG.md +
+     BACKLOG-DONE.md was B226, so these minted **B227** (two-backend architecture doc) + **B228**
+     (DWG→DXF conversion service). Deduped before filing: NEW-1 RECONCILED the existing "Two
+     backends — don't conflate" section in CLAUDE.md in place (no duplicate section); NEW-2 ADDED
+     server/convert/ to the ALREADY-EXISTING /server scaffold (the B206–B209 Drive storage layer
+     was there — /server was not absent), reusing the shared no-silent-failure result.js. Both
+     filed AND shipped this same session — full blocks moved to BACKLOG-DONE.md. -->
+
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
      size-gate the buttons) + B226 (NEW-2: only on the selected/hovered building) — highest B#
