@@ -21,6 +21,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — the "deliberate Group" tranche for the Site
+     Planner. Minted **B261–B264** (highest B# across both files was B246, so these are the real next free
+     IDs). Deduped before filing: no prior OPEN item covers a Group tool / snap-alignment-only / snap-pref-
+     stickiness / per-plan delete. The relevant prior art is the DONE **B114** (Shift-drag snap+bond + the
+     S-key snap toggle) — B261 replaces its *bonding* half with an explicit Group, B262 strips the bond so
+     snap only aligns, and B263 fixes the snap pref's global stickiness; B114's toggle + Alt-bypass survive.
+     The owner-mentioned "earlier split-snap item" was that B114 family (done), not a separate open item.
+     The still-open, owner-gated **B115** (keyboard-shortcuts pass) referenced the now-removed ⇧-drag bond
+     gesture; its in-app shortcut table was updated here (B115 itself stays open for the deliberate remap
+     pass). All four filed AND shipped this same session on branch `claude/eager-keller-1ueisx` — full
+     blocks moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b261-b264.mjs, 14/14, 0 page
+     errors), VERIFICATION **V64**. lint 0 · 537 tests · build green. -->
 <!-- 2026-06-20: owner dropped his old "Planar — Engineering Backlog" (2026-05-26 code review, re-verified
      2026-06-19) for the **Scheduler** app (`public/sequence/index.html`), said "log this" + "don't worry
      about the email feature." Filed under `[Scheduler]` as B247–B259. The safe wins (B247–B253) were filed
