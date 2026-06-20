@@ -135,6 +135,12 @@ input[type="range"] { height: 18px; }
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Project Files upload tray (B260): a filed row demotes into the "Recently filed" trail
+   with a subtle slide/fade — never an abrupt removal. */
+@keyframes pf-demote-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: .92; transform: none; } }
+.pf-queue-row { transition: opacity .25s ease, background-color .25s ease; }
+.pf-queue-recent { animation: pf-demote-in .25s ease; }
+
 /* keyboard hint chips */
 kbd {
   font-family: "Inter", system-ui, sans-serif;
