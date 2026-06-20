@@ -12,7 +12,8 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -773,7 +774,7 @@ const EyeOffIcon = () => (
   </svg>
 );
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -1064,6 +1065,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
+  const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
@@ -1262,6 +1264,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const iv = setInterval(sync, 45000); // re-probe so stopped services self-heal
     return () => clearInterval(iv);
   }, [overlays, origin, basemapOn]); // eslint-disable-line
+
+  /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
+     the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
+     when the view/size/origin settle (debounced past the basemap commit) and when the
+     nearby-range pref changes. Picker-only — never alters a layer's map request. */
+  useEffect(() => {
+    if (!origin) return;
+    let t;
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles()));
+    prefetchExtents(ALL_LAYERS, probeService).then(recompute);
+    t = setTimeout(recompute, 300); // let the basemap commit (≤160ms) settle first
+    const unsub = subscribeRelevance(recompute);
+    return () => { clearTimeout(t); unsub(); };
+  }, [overlays, origin, view, size]);
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -5511,13 +5527,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       />
 
       {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+          the file index needs a signed-in cloud session; reviews open in Document Review.
+          Clicking a file hands the whole review row up to the Shell, which stashes it and
+          switches to Document Review — DR opens it once it mounts. Passing only
+          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
+          (NEW-1). */}
       <ProjectFilesDrawer
         open={filesOpen}
         onClose={() => setFilesOpen(false)}
         signedIn={isCloudActive()}
         projectId={groupId}
-        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
@@ -6277,7 +6297,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
                     <span style={{ flex: 1 }}>Aerial basemap</span>
                   </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} />
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage} />
                   {/* utility-evidence drawing tools */}
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
