@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
@@ -32,6 +33,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
+import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -42,6 +44,7 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth } from "./lib/siteModel.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone } from "./lib/dockZones.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
@@ -177,7 +180,7 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
 // element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
-const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
@@ -285,6 +288,16 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
+// B230 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
+// drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
+// old fixed midpoint. Returns the point + its distance for hit-testing.
+const projToSeg = (p, a, b) => {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const x = a.x + t * dx, y = a.y + t * dy;
+  return { x, y, d: Math.hypot(p.x - x, p.y - y) };
+};
 const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); return t; };
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -666,36 +679,9 @@ const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumF
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* --------------- county appraisal-district attribute view --------------- */
-// Curated, human-labelled rows pulled from the raw county GIS attributes that
-// rode along with a map-imported parcel.
-const APPR_FIELDS = [
-  [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
-  [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
-  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre)/i, "Acreage"],
-  [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
-  [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
-  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt)/i, "Total value"],
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type)/i, "Land use"],
-  [/zoning/i, "Zoning"],
-  [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
-];
-const prettyKey = (k) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-const apprRows = (attrs) => {
-  if (!attrs) return [];
-  const used = new Set(), rows = [];
-  for (const [re, label] of APPR_FIELDS) {
-    const k = Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
-    if (k) { used.add(k); rows.push({ label, value: attrs[k] }); }
-  }
-  return rows;
-};
-const apprAll = (attrs) => Object.entries(attrs || {})
-  .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
-  .map(([k, v]) => ({ label: prettyKey(k), value: v }));
-// Format a value, adding $ + thousands for the money fields.
-const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
-const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== ""); return k ? String(attrs[k]) : null; };
+// The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
+// now lives in ./lib/appraisal.js so the map finder's address-search info card shares
+// the exact same labelling (B233). countyAcres stays here (planner-only geometry check).
 // County stated acreage from the attributes. Prefer an explicit acres field;
 // fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
 // { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
@@ -756,6 +742,9 @@ const DEFAULT_SETTINGS = {
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
+  // Building-anchored dock-zone stack default depths (B228), outward from the dock
+  // face: truck court → trailer parking → buffer. User-editable in Setup → Dock zones.
+  truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
@@ -996,6 +985,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
+  // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
+  // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
+  // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
+  // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
+  const [selVtx, setSelVtx] = useState(null);   // {layer, id, index}
+  const [vtxMenu, setVtxMenu] = useState(null); // {mode:"vertex"|"edge", layer, id, index, ptFeet?, canDelete?, x, y}
+  const [insHint, setInsHint] = useState(null); // {x,y} screen px (snapped to the nearest edge point)
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const selVtxRef = useRef(selVtx); selVtxRef.current = selVtx;
   const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
@@ -1574,9 +1572,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
+      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
       if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
@@ -1584,6 +1583,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
+
+  // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
+  // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
+  useEffect(() => {
+    const sync = (e) => setShiftHeld(e.shiftKey);
+    const clear = () => setShiftHeld(false);
+    window.addEventListener("keydown", sync);
+    window.addEventListener("keyup", sync);
+    window.addEventListener("blur", clear);
+    return () => { window.removeEventListener("keydown", sync); window.removeEventListener("keyup", sync); window.removeEventListener("blur", clear); };
+  }, []);
 
   const deleteSel = () => {
     const sel = selRef.current, multi = multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
@@ -2010,7 +2020,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The hand-editable path of an easement: the boundary ring for mode B, else the
   // centerline/edge-run spine that gets offset into the strip.
   const easeEditPath = (e) => (e.mode === "boundary" ? (e.pts || []) : (e.centerline || []));
-  const easeEditClosed = (e) => e.mode === "boundary";
   // Apply a patch and RE-DERIVE the drawn ring, so a width/vertex change re-offsets
   // the strip live (NEW-1). Boundary mode derives pts = the path itself.
   const withEaseRing = (e, patch) => {
@@ -2072,34 +2081,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Attribute edit on the selected easement (re-derives the ring so width edits re-offset live).
   const setSelEasement = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? withEaseRing(m, patch) : m)); };
-  // Vertex editing of the selected easement's path (drag; Shift-click deletes; ＋ adds).
+  // B230 — drag an easement path vertex (the active control point). Inserting / deleting a
+  // control point is handled by the shared edge/vertex affordances (Shift-click / right-click an
+  // edge to add; right-click a vertex or press Delete to remove), not a per-handle "+" / Shift-click.
   const startEaseVertex = (ev, id, index) => {
     if (tool !== "select" || ev.button !== 0) return;
     ev.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
-    if (ev.shiftKey) {
-      const minN = m.mode === "boundary" ? 3 : 2;
-      if (easeEditPath(m).length > minN) { pushHistory(); setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, easeEditPath(x).filter((_, i) => i !== index)) : x)); }
-      return;
-    }
     setSel({ kind: "markup", id });
+    setSelVtx({ layer: "ease", id, index });
     pushHistory();
     drag.current = { mode: "easeVertex", id, index };
     svgRef.current.setPointerCapture(ev.pointerId);
-  };
-  const addEaseVertex = (ev, id, index) => {
-    if (tool !== "select" || ev.button !== 0) return;
-    ev.stopPropagation();
-    const m = markups.find((x) => x.id === id);
-    if (!m || m.locked) return;
-    pushHistory();
-    setMarkups((a) => a.map((x) => {
-      if (x.id !== id) return x;
-      const path = easeEditPath(x), p = path[index], q = path[(index + 1) % path.length];
-      const np = [...path]; np.splice(index + 1, 0, snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }));
-      return setEasePath(x, np);
-    }));
   };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -2112,137 +2106,156 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ parcel vertex editing ------------ */
+  /* ------------ parcel vertex editing (B230: drag only; insert/delete via shared edge/vertex) ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     if (parcels.find((p) => p.id === id)?.locked) { e.stopPropagation(); setSel({ kind: "parcel", id }); return; }
     e.stopPropagation();
     pushHistory();
-    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
-      setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3
-        ? { ...pc, points: pc.points.filter((_, i) => i !== index) } : pc));
-      return;
-    }
     setSel({ kind: "parcel", id });
+    setSelVtx({ layer: "parcel", id, index });
     drag.current = { mode: "vertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addVertex = (e, id, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    if (parcels.find((p) => p.id === id)?.locked) return;
-    e.stopPropagation();
-    pushHistory();
-    setParcels((a) => a.map((pc) => {
-      if (pc.id !== id) return pc;
-      const p = pc.points[index], q = pc.points[(index + 1) % pc.points.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const points = [...pc.points];
-      points.splice(index + 1, 0, mid);
-      return { ...pc, points };
-    }));
-    setSel({ kind: "parcel", id });
-  };
 
-  /* ------------ polygon element vertex editing (drag/add/delete points) ------------ */
+  /* ------------ polygon element vertex editing (drag only) ------------ */
   const startElVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el || !el.points || el.locked) return;
     pushHistory();
-    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
-      setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3
-        ? { ...x, points: x.points.filter((_, i) => i !== index) } : x));
-      return;
-    }
     setSel({ kind: "el", id });
+    setSelVtx({ layer: "el", id, index });
     drag.current = { mode: "elVertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addElVertex = (e, id, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    const el = els.find((x) => x.id === id);
-    if (!el || !el.points || el.locked) return;
-    pushHistory();
-    setEls((a) => a.map((x) => {
-      if (x.id !== id || !x.points) return x;
-      const p = x.points[index], q = x.points[(index + 1) % x.points.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const points = [...x.points];
-      points.splice(index + 1, 0, mid);
-      return { ...x, points };
-    }));
-    setSel({ kind: "el", id });
-  };
 
-  /* ------------ measurement vertex editing (B141: Bluebeam-style add/drag/delete) ------------
-     Mirrors the element-vertex handlers for the measures[] layer; area/perimeter recompute
-     live because the label is derived from the points. Legacy {a,b} records migrate to
-     {mode,pts} on first edit. */
+  /* ------------ measurement vertex editing (drag only; area/perimeter recompute live because
+     the label is derived from the points; legacy {a,b} records migrate to {mode,pts} on edit) ------------ */
   const startMeasureVertex = (e, i, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = measures[i];
     if (!m) return;
-    const pts = measPts(m), min = measMode(m) === "area" ? 3 : 2;
     pushHistory();
-    if (e.shiftKey) { // shift-click deletes the vertex (keep the mode's minimum)
-      if (pts.length > min) setMeasures((arr) => arr.map((mm, k) => k === i ? { ...mm, mode: measMode(mm), pts: pts.filter((_, j) => j !== index) } : mm));
-      return;
-    }
     setSel({ kind: "measure", i });
+    setSelVtx({ layer: "measure", id: i, index });
     drag.current = { mode: "measureVertex", i, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addMeasureVertex = (e, i, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    pushHistory();
-    setMeasures((arr) => arr.map((mm, k) => {
-      if (k !== i) return mm;
-      const pts = measPts(mm), p = pts[index], q = pts[(index + 1) % pts.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const np = [...pts];
-      np.splice(index + 1, 0, mid);
-      return { ...mm, mode: measMode(mm), pts: np };
-    }));
-    setSel({ kind: "measure", i });
-  };
 
-  /* ------------ markup geometry editing (Bluebeam-style: drag/add/delete vertices,
-     resize + rotate boxes). Mirrors the element/measure vertex + resize/rotate handlers
-     for the markups[] layer. ------------ */
+  /* ------------ markup geometry editing (drag a vertex; box resize/rotate handlers below) ------------ */
   const startMarkupVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m || m.locked) return;
     pushHistory();
-    if (e.shiftKey) { // shift-click deletes the vertex (keep the kind's minimum)
-      const pts = mkPts(m);
-      if (pts.length > mkMinPts(m)) setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, pts.filter((_, j) => j !== index)) : x));
-      return;
-    }
     setSel({ kind: "markup", id });
+    setSelVtx({ layer: "markup", id, index });
     drag.current = { mode: "mkVertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addMarkupVertex = (e, id, index) => { // ＋ on an edge midpoint (polyline/polygon)
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    const m = markups.find((x) => x.id === id);
-    if (!m || m.locked) return;
-    pushHistory();
-    setMarkups((a) => a.map((x) => {
-      if (x.id !== id) return x;
-      const pts = mkPts(x), p = pts[index], q = pts[(index + 1) % pts.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const np = [...pts]; np.splice(index + 1, 0, mid);
-      return setMkPts(x, np);
-    }));
-    setSel({ kind: "markup", id });
+
+  /* ------------ B230: shared Bluebeam vertex editing across EVERY editable path ------------
+     One resolver + one hit-test + one insert/delete, so Shift-click / right-click / Delete
+     behaves identically on a parcel, a polygon element, a measurement, a markup poly/line, or
+     an easement — no per-type forks. The always-on "+" midpoint handles are gone; a control
+     point is dropped exactly where the edge was touched. */
+  // Which closed/open path (if any) is vertex-editable right now, given the selection.
+  const editablePath = () => {
+    if (tool !== "select" || !sel) return null;
+    if (sel.kind === "parcel") { const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "el") { const el = els.find((x) => x.id === sel.id); return el && el.points && !el.locked ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min: closed ? 3 : 2 }; }
+    if (sel.kind === "markup") {
+      const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
+      if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
+      if (m.kind === "polyline" || m.kind === "polygon") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind === "polygon", min: mkMinPts(m) };
+    }
+    return null;
   };
+  // Nearest vertex / nearest edge of `path` to a feet point, each within a screen-PIXEL
+  // tolerance (so the grab radius is zoom-independent). A corner wins a tie over its edges.
+  const hitEditPath = (path, fp) => {
+    const vTol = 9 / view.ppf, eTol = 11 / view.ppf, n = path.pts.length;
+    let v = null;
+    path.pts.forEach((p, i) => { const d = Math.hypot(fp.x - p.x, fp.y - p.y); if (d <= vTol && (!v || d < v.d)) v = { index: i, d }; });
+    let e = null;
+    const lastEdge = path.closed ? n : n - 1;
+    for (let i = 0; i < lastEdge; i++) {
+      const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
+      if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+    }
+    return { v, e };
+  };
+  // Insert a control point at `ptFeet` (the nearest point on edge `edgeIndex`) into whichever
+  // layer owns the path, and select the new point so Delete can remove it.
+  const insertVtx = (layer, id, edgeIndex, ptFeet) => {
+    const np = snapPt(ptFeet);
+    const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
+    pushHistory();
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points) } : pc));
+    else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
+    else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
+    else if (layer === "markup") setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, ins(mkPts(x))) : x));
+    setSelVtx({ layer, id, index: edgeIndex + 1 });
+  };
+  // Delete control point `index` from its path, but never below the geometry's minimum.
+  const deleteVtx = (layer, id, index) => {
+    const rm = (arr) => arr.filter((_, j) => j !== index);
+    pushHistory();
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3 ? { ...pc, points: rm(pc.points) } : pc));
+    else if (layer === "el") setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3 ? { ...x, points: rm(x.points) } : x));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => { if (k !== id) return mm; const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : 2; return pts.length > min ? { ...mm, mode: measMode(mm), pts: rm(pts) } : mm; }));
+    else if (layer === "ease") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; return p.length > min ? setEasePath(x, rm(p)) : x; }));
+    else if (layer === "markup") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const pts = mkPts(x); return pts.length > mkMinPts(x) ? setMkPts(x, rm(pts)) : x; }));
+    setSelVtx(null);
+  };
+  // Capture-phase pointer / contextmenu / move on the canvas, so the SAME interaction reaches
+  // every editable layer BEFORE its own handlers — without overlaying hit targets that would
+  // block a normal click/drag. Shift+click an edge inserts; right-click a vertex/edge opens the
+  // menu; a plain click on a vertex marks it active for Delete; hovering an edge shows the dot.
+  const onCanvasVtxDownCapture = (e) => {
+    const path = editablePath();
+    if (!path) { if (selVtxRef.current) setSelVtx(null); return; }
+    const fp = p2f(e.clientX, e.clientY);
+    const { v, e: edge } = hitEditPath(path, fp);
+    if (e.button === 0 && e.shiftKey && edge && !v) { // Shift+click an edge (away from a corner) → insert here
+      e.preventDefault(); e.stopPropagation();
+      altSnapOffRef.current = !!e.altKey;
+      insertVtx(path.layer, path.id, edge.index, edge.pt);
+      setInsHint(null);
+      return;
+    }
+    if (e.button === 0 && !e.shiftKey) setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
+  };
+  const onCanvasVtxContextCapture = (e) => {
+    const path = editablePath();
+    if (!path) return;
+    const fp = p2f(e.clientX, e.clientY);
+    const { v, e: edge } = hitEditPath(path, fp);
+    if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
+      e.preventDefault(); e.stopPropagation();
+      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: path.pts.length > path.min, x: e.clientX, y: e.clientY });
+    } else if (edge) { // on an edge (away from any corner) → Add control point here
+      e.preventDefault(); e.stopPropagation();
+      setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
+    }
+    // else: not near the path → let the element's own context menu open
+  };
+  const onCanvasVtxMoveCapture = (e) => {
+    if (drag.current || tool !== "select") { if (insHint) setInsHint(null); return; }
+    const path = editablePath();
+    if (!path) { if (insHint) setInsHint(null); return; }
+    const { v, e: edge } = hitEditPath(path, p2f(e.clientX, e.clientY));
+    if (edge && !v) { const sp = f2p(edge.pt); setInsHint((h) => (h && Math.abs(h.x - sp.x) < 0.5 && Math.abs(h.y - sp.y) < 0.5 ? h : sp)); }
+    else if (insHint) setInsHint(null);
+  };
+
   const startMarkupResize = (e, id, hx, hy) => { // hx/hy ∈ {-1,0,1}: corner = both, edge = one
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -3061,7 +3074,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const WALL_KID_TYPES = ["sidewalk", "landscape", "parking", "trailer", "paving"];
   // noFit children (dog-ears, the rotated opposite-dock trailer strip) keep their
   // fixed size/position when the building is resized instead of scaling with a wall.
-  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
+  // Dock-zone stack members (court/trailer/buffer) are positioned by relayoutSide, not
+  // as wall-hugging kids — exclude them here so they're not double-fit on a resize.
+  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     // A child may be turned 90° from the building (e.g. a parking field rotated to
     // run ALONG a side wall). Resolve its extent on each building axis so depth,
@@ -3096,7 +3111,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
-  const TRUCK_COURT_D = 135; // truck dock apron + drive depth
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -3146,12 +3160,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fitDogEar = (nb, de) => dogEarGeom(nb, de.side, de.sign);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
-  // Remove a building feature (and anything that hangs off it, e.g. a court's trailer).
-  const removeFeature = (id) => { pushHistory(); setEls((a) => a.filter((e) => e.id !== id && e.forCourt !== id)); };
-  // Add a strip element of `type`/`depth` flush against one side of the building
-  // (local normal nx,ny), full wall length, bonded to the building. Keeps the
-  // building selected so several can be added in a row.
-  const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
+  // Remove a building feature (and anything that hangs off it — a court's trailer, a
+  // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
+  const removeFeature = (id) => {
+    pushHistory();
+    setEls((a) => {
+      const el = a.find((x) => x.id === id);
+      let next = removeWithChildren(a, [id]);
+      const b = el && a.find((x) => x.id === el.attachedTo);
+      if (b && b.type === "building") next = relayoutAllSides(next, b);
+      return next;
+    });
+  };
   // Add a single row of parking + drive aisle flush against a building side, the
   // wall's full length, oriented so it grows OUTWARD (drive on the building side).
   const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
@@ -3200,43 +3220,212 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
     return { cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360 };
   };
-  const makeOppTrailer = (b, name, attachId = b.id) => ({
-    id: uid(), type: "trailer", ...oppTrailerGeom(b, name),
-    attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
-  });
-  // Re-fit a wall-hugging single trailer row to a (resized) host box.
+  // Re-fit a wall-hugging single trailer row to a (resized) host box (the opposite-dock
+  // `oppSide` trailer; the dock-zone stack uses relayoutSide instead).
   const fitWallTrailer = (hostBox, side) => oppTrailerGeom(hostBox, side);
+
+  /* ---- Building-anchored dock-zone stack (B228): truck court → trailer parking →
+     buffer, stacked OUTWARD from each dock face. The building footprint is the
+     control hub: one "+" walks the stack outward, one "−" peels the outermost off
+     (LIFO). A single pure layout (lib/dockZones `layoutZone`) positions all three
+     from their stored depths (`zd`), so they stay flush + depth-correct on add /
+     remove / inline depth-edit / building-resize. Truck court + trailer parking REUSE
+     the existing `truckCourt` / `forCourt` tags; the buffer is the new zone (a sage
+     `landscape` clear strip), bonded to its trailer via `forTrailer`. Car parking and
+     bump-outs are deliberately NOT in this stack (see addCarParkingEnds / dog-ears). ---- */
+  // Find the stack members on a side, within a given element array (pure).
+  const findCourtIn = (arr, b, side) => arr.find((x) => x.attachedTo === b.id && x.truckCourt && x.truckCourt.side === side && !x.points);
+  const findTrailerIn = (arr, court) => (court ? arr.find((x) => x.forCourt === court.id && !x.points) : null);
+  const findBufferIn = (arr, trailer) => (trailer ? arr.find((x) => x.forTrailer === trailer.id && !x.points) : null);
+  const findZoneIn = (arr, b, side, i) => { const c = findCourtIn(arr, b, side); if (i === 0) return c; const t = findTrailerIn(arr, c); if (i === 1) return t; return findBufferIn(arr, t); };
+  // How many zones are present on a side (0..3), within `arr`.
+  const stackCountIn = (arr, b, side) => { const c = findCourtIn(arr, b, side); if (!c) return 0; const t = findTrailerIn(arr, c); if (!t) return 1; return findBufferIn(arr, t) ? 3 : 2; };
+  const courtOnSide = (b, side) => findCourtIn(els, b, side);
+  // Is this element a member of a dock-zone stack, and which zone (0 court / 1 trailer / 2 buffer)?
+  const isDockZone = (el) => !!el && !el.points && !!(el.truckCourt || el.forCourt || el.forTrailer);
+  const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
+  // The min / max stack depth across a building's dock sides (the "+"/"−" operate on
+  // the whole set as a unit, so the min level advances together and the max peels off).
+  const dockStackLevel = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.min(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
+  const dockStackMax = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.max(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
+  // The dock side a stack zone belongs to (court carries it; trailer/buffer inherit via their chain).
+  const zoneSideOf = (arr, z) => {
+    if (!z) return null;
+    if (z.truckCourt) return z.truckCourt.side;
+    if (z.forCourt) { const c = arr.find((x) => x.id === z.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
+    if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
+    return null;
+  };
+  // A zone's depth (feet): stored `zd` wins; else derive its extent along the side
+  // normal (so a legacy court/trailer survives); else fall back to the configured default.
+  const zoneDepthOf = (z, b, side, i) => {
+    if (Number.isFinite(z.zd) && z.zd > 0) return z.zd;
+    const u = outwardUnit(b, side);
+    const ax = rot2(z.w / 2, 0, z.rot || 0), ay = rot2(0, z.h / 2, z.rot || 0);
+    const derived = 2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y));
+    return derived > 0.5 ? derived : zoneDepthDefaults(settings)[i];
+  };
+  // Re-lay the whole stack on one side of building `b` (pure over `arr`): each present
+  // zone flush-outward from the building face, full wall length, depth-correct.
+  const relayoutSide = (arr, b, side) => {
+    const court = findCourtIn(arr, b, side);
+    if (!court) return arr;
+    const trailer = findTrailerIn(arr, court);
+    const buffer = findBufferIn(arr, trailer);
+    const zones = [court, trailer, buffer].filter(Boolean);
+    const depths = zones.map((z, i) => zoneDepthOf(z, b, side, i));
+    const patch = new Map();
+    zones.forEach((z, i) => {
+      const g = layoutZone(b, side, i, depths);
+      patch.set(z.id, z.type === "trailer"
+        ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
+        : g);
+    });
+    return arr.map((x) => (patch.has(x.id) ? { ...x, ...patch.get(x.id) } : x));
+  };
+  // Relayout every dock side of `b` that currently carries a court.
+  const relayoutAllSides = (arr, b) => {
+    const sides = new Set(arr.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
+    let next = arr; sides.forEach((s) => { next = relayoutSide(next, b, s); }); return next;
+  };
+  // Remove ids + anything bonded to them (a court's trailer, a trailer's buffer).
+  const removeWithChildren = (arr, ids) => {
+    const kill = new Set(ids);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      arr.forEach((x) => { if (!kill.has(x.id) && ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer)))) { kill.add(x.id); grew = true; } });
+    }
+    return arr.filter((x) => !kill.has(x.id));
+  };
+  // Zone element factories (final geometry is set by relayoutSide).
+  const baseZone = (b, extra) => ({ id: uid(), cx: b.cx, cy: b.cy, w: 1, h: 1, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra });
+  const makeCourtZone = (b, side) => baseZone(b, { type: "paving", truckCourt: { side }, zd: zoneDepthDefaults(settings)[0] });
+  const makeTrailerZone = (b, court) => baseZone(b, { type: "trailer", forCourt: court.id, noFit: true, zd: zoneDepthDefaults(settings)[1], cfg: { trailerW: settings.trailerW || OPP_TRAILER_W, trailerL: zoneDepthDefaults(settings)[1], trailerAisle: 0, single: true } });
+  const makeBufferZone = (b, trailer) => baseZone(b, { type: "landscape", forTrailer: trailer.id, buffer: true, noFit: true, zd: zoneDepthDefaults(settings)[2] });
+  // The next-zone element (index = present count) for a side, within `arr`.
+  const buildNextZone = (arr, b, side) => {
+    const n = stackCountIn(arr, b, side);
+    if (n === 0) return makeCourtZone(b, side);
+    if (n === 1) { const c = findCourtIn(arr, b, side); return c ? makeTrailerZone(b, c) : null; }
+    if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
+    return null; // full
+  };
+  // "+" — grow the building's dock apron outward by one ring: add the NEXT outward zone to
+  // EVERY dock side that isn't full (each side adds its own next: court → trailer → buffer).
+  // Per-side (not min-level), so an uneven building is never stuck adding courts.
+  const addDockZone = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    if (!dockSides.length || dockSides.every((s) => stackCountIn(els, b, s) >= MAX_DOCK_ZONES)) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => { if (stackCountIn(next, b, side) < MAX_DOCK_ZONES) { const z = buildNextZone(next, b, side); if (z) next = [...next, z]; } });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // "−" — pull the apron in by one ring: peel the OUTERMOST zone off EVERY dock side that has
+  // one (LIFO per side: buffer → trailer → court); cascade children; re-lay each side.
+  const removeOuterDockZone = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    if (!dockSides.some((s) => stackCountIn(els, b, s) > 0)) return;
+    pushHistory();
+    setEls((a) => {
+      const rm = [];
+      dockSides.forEach((side) => { const n = stackCountIn(a, b, side); if (n > 0) { const z = findZoneIn(a, b, side, n - 1); if (z) rm.push(z.id); } });
+      let next = removeWithChildren(a, rm);
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Remove the outermost zone on ONE dock side (the on-canvas per-side "−").
+  const removeOuterZoneOnSide = (b, side) => {
+    const court = findCourtIn(els, b, side); if (!court) return;
+    const trailer = findTrailerIn(els, court);
+    const buffer = findBufferIn(els, trailer);
+    removeFeature((buffer || trailer || court).id); // removeFeature cascades children + re-lays the side
+  };
+  // True if ANY / the given dock side can still grow / shrink (for enabling the +/− controls).
+  const dockCanAdd = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) < MAX_DOCK_ZONES); };
+  const dockCanRemove = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) > 0); };
+  // Inline depth edit for zone index `i`, applied across every dock side (the stack is
+  // mirrored, so depths stay uniform); outer zones shift out via relayout.
+  const setZoneDepthAll = (b, i, newDepth) => {
+    const { dockSides } = dockSidesOf(b);
+    const nd = Math.max(1, Math.round(newDepth));
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => { const z = findZoneIn(next, b, side, i); if (z) next = next.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)); });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  // The depth shown for zone index `i` (first dock side that has it).
+  const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
+  // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
+  const addZoneOnSide = (b, side) => {
+    pushHistory();
+    setEls((a) => { const z = buildNextZone(a, b, side); return z ? relayoutSide([...a, z], b, side) : a; });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Car parking on the building ENDS (non-dock short sides) — tracked OUTSIDE the
+  // dock-face LIFO stack, with its own add/remove. [B228 assumption, flagged for Michael.]
+  // Car parking goes on every NON-dock side (the short ends, plus the long side opposite the
+  // docks on a single-load building) — wherever there's no truck court / trailer / buffer.
+  const carEndsSides = (b) => { const dock = dockSidesOf(b).dockSides; return ["top", "bottom", "left", "right"].filter((s) => !dock.includes(s)); };
+  const carParkingEnds = (b) => els.filter((x) => x.attachedTo === b.id && x.sideParkSide && carEndsSides(b).includes(x.sideParkSide));
+  const addCarParkingEnds = (b) => { carEndsSides(b).forEach((name) => addParkingRowSide(b, name)); };
+  const removeCarParkingEnds = (b) => { const ids = new Set(carParkingEnds(b).map((x) => x.id)); if (!ids.size) return; pushHistory(); setEls((a) => a.filter((x) => !ids.has(x.id))); };
+  const carParkingOpenSides = (b) => carEndsSides(b).filter((s) => !els.some((x) => x.attachedTo === b.id && x.sideParkSide === s)); // ends still free
+  // Remove every bump-out at once (the "−" counterpart to "+ Bump-outs"; footprint modifier).
+  const removeAllDogEars = (b) => {
+    const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
+    if (!des.length) return;
+    pushHistory();
+    setEls((a) => { let next = a; des.forEach((de) => { const ss = bumpSidewalkSide(de.dogEar.side, de.dogEar.sign); next = next.filter((x) => x.id !== de.id && x.forCourt !== de.id).map((x) => (isBumpSidewalk(x, b, ss) ? adjustSidewalkForBump(x, de.dogEar.side, -1) : x)); }); return next; });
+  };
+
   // Re-fit every feature bonded to a resized building so the whole assembly stays
   // stuck together: dog-ears slide to the corner, wall strips scale, the
   // opposite-side trailer re-hugs its wall, and a court's trailer follows the
   // (re-scaled) court's far edge.
   const refitChildren = (a, buildingId, nb, kids) => {
-    const courtBox = {}; // court id -> { box, side } for trailers that back onto it
-    const pass1 = a.map((x) => {
-      if (x.id === buildingId) {
-        // NEW-4: when the resized element IS a truck court, register its NEW box so the
-        // trailer parking flush against its far edge (forCourt) follows the moved edge —
-        // grow/shrink the depth and the trailer is pushed/pulled out to stay flush.
-        if (x.truckCourt) courtBox[x.id] = { box: { cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot ?? x.rot ?? 0 }, side: x.truckCourt.side };
-        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
-      }
+    const resized = a.find((x) => x.id === buildingId);
+    let next = a.map((x) => {
+      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
-      if (k) { const g = fitKid(nb, k); if (x.truckCourt) courtBox[x.id] = { box: g, side: x.truckCourt.side }; return { ...x, ...g }; }
+      if (k) return { ...x, ...fitKid(nb, k) };
       return x;
     });
-    return pass1.map((x) => (x.forCourt && courtBox[x.forCourt]) ? { ...x, ...fitWallTrailer(courtBox[x.forCourt].box, courtBox[x.forCourt].side) } : x);
+    // Re-lay the dock-zone stack from stored depths so court → trailer → buffer stay
+    // flush + depth-correct. The resized element may be the building (relay its dock
+    // sides) or a stack zone itself (re-derive that zone's depth from its new box, then
+    // relay its side so the trailer/buffer beyond it follow — the old "court drags its
+    // trailer" behaviour, now extended through the buffer).
+    if (resized && resized.type === "building" && !resized.dogEar) {
+      next = relayoutAllSides(next, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot });
+    } else if (resized && (resized.truckCourt || resized.forCourt || resized.forTrailer)) {
+      const b = next.find((x) => x.id === resized.attachedTo);
+      const side = zoneSideOf(next, resized);
+      if (b && side) {
+        const u = outwardUnit(b, side), rr = nb.rot != null ? nb.rot : resized.rot;
+        const ax = rot2(nb.w / 2, 0, rr), ay = rot2(0, nb.h / 2, rr);
+        const newDepth = Math.max(1, Math.round(2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y))));
+        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth } : x));
+        next = relayoutSide(next, b, side);
+      }
+    }
+    return next;
   };
-  // Trailer parking flush against the FAR (outer) edge of a truck court — where
-  // trailers actually back in. Bonded to the court's building so it moves as one.
-  const addCourtTrailer = (tc) => { if (els.some((x) => x.forCourt === tc.id)) return; const root = rootIdOf(tc.id); addBuildingEls([{ ...makeOppTrailer(tc, tc.truckCourt.side, root), forCourt: tc.id }], root); };
-  // 135′ truck court on every dock side that doesn't already have one (tagged so it can sprout trailer parking).
-  const addTruckCourt = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
-    addBuildingEls(dockSides.filter((s) => !have.has(s)).map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id);
-  };
+  // Trailer parking flush against the FAR (outer) edge of a truck court — where trailers
+  // actually back in. Routes through the stack ("+" adds the next zone, here the trailer).
+  const addCourtTrailer = (tc) => { const b = buildingOf(tc); if (b && tc.truckCourt && !findTrailerIn(els, tc)) addZoneOnSide(b, tc.truckCourt.side); };
   // A dock-corner bump-out lengthens the building's perpendicular wall by its
   // projection — so a sidewalk on that wall should grow to match. Which side that
   // sidewalk is on, and the direction it extends, follow from the corner.
@@ -4140,8 +4329,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     seenLabels.add(dupKey);
     let lines, pondAdd = null;
     if (el.type === "sidewalk" || el.type === "landscape") {
-      // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
-      const name = el.type === "landscape" ? "Landscape" : "Sidewalk";
+      // e.g. "5′ Sidewalk" / "15′ Buffer" / "5′ Landscape" — width only, no sf / length
+      const name = el.buffer ? "Buffer" : el.type === "landscape" ? "Landscape" : "Sidewalk";
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
       // B140/B157: label shows acres + sf (was sf only). In expansion mode (B139) the
@@ -4206,13 +4395,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
     let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
     if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader });
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond" });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
   const labelShow = layoutLabels(
@@ -4229,16 +4418,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
-    const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
+    // B231 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
+    // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
+    const carto = d.carto;
+    const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
+    const halo = carto || leader;
+    const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
         {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
-          fontFamily="ui-monospace, Menlo, monospace" fill={ink}
-          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * dls : undefined} paintOrder={leader ? "stroke" : undefined}
-          style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
+          fontFamily={fam} fill={ink}
+          stroke={halo ? "#fff" : undefined} strokeWidth={halo ? (carto ? 2.75 : 3) * dls : undefined} paintOrder={halo ? "stroke" : undefined}
+          style={{ fontWeight: 600, letterSpacing: carto ? "0" : "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
       </g>
@@ -4300,6 +4494,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B242 — a "+ / −" PAIR (both visible together) for the on-building controls: a coloured "+"
+  // to extend out and a red "−" to pull in, side by side along the wall tangent. When only one
+  // action applies it sits centred. This is what the owner asked for — grow AND shrink right on
+  // the building, not a single toggle that hides the "+" once something's there.
+  const glyphPlus = (cx, cy, color, r, title, onClick) => (
+    <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
+      <title>{title}</title>
+      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+    </g>
+  );
+  const glyphMinus = (cx, cy, r, title, onClick) => (
+    <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
+      <title>{title}</title>
+      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+    </g>
+  );
+  const featPair = (key, pos, tan, opt, r = 9) => {
+    const both = opt.canAdd && opt.canRemove, gap = r + 3;
+    const aP = both ? { x: pos.x - tan.x * gap, y: pos.y - tan.y * gap } : pos;
+    const rP = both ? { x: pos.x + tan.x * gap, y: pos.y + tan.y * gap } : pos;
+    return (
+      <g key={key}>
+        {opt.canAdd && glyphPlus(aP.x, aP.y, opt.addColor, r, opt.addTitle, opt.onAdd)}
+        {opt.canRemove && glyphMinus(rP.x, rP.y, r, opt.removeTitle, opt.onRemove)}
+      </g>
+    );
+  };
   // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
   // one, or (when nothing is selected) the one under the cursor — never every building
   // in view. featActiveId is that building; each node group below ALSO gates each button
@@ -4311,41 +4535,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
-    // they don't get their own dock / sidewalk / trailer handles.
+    // they don't get their own dock / parking / bump-out handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
-    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
+    const depths = zoneDepthDefaults(settings);
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
-          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
-          // cluster; below that it piles onto the opposite wall's button. A long/narrow
-          // footprint thus keeps its long-side buttons and drops only the cramped short-end
-          // ones — overlap handled without a collapse menu.
+          // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
+          // its long-side controls and drops only the cramped short ends.
           if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-          const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          if (dockSides.includes(name)) { // long side → truck dock + drive
-            const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
-            return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${TRUCK_COURT_D}′ truck dock + drive`,
-              () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } }),
-              existing ? () => removeFeature(existing.id) : null);
+          const pos = { x: ms.x - ux * 24, y: ms.y - uy * 24 }; // just inside the wall, on the building
+          const tan = { x: -uy, y: ux };                        // along the wall (side-by-side +/−)
+          if (dockSides.includes(name)) {
+            // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
+            const n = stackCountIn(els, el, name);
+            const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
+            return featPair(`dock${name}`, pos, tan, {
+              canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
+              addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
+              onAdd: () => addZoneOnSide(el, name),
+              canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
+              onRemove: () => removeOuterZoneOnSide(el, name),
+            });
           }
-          // short (non-dock) side → progress: + sidewalk → + parking row → − parking
-          const sw = kids.find((x) => isWallStrip(x) && !x.points && sideOfKid(el, x) === name);
+          // non-dock side (a short end, or the long side opposite single-load docks) → car parking
           const park = kids.find((x) => x.sideParkSide === name);
-          return featNode(`add${name}`, pos, !!park,
-            sw ? "#2563eb" : "#16a34a",
-            sw ? "Add a parking row + drive aisle" : `Add ${SIDEWALK_W}′ sidewalk`,
-            sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
-            park ? () => removeFeature(park.id) : null);
+          return featPair(`end${name}`, pos, tan, {
+            canAdd: !park, addColor: "#16a34a", addTitle: "Add a car-parking row",
+            onAdd: () => addParkingRowSide(el, name),
+            canRemove: !!park, removeTitle: "Remove car parking",
+            onRemove: () => park && removeFeature(park.id),
+          });
         })}
-        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
+            one thing there, per the owner); needs room on BOTH axes (B225) */}
         {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
@@ -4361,23 +4593,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         })}
       </g>
     );
-  })();
-
-  // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
-  // parking backs in. Adds 50′ striped trailer parking, or removes it if present.
-  const courtAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
-    const el = els.find((x) => x.id === featActiveId);
-    if (!el || el.locked || el.points || !el.truckCourt) return null;
-    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
-    const existing = els.find((x) => x.forCourt === el.id);
-    const [nx, ny] = SIDE_N[el.truckCourt.side];
-    const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
-    const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });        // outer-edge midpoint
-    const cpx = f2p({ x: el.cx, y: el.cy });
-    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-    const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
-    return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
   })();
 
   // Grow a parking field one row deeper (keeping its near edge fixed); the stall
@@ -4550,64 +4765,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   })();
 
-  // Draggable vertices + add-point (+) handles on the selected parcel (select tool).
+  // B230 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
+  // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
+  // point instead. The active control point (the Delete-key target) is shown inverted.
+  const vtxRect = (key, c, on, cursor, onDown) => (
+    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
+      fill={on ? PAL.paper : PAL.accent} stroke={on ? PAL.accent : PAL.paper} strokeWidth={on ? 2 : 1.5}
+      style={{ cursor }} onPointerDown={onDown} />
+  );
+  const isSelVtx = (layer, id, i) => !!selVtx && selVtx.layer === layer && String(selVtx.id) === String(id) && selVtx.index === i;
   const parcelHandles = (() => {
     if (sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
     if (!pc) return null;
-    const nodes = [];
-    pc.points.forEach((a, i) => {
-      const b = pc.points[(i + 1) % pc.points.length];
-      const am = f2p(a), bm = f2p(b);
-      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-      nodes.push(
-        <g key={`addv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addVertex(e, pc.id, i)}>
-          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    pc.points.forEach((a, i) => {
-      const c = f2p(a);
-      nodes.push(
-        <rect key={`pv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startVertex(e, pc.id, i)} />
-      );
-    });
-    return <g>{nodes}</g>;
+    return <g>{pc.points.map((a, i) => vtxRect(`pv${i}`, f2p(a), isSelVtx("parcel", pc.id, i), "move", (e) => startVertex(e, pc.id, i)))}</g>;
   })();
 
-  // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond):
-  // drag a dot to move a corner, click a ＋ on an edge to add one, Shift-click a
-  // dot to delete it — same as parcels.
+  // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
+  // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
   const elPolyHandles = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
-    const nodes = [];
-    el.points.forEach((a, i) => {
-      const b = el.points[(i + 1) % el.points.length];
-      const am = f2p(a), bm = f2p(b);
-      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-      nodes.push(
-        <g key={`eaddv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addElVertex(e, el.id, i)}>
-          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    el.points.forEach((a, i) => {
-      const c = f2p(a);
-      nodes.push(
-        <rect key={`epv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startElVertex(e, el.id, i)} />
-      );
-    });
-    return <g>{nodes}</g>;
+    return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
   })();
 
   // Bluebeam-style editing chrome on a selected markup (select tool):
@@ -4646,50 +4826,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     }
     if (m.kind === "easement") {
-      // Grips on the editable PATH (boundary ring, or the centerline/edge-run spine).
-      const path = easeEditPath(m);
-      const px = path.map(f2p);
-      const closed = easeEditClosed(m);
-      const nodes = [];
-      px.forEach((p, i) => {
-        if (!closed && i === px.length - 1) return; // open spine: no edge past the last point
-        const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
-        nodes.push(
-          <g key={`eav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addEaseVertex(e, m.id, i)}>
-            <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-            <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
-            <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-          </g>
-        );
-      });
-      px.forEach((p, i) => nodes.push(
-        <rect key={`ev${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startEaseVertex(e, m.id, i)} />
-      ));
-      return <g>{nodes}</g>;
+      // B230 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
+      // spine). Insert via Shift-click / right-click an edge; the old "+" midpoint dots are gone.
+      const px = easeEditPath(m).map(f2p);
+      return <g>{px.map((p, i) => vtxRect(`ev${i}`, p, isSelVtx("ease", m.id, i), "move", (e) => startEaseVertex(e, m.id, i)))}</g>;
     }
     if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
+    // B230 — line/polyline/polygon control points as draggable squares (no "+" dots).
     const px = mkPts(m).map(f2p);
-    const isPoly = m.kind === "polyline" || m.kind === "polygon";
-    const nodes = [];
-    if (isPoly) px.forEach((p, i) => {
-      if (m.kind === "polyline" && i === px.length - 1) return; // open path: no edge past the last point
-      const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
-      nodes.push(
-        <g key={`mkav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMarkupVertex(e, m.id, i)}>
-          <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    px.forEach((p, i) => nodes.push(
-      <rect key={`mkv${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-        fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-        style={{ cursor: "move" }} onPointerDown={(e) => startMarkupVertex(e, m.id, i)} />
-    ));
-    return <g>{nodes}</g>;
+    return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
   // Accuracy state — the single source of truth for measurement / acreage trust.
@@ -5255,6 +5400,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
+            onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
@@ -5265,9 +5411,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
               </pattern>
-              <pattern id="pat-water" width="22" height="10" patternUnits="userSpaceOnUse">
-                <path d="M0 5 q5.5 -4 11 0 t11 0" fill="none" stroke="#5d8497" strokeWidth="0.8" opacity="0.45" />
-              </pattern>
+              {/* B231 — cartographic water body: a radial steel-teal gradient that deepens
+                  toward the center so a pond reads as water with volume (replaces the old
+                  decorative wavy-line hatch). objectBoundingBox units → auto-fits each pond. */}
+              <radialGradient id="grad-water" cx="50%" cy="50%" r="62%">
+                <stop offset="0%" stopColor="#2F6675" />
+                <stop offset="100%" stopColor="#5B97A5" />
+              </radialGradient>
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
               </pattern>
@@ -5738,24 +5888,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && tool === "select" && (
                       <g>
-                        {/* B141: add-vertex ＋ on each editable edge (area wraps closed; line/polyline don't) */}
+                        {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
+                            right-click an edge inserts a point; right-click / Delete removes one.
+                            The active control point (Delete target) is shown inverted. */}
                         {pts.map((p, k) => {
-                          if (!isArea && k === pts.length - 1) return null;
-                          const q = pts[(k + 1) % pts.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+                          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
                           return (
-                            <g key={`mav${k}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMeasureVertex(e, i, k)}>
-                              <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={mcolor} strokeWidth={1.25} />
-                              <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={mcolor} strokeWidth={1.25} />
-                              <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={mcolor} strokeWidth={1.25} />
-                            </g>
+                            <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+                              fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
+                              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
                           );
                         })}
-                        {/* B141: draggable vertex dots — drag to reshape, Shift-click to delete */}
-                        {pts.map((p, k) => (
-                          <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                            fill={mcolor} stroke={PAL.paper} strokeWidth={1.5}
-                            style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                        ))}
                         {/* delete the whole measurement */}
                         <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
                           <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
@@ -5874,11 +6017,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parcelEdgeLabels}
                 {handleNodes}
                 {sideAddNodes}
-                {courtAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
                 {markupHandles}
+                {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
+                    edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
+                {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
                 {attachHint && (() => {
                   const p = f2p(attachHint);
                   return (
@@ -6684,7 +6829,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                     </>
-                  ) : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
+                  ) : isDockZone(selEl) ? (() => {
+                    // A dock-zone stack member (court / trailer / buffer). Edit its DEPTH inline,
+                    // and — the button Michael relies on — a "＋" to add the NEXT outward zone on
+                    // THIS side (court → trailer parking → buffer), plus a direct remove. This is the
+                    // per-zone add restored (B239): selecting the truck court gives you "＋ Add trailer
+                    // parking" again, independent of the other dock side.
+                    const b = els.find((x) => x.id === selEl.attachedTo);
+                    const side = b && zoneSideOf(els, selEl);
+                    const i = zoneIndexOf(selEl);
+                    const n = b && side ? stackCountIn(els, b, side) : 0; // zones present on this side (1..3)
+                    const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label : null; // the next one out
+                    return (
+                      <>
+                        <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
+                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
+                        </Field>
+                        {b && side && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2, marginBottom: 4 }}>
+                            {nextLabel && (
+                              <button style={{ ...chip, textAlign: "left", color: "#0e7490" }}
+                                title={`Add ${Math.round(zoneDepthDefaults(settings)[n])}′ ${nextLabel.toLowerCase()} flush beyond this, on this dock side`}
+                                onClick={() => addZoneOnSide(b, side)}>＋ Add {nextLabel.toLowerCase()}</button>
+                            )}
+                            <button style={{ ...chip, textAlign: "left", color: "#b3361b" }}
+                              title={`Remove this ${DOCK_ZONES[i].label.toLowerCase()}${n > i + 1 ? " and the zones beyond it" : ""}`}
+                              onClick={() => removeFeature(selEl.id)}>－ Remove {DOCK_ZONES[i].label.toLowerCase()}{n > i + 1 ? " (+ outer)" : ""}</button>
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? "" : ""}. Or select the building to grow / shrink every dock side at once.
+                        </div>
+                      </>
+                    );
+                  })() : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(swThick(selEl))} min={1} onCommit={(n) => setSidewalkWidth(selEl, n)} /></Field>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
@@ -6695,6 +6873,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
+                  {!isDockZone(selEl) && (
                   <Field label="Rotation (°)">
                     <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
@@ -6704,6 +6883,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </span>
                     </span>
                   </Field>
+                  )}
                   {selEl.type === "building" && (
                     <Field label="Docks">
                       <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
@@ -6741,21 +6921,66 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </>
                     );
                   })()}
-                  {selEl.type === "building" && (
-                    <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addTruckCourt(selEl)}>＋ {TRUCK_COURT_D}′ truck court</button>
-                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addDogEars(selEl)}>＋ Bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                  {selEl.type === "building" && !selEl.dogEar && (() => {
+                    // B229 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
+                    // car parking, and the visually-distinct bump-outs footprint modifier),
+                    // then the active dock-face zones listed in outward order with inline depths
+                    // + the LIFO "−". The footprint/dock-doors summary stays at the bottom (below).
+                    const b = selEl;
+                    const { dockSides } = dockSidesOf(b);
+                    const noDock = dockSides.length === 0;
+                    const level = dockStackLevel(b);          // shallowest dock side
+                    const hasBumps = els.some((x) => x.attachedTo === b.id && x.dogEar);
+                    const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
+                    const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
+                    // Uniform square +/− buttons so every control row lines up (B242 — the owner asked
+                    // for "+ and − next to each other" at a consistent size).
+                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid #ddd6c5", background: "#fff", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    // One control row: label (+ sub) on the left, "＋" and (optionally) "−" on the right.
+                    const ctlRow = (label, sub, { onAdd, addOn, addTitle, onRem = null, remOn = false, remTitle = "" }) => (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, color: PAL.ink }}>{label}</div>
+                          {sub && <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.3 }}>{sub}</div>}
+                        </div>
+                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={sq(addOn, false)}>＋</button>
+                        {onRem !== null && <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={sq(remOn, true)}>－</button>}
                       </div>
-                    </div>
-                  )}
-                  {selEl.truckCourt && (
-                    <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Truck court</div>
-                      <button style={{ ...chip, textAlign: "left", color: "#0e7490", width: "100%" }} onClick={() => addCourtTrailer(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (far side)</button>
-                    </div>
-                  )}
+                    );
+                    return (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={muteHdr}>Dock features</div>
+                        {ctlRow("Dock zones", "court → trailer parking → buffer", {
+                          onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
+                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone",
+                          onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
+                        })}
+                        {ctlRow("Car parking", "non-dock sides (the ends)", {
+                          onAdd: () => addCarParkingEnds(b), addOn: carParkingOpenSides(b).length > 0,
+                          addTitle: "Add a car-parking row on each open non-dock side",
+                          onRem: () => removeCarParkingEnds(b), remOn: carParkingEnds(b).length > 0, remTitle: "Remove the non-dock-side car parking",
+                        })}
+                        {ctlRow("Bump-outs", `footprint modifier · ${DOGEAR_W}′×${DOGEAR_D}′ corners`, {
+                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: "Add dock-corner bump-outs",
+                          onRem: hasBumps ? () => removeAllDogEars(b) : null, remOn: hasBumps, remTitle: "Remove all bump-outs",
+                        })}
+                        {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
+                        {/* active dock-face zones, outward order, inline editable depth */}
+                        {level > 0 && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={muteHdr}>Zone depths · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
+                            {DOCK_ZONES.slice(0, level).map((z, i) => (
+                              <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                                <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i + 1}. {z.label}</span>
+                                <NumInput style={{ ...numInput, width: 52 }} value={zoneDepthShown(b, i)} min={1} onCommit={(n) => setZoneDepthAll(b, i, n)} />
+                                <span style={{ fontSize: 11, color: PAL.muted }}>′</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {selEl.type === "parking" && (() => {
                     const pc = cfgOf(selEl);
                     return (
@@ -7321,6 +7546,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
           </Section>
 
+          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
+              the dock face. Editable per plan — the building "+" reads these. */}
+          <Section title="Dock zones" collapsed>
+            <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
+            <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
+            <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
+          </Section>
+
           <Section title="Roads" collapsed>
             <Field label="Curb width (ft)"><NumInput style={numInput} value={settings.roadCurb ?? 0.5} min={0} onCommit={(n) => setSettings((s) => ({ ...s, roadCurb: n }))} /></Field>
             <Field label="Road widths (ft)">
@@ -7594,6 +7828,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
+      {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
+          never be clipped or trapped behind the canvas / tool-rail stacking contexts. */}
+      {vtxMenu && createPortal(
+        <>
+          <div onClick={() => setVtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setVtxMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 6000 }} />
+          <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(vtxMenu.x + 2, window.innerWidth - 200), top: Math.min(vtxMenu.y + 2, window.innerHeight - 64), zIndex: 6001, minWidth: 190 }}>
+            {vtxMenu.mode === "edge"
+              ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+              : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
+          </div>
+        </>,
+        document.body,
+      )}
+
       {parcelMenu && (
         <>
           <div onClick={() => setParcelMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
@@ -7632,13 +7880,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </button>
                     </>
                   )}
-                  {isBuildingRect && (
-                    <>
-                      <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
-                      <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
-                      <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
-                    </>
-                  )}
+                  {isBuildingRect && (() => {
+                    const lvl = dockStackLevel(t), mx = dockStackMax(t);
+                    const nextL = DOCK_ZONES[lvl] ? DOCK_ZONES[lvl].label : null;
+                    const outerL = mx > 0 && DOCK_ZONES[mx - 1] ? DOCK_ZONES[mx - 1].label : null;
+                    return (
+                      <>
+                        <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
+                        {nextL && <button style={menuItem(false)} onClick={() => { addDockZone(t); setTypeMenu(null); }}>＋ Add {nextL.toLowerCase()} (outward)</button>}
+                        {outerL && <button style={menuItem(false)} onClick={() => { removeOuterDockZone(t); setTypeMenu(null); }}>－ Remove {outerL.toLowerCase()} (outermost)</button>}
+                        <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                      </>
+                    );
+                  })()}
                   {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
@@ -7675,22 +7929,29 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
-  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;
+  // B231 — cartographic water body (detention pond): a radial steel-teal gradient fill at
+  // ~80% opacity + a constant-screen-pixel teal outline. NEVER orange (the Markup accent), so
+  // a pond never reads as redline — selection is shown by a thicker teal stroke + the vertex
+  // handles, not a colour change.
+  const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
+  const waterOp = st.cartoWater ? 0.8 : fillOp;
+  const elStroke = st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke);
   // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
   // feet, drawn dashed so the user sees what the pond grew from. Same path for the
   // polygon and rect branches (the rect branch counter-rotates it back to world).
   const ghostRing = el.type === "pond" && el.det?.baseline?.ring?.length >= 3 ? el.det.baseline.ring : null;
   const ghostPath = ghostRing ? ghostRing.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
-  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
+  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#2C5D6B" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>
-        <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
+        <path d={dPath} fill={waterFill} fillOpacity={waterOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
-        <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+        <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
       </g>
     );
@@ -7701,8 +7962,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
   const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
-    stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={waterFill} fillOpacity={waterOp}
+    stroke={st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.

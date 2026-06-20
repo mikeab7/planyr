@@ -170,6 +170,46 @@ Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
 
 export const ALL_LAYERS = { ...STATEWIDE, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
 
+/* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
+ * date or maintenance cadence, as documented by the provider. This is the
+ * decision-relevant "current as of" stamp, and is DELIBERATELY DISTINCT from
+ * "last refreshed" (when WE pulled the copy — that rides the gisCache age, and
+ * only becomes meaningful once caching lands; until then a fetch is effectively
+ * live). Honest by rule: where a source has no single date — per-panel FIRMs,
+ * per-area LiDAR, continuously-maintained registries — we SAY SO rather than
+ * invent one, and a layer with no entry here renders "vintage unknown" (an honest
+ * state, never a fabricated date). Keyed by layer id, so the per-county utility
+ * layers (spread into JLAYERS) are covered too. When the GIS-cache work (B96)
+ * lands, fold this together with the refreshed-age stamp into one surface. */
+export const LAYER_VINTAGE = {
+  // Statewide overlays
+  fema: "Effective date varies by FIRM panel",
+  wetlands: "Survey date varies by NWI project area",
+  txrrc_pipe: "RRC permit data — continuously updated",
+  txrrc_wells: "RRC permit data — continuously updated",
+  // Utility evidence
+  osm_power: "OpenStreetMap — community-edited, live",
+  osm_hydrants: "OpenStreetMap — community-edited, live",
+  mapillary: "Capture date varies by street",
+  hifld_tx: "HIFLD (US DOE/NETL) — periodically updated",
+  coh_hydrants: "City of Houston Public Works — current edition",
+  elevation: "LiDAR collection varies by county (USGS 3DEP)",
+  // Jurisdiction boundaries
+  jur_county: "TxDOT county boundaries — current edition",
+  jur_city: "TxGIO city limits — current edition",
+  jur_etj: "H-GAC ETJ — current edition",
+  jur_mud: "TCEQ water districts (via HARC) — current edition",
+  // Per-county utility layers
+  hcfcd_row: "HCFCD channels & ROW — current edition",
+  coh_ww: "City of Houston GIS (test host) — current edition",
+  coh_storm: "City of Houston GIS (test host) — current edition",
+  coh_water: "City of Houston GIS (test host) — current edition",
+  fb_contours: "Fort Bend Drainage District — current edition",
+};
+// A layer's vintage: an explicit per-config override wins; else the central map;
+// else null → the UI shows the honest "vintage unknown".
+export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
+
 // Fresh per-layer UI state (all off, each at its default opacity).
 export const defaultOverlayState = () => {
   const o = {};

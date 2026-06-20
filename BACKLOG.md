@@ -25,8 +25,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-20: owner-reported (chat, w/ 3 screenshots) that "Print" opens a blank `about:blank`
      window and routes through the BROWSER's print dialog — which stamps a date/time header, the
      about:blank URL, and a page number onto the output, bleeds a cream page background (more ink),
-     and (Letter content dropped on a Tabloid sheet) doesn't fill the page. Filed **B228** (arrived
-     as "NEW-1") — highest B# across both files was B227, so B228 is the real next free ID.
+     and (Letter content dropped on a Tabloid sheet) doesn't fill the page. Filed **B243** (arrived
+     as "NEW-1"; minted B228, renumbered **B243** — concurrent `main` took B228–B242 while this was
+     in flight, so B243 is the real next free ID after B242).
      **Inspected the current print code first (as the owner asked):** the path ALREADY composes the
      whole sheet as ONE SVG at the exact page size (B200/B197/B201) — the only problem is the final
      DELIVERY step (`window.open` + `win.print()` hands it to the browser's print dialog; the cream
@@ -39,7 +40,75 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      **B50** (export/print robustness) is partly SUPERSEDED for the print path (the old "don't strand
      a blank Preparing… window" guard is moot — there's no window now). **B159/B160** are the
      *Scheduler* Gantt PDF/Print export (a different module), not this. Filed AND shipped this same
-     session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION **V55**). -->
+     session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION **V60**). -->
+
+<!-- 2026-06-20: owner-reported (chat, with finished artwork + brief) the new Planyr coral brand
+     mark — the favicon/app-icon swap + coral tokens/BrandMark component. Arrived as "NEW-1"/"NEW-2";
+     provisionally B230/B231, but `main` advanced repeatedly during the work (B230–B239: Bluebeam
+     vertex editing, detention pond, map-finder tranche, stale-chunk hardening, dock-zone fixes),
+     so renumbered to the real next free IDs **B240/B241** at merge time. Deduped: no prior favicon/
+     app-icon or brand-token/BrandMark item (B3 = brand *spelling*; B104/B10 = the unified-header
+     consolidation that B241's logo slot plugs into — orthogonal). Both filed AND shipped this same
+     session — moved to BACKLOG-DONE.md. Canonical artwork + the dependency-free icon generator live
+     in brand/. -->
+
+<!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
+     deal." Filed B228, renumbered B239 — concurrent `main` took B228–B238 while this was in flight, so B239 is the real next free ID.
+     Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
+     holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
+     NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
+     its chunk loads (ui-audit/diagnose-scheduler.mjs). B221 already auto-reloads, but two recovery gaps
+     let it still dead-end: (1) a plain location.reload() can be served the browser's OWN hard-cached
+     stale index.html → same dead chunk → cooldown → error screen (the no-cache _headers can't retro-fix
+     an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
+     dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
+     the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
+     same session — moved to BACKLOG-DONE.md: B239 (reloadFresh cache-busting reload + chunk-aware
+     ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
+     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V58). -->
+
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2"). Concurrent main took B227–B236 while
+     this was in flight, so these renumbered to **B237** (two-backend architecture doc) + **B238**
+     (DWG→DXF conversion service) — the real next free IDs after B236. Deduped before filing: NEW-1
+     RECONCILED the existing "Two backends — don't conflate" section in CLAUDE.md in place (no
+     duplicate section); NEW-2 ADDED server/convert/ to the ALREADY-EXISTING /server scaffold (the
+     B206–B209 Drive storage layer was there — /server was not absent), reusing the shared
+     no-silent-failure result.js. Both filed AND shipped this same session — full blocks moved to
+     BACKLOG-DONE.md. -->
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Renumbered twice
+     under a hot `main` (B225–B229 → B230–B234 → **B232–B236**; concurrent PRs #188–#191 + #190
+     took B225–B231). Filed AND shipped this same session on branch `claude/tender-goldberg-ax4n5w`
+     — all five moved to BACKLOG-DONE.md: B232 (address search recenters — Esri geocoder biased to
+     the map, replaces the no-bias Nominatim that returned nothing for bare street addresses), B233
+     (address search selects the parcel + shows its appraisal info, reusing the click pipeline + the
+     planner's appraisal labeller; source-unavailable ≠ no-parcel-here), B234 (one shared status-
+     token set — color + glyph per state — across chips, list markers, and map pins; module accents
+     confined to the tab row; amends B161's pins), B235 (left rail: chips-as-filters + type-to-filter
+     + collapsible status groups, Complete/Dead collapsed by default; consumes B234), and B236
+     (per-layer source-vintage stamp, distinct from refreshed-age; "vintage unknown" never
+     fabricated; the ship-now half of B96's data-age surfacing). All self-verified headless (V57). -->
+
+<!-- 2026-06-20: B230 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+     right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
+     dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
+     measures / markup poly-line / easements) + B231 (cartographic detention pond — radial steel-teal
+     gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B230/B231** — concurrent `main` (PRs #184/#186/
+     #188/#189/#191) took B221–B229 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-
+     panel redesign, dock-zone stack) while this was in flight, so B230/B231 are the real next free IDs
+     after B229. Filed AND shipped this same session — moved to BACKLOG-DONE.md; self-verified headless
+     (ui-audit/verify-b221-b222.mjs), V56. -->
+
+<!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
+     B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
+     feature-button visibility, #189 B227 yield panel, #184 B222–B224 Schedule) while this was in
+     flight, so renumbered to the real next free IDs **B228/B229** at merge time. Filed AND shipped
+     this same session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout
+     freeze) AND vs main's B225/B226 (#188 size-GATES these feature buttons — orthogonal: that's
+     button visibility, this is the zone stack the buttons drive). REUSES the existing court /
+     far-side-trailer / bump-out machinery rather than re-adding it. -->
 
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
@@ -1110,7 +1179,6 @@ Original spec:
   - Coupled to **B11 / B13 / B36 / B137** (the county-resolution theme). **Not urgent** — the statewide fallback keeps Austin/DFW functional meanwhile; pick up when the owner is actively working those metros (start with Travis, Tarrant, Dallas).
 
 ---
-
 
 ## ✅ Done
 
