@@ -101,3 +101,65 @@ export function parseScaleNote(text) {
   }
   return null;
 }
+
+// "1 1/2" → 1.5, "3/16" → 0.1875, "1" → 1. Tolerant of spaces around the slash.
+function fracToNum(s) {
+  s = String(s).trim();
+  const mixed = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixed) return +mixed[1] + +mixed[2] / +mixed[3];
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (frac) return +frac[1] / +frac[2];
+  return +s || 0;
+}
+
+/* Parse a STATED scale callout from a sheet's text, for Document Review auto-calibration
+ * (B267). Richer than parseScaleNote (which stays civil-only, 10–1000 ft/in, for the Site
+ * Planner overlay): it also reads ARCHITECTURAL fractional and RATIO forms — which fall
+ * below the civil floor — and recognises an explicit "not to scale". Returns one of:
+ *   { ftPerInch, form:'engineer'|'arch'|'ratio', label }   a usable real-feet-per-paper-inch
+ *   { explicit:'nts', label }                              explicitly NOT scalable (don't calibrate)
+ *   null                                                    nothing parseable
+ * ftPerInch → feet-per-point via ftPerPointForScale (so it feeds calByPage directly). The
+ * caller still gates on detectSheet() (standard plot size) before trusting it, and labels
+ * the result "from sheet scale — verify". Pure + browser-free, so it's unit-tested. */
+export function parseSheetScale(text) {
+  if (!text || typeof text !== "string") return null;
+  const t = text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'"); // normalize smart quotes
+
+  // 1) A TITLE-BLOCK "SCALE: NOT TO SCALE / AS NOTED" wins outright — the sheet itself
+  //    declares no single scale. (A stray "NTS" on one detail does NOT; see step 5.)
+  if (/\bscale\b[\s:.\-—]{0,4}(?:not\s*to\s*scale|n\.?t\.?s\.?|as\s+noted)\b/i.test(t)) {
+    return { explicit: "nts", label: "NOT TO SCALE" };
+  }
+
+  // 2) Architectural fractional: 1/4"=1'-0",  3/16" = 1'-0",  1 1/2"=1'-0"  (paper inches as a
+  //    fraction/mixed = feet'-inches"). Require a fraction so a bare 1"=50' falls to (3) engineer.
+  const arch = t.match(/(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+)\s*"\s*=\s*(\d+)\s*'(?:\s*-?\s*(\d+(?:\s+\d+\s*\/\s*\d+)?)\s*")?/);
+  if (arch) {
+    const paperIn = fracToNum(arch[1]);
+    const ft = +arch[2] + (arch[3] ? fracToNum(arch[3]) / 12 : 0);
+    if (paperIn > 0 && ft > 0) {
+      const fpi = ft / paperIn;
+      if (fpi >= 0.1 && fpi <= 400) {
+        const lbl = `${arch[1].replace(/\s*\/\s*/, "/")}"=${arch[2]}'-${arch[3] || 0}"`;
+        return { ftPerInch: fpi, form: "arch", label: lbl };
+      }
+    }
+  }
+
+  // 3) Engineer's: 1"=50',  1" = 50 ft,  1 inch = 50 ft,  SCALE: 1"=50'
+  //    (foot mark ' has no \b — it's non-word, so \b would fail at end-of-string; ft/feet keep it)
+  const eng = t.match(/1\s*(?:"|in(?:ch)?)\s*=\s*(\d{1,4})\s*(?:['′]|ft\b|feet\b)/i);
+  if (eng) { const s = +eng[1]; if (s >= 1 && s <= 2000) return { ftPerInch: s, form: "engineer", label: `1"=${s}'` }; }
+
+  // 4) Ratio: 1:200  (1 paper unit = N real units → N/12 feet per paper inch)
+  const ratio = t.match(/\b1\s*:\s*(\d{1,5})\b/);
+  if (ratio) { const n = +ratio[1]; if (n >= 2 && n <= 10000) return { ftPerInch: n / 12, form: "ratio", label: `1:${n}` }; }
+
+  // 5) No numeric plan scale — a bare "NOT TO SCALE" / "NTS" anywhere means uncalibrate.
+  if (/\bnot\s*to\s*scale\b/i.test(t) || /\bn\.?t\.?s\.?\b/i.test(t)) {
+    return { explicit: "nts", label: "NOT TO SCALE" };
+  }
+
+  return null;
+}

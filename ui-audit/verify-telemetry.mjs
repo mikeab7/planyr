@@ -1,4 +1,4 @@
-/* Runtime verification for B276 — client error telemetry.
+/* Runtime verification for B279 — client error telemetry.
  *
  * Drives the BUILT app (vite preview on :4173) in headless Chromium and exercises the
  * real global handlers installed by src/shared/telemetry/clientErrors.js. The DB sink

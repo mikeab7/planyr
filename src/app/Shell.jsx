@@ -52,7 +52,7 @@ export default function Shell() {
   // instant. Lazy-loading still gates the first paint; this only runs after.
   useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
 
-  // B276 — tag telemetry rows with the workspace the user is in, so a reported error
+  // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler).
   useEffect(() => { setTelemetryModule(active); }, [active]);
 

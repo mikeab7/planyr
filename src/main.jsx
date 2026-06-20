@@ -5,7 +5,7 @@ import { installChunkReloadGuard } from "./app/chunkReload.js";
 import { installClientErrorTelemetry } from "./shared/telemetry/clientErrors.js";
 import "./index.css";
 
-// Self-report runtime errors (B276): global error / unhandledrejection / preloadError
+// Self-report runtime errors (B279): global error / unhandledrejection / preloadError
 // handlers record each crash to Supabase so silent production failures become visible.
 // Installed first (before the chunk guard and render) so it can catch the earliest boot
 // errors too. Fail-safe — never throws into the app.

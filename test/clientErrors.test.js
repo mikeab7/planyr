@@ -10,10 +10,10 @@ import {
   RATE_MAX,
 } from "../src/shared/telemetry/clientErrors.js";
 
-// B276 — error telemetry. The pure layer (decide-to-send + row shaping) is what carries
+// B279 — error telemetry. The pure layer (decide-to-send + row shaping) is what carries
 // the real logic; the network sink is a thin fire-and-forget insert verified headlessly.
 
-describe("decideReport — storm guard (B276)", () => {
+describe("decideReport — storm guard (B279)", () => {
   const fresh = () => ({ seen: new Map(), windowStart: 0, sent: 0 });
 
   it("reports the first time a signature is seen", () => {
@@ -70,7 +70,7 @@ describe("decideReport — storm guard (B276)", () => {
   });
 });
 
-describe("extractMessage / extractStack (B276)", () => {
+describe("extractMessage / extractStack (B279)", () => {
   it("reads a message from Error, string, rejection reason, and arbitrary objects", () => {
     expect(extractMessage(new Error("boom"))).toBe("boom");
     expect(extractMessage("plain string error")).toBe("plain string error");
@@ -91,7 +91,7 @@ describe("extractMessage / extractStack (B276)", () => {
   });
 });
 
-describe("buildErrorRow (B276)", () => {
+describe("buildErrorRow (B279)", () => {
   const meta = { build: "abc1234", url: "https://planyr.io/", userAgent: "test-UA" };
 
   it("shapes the row with source, module, message and metadata", () => {
@@ -124,7 +124,7 @@ describe("buildErrorRow (B276)", () => {
   });
 });
 
-describe("errorSignature (B276)", () => {
+describe("errorSignature (B279)", () => {
   it("combines source + message and is bounded in length", () => {
     expect(errorSignature("react", "Cannot read x")).toBe("react|Cannot read x");
     expect(errorSignature(undefined, undefined)).toBe("error|");

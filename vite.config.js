@@ -5,7 +5,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 
 // Build identifier (short git SHA, timestamp fallback) baked into the bundle so the
-// error-telemetry rows (B276) can be traced back to the exact deploy that produced them.
+// error-telemetry rows (B279) can be traced back to the exact deploy that produced them.
 const BUILD_ID = (() => {
   try {
     return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
@@ -25,7 +25,7 @@ export default defineConfig(({ command }) => ({
   // GitHub Pages subfolder (https://<user>.github.io/<repo>/), while local
   // `npm run dev` still serves from the root.
   base: command === "build" ? "./" : "/",
-  // Compile-time constant for error telemetry (B276); read via a typeof guard in
+  // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [

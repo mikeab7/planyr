@@ -1,4 +1,4 @@
--- Client error telemetry (B276) — public.client_errors
+-- Client error telemetry (B279) — public.client_errors
 -- Run ONCE in the Supabase SQL editor. Idempotent (safe to re-run). Mirrors the
 -- doc_reviews.sql migration style.
 --

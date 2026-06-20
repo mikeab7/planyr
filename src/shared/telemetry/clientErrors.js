@@ -1,4 +1,4 @@
-/* Client error telemetry (B276).
+/* Client error telemetry (B279).
  *
  * Makes the app self-report runtime errors so silent failures stop being invisible
  * until someone stumbles on them. Three global sources feed one sink: window 'error'
@@ -9,7 +9,7 @@
  * calls reportClientError() from componentDidCatch.
  *
  * Sink: a new public.client_errors table via the EXISTING anon Supabase client (no new
- * vendor, no new keys — the "Supabase table, not Sentry" decision in B276). The table
+ * vendor, no new keys — the "Supabase table, not Sentry" decision in B279). The table
  * is INSERT-only under RLS (see client_errors.sql): anyone — including an anonymous or
  * half-broken/logged-out session — can write a row, nobody can read it back from the
  * client (admins read via the dashboard / service role). That's deliberate: an error
