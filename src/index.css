@@ -121,6 +121,9 @@ input[type="range"] { height: 18px; }
   50% { opacity: .35; transform: scale(.7); }
 }
 
+/* spinner — e.g. the "Preparing PDF…" indicator */
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* keyboard hint chips */
 kbd {
   font-family: "Inter", system-ui, sans-serif;
