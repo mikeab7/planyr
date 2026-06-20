@@ -837,6 +837,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
+  const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
@@ -1556,6 +1557,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => wrap.removeEventListener("wheel", onWheel);
   }, []);
 
+  // NEW-1 — never leave the canvas stuck behind a frozen grab/hand cursor that won't click.
+  // A pan/drag captures the pointer and relies on the pointer-UP (onUp) to release capture
+  // and clear `panning`/`drag`. But the browser fires pointer-CANCEL (not pointer-up) when a
+  // gesture is interrupted — a devtools/remote-debugger session attaching to the tab, an OS
+  // gesture takeover, or the window losing focus mid-drag. With no cancel handler that cleanup
+  // never ran, so `panning` stayed true (stuck grab cursor) with pointer-capture held and the
+  // canvas swallowed every click. This tears the whole gesture down so it can self-recover.
+  const abortGesture = (pid = capturePidRef.current) => {
+    if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
+    capturePidRef.current = null;
+    drag.current = null;
+    setPanning(false);
+    setMarquee(null);
+    setMkRect(null);
+    setDraftRect(null);
+  };
+  // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
+  // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
+  // waiting on). Mirrors the Shift-reset effect below; also drops the Space hand-pan so the
+  // grab cursor can't stick on.
+  useEffect(() => {
+    const recover = () => { spaceRef.current = false; setSpacePan(false); abortGesture(); };
+    const onVis = () => { if (document.hidden) recover(); };
+    window.addEventListener("blur", recover);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
@@ -1590,7 +1619,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -1769,6 +1798,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ pointer handlers (svg root) ------------ */
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
     altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
 
@@ -2717,6 +2747,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
     drag.current = null;
     setPanning(false);
+    capturePidRef.current = null;
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
   };
 
@@ -5506,7 +5537,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
-            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
+            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
             <defs>
