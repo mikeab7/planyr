@@ -22,6 +22,16 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
+     B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
+     feature-button visibility, #189 B227 yield panel, #184 B222–B224 Schedule) while this was in
+     flight, so renumbered to the real next free IDs **B228/B229** at merge time. Filed AND shipped
+     this same session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout
+     freeze) AND vs main's B225/B226 (#188 size-GATES these feature buttons — orthogonal: that's
+     button visibility, this is the zone stack the buttons drive). REUSES the existing court /
+     far-side-trailer / bump-out machinery rather than re-adding it. -->
+
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
      size-gate the buttons) + B226 (NEW-2: only on the selected/hovered building) — highest B#

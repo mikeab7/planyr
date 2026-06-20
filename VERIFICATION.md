@@ -61,6 +61,12 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V55 — Building-anchored dock-zone stack + Dock Features panel reorg (B228 / B229) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, vite preview, logged-out, non-located demo site) · **Next check** — none (pure planner-canvas/panel UI; no auth/cloud path involved)
+- **Harness:** `ui-audit/verify-dock-zones.mjs` (seeds a 600′×300′ cross-dock building → boots the planner → selects the building → drives the Dock features panel; captures console/page errors; screenshots `screens/dock-zones-full.png` + `dock-zones-deepbuffer.png`).
+- **✅ Result (all checks passed, 0 page errors):** the stack "+" walks out **truck court → trailer parking → buffer** (cross-dock → 2 of each), in the correct **outward order** (court nearest the wall, buffer farthest); "+" reads "All zones" and disables at the full stack. **Inline buffer depth 15→40 grew the band** while the outer zones stayed flush. **Building resize 600→760 kept every zone attached, full-width and flush** (the rewritten `refitChildren` relayout). The LIFO "−" peeled **buffer → trailer → court** in order. **Car parking (ends)** added a separate parking field outside the stack. Screenshots confirm the panel layout (add-controls on top: stack +/−, car parking, visually-distinct bump-outs; the outward zone list with inline depths + LIFO −; the footprint/dock-doors summary at the bottom).
+- **Note:** logged-out is the full story here — the dock-zone stack is local planner geometry (no auth/cloud branch), so no separate signed-in check is owed.
+
 ### V49 — Header cleanup + cartographic furniture restyle (B218 / B219) ✅ (self-verified headless — fully done, no signed-in check needed)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, vite preview, logged-out, live Harris-county aerial) · **Next check** — none (pure UI; no auth/cloud path involved)
 - **Harness:** `ui-audit/verify-new1to2.mjs` (seeds a located demo site → boots into the planner → asserts the header + furniture DOM, captures console/page errors, screenshots the header and both furniture corners).
