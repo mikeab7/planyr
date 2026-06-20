@@ -21,6 +21,7 @@
  */
 import { useEffect, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 
@@ -186,32 +187,19 @@ export default function AppHeader({
 
         {/* Left zone */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0 }}>
-          {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B192) */}
+          {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
+              Also a secondary route to the Dashboard (the labeled crumb is primary, B192). */}
           <button
             onClick={onDashboard || undefined}
             title={onDashboard ? "Dashboard — all projects" : undefined}
             style={{
-              display: "flex", alignItems: "center", gap: 6, flex: "none",
+              display: "flex", alignItems: "center", flex: "none",
               background: "transparent", border: "none",
               cursor: onDashboard ? "pointer" : "default",
               padding: "2px 4px", borderRadius: 6,
             }}
           >
-            <span
-              style={{
-                width: 18, height: 18, borderRadius: 5,
-                background: accent, transition: "background 0.25s",
-                display: "grid", placeItems: "center", flex: "none",
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" />
-                <rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" />
-              </svg>
-            </span>
-            <span style={{ fontWeight: 800, fontSize: 13.5, color: "#fff", letterSpacing: "-0.01em" }}>
-              planyr
-            </span>
+            <BrandMark size={20} tile={false} wordmark surface="dark" />
           </button>
 
           {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}

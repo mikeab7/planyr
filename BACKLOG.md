@@ -21,6 +21,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+
+<!-- 2026-06-20: owner-reported (chat, with finished artwork + brief) the new Planyr coral brand
+     mark — the favicon/app-icon swap + coral tokens/BrandMark component. Arrived as "NEW-1"/"NEW-2";
+     provisionally B230/B231, but `main` advanced repeatedly during the work (B230–B239: Bluebeam
+     vertex editing, detention pond, map-finder tranche, stale-chunk hardening, dock-zone fixes),
+     so renumbered to the real next free IDs **B240/B241** at merge time. Deduped: no prior favicon/
+     app-icon or brand-token/BrandMark item (B3 = brand *spelling*; B104/B10 = the unified-header
+     consolidation that B241's logo slot plugs into — orthogonal). Both filed AND shipped this same
+     session — moved to BACKLOG-DONE.md. Canonical artwork + the dependency-free icon generator live
+     in brand/. -->
+
 <!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
      deal." Filed B228, renumbered B239 — concurrent `main` took B228–B238 while this was in flight, so B239 is the real next free ID.
      Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
