@@ -3,12 +3,14 @@
  * workspace-specific toolbar content). The shell's job is auth, module
  * switching state, and building the auth-control slot that AppHeader needs.
  */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
-import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
+import { onAuthChange, signOut } from "../workspaces/site-planner/lib/auth.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
+import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
+import { useProfile } from "../shared/profile/useProfile.js";
 import { prefetchOnIdle } from "./modulePrefetch.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 
@@ -23,12 +25,58 @@ const CHROME = "#14110e";
 const LINE   = "#2e2a23";
 const MUTED  = "#9b9482";
 
+// ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
+// same portal menu primitive as the project breadcrumb — so it escapes the header's
+// stacking/clipping context and lines up under the pill, consistent with that menu.
+const pill = {
+  display: "flex", alignItems: "center", gap: 7,
+  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99,
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+  border: `1px solid ${LINE}`, background: "rgba(255,255,255,0.06)", color: "#ece7db",
+};
+const avatar = (signedIn, size = 20) => ({
+  width: size, height: size, borderRadius: 99, flex: "none",
+  display: "grid", placeItems: "center",
+  fontSize: size >= 28 ? 12.5 : 10.5, fontWeight: 800, color: "#fff",
+  background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)",
+});
+const acctPanel = {
+  padding: 6, borderRadius: 10, background: "#fff", color: "#2c2a26",
+  border: "1px solid #e7e2d6", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  fontFamily: "system-ui, sans-serif",
+};
+const acctRow = {
+  display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
+  padding: "8px 9px", borderRadius: 7, border: "none", background: "transparent",
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "#2c2a26",
+};
+const acctDivider = { height: 1, background: "#ece7db", margin: "4px 4px" };
+const hoverOn  = (e) => { e.currentTarget.style.background = "#f1eee6"; };
+const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
+
+// Tiny 14px line icons for the dropdown rows.
+const RowIcon = ({ d, size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", color: "#6b6557" }}>
+    {d}
+  </svg>
+);
+const ICON = {
+  profile:  (<><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-6 8-6s8 2 8 6" /></>),
+  settings: (<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>),
+  signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
+};
+
 export default function Shell() {
   const [active,    setActive]    = useState("site-planner");
   const [user,      setUser]      = useState(null);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
+  const [acctOpen,  setAcctOpen]  = useState(false); // account dropdown (signed-in pill, B298)
+  const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
+  const acctAnchor = useRef(null);
   // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
   // workspace's header; "Dashboard" and "open/new project" from Schedule or Markup
   // must route into the Site Planner (where projects open). The Shell switches the
@@ -67,40 +115,70 @@ export default function Shell() {
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;
 
-  const meta = (user && user.user_metadata) || {};
-  const who  = [meta.first_name, meta.last_name].filter(Boolean).join(" ")
-    || (user && user.email) || "";
+  // Profile (name/org) for the signed-in user — sourced from the profiles table via
+  // the useProfile hook, with a never-blank display name (B297/B298).
+  const profileApi = useProfile(user);
+  const who = profileApi.displayName;
 
-  const openAuth = () => { setRecovery(false); setAuthOpen(true); };
+  const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
+  const openAccount = (tab) => { setAcctOpen(false); setRecovery(false); setAuthTab(tab); setAuthOpen(true); };
 
   // Build the auth-control slot once per render; passed to every workspace so
   // AppHeader always has the current user state without needing its own auth hook.
   const authControl = supabaseConfigured() ? (
-    <button
-      onClick={openAuth}
-      title={user ? `Signed in as ${user.email}` : "Sign in or create an account"}
-      style={{
-        display: "flex", alignItems: "center", gap: 7,
-        maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99,
-        cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-        border: `1px solid ${LINE}`, background: "rgba(255,255,255,0.06)",
-        color: "#ece7db",
-      }}
-    >
-      <span
-        style={{
-          width: 20, height: 20, borderRadius: 99, flex: "none",
-          display: "grid", placeItems: "center",
-          fontSize: 10.5, fontWeight: 800, color: "#fff",
-          background: user ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)",
-        }}
-      >
-        {user ? (who.trim()[0] || "•").toUpperCase() : "›"}
-      </span>
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {user ? who : "Sign in"}
-      </span>
-    </button>
+    user ? (
+      // Signed in — the pill shows the user's name and opens an account dropdown (B298).
+      <>
+        <button
+          ref={acctAnchor}
+          onClick={() => setAcctOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={acctOpen}
+          title={`Signed in as ${user.email}`}
+          style={pill}
+        >
+          <span style={avatar(true)}>{profileApi.initial}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</span>
+          <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+        </button>
+        <AnchoredMenu
+          open={acctOpen}
+          onClose={() => setAcctOpen(false)}
+          anchorRef={acctAnchor}
+          placement="below-right"
+          width={236}
+          gap={8}
+          panelStyle={acctPanel}
+        >
+          {/* Identity header — avatar + name + email */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 9px 10px" }}>
+            <span style={avatar(true, 30)}>{profileApi.initial}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
+              {profileApi.org && <div style={{ fontSize: 11.5, color: "#6b6557", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
+              <div style={{ fontSize: 11.5, color: "#8a8475", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+            </div>
+          </div>
+          <div style={acctDivider} />
+          <button style={acctRow} onClick={() => openAccount("profile")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.profile} /> Profile
+          </button>
+          <button style={acctRow} onClick={() => openAccount("settings")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.settings} /> Settings
+          </button>
+          <div style={acctDivider} />
+          <button style={acctRow} onClick={async () => { setAcctOpen(false); await signOut(); }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.signout} /> Sign out
+          </button>
+        </AnchoredMenu>
+      </>
+    ) : (
+      // Logged out — a "Sign in" pill that opens the auth modal directly.
+      <button onClick={openAuth} title="Sign in or create an account" style={pill}>
+        <span style={avatar(false)}>›</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sign in</span>
+      </button>
+    )
   ) : (
     // Cloud not configured — show a "Cloud off" pill with an explanatory popover.
     <div style={{ position: "relative" }}>
@@ -183,6 +261,8 @@ export default function Shell() {
         <AuthPanel
           user={user}
           recovery={recovery}
+          profileApi={profileApi}
+          initialTab={authTab}
           onClose={() => { setAuthOpen(false); setRecovery(false); }}
         />
       )}

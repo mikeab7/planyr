@@ -28,7 +28,7 @@ describe("stitchGeom — solveM maps the two click pairs exactly", () => {
     expect(Math.hypot(M.A, M.B)).toBeCloseTo(3, 6); // 30 / 10
   });
 
-  // The exact failure B297 guards against: two coincident clicks on the moving sheet make
+  // The exact failure B300 guards against: two coincident clicks on the moving sheet make
   // |b2−b1| = 0, masked to 1 by `lb || 1`, so the transform inherits the reference baseline
   // as a raw scale — here ×100 with the sheet flung to e/f = −500.
   it("blows up (×100, e/f = −500) on a coincident moving-sheet baseline", () => {
@@ -39,7 +39,7 @@ describe("stitchGeom — solveM maps the two click pairs exactly", () => {
   });
 });
 
-describe("stitchGeom — degenerateAlign (the B297 guard)", () => {
+describe("stitchGeom — degenerateAlign (the B300 guard)", () => {
   const A1 = { x: 0, y: 0 }, A2 = { x: 100, y: 0 };
   const b1 = { x: 0, y: 0 }, b2 = { x: 80, y: 60 }; // 100-unit moving baseline
 
@@ -73,7 +73,7 @@ describe("stitchGeom — sheetBBox / pointInSheet", () => {
   });
 });
 
-describe("stitchGeom — overUnaligned (the B298 guard)", () => {
+describe("stitchGeom — overUnaligned (the B301 guard)", () => {
   // sheet 0 = anchor [0..100]×[0..100]; sheet 1 placed to the right [140..240]×[0..100]
   const anchor = { baseW: 100, baseH: 100, M: { A: 1, B: 0, e: 0, f: 0 }, aligned: true };
   const later = (aligned) => ({ baseW: 100, baseH: 100, M: { A: 1, B: 0, e: 140, f: 0 }, aligned });

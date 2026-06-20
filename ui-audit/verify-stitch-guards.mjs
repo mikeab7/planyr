@@ -1,11 +1,11 @@
-/* Verify the 2026-06-20 Doc Review STITCHER takeoff-correctness guards (B297/B298) against
+/* Verify the 2026-06-20 Doc Review STITCHER takeoff-correctness guards (B300/B301) against
  * the REAL built stitcher (vite preview on :4173). Loads a 2-page PDF into the Stitch
  * workspace, places both sheets (sheet 2 lands un-aligned), then drives:
  *
- *   B298 — an un-aligned later sheet is flagged "NEEDS ALIGN", and a Distance measurement
+ *   B301 — an un-aligned later sheet is flagged "NEEDS ALIGN", and a Distance measurement
  *          whose points land on it is BLOCKED (error banner, nothing committed) — so its
  *          (possibly different) scale can't silently corrupt the shared takeoff.
- *   B297 — a degenerate Align (two coincident clicks on the moving sheet) is REJECTED with
+ *   B300 — a degenerate Align (two coincident clicks on the moving sheet) is REJECTED with
  *          the "too close together" banner, and the sheet's transform is left UNTOUCHED
  *          (scale stays ~1, not flung to a runaway ×N) — the bug had no undo.
  *
@@ -86,13 +86,13 @@ try {
     [...document.querySelectorAll("svg image")].every((im) => im.getBoundingClientRect().width > 0), { timeout: 12000 });
   await page.waitForTimeout(400);
 
-  // ---- B298 visual: sheet 2 is flagged "NEEDS ALIGN" ----
+  // ---- B301 visual: sheet 2 is flagged "NEEDS ALIGN" ----
   {
     const badge = await page.locator('text=NEEDS ALIGN').count();
-    ok("B298 unaligned sheet is flagged", badge >= 1, `NEEDS ALIGN badge present (count ${badge})`);
+    ok("B301 unaligned sheet is flagged", badge >= 1, `NEEDS ALIGN badge present (count ${badge})`);
   }
 
-  // ---- B298 block: measuring over the un-aligned sheet is refused ----
+  // ---- B301 block: measuring over the un-aligned sheet is refused ----
   {
     await page.getByRole("button", { name: "Distance", exact: true }).click();
     const c = await imgCentre(page, 1); // sheet 2
@@ -101,11 +101,11 @@ try {
     await page.waitForTimeout(250);
     const lines = await page.evaluate(() => document.querySelectorAll('svg line[stroke="#0e7490"]').length);
     const blocked = /isn.?t aligned|align it before measuring/i.test(await bannerText(page));
-    ok("B298 measuring on an un-aligned sheet is blocked", lines === 0 && blocked,
+    ok("B301 measuring on an un-aligned sheet is blocked", lines === 0 && blocked,
       `committed distance lines=${lines} (want 0); banner warns=${blocked}`);
   }
 
-  // ---- B297: a degenerate Align (coincident moving-sheet clicks) is rejected, sheet untouched ----
+  // ---- B300: a degenerate Align (coincident moving-sheet clicks) is rejected, sheet untouched ----
   {
     const scaleBefore = await sheetScale(page, 1);
     await page.getByRole("button", { name: "Align", exact: true }).click(); // align sheet 2
@@ -120,8 +120,8 @@ try {
     const scaleAfter = await sheetScale(page, 1);
     const rejected = /too close together|farther apart/i.test(await bannerText(page));
     const untouched = scaleBefore != null && scaleAfter != null && Math.abs(scaleAfter - scaleBefore) < 0.05 && Math.abs(scaleAfter - 1) < 0.1;
-    ok("B297 degenerate align is rejected with a banner", rejected, `banner shows "too close" = ${rejected}`);
-    ok("B297 sheet transform left untouched (not flung)", untouched,
+    ok("B300 degenerate align is rejected with a banner", rejected, `banner shows "too close" = ${rejected}`);
+    ok("B300 sheet transform left untouched (not flung)", untouched,
       `scale ${scaleBefore?.toFixed(3)} → ${scaleAfter?.toFixed(3)} (want ≈1, |Δ|<0.05)`);
   }
 

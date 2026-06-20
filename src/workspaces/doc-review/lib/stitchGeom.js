@@ -19,7 +19,7 @@ export const MIN_BASELINE = 1;
 
 // True when either the moving-sheet baseline |b2−b1| or the reference baseline |A2−A1| is
 // too short to define a stable similarity transform. Guard with this BEFORE calling solveM
-// — otherwise a coincident pair flings the sheet off-canvas at a garbage scale (B297).
+// — otherwise a coincident pair flings the sheet off-canvas at a garbage scale (B300).
 export const degenerateAlign = (b1, b2, A1, A2, min = MIN_BASELINE) =>
   Math.hypot(b2.x - b1.x, b2.y - b1.y) < min || Math.hypot(A2.x - A1.x, A2.y - A1.y) < min;
 
@@ -49,6 +49,6 @@ export const pointInSheet = (s, w) => {
 // Does world point w land on a placed sheet that still needs alignment? The first placed
 // sheet (index 0) is the world anchor and is always "aligned"; any later sheet is unaligned
 // until its Align completes (s.aligned === true). Measuring there would score the point with
-// the shared (sheet-1) calibration → a silently wrong quantity when scales differ (B298).
+// the shared (sheet-1) calibration → a silently wrong quantity when scales differ (B301).
 export const overUnaligned = (placed, w) =>
   placed.some((s, i) => i > 0 && s.aligned !== true && pointInSheet(s, w));
