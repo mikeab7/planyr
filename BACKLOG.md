@@ -22,6 +22,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Minted
+     **B225–B229** (highest B# across both files was B224). Filed AND shipped this same session
+     on branch `claude/tender-goldberg-ax4n5w` — all five moved to BACKLOG-DONE.md: B225 (address
+     search recenters — Esri geocoder, biased to the map, replaces the no-bias Nominatim that
+     returned nothing for bare street addresses), B226 (address search selects the parcel + shows
+     its appraisal info, reusing the click pipeline + the planner's appraisal labeller; source-
+     unavailable ≠ no-parcel-here), B227 (one shared status-token set — color + glyph per state —
+     across chips, list markers, and map pins; module accents confined to the tab row; amends
+     B161's pins), B228 (left rail: chips-as-filters + type-to-filter + collapsible status groups,
+     Complete/Dead collapsed by default; consumes B227), and B229 (per-layer source-vintage stamp,
+     distinct from refreshed-age; "vintage unknown" never fabricated; the ship-now half of B96's
+     data-age surfacing). All self-verified headless (V53). -->
+
 <!-- 2026-06-20: owner-reported (chat) "Document Review (and all lazy modules) fail to load after a
      deploy — Failed to fetch dynamically imported module." Arrived as "NEW-1"; provisionally B218,
      renumbered **B221** — concurrent `main` (PR #183) took B218 (dead header controls) + B219

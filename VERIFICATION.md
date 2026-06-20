@@ -823,3 +823,14 @@ _Move items here with the date and who/what checked them._
   - **Reduced-motion:** with `prefers-reduced-motion`, the loader still renders but the cascade + sweep are dropped — **0 animated bars, no playhead** (`ui-audit/screens/loader-reduced-motion.png`).
   - 0 boot console errors; lint 0 · **419 tests** (5 new in `test/moduleLoaderTheme.test.js`) · build green; the `Scheduler` / `SitePlannerApp` / `DocReview` lazy chunks intact.
 - **Not covered (logged-out limits):** the signed-in path is identical (the loader/prefetch are auth-agnostic shell chrome); the Site-Planner skin (`#1D9E75` footprints) shares the one engine + is unit-tested, shown on the SitePlannerApp chunk's first load.
+
+### V53 — Map finder: address search recenter + parcel info, shared status tokens, left-rail rework, layer vintage (B225–B229) ✅
+- **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out, this-device seed) · **Cadence** once (bugfix + feature acceptance)
+- **Steps:** seeded 7 sites across all five statuses into `planarfit:sites:v1`, booted the map finder, then asserted pins/chips/rail/layers and drove the address search. Script `ui-audit/verify-b225-b229.mjs` (21/21).
+- **Result ✅:**
+  - **B227 tokens:** the five pins paint in the new status colors (Pursuit `#378ADD`, Active `#639922`, On Hold `#BA7517`, Complete `#888780`, Dead `#E24B4A`); the module accents `#EF9F27`/`#1D9E75` are confirmed **absent** from pins.
+  - **B228 rail:** the type-to-filter box narrows the list (and surfaces a match inside a collapsed group); Complete/Dead collapse by default and expand on click; the Active chip narrows the map **7→2 pins** and the header shows `2/7`.
+  - **B229 vintage:** toggling FEMA on shows the low-weight **"as of: Effective date varies by FIRM panel"** stamp, distinct from the refreshed-age.
+  - **B225/B226 address search:** searching **"19630 Crossbranch Dr, Katy, TX"** recentered the map on the parcel and produced a **"📍 CROSSBRANCH"** info card (Account 1403613 · 0.27 ac measured · land/improvement/total values · land use · legal) with the parcel highlighted + "Plan this site →" (`ui-audit/screens/b225-b229/address-search-result.png`).
+  - 0 uncaught page errors; lint 0 · **436 tests** · build green; lazy chunk split intact.
+- **Not covered (logged-out limits):** the live geocode (Esri) + county parcel identify happened to be reachable from the sandbox here (the Crossbranch card is real data); on a network where they're blocked, B225/B226 degrade to the honest "couldn't find that address" / "source unavailable" states (the code paths are exercised by the same script's branch). Cloud-synced sites (signed-in) render through the identical `statusOf`/token path.

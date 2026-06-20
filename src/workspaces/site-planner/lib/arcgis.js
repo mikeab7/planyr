@@ -149,15 +149,25 @@ export async function queryAtPoint(layerUrl, lng, lat) {
  * failing the whole identify, so a sibling county can still answer. Returns [] when
  * nothing matched anywhere. */
 export async function identifyParcelAcross(candidates, lng, lat) {
+  return (await identifyParcelDetailed(candidates, lng, lat)).hits;
+}
+
+/* Same identify, but also reports how many candidate services actually RESPONDED,
+ * so a caller can tell "couldn't reach any parcel service" (responded === 0) apart
+ * from "a service answered, but there's no parcel at this point" (responded > 0,
+ * hits empty) — two states that must read differently (B226). Returns
+ * { hits:[{county,feature}], responded, errors }. */
+export async function identifyParcelDetailed(candidates, lng, lat) {
   const results = await Promise.allSettled(
     (candidates || []).map(async ({ county, url }) => {
       const feature = await queryAtPoint(url, lng, lat);
       return feature ? { county, feature } : null;
     })
   );
-  return results
-    .filter((r) => r.status === "fulfilled" && r.value)
-    .map((r) => r.value);
+  const hits = results.filter((r) => r.status === "fulfilled" && r.value).map((r) => r.value);
+  const responded = results.filter((r) => r.status === "fulfilled").length;
+  const errors = results.filter((r) => r.status === "rejected").length;
+  return { hits, responded, errors };
 }
 
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
