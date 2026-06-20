@@ -19,8 +19,9 @@
  * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
@@ -116,6 +117,26 @@ function ModuleTab({ m, isActive, onClick }) {
   );
 }
 
+// B275 — track whether the same project is open in another same-browser tab (BroadcastChannel),
+// so the header can warn that editing in two tabs can conflict. Degrades to "no peers" where
+// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B274.
+function useMultiTab(projectId) {
+  const [state, setState] = useState({ otherCount: 0, sameProjectTabs: 0, conflictRisk: false });
+  const ref = useRef(null);
+  useEffect(() => {
+    const p = createMultiTabPresence({ project: projectId });
+    ref.current = p;
+    p.onChange(setState);
+    p.start();
+    const bye = () => p.stop();
+    window.addEventListener("pagehide", bye); // 'bye' so other tabs clear promptly on close
+    return () => { window.removeEventListener("pagehide", bye); p.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { if (ref.current) ref.current.setProject(projectId); }, [projectId]); // keep presence in sync as the project changes
+  return state;
+}
+
 export default function AppHeader({
   module = "site-planner",
   onSwitch,
@@ -137,6 +158,7 @@ export default function AppHeader({
   homeLabel,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const multiTab = useMultiTab(currentProject ? currentProject.id : null); // B275 — same-project-in-another-tab warning
 
   useEffect(() => {
     const handle = (e) => {
@@ -173,6 +195,7 @@ export default function AppHeader({
   }
 
   return (
+    <>
     <header
       style={{
         flex: "none",
@@ -270,5 +293,13 @@ export default function AppHeader({
         </div>
       </div>
     </header>
+    {/* B275 — non-blocking warning when the SAME project is open in another same-browser tab.
+        Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
+    {multiTab.conflictRisk && (
+      <div role="status" style={{ position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
+        <span>⧉ This project is open in <b>another tab</b>. Editing it in more than one tab can conflict — work in a single tab to be safe.</span>
+      </div>
+    )}
+    </>
   );
 }

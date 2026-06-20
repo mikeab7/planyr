@@ -9,14 +9,18 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions } from "./cloudSync.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
  * login) and writes mirror to Supabase (RLS-scoped to them). Logged out,
  * activeUser is null and everything stays 100% localStorage (the legacy store). */
 let activeUser = null;
-export function setActiveUser(uid) { activeUser = uid || null; }
+export function setActiveUser(uid) {
+  const next = uid || null;
+  if (next !== activeUser) clearSiteVersions(); // don't carry one user's optimistic-version tokens into another's session (B274)
+  activeUser = next;
+}
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // Pure merge of the local cache with the cloud's records (exported for tests).

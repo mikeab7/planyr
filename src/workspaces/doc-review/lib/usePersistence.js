@@ -67,9 +67,11 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     if (!snap) return;
     if (!readyRef.current) { setStatus("local"); return; }
     setStatus("saving");
-    const { ok } = await upsertReview({ ...snap, updatedAt: Date.now() });
+    const { ok, conflict } = await upsertReview({ ...snap, updatedAt: Date.now() });
     if (ok) dirtyRef.current = false; // cloud has the latest; a later edit re-flags dirty (B44)
-    setStatus(ok ? "saved" : "unsaved");
+    // A conflict (B274) — this review was changed in another session — is its own state, not a
+    // plain "unsaved": retrying won't help, the user must reload to merge in the latest first.
+    setStatus(conflict ? "conflict" : (ok ? "saved" : "unsaved"));
   }, [flushLocal]);
 
   // Debounced autosave on edits; skips only the initial mount.
