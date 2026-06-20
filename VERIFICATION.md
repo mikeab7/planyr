@@ -60,7 +60,7 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V58 — Schedule module recovers after a deploy instead of dead-ending (B237) ✅ (self-verified headless — fully done) · ⏳ one optional production click-through
+### V58 — Schedule module recovers after a deploy instead of dead-ending (B239) ✅ (self-verified headless — fully done) · ⏳ one optional production click-through
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — one optional live confirm on planyr.io after deploy (steps below)
 - **Harness:** `ui-audit/diagnose-scheduler.mjs` (three scenarios: normal click, stale-but-recoverable chunk, permanently-missing chunk) + `ui-audit/verify-chunk-reload.mjs` (the B221 guard contract).
 - **✅ A (module not broken):** clicking **Schedule** on a fresh load mounts the `/sequence/` iframe and the embedded Gantt renders **44 task rows** — confirms the failure was never the Scheduler/iframe code, only the chunk-fetch recovery.
