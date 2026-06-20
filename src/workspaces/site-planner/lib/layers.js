@@ -96,9 +96,9 @@ export const EVIDENCE = {
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
   },
   mapillary: {
-    // NEW-3/B276: plain-language name; the "Mapillary" brand is demoted to a small
+    // NEW-3/B284: plain-language name; the "Mapillary" brand is demoted to a small
     // source/attribution note (`source`) since the brand wasn't recognized.
-    // NEW-4/B277: `needsSetup` marks it as NOT part of the default working set — it
+    // NEW-4/B285: `needsSetup` marks it as NOT part of the default working set — it
     // does nothing until a free access token is provided, so the picker treats a
     // tokenless instance as "needs setup" (gray, sorted down), never a generic failure.
     kind: "mapillary", label: "Poles & hydrants from street imagery",
@@ -278,7 +278,7 @@ export async function probeService(url) {
         ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
         // Capture the service's own data extent (fullExtent, or `extent` on a
         // FeatureServer/layer) straight from the health probe — the coverage engine
-        // (NEW-1/B274) reprojects it to test whether this layer's data reaches the view.
+        // (NEW-1/B282) reprojects it to test whether this layer's data reaches the view.
         // No extra request: it's already in this same ?f=json response.
         : { ok: true, error: null, fullExtent: (j && (j.fullExtent || j.extent)) || null };
     }
@@ -295,7 +295,7 @@ export async function probeService(url) {
   return result;
 }
 
-/* esri-leaflet FeatureLayer retry/backoff (NEW-5/B278). Wires the pure retry policy
+/* esri-leaflet FeatureLayer retry/backoff (NEW-5/B286). Wires the pure retry policy
  * (featureRetryDecision in layerRequest.js) onto a live FeatureLayer: esri-leaflet
  * issues its own GeoJSON queries with no retry of its own, so a single transient
  * 5xx/429 (or a codeless network/CORS blip) on a jurisdiction vector service — City ETJ
@@ -357,7 +357,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       } else if (cfg.kind === "mapillary") {
         // No token isn't a failure — the layer just isn't set up. Report a quiet
         // "unconfigured" status (a gray "needs setup" dot, not the alarming red
-        // "failed") and don't fire the error toast (NEW-4/B277).
+        // "failed") and don't fire the error toast (NEW-4/B285).
         if (!mapillaryToken()) { refs[k] = null; onStatus && onStatus(k, "unconfigured", "Not configured — add a free access token to enable this layer."); return; }
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
@@ -381,7 +381,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             lyr = EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane));
           }
           if (cfg.kind === "esriFeature") {
-            // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B278): esri-leaflet
+            // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B286): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.
             attachFeatureRetry(lyr, k, cfg, onStatus);

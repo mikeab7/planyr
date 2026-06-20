@@ -4,7 +4,7 @@
  * unit-testable in the node test env. layers.js (which owns the live leaflet layers)
  * imports from here.
  *
- * HARD RULE (NEW-1/B274): the option builders take a layer config + opacity and NOTHING
+ * HARD RULE (NEW-1/B282): the option builders take a layer config + opacity and NOTHING
  * about coverage. Coverage is a PICKER-ONLY signal — it can never narrow a turned-on
  * layer's sublayers / bbox / where. A City-of-Houston utility layer always requests its
  * FULL pinned sublayer set for the whole view, in or out of coverage. There is no
@@ -13,7 +13,7 @@
 
 // The transient HTTP statuses worth a retry — 429 (rate-limited) + 5xx (server blips).
 // One definition shared by fetchWithRetry (the ?f=json probe), withTileRetry (raster
-// tiles), and the FeatureServer query retry (NEW-5/B278), so "what counts as a blip" is
+// tiles), and the FeatureServer query retry (NEW-5/B286), so "what counts as a blip" is
 // consistent across raster, metadata, and vector requests.
 export const TRANSIENT_STATUS = [429, 500, 502, 503, 504];
 export const isTransientStatus = (code) => TRANSIENT_STATUS.includes(Number(code));
@@ -44,7 +44,7 @@ export function featureLayerOptions(cfg, opacity, pane) {
   };
 }
 
-/* Retry policy for a FeatureServer `requesterror` (NEW-5/B278). esri-leaflet issues its
+/* Retry policy for a FeatureServer `requesterror` (NEW-5/B286). esri-leaflet issues its
  * own GeoJSON queries with no retry, so a transient 5xx/429 (or a codeless network/CORS
  * blip) on a jurisdiction vector service would otherwise drop the layer on one hiccup.
  * Given the error's HTTP code (or null for a codeless blip) and how many retries already

@@ -1248,7 +1248,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => clearInterval(iv);
   }, [overlays, origin, basemapOn]); // eslint-disable-line
 
-  /* Coverage (NEW-1/B274): which layers' DATA reaches the planner's current view, for
+  /* Coverage (NEW-1/B282): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
      when the view/size/origin settle (debounced past the basemap commit) and when the
      nearby-range pref changes. Picker-only — never alters a layer's map request. */

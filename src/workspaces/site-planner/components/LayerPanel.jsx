@@ -5,7 +5,7 @@
  * county's jurisdiction layers — each with a checkbox, opacity slider, a live status
  * indicator (loading/loaded/empty/failed/needs-setup) and a disclaimer note.
  *
- * Coverage-aware picker (NEW-2/B275): a "Relevance" control (Show all / Dim / Hide) +
+ * Coverage-aware picker (NEW-2/B283): a "Relevance" control (Show all / Dim / Hide) +
  * an adjustable "nearby range" decide how OUT-OF-COVERAGE layers (ones whose data
  * doesn't reach the current view — e.g. City-of-Houston sewer when you're in Dallas)
  * are presented. This affects ONLY this list's ordering/visibility — never the map: a
