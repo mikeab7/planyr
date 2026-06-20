@@ -40,7 +40,7 @@ const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
 const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
-// an explicit status, so the version bump (→6 for the B272 delete-tombstones) doesn't
+// an explicit status, so the version bump (→6 for the B276 delete-tombstones) doesn't
 // disturb it. (saveSite re-normalizes through this, so the status it reads back is the explicit
 // one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
@@ -49,7 +49,7 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
-// Cap on retained delete-tombstones (B272). Each is just an id string, so this is generous
+// Cap on retained delete-tombstones (B276). Each is just an id string, so this is generous
 // headroom — a real plan deletes a handful of items, never thousands.
 const MAX_TOMBSTONES = 5000;
 
@@ -89,7 +89,7 @@ export function createSiteModel(p = {}) {
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
-    // Delete-tombstones (B272): ids the user DELIBERATELY deleted. The cross-copy merge
+    // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
     // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
     // deleted item from a stale/other copy that still has it (the documented B126 trade-off
     // — "a delete in only one copy can reappear once"). A tombstone makes a deletion win over
@@ -149,7 +149,7 @@ function healSrc(chosen, other) {
 // Reconcile two copies of the SAME site without ever dropping drawn work: scalar/meta
 // fields come from the NEWER copy; every drawn collection is UNIONED by id, so a
 // building (or markup, parcel, measure, overlay, cross-section) in EITHER copy survives.
-// Deletions are honored via tombstones (B272): a `deletedIds` id from EITHER copy wins,
+// Deletions are honored via tombstones (B276): a `deletedIds` id from EITHER copy wins,
 // so a deliberate delete is NOT undone by a stale/other copy that still has the item.
 // (Items not yet wired to record a tombstone keep the old union behavior — still no data
 // loss, just the recoverable "delete can reappear once" trade-off until they adopt it.)

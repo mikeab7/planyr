@@ -86,9 +86,9 @@ describe("mergeSiteContent — a thinner copy can never erase a fuller one (B126
   });
 });
 
-// B272 — a deliberate delete records a tombstone (`deletedIds`); the merge must honor it so a
+// B276 — a deliberate delete records a tombstone (`deletedIds`); the merge must honor it so a
 // stale/other copy that still has the item can't resurrect it (the documented B126 trade-off, fixed).
-describe("mergeSiteContent — delete-tombstones keep a deletion deleted (B272)", () => {
+describe("mergeSiteContent — delete-tombstones keep a deletion deleted (B276)", () => {
   const ov = (id) => ({ id, name: "sheet", src: "data:img", imgW: 100, imgH: 100, x: 0, y: 0, ftPerPx: 1 });
 
   it("does NOT resurrect an overlay the newer copy tombstoned, though the older copy still has it", () => {

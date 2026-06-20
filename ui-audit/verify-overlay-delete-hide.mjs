@@ -1,11 +1,11 @@
-/* Verify the overlay lifecycle fixes (B272 + B273), logged-out, on the built app.
+/* Verify the overlay lifecycle fixes (B276 + B277), logged-out, on the built app.
  *
- *  B273 (visibility toggle): hiding an overlay removes it from the map but KEEPS it in
+ *  B277 (visibility toggle): hiding an overlay removes it from the map but KEEPS it in
  *    the Overlay panel; the hidden state PERSISTS across reload; showing it brings it back.
- *  B272 (delete persists): removing an overlay is durable — after a reload it stays gone,
+ *  B276 (delete persists): removing an overlay is durable — after a reload it stays gone,
  *    and the persisted record carries a `deletedIds` tombstone (the mechanism that, on a
  *    signed-in cloud/2-tab merge, stops the deleted overlay from being resurrected; the
- *    merge logic itself is unit-tested in test/storage.test.js — B272 cases).
+ *    merge logic itself is unit-tested in test/storage.test.js — B276 cases).
  *
  * Image overlay (not PDF): the sandbox Chromium can't run pdf.js, so we seed an SVG/raster
  * overlay `src` directly — the same render/persist path a dropped sheet uses.
@@ -50,41 +50,41 @@ await boot();
 check("overlay renders on the map at boot", await hasOverlayImg());
 await page.screenshot({ path: OUT + "overlay-1-shown.png" });
 
-// ---- B273: hide ----
+// ---- B277: hide ----
 await openOverlayPanel();
 check("Overlay panel lists the overlay", await overlayRowListed());
 await page.locator('[title="Hide overlay"]').first().click(); await page.waitForTimeout(900);
-check("B273 hide — overlay removed from the map", !(await hasOverlayImg()));
-check("B273 hide — overlay STILL listed in the panel (hidden, not deleted)", await overlayRowListed());
+check("B277 hide — overlay removed from the map", !(await hasOverlayImg()));
+check("B277 hide — overlay STILL listed in the panel (hidden, not deleted)", await overlayRowListed());
 await page.screenshot({ path: OUT + "overlay-2-hidden.png" });
 
 // reload → hidden persists
 await boot();
-check("B273 hide PERSISTS across reload — still off the map", !(await hasOverlayImg()));
+check("B277 hide PERSISTS across reload — still off the map", !(await hasOverlayImg()));
 await openOverlayPanel();
-check("B273 hide PERSISTS — overlay still listed (recoverable)", await overlayRowListed());
+check("B277 hide PERSISTS — overlay still listed (recoverable)", await overlayRowListed());
 {
   const s = await storedSite();
-  check("B273 — record persists visible:false on the overlay", !!(s && s.sheetOverlays[0] && s.sheetOverlays[0].visible === false));
+  check("B277 — record persists visible:false on the overlay", !!(s && s.sheetOverlays[0] && s.sheetOverlays[0].visible === false));
 }
 
-// ---- B273: show again ----
+// ---- B277: show again ----
 await page.locator('[title="Show overlay"]').first().click(); await page.waitForTimeout(700);
-check("B273 show — overlay returns to the map", await hasOverlayImg());
+check("B277 show — overlay returns to the map", await hasOverlayImg());
 
-// ---- B272: delete persists ----
+// ---- B276: delete persists ----
 await page.locator('[title="Remove"]').first().click(); await page.waitForTimeout(900);
-check("B272 delete — overlay removed from the map", !(await hasOverlayImg()));
-check("B272 delete — overlay no longer listed in the panel", !(await overlayRowListed()));
+check("B276 delete — overlay removed from the map", !(await hasOverlayImg()));
+check("B276 delete — overlay no longer listed in the panel", !(await overlayRowListed()));
 await page.screenshot({ path: OUT + "overlay-3-deleted.png" });
 
 // reload → delete persists + tombstone written
 await boot();
-check("B272 delete PERSISTS across reload — overlay stays gone", !(await hasOverlayImg()));
+check("B276 delete PERSISTS across reload — overlay stays gone", !(await hasOverlayImg()));
 {
   const s = await storedSite();
-  check("B272 — record has NO overlay after reload", !!(s && s.sheetOverlays.length === 0));
-  check("B272 — record carries the deletedIds tombstone (blocks cloud/2-tab resurrection)", !!(s && Array.isArray(s.deletedIds) && s.deletedIds.includes("ovJ")));
+  check("B276 — record has NO overlay after reload", !!(s && s.sheetOverlays.length === 0));
+  check("B276 — record carries the deletedIds tombstone (blocks cloud/2-tab resurrection)", !!(s && Array.isArray(s.deletedIds) && s.deletedIds.includes("ovJ")));
 }
 
 await ctx.close();
