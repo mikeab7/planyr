@@ -26,6 +26,13 @@ const PAL = {
 
 // Free aerial sources (no API key). Both are ArcGIS MapServers that support
 // both XYZ tiles (for the map) and `export` (for the planner underlay capture).
+// `maxNative` = each provider's native imagery ceiling (Esri z19 ≈ 0.3 m/px; USGS
+// z16). This is REQUIRED per source and must not be dropped in a refactor: past its
+// ceiling a provider returns the gray "Map data not yet available" placeholder as an
+// HTTP 200 (not an error), so Leaflet's error-tile fallback never fires and the whole
+// view goes blank. The imagery layer below clamps fetches to this ceiling (minus the
+// retina offset) and lets maxZoom upscale the deepest real tile beyond it. Any new
+// source MUST carry its own `maxNative`. (B218 — recurrence of B182)
 const BASEMAPS = {
   esri: {
     label: "Esri",
@@ -289,7 +296,21 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const bm = BASEMAPS[basemap] || BASEMAPS.esri;
     // detectRetina: request 2x-density (one-zoom-higher) tiles on HiDPI displays
     // so imagery is crisp instead of upscaled-and-soft. Keeps the Esri source. (B170)
-    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, detectRetina: true, attribution: bm.attr }));
+    //
+    // maxNativeZoom must DROP BY 1 on a retina/HiDPI display: detectRetina fetches one
+    // zoom level HIGHER than the display zoom (it adds zoomOffset +1), so a plain
+    // `maxNativeZoom: bm.maxNative` would, at deep zoom, ask the provider for a tile one
+    // level past its native ceiling (Esri z20, USGS z17) — which arcgisonline/USGS
+    // answer with the gray "Map data not yet available" PLACEHOLDER served as HTTP 200,
+    // so the error-tile fallback never fires and the canvas fills with gray. Clamping
+    // native to ceiling−1 on retina makes the highest fetch land on a REAL tile and lets
+    // maxZoom:21 upscale it past that (slightly soft, never blank). Applies to EVERY
+    // source in the dropdown via bm.maxNative. This is the same retina-offset fix B182
+    // shipped for the planner-canvas backdrop (SitePlanner.jsx GEO_BASEMAP's
+    // detailMaxNative); B218 brings it to the map-finder layer B182 missed. Do NOT drop
+    // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B218)
+    const srcMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: srcMaxNative, detectRetina: true, attribution: bm.attr }));
     layer.setZIndex(1);
     layer.addTo(map);
     imageryRef.current = layer;
@@ -302,7 +323,13 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const map = mapRef.current;
     if (!map || !labels) return;
     const initOpacity = (map.getZoom() >= 14) ? 0.4 : 0;
-    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, opacity: initOpacity });
+    // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
+    // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
+    // without this cap the labels kept rendering crisp while the imagery (clamped to its
+    // native ceiling) had nothing there — the exact "labels float over gray" diagnostic
+    // tell. No detectRetina on this overlay, so there's no retina offset to subtract.
+    // Keep this aligned with the imagery layer's native ceiling above. (B218)
+    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, maxNativeZoom: 19, opacity: initOpacity });
     layer.setZIndex(2);
     layer.addTo(map);
     labelsRef.current = layer;
