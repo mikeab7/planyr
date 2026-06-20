@@ -11,6 +11,7 @@ import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
+import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
@@ -456,7 +457,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
       <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
-        projectId={markupProject?.id || meta.projectId || null} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
+        projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}

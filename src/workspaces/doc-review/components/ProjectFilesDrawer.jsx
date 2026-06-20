@@ -15,7 +15,8 @@
  * the auto-filing index is stubbed behind the index-provider interface.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, DISCIPLINES } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, upsertFileFacts, listFileFacts, DISCIPLINES } from "../lib/reviewStore.js";
+import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
@@ -45,7 +46,14 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const refresh = async () => {
     const tok = ++reqRef.current;
     setBusy(true);
-    try { const [p, r] = await Promise.all([listProjects(), listReviews()]); if (tok !== reqRef.current) return; setProjects(p); setReviews(r); }
+    // Merge the auto-filing file-facts index (B270) onto the review rows so the list surfaces
+    // captured placement + needs-filing state. listFileFacts returns [] until the migration
+    // runs, leaving the rows unchanged (no regression).
+    try {
+      const [p, r, ff] = await Promise.all([listProjects(), listReviews(), listFileFacts()]);
+      if (tok !== reqRef.current) return;
+      setProjects(p); setReviews(mergeFactsIntoReviews(r, ff));
+    }
     finally { if (tok === reqRef.current) setBusy(false); }
   };
   useEffect(() => { if (open && signedIn) refresh(); }, [open, signedIn]);
@@ -68,18 +76,29 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     const failed = [];
     try {
       for (const f of files) {
-        // Auto-file by title block is the backend tranche; until then, file under the
-        // active project (or the holding area when none is selected). The index provider
-        // captures placement facts at filing time through the same interface.
-        // fileNewReview files to Supabase AND pushes a copy to Google Drive (B207),
-        // recording the Drive key for read-back. A Drive failure never blocks filing.
-        const r = await fileNewReview({ projectId: activeProject || null, project: projName(activeProject), discipline: "Other", blob: f, fileName: f.name });
-        if (!r || !r.ok) failed.push(`${f.name} — couldn't file`);
-        else if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop on open to view)`);
+        // B270: when the auto-filing backend is live, read the title block → match a project →
+        // route + name it, and record the file-facts index row (incl. placement). The matcher
+        // never auto-guesses: an unmatched/ambiguous read files into the holding area for the
+        // one-click confirm. When the backend is dormant (default), autofile SKIPS and we file
+        // manually under the active project — identical to before. fileNewReview also pushes a
+        // Drive copy (B207); a Drive failure never blocks filing.
+        let auto = null;
+        if (indexProvider && indexProvider.backendReady && indexProvider.autofile) {
+          try { auto = await indexProvider.autofile(f, projects); } catch (_) { auto = null; }
+        }
+        const route = auto && auto.ok ? auto.decision : null;
+        const pid = route && route.matched ? route.projectId : (activeProject || null);
+        const r = await fileNewReview({ projectId: pid, project: projName(pid),
+          discipline: (route && route.discipline) || "Other", item: (route && route.item) || "",
+          docDate: route ? route.docDate : null, blob: f, fileName: f.name });
+        if (!r || !r.ok) { failed.push(`${f.name} — couldn't file`); continue; }
+        if (route && auto.facts && r.id) await upsertFileFacts(toFactsRow(auto.facts, { id: r.id, reviewId: r.id, sourceFile: f.name }));
+        if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop on open to view)`);
         else if (r.driveError) failed.push(`${f.name} — filed, but the Drive copy failed (${r.driveError})`);
+        else if (route && route.needsFiling) failed.push(`${f.name} — couldn't confidently match a project (${route.reason}); filed to the holding area — confirm it below`);
       }
     } finally { setBusy(false); refresh(); }
-    if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
+    if (failed.length) window.alert("Some files:\n• " + failed.join("\n• "));
   };
   const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file and its stored PDF?")) return; await deleteReview(id); refresh(); };
 
@@ -148,8 +167,9 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
             <div onDragOver={(e) => { e.preventDefault(); setDropTarget(true); }} onDragLeave={() => setDropTarget(false)} onDrop={drop}
               style={{ flex: "none", margin: "8px 12px", padding: "10px", borderRadius: 8, textAlign: "center", fontSize: 11.5, lineHeight: 1.4,
                 border: `2px dashed ${dropTarget ? PAL.accent : PAL.line}`, background: dropTarget ? "#fbf3ee" : "#faf8f3", color: PAL.muted }}>
-              Drop a PDF to file it {activeProject ? `under "${projName(activeProject)}"` : "(into the holding area)"}.
-              <div style={{ fontSize: 10, marginTop: 2 }}>Auto-file by title block arrives with the filing backend.</div>
+              {indexProvider && indexProvider.backendReady
+                ? <>Drop a PDF — it reads the title block and files itself into the right project &amp; discipline.<div style={{ fontSize: 10, marginTop: 2 }}>Anything it can&apos;t confidently match goes to the holding area for a one-click confirm.</div></>
+                : <>Drop a PDF to file it {activeProject ? `under "${projName(activeProject)}"` : "(into the holding area)"}.<div style={{ fontSize: 10, marginTop: 2 }}>Auto-file by title block arrives with the filing backend.</div></>}
             </div>
 
             {/* file list */}

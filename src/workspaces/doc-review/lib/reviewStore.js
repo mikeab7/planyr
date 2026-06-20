@@ -187,6 +187,27 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
+/* --------------------------- file-facts index (B270) ----------------------- */
+// The queryable auto-filing index (db/file_facts.sql): one small row per filed drawing, so the
+// library can answer "this project's Civil set, latest revision" WITHOUT re-reading the PDF.
+// Degrades gracefully — if the migration hasn't run (or the user's signed out) upsert no-ops
+// and list returns [], so filing never regresses (same discipline as listReviews' fallback).
+export async function upsertFileFacts(row) {
+  if (!supabase || !row || !row.id) return { ok: false, error: "Cloud not configured." };
+  const uid = await currentUid();
+  if (!uid) return { ok: false, error: "Sign in to file documents." };
+  const { error } = await supabase.from("file_facts").upsert({ ...row, user_id: uid }, { onConflict: "user_id,id" });
+  return { ok: !error, error: error ? error.message : null };
+}
+
+export async function listFileFacts() {
+  if (!supabase || !(await currentUid())) return [];
+  const { data, error } = await supabase.from("file_facts")
+    .select("id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at")
+    .order("updated_at", { ascending: false });
+  return error || !data ? [] : data;
+}
+
 /* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Returns
  * { ok, driveKey } on success (driveKey = the stable key to read it back with),
  * { ok:false, skipped:true } when Drive isn't enabled yet, or { ok:false, error }.
@@ -231,11 +252,12 @@ export async function downloadFromDrive(driveKey) {
 // the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
 // so a file is never left unstored AND the redundant Supabase copy stops consuming storage
 // on the happy path. Then upsert the indexed record. Returns { ok, id }.
-export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", blob, fileName }) {
+export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
-  const docDate = new Date().toISOString().slice(0, 10);
+  // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
+  const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
   // 1) Try Google Drive (the primary home).
   const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
@@ -245,8 +267,8 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
   const uploadFailed = !drive.ok && !up.ok && !up.oversize;
   const record = {
-    id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
-    project, projectId, discipline, item: itemLabel, revision: "", docDate,
+    id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
+    project, projectId, discipline, item: itemLabel, revision: "", docDate: filedDate,
     sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: up.storageKey || null, oversize: !!up.oversize, driveKey: drive.ok ? drive.driveKey : null }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
