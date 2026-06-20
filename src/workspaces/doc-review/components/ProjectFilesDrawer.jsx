@@ -56,6 +56,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const [busy, setBusy] = useState(false);
   const [placePlan, setPlacePlan] = useState(null); // { fileId, plan } — the cascade result to show
   const [refileSel, setRefileSel] = useState({});   // fileId -> { projectId, discipline } for the one-click confirm
+  const [pendingDel, setPendingDel] = useState(null); // fileId armed for inline delete-confirm
 
   // Persistent processing queue (B260). One flat array; the active/recently-filed split is
   // a derived view over it (splitQueue), never two lists.
@@ -145,7 +146,10 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const onPaste = (e) => { const f = e.clipboardData?.files; if (f && f.length) { e.preventDefault(); ingest(f); } };
   const retry = (item) => { runPool([item], processItem, 1); };
   const triage = (uploadId) => { setView("needs-filing"); removeItem(uploadId); }; // hand off to the holding-area flow
-  const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file and its stored PDF?")) return; await deleteReview(id); refresh(); };
+  // Delete uses an INLINE confirm (the × arms a ✓/✕ in place), never window.confirm:
+  // a native modal blocks the main thread, which hard-freezes the tab when it's already
+  // memory-pressured from a large rendered PDF — and dialog boxes are banned by rule.
+  const del = async (id) => { setPendingDel(null); await deleteReview(id); refresh(); };
 
   // One-click confirm out of the "needs filing" holding area: assign a project +
   // discipline to an unfiled file. Never auto-guesses (a misfiled drawing is worse than
@@ -247,7 +251,15 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                           </div>
                           {isSpatial(f) && <button onClick={() => planPlacement(f)} title="Place this drawing on the map (auto-placement cascade)"
                             style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "3px 7px" }}>Place on map</button>}
-                          <button onClick={(e) => del(e, f.id)} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
+                          {pendingDel === f.id ? (
+                            <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: PAL.muted }}>
+                              <span>Delete?</span>
+                              <button onClick={(e) => { e.stopPropagation(); del(f.id); }} title="Confirm delete" style={{ border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2, fontWeight: 700 }}>✓</button>
+                              <button onClick={(e) => { e.stopPropagation(); setPendingDel(null); }} title="Cancel" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>✕</button>
+                            </span>
+                          ) : (
+                            <button onClick={(e) => { e.stopPropagation(); setPendingDel(f.id); }} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
+                          )}
                         </div>
                         {f.unfiled && <RefileRow projects={projects} value={refileSel[f.id]} onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />}
                         {showPlan && <PlacePlan plan={placePlan.plan} onGo={() => { onPlaceOnMap?.(reviews.find((x) => x.id === f.id) || f, placePlan.plan); setPlacePlan(null); onClose?.(); }} onDismiss={() => setPlacePlan(null)} />}
