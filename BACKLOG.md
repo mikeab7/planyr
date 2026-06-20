@@ -22,57 +22,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- Filed 2026-06-20 from owner-submitted NEW-1..NEW-3 (a Schedule polish trio). Highest B# across
-     BOTH files was B217, so these mint B218 / B219 / B220. Deduped before filing: B210–B212 were a
-     DIFFERENT Schedule Gantt tranche (summary brackets / status-as-fill / configurable columns — all
-     DONE), B159/B160 are PDF-export controls, and the stale-while-revalidate GIS cache (B96) is
-     Site-Planner-only — no collision, all three are net-new. ALL THREE filed AND shipped this same
-     session (see BACKLOG-DONE.md once moved). NEW-2 (B219) and NEW-3 (B220) are paired by design. -->
-
-### B218 — Row color fill hides Gantt bars `[Scheduler]` (bug)  *(arrived as "NEW-1")*
-`[ ]` Applying a color fill to a row in the schedule makes the task bars on that row disappear from the
-Gantt. **Root cause (b) — color collision:** `task.rowColor` is overloaded — the *same* field paints
-both the row background (`rowBg`) AND the bar fill (`task.rowColor || <neutral>` for leaf bars, summary
-brackets, and milestone diamonds, in `GanttView`). So a row fill repaints every on-row element that
-exact color → it vanishes into its own background. **Fix (handles both stated causes):** bars,
-milestone diamonds, and summary brackets keep their own identity hue (neutral gray / depth-navy),
-*independent* of the row fill, plus a hairline border so a bar stays legible on any fill color; the row
-fill is background decoration only. Lock + verify the per-row paint order: zebra banding / user fill
-(bottom) → grid + today + dependency lines → bars / milestones (data layer) → labels (top). Holistic:
-cover every on-row element (rectangular bars, milestone diamonds, dependency links, in/end-of-bar
-labels), not just task bars. (The PDF/Print export path `buildGanttSVG` already paints bars in neutral
-gray/navy and never applies `rowColor` to bars — no collision there; scope is the on-screen `GanttView`.)
-
-### B219 — Speed up Schedule module load `[Scheduler]` (task)  *(arrived as "NEW-2")*
-`[ ]` Cut time-to-interactive when navigating to Schedule without regressing initial app boot. **Profile
-first:** the Schedule tab embeds the standalone Gantt app (`public/sequence/index.html`, ~692 KB) in an
-iframe; the React lazy chunk (`Scheduler.jsx`) is trivial, so the dominant navigation cost is
-**doc-fetch** (downloading + parsing that iframe HTML, plus the Supabase JS CDN) on every visit, not
-layout/paint. **Wins:** (1) **background-prefetch** the Schedule module — once the app is idle, and on
-nav-hover intent over the tab, quietly warm the `Scheduler.jsx` chunk **and** the `/sequence/` iframe
-document so the tab click loads from cache; lazy-load stays for initial boot. (2) **Virtualization** —
-already present: both `GridView` and `GanttView` window rows by scroll position (`startIdx`/`endIdx` +
-slice), so paint already scales with the viewport, not task count (verified). (3) **Layout memoization**
-— `GanttView` already `useMemo`s dep-lines/months/years within a session. **Data-fetch:** the app ships
-an inline `__PLANAR_DATA__` seed that paints immediately, then syncs Supabase in the background and
-surfaces save state — so the Supabase round-trip is already off the critical first paint and the
-silent-failure guard stays intact. Net: implement the prefetch (the measured dominant cost); note the
-rest as already-satisfied.
-
-### B220 — "Schedule-assembling" themed loading animation, reusable engine across modules `[Scheduler]` (feature)  *(arrived as "NEW-3")*
-`[ ]` While Schedule loads (chunk + iframe doc + first paint), show an animated loader that is a Gantt
-chart building itself — not a bare spinner — doubling as a skeleton screen (a greyed ghost of the real
-layout) so it previews the structure and reads as faster. **Sequence:** zebra row bands fade in
-top→bottom (reusing the real banding); ghost task bars wipe in left→right, staggered ~80–120 ms per
-row, in the Schedule accent `#7F77DD` at reduced opacity; milestone diamonds pop in at bar ends; a soft
-vertical "playhead" sweep travels left→right; loop seamlessly, then cross-fade (not a hard cut) into
-the real Gantt. **Accessibility (required):** honor `prefers-reduced-motion` — drop the cascade + sweep,
-show a static skeleton with at most a gentle opacity pulse. **Reusable engine:** ONE shared loader
-component, themeable per module — Schedule = bars + diamonds + playhead in `#7F77DD`; Site Planner =
-building footprints / parcel outlines stroke-drawing themselves in the Site accent `#1D9E75` (reuse the
-existing `MODULE_ACCENT`). **Threshold:** only show once load crosses ~200–300 ms so fast loads don't
-flash it. **Pairs with B219** (that shrinks the wait; this covers the residual).
-
 <!-- 2026-06-19: owner-reported (chat) "can't access my scheduling projects — this is imperative."
      Filed B203–B205 (arrived as B194–B196, but concurrent `main` #169–#172 minted B194–B202 for
      the project switcher / trailer labels / scale bar / print tranche, so renumbered to the real
