@@ -521,7 +521,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (!draft) return;
     const { kind, pts } = draft;
     // Area + perimeter need ≥3 points to be real polygons; a 2-point area is 0 sf and a
-    // 2-point perimeter is a single segment, both meaningless in the takeoff (B301).
+    // 2-point perimeter is a single segment, both meaningless in the takeoff (B302).
     if ((kind === "count" || kind === "area" || kind === "perimeter") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
     else setDraft(null);
   };
@@ -540,7 +540,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const pts = draft.pts.slice();
       while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
       // Same min-point gate as Enter/finishDraft so a 2-point area/perimeter can't slip in
-      // via double-click either (count ≥1, area/perimeter ≥3). (B301)
+      // via double-click either (count ≥1, area/perimeter ≥3). (B302)
       if (canCommitMeasure(draft.kind, pts.length)) commit({ kind: draft.kind, pts });
       else setDraft(null);
     } else finishDraft();

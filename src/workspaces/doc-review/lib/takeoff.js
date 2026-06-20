@@ -27,7 +27,7 @@ export function polyArea(pts) {
 /* Minimum points needed to COMMIT each measurement kind. Area + perimeter describe a
  * polygon, so they need ≥3 distinct points — a 2-point "area" is 0 sf (shoelace) and a
  * 2-point "perimeter" is a single segment drawn back on itself (half the loop it implies),
- * both meaningless in the takeoff. Distance is a 2-point segment; count is ≥1 marker. (B301) */
+ * both meaningless in the takeoff. Distance is a 2-point segment; count is ≥1 marker. (B302) */
 export const MIN_MEASURE_PTS = { distance: 2, perimeter: 3, area: 3, count: 1 };
 export const canCommitMeasure = (kind, n) => (n || 0) >= (MIN_MEASURE_PTS[kind] ?? 1);
 

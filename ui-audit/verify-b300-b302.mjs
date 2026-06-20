@@ -1,16 +1,16 @@
-/* Verify B299 / B300 / B301 — Document Review stitch + markup safety guards.
+/* Verify B300 / B301 / B302 — Document Review stitch + markup safety guards.
  *
  * Drives the REAL built app (logged-out; the stitch/markup core is browser-only) with a
  * generated minimal 2-page PDF — no owner sample needed. Asserts:
- *   B301 (single Markup): a 2-point Area can't be committed; a 3-point Area can.
- *   B300 (Stitch): a freshly-added 2nd sheet is flagged "Not aligned"; measuring over it
+ *   B302 (single Markup): a 2-point Area can't be committed; a 3-point Area can.
+ *   B301 (Stitch): a freshly-added 2nd sheet is flagged "Not aligned"; measuring over it
  *                  warns; a valid Align clears the flag.
- *   B299 (Stitch): a degenerate Align (two coincident points on the moving sheet) is
+ *   B300 (Stitch): a degenerate Align (two coincident points on the moving sheet) is
  *                  rejected with the "too close together" banner and leaves the sheet
  *                  un-aligned (not flung) — then a real Align still succeeds.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
- *       node ui-audit/verify-b299-b301.mjs               (another)
+ *       node ui-audit/verify-b300-b302.mjs               (another)
  */
 const pw = await import("/opt/node22/lib/node_modules/playwright/index.js");
 const chromium = pw.chromium || (pw.default && pw.default.chromium);
@@ -88,8 +88,8 @@ const polygonCount = () => page.evaluate(() => {
   return overlay && overlay.a > 10000 ? overlay.s.querySelectorAll("polygon").length : -1;
 });
 
-/* ---------------- B301 — single-sheet Area needs ≥3 points ---------------- */
-console.log("\nB301 — degenerate Area can't be committed (single Markup):");
+/* ---------------- B302 — single-sheet Area needs ≥3 points ---------------- */
+console.log("\nB302 — degenerate Area can't be committed (single Markup):");
 await page.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
 await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0; }, { timeout: 20000 });
 await waitOverlay();
@@ -114,7 +114,7 @@ const polyAfter3 = await polygonCount();
 check(polyAfter3 === 1, `3-point Area commits (committed polygons = ${polyAfter3}, want 1)`);
 
 /* ---------------- switch to Stitch, place two sheets ---------------- */
-console.log("\nB300 — a freshly added 2nd sheet is flagged 'Not aligned':");
+console.log("\nB301 — a freshly added 2nd sheet is flagged 'Not aligned':");
 await page.locator('button:has-text("Stitch sheets")').first().click({ timeout: 8000 });
 await sleep(700);
 await page.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
@@ -131,8 +131,8 @@ let txt = await bodyTxt();
 check(/Not aligned — click/.test(txt), "canvas shows the 'Not aligned — click \"Align\"' overlay");
 check(/Not aligned — measurements may be off/.test(txt), "right-panel chip warns the 2nd sheet isn't aligned");
 
-/* ---------------- B300 — measuring over the unaligned sheet warns ---------------- */
-console.log("\nB300 — measuring over the unaligned sheet warns:");
+/* ---------------- B301 — measuring over the unaligned sheet warns ---------------- */
+console.log("\nB301 — measuring over the unaligned sheet warns:");
 await page.locator('div[style] button:has-text("Distance"), button:has-text("Distance")').first().click({ timeout: 8000 });
 await sleep(200);
 const moving = imgs[1];
@@ -142,8 +142,8 @@ await sleep(300);
 txt = await bodyTxt();
 check(/isn’t aligned yet|isn't aligned yet|aligned yet/.test(txt), "a measurement over the unaligned sheet shows the warning banner");
 
-/* ---------------- B299 — a degenerate Align is rejected, sheet untouched ---------------- */
-console.log("\nB299 — degenerate Align (coincident points) is rejected, sheet not flung:");
+/* ---------------- B300 — a degenerate Align is rejected, sheet untouched ---------------- */
+console.log("\nB300 — degenerate Align (coincident points) is rejected, sheet not flung:");
 const matrices = () => page.evaluate(() => {
   const svg = [...document.querySelectorAll("svg")].find((s) => s.querySelector("image"));
   return [...svg.querySelectorAll("image")].map((im) => im.parentElement.getAttribute("transform"));
@@ -166,8 +166,8 @@ const afterDegen = await matrices();
 check(JSON.stringify(before[1]) === JSON.stringify(afterDegen[1]), "the 2nd sheet's transform is UNCHANGED (not flung off-canvas)");
 check(/Not aligned — measurements may be off/.test(txt), "the 2nd sheet is still flagged not-aligned after rejection");
 
-/* ---------------- B299/B300 — a real Align then succeeds and clears the flag ---------------- */
-console.log("\nB299/B300 — a valid Align then succeeds and clears the flag:");
+/* ---------------- B300/B301 — a real Align then succeeds and clears the flag ---------------- */
+console.log("\nB300/B301 — a valid Align then succeeds and clears the flag:");
 // the guard left us in align step-0; drive 4 clicks with DISTINCT baselines on both sheets
 imgs = await imageRects();
 const b2 = imgs[0], m2 = imgs[1];
@@ -180,7 +180,7 @@ txt = await bodyTxt();
 check(!/too close together/.test(txt), "no 'too close' error after the valid Align");
 check(!/Not aligned/.test(txt), "the 'Not aligned' flag/chip is gone after a successful Align");
 
-await page.screenshot({ path: new URL("./screens/b299-b301.png", import.meta.url).pathname }).catch(() => {});
+await page.screenshot({ path: new URL("./screens/b300-b302.png", import.meta.url).pathname }).catch(() => {});
 check(pageErrors.length === 0, `no uncaught JS errors during the run (${pageErrors.length})`);
 if (pageErrors.length) console.log("  pageerrors:", pageErrors.slice(0, 4));
 
