@@ -1,4 +1,4 @@
-// B220 — verify a row color fill no longer hides the Gantt bars.
+// B221 — verify a row color fill no longer hides the Gantt bars.
 // Seeds a real row fill (rowColor) onto a leaf task in the inline __PLANAR_DATA__
 // before render, then asserts: the row band IS painted the fill (it applied) while
 // NO bar-sized element shares that color (the bug = a bar repainted the fill and

@@ -1,4 +1,4 @@
-/* moduleLoaderTheme — pure theming for the assembling loader (B222).
+/* moduleLoaderTheme — pure theming for the assembling loader (B223).
  *
  * One animation engine, a per-module skin + accent. Kept React-free so the skin
  * resolution is unit-testable and shared cleanly: ModuleLoader.jsx renders the

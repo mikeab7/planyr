@@ -84,7 +84,7 @@ function ModuleTab({ m, isActive, onClick }) {
     <button
       onClick={onClick}
       // Hover = nav intent: warm the target workspace's chunk (and Schedule's
-      // iframe doc) so the click loads from cache. Idempotent + best-effort. (B221)
+      // iframe doc) so the click loads from cache. Idempotent + best-effort. (B222)
       onMouseEnter={() => { setHover(true); if (!isActive) prefetchModule(m.id); }}
       onMouseLeave={() => setHover(false)}
       aria-current={isActive ? "page" : undefined}

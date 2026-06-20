@@ -797,18 +797,29 @@ _Move items here with the date and who/what checked them._
   - lint 0 errors · **411 tests** (14 in `test/edgeRuns.test.js`) · build green; the original **B213–B215 acceptance still 7/7** (`ui-audit/verify-edge-runs.mjs`).
 - **Not covered (logged-out headless limits):** signed-in cloud-reload of an edited irregular-parcel setback (rides the same Site-Model persistence as the V46/V47 cases); self-touching / zero-area degenerate rings (guarded by `offsetPolygon` + the `edgeRuns` degenerate-input unit tests, not separately driven in-browser).
 
-### V50 — Row color fill no longer hides the Gantt bars (B220) ✅
+### V50 — Map-finder Esri imagery no longer over-zooms to the gray "Map data not yet available" placeholder on retina (B220) ✅
+- **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bugfix acceptance)
+- **Steps:** booted the **map finder** over a Katy parcel (29.786, −95.83) at **deviceScaleFactor 1 (standard)** and **2 (retina)**, fit to the parcel, then wheel-zoomed in deep (toward maxZoom 21) with the labels overlay on, recording the `{z}` of every `World_Imagery` (imagery) and `World_Transportation` (labels) tile actually requested + any past-native / placeholder-sized responses. Script `gis-verify/mapfinder-overzoom-verify.mjs`.
+- **Result ✅ (4/4):**
+  - **Imagery clamped:** max imagery tile zoom requested = **z19 at BOTH densities** (DSF 1 and DSF 2). Pre-fix the retina run requested **z20** (one past Esri's native z19 = the gray placeholder); now it clamps to z19 and Leaflet upscales past that.
+  - **Deep zoom genuinely reached:** z19 imagery tiles were requested (at DSF 2, getting a z19 URL requires map zoom ≥ 18, since detectRetina adds +1 to the z18 clamp) — so the test exercised the over-zoom range, not a trivial pass.
+  - **Labels aligned:** max labels (World_Transportation) tile zoom = **z19** at both densities — the reference overlay no longer diverges above the imagery ceiling (the "labels float over gray" tell is gone).
+  - **No placeholders:** **0** past-native / placeholder-sized responses across both runs.
+  - lint 0 errors · **414 tests** · build green; `SitePlannerApp` / `DocReview` lazy chunks intact.
+- **Not covered (logged-out headless limits):** the visible *sharpness* gain of detectRetina is invisible at the sandbox's effective DPR and is best eyeballed on Michael's own retina/4K display (the higher-density tile request is proven engaged here and in V43); the planner-canvas backdrop was already fixed + verified under B182.
+
+### V51 — Row color fill no longer hides the Gantt bars (B221) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the standalone `public/sequence/` app (logged-out seed) · **Cadence** once (bugfix acceptance)
 - **Steps:** intercepted the seed so the active project's first **leaf** task carries a row fill (`rowColor:#c7d2fe` Indigo) from first render, then probed every `<div>`'s computed background. Script `ui-audit/verify-rowfill-bars.mjs`.
 - **Result ✅:** the fill paints the **row bands** (grid + Gantt rows — `rowBands:2`) while **no bar-sized element shares the fill** (`barCollisions:0`); the filled leaf's own bar keeps its neutral identity — `bg rgb(148,163,184)` (`#94a3b8`) with the new **slate hairline edge** `rgb(71,85,105)` (`#475569`, 1px). Visual: the filled "Begin DD" row shows the Indigo tint with its marker fully visible on top (`ui-audit/screens/rowfill-bars-crop.png`). The summary brackets (navy) and milestone diamonds were de-coupled from `rowColor` in the same pass.
 - **Not covered (logged-out limits):** none material — the fix is render-only (no persistence); the PDF/Print export path (`buildGanttSVG`) already never colored bars from `rowColor`, so it had no collision to fix.
 
-### V51 — Schedule prefetch + the themed "assembling" loader (B221 + B222) ✅
+### V52 — Schedule prefetch + the themed "assembling" loader (B222 + B223) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (feature + perf acceptance)
 - **Steps:** loaded the built shell, waited for idle, then navigated to the **Schedule** tab; also reloaded with `prefers-reduced-motion: reduce` emulated. Script `ui-audit/verify-loader-prefetch.mjs`.
 - **Result ✅:**
-  - **B221 prefetch:** after boot-idle a `<link rel="prefetch" href="/sequence/">` is injected (warms the heavy iframe doc); hover-intent on the tab warms it too (same idempotent `prefetchModule`). Virtualization + in-session layout memoization were confirmed already present (`GridView`/`GanttView` windowing), so the prefetch is the net-new win.
-  - **B222 loader:** navigating to Schedule shows the loader (`role="status"`, `aria-label="Assembling schedule…"`) — a Gantt assembling itself: ghost name column, zebra bands, **12 task elements painted the `#7F77DD` accent**, milestone diamonds, and the playhead sweep — then it cross-fades out once the iframe posts its first nav-state. Screenshot `ui-audit/screens/loader-schedule.png`.
+  - **B222 prefetch:** after boot-idle a `<link rel="prefetch" href="/sequence/">` is injected (warms the heavy iframe doc); hover-intent on the tab warms it too (same idempotent `prefetchModule`). Virtualization + in-session layout memoization were confirmed already present (`GridView`/`GanttView` windowing), so the prefetch is the net-new win.
+  - **B223 loader:** navigating to Schedule shows the loader (`role="status"`, `aria-label="Assembling schedule…"`) — a Gantt assembling itself: ghost name column, zebra bands, **12 task elements painted the `#7F77DD` accent**, milestone diamonds, and the playhead sweep — then it cross-fades out once the iframe posts its first nav-state. Screenshot `ui-audit/screens/loader-schedule.png`.
   - **Reduced-motion:** with `prefers-reduced-motion`, the loader still renders but the cascade + sweep are dropped — **0 animated bars, no playhead** (`ui-audit/screens/loader-reduced-motion.png`).
-  - 0 boot console errors; lint 0 · **416 tests** (5 new in `test/moduleLoaderTheme.test.js`) · build green; the `Scheduler` / `SitePlannerApp` / `DocReview` lazy chunks intact.
+  - 0 boot console errors; lint 0 · **419 tests** (5 new in `test/moduleLoaderTheme.test.js`) · build green; the `Scheduler` / `SitePlannerApp` / `DocReview` lazy chunks intact.
 - **Not covered (logged-out limits):** the signed-in path is identical (the loader/prefetch are auth-agnostic shell chrome); the Site-Planner skin (`#1D9E75` footprints) shares the one engine + is unit-tested, shown on the SitePlannerApp chunk's first load.
