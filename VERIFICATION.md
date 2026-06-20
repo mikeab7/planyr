@@ -833,3 +833,14 @@ _Move items here with the date and who/what checked them._
   - lint 0 errors · **414 tests** · build green; `SitePlannerApp` lazy chunk intact.
 - **Not covered (logged-out headless limits):** none material — the feature is purely client-side geometry/render; no auth or network path involved. The map's **Building Pin + Progress Arc** (`MapFinder.jsx`) are a separate component and were deliberately left untouched (still visible at every zoom).
 
+### V54 — Redesigned Site Yield panel: composition donut + legend + grouped rows (B227) ✅
+- **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (feature acceptance)
+- **Steps:** seeded two logged-out sites and opened the **Yield** tab. **Seed A (spec example):** a 29.25-ac parcel with a 226,576-sf building + paving only, no pond → coverage 18 %, impervious 31 %. **Seed B:** added a parking field + a detention pond. Read back the donut arcs' `stroke-dasharray`, the legend, the KPI cards, and the grouped rows; also toggled the header to confirm collapse/expand. Script `ui-audit/verify-yield.mjs` (+ a collapse probe).
+- **Result ✅:**
+  - **Donut closes:** the four arcs' lengths sum to **100.0 % of the circumference** in BOTH seeds — the ring always closes (open is the clamped remainder). Seed A paints Building 18 / Paving 13 / Open 69 with **no detention arc**; Seed B paints all four incl. the dusty-blue detention slice (18 / 11 / 66 / 5). Center reads the site acreage over "acres".
+  - **Legend ↔ rows agree:** legend %s match the detail rows (Coverage 18 % = donut Building; Impervious − Coverage = Paving; Detention %). The **Detention legend row always renders even at 0 %** with the muted hollow zero-state swatch (`#DCE5EB`/`#C2D2DC`) — a zeroed share is present-and-zero, never hidden.
+  - **KPI abbreviation:** the **Building card shows `227k`** while the **Building detail row shows the full `226,576 sf`** — exactly the requested split.
+  - **Grouped rows wired live:** Land / Building / Parking / Stormwater each render with their semantic dot; Seed B's Parking group reads **Car stalls 220 · 0.97/1k sf** (proves the rows carry live engine values, not placeholders).
+  - **Collapse preserved:** clicking the "SITE YIELD" header hides the body and clicking again restores it (grouped rows visible → hidden → visible).
+  - **0 page errors** in either seed; screenshots `ui-audit/screens/yield-panel.png` + `yield-panel-detention.png`. lint 0 · **436 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered (logged-out limits):** none material — the panel is presentational and reads engine outputs the planner computes locally (no auth, no persistence change); the signed-in path renders the identical component from the same values.
