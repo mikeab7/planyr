@@ -22,6 +22,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: B230 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+     right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
+     dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
+     measures / markup poly-line / easements) + B231 (cartographic detention pond — radial steel-teal
+     gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B230/B231** — concurrent `main` (PRs #184/#186/
+     #188/#189/#191) took B221–B229 (lazy-chunk recovery, Schedule fixes, building-button gating, Yield-
+     panel redesign, dock-zone stack) while this was in flight, so B230/B231 are the real next free IDs
+     after B229. Filed AND shipped this same session — moved to BACKLOG-DONE.md; self-verified headless
+     (ui-audit/verify-b221-b222.mjs), V56. -->
+
 <!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
      panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
      B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
