@@ -142,6 +142,7 @@ export default function Shell() {
             <span style={avatar(true, 30)}>{profileApi.initial}</span>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
+              {profileApi.org && <div style={{ fontSize: 11.5, color: "#6b6557", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
               <div style={{ fontSize: 11.5, color: "#8a8475", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
             </div>
           </div>

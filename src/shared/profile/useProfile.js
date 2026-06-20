@@ -38,6 +38,11 @@ export function firstNameFor(profile, user) {
   return nameParts(profile, user).first;
 }
 
+export function orgFor(profile, user) {
+  const meta = (user && user.user_metadata) || {};
+  return s(profile?.org) || s(meta.org);
+}
+
 // Pure: the avatar letter — first char of the display name, or a dot placeholder.
 export const initialFor = (name) => (s(name)[0] || "•").toUpperCase();
 
@@ -89,6 +94,7 @@ export function useProfile(user) {
     loading,
     displayName,
     firstName: firstNameFor(profile, user),
+    org: orgFor(profile, user),
     initial: initialFor(displayName),
     reload,
     save,

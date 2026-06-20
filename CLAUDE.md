@@ -512,7 +512,7 @@ a **`handle_new_user` SECURITY DEFINER trigger** on `auth.users insert` copies t
 seeds rows for pre-existing users. RLS is the same own-row private-by-default shape as
 `public.sites` (`auth.uid() = id`; select/insert/update; no delete — `on delete cascade`).
 `profile.js` = pure I/O (`loadProfile`/`saveProfile`, reuses the anon client + session, no
-new keys); `useProfile(user)` = the hook → `{ profile, loading, displayName, firstName,
+new keys); `useProfile(user)` = the hook → `{ profile, loading, displayName, firstName, org,
 initial, reload, save }` with a never-blank display chain (First Last → first → last →
 metadata → email; pure `displayNameFor`/`firstNameFor`/`initialFor`, unit-tested). The Shell
 pill reads it and opens an account dropdown (`AnchoredMenu` portal); `AuthPanel` is a tabbed

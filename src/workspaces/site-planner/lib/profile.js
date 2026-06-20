@@ -35,5 +35,12 @@ export async function saveProfile(uid, fields = {}) {
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from("profiles").upsert(row, { onConflict: "id" });
-  return { ok: !error, error: error ? error.message : null };
+  if (error) return { ok: false, error: error.message };
+  // Keep the auth record's user_metadata in sync with the table so the two name
+  // stores never disagree (and the offline display fallback stays fresh). The table
+  // is the source of truth — a metadata hiccup is best-effort, it doesn't fail the save.
+  try {
+    await supabase.auth.updateUser({ data: { first_name: row.first_name, last_name: row.last_name, org: row.org } });
+  } catch (_) {}
+  return { ok: true, error: null };
 }

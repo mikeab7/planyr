@@ -93,9 +93,18 @@ const clickButton = async (page, re) => {
   log(menuBtns.includes("Sign out"), "Dropdown has a Sign out item");
   const hasEmail = await page.evaluate(() => /mike@demo\.co/.test(document.body.innerText));
   log(hasEmail, "Dropdown shows the account email");
-  await page.screenshot({ path: OUT + "b272-account-dropdown.png", clip: { x: 980, y: 0, width: 460, height: 320 } });
+  const hasOrg = await page.evaluate(() => /Demo Dev Co/.test(document.body.innerText));
+  log(hasOrg, "Dropdown shows the organization");
+  await page.screenshot({ path: OUT + "b272-account-dropdown.png", clip: { x: 980, y: 0, width: 460, height: 340 } });
 
-  // Profile → modal opens on the Profile tab with the name fields populated + Save profile.
+  // Escape closes the dropdown (shared AnchoredMenu affordance).
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+  const closed = await page.evaluate(() => ![...document.querySelectorAll("button")].some((b) => b.offsetParent !== null && /^Sign out$/.test((b.textContent || "").trim())));
+  log(closed, "Escape closes the account dropdown");
+
+  // Re-open, then Profile → modal opens on the Profile tab (name fields populated + Save).
+  await clickButton(page, /Mike Abbott/);
   await clickButton(page, /^Profile$/);
   const profileModal = await page.evaluate(() => {
     const vals = [...document.querySelectorAll("input")].map((i) => i.value);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { displayNameFor, firstNameFor, initialFor } from "../src/shared/profile/useProfile.js";
+import { displayNameFor, firstNameFor, initialFor, orgFor } from "../src/shared/profile/useProfile.js";
 
 // NEW-2 display rule: "First Last" → first alone → last alone → metadata → email,
 // never blank. The profiles table wins over signup metadata; metadata is the
@@ -51,5 +51,11 @@ describe("profile display name (B271/B272) — never-blank fallback chain", () =
     expect(initialFor("Mike Abbott")).toBe("M");
     expect(initialFor("abbott@x.com")).toBe("A");
     expect(initialFor("")).toBe("•");
+  });
+
+  it("orgFor prefers the profile row, then metadata, else empty", () => {
+    expect(orgFor({ org: "Acme RE" }, user("m@x.com", { org: "Old Co" }))).toBe("Acme RE");
+    expect(orgFor(null, user("m@x.com", { org: "Old Co" }))).toBe("Old Co");
+    expect(orgFor(null, user("m@x.com"))).toBe("");
   });
 });
