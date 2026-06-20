@@ -25,18 +25,41 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-19: owner-reported (chat) "can't access my scheduling projects — this is imperative."
      Filed B203–B205 (arrived as B194–B196, but concurrent `main` #169–#172 minted B194–B202 for
      the project switcher / trailer labels / scale bar / print tranche, so renumbered to the real
-     next free IDs at merge time). B203 (Schedule picker showed Site projects — CRITICAL
-     data-access) + B204 (module-contextual home crumb: "Map" in Site, "Dashboard" in Schedule)
-     were filed AND shipped this session — moved to BACKLOG-DONE.md. B205 (remove the Site "center
-     map" control) stays open below, blocked on the owner identifying which control he means (no
-     control is literally named "center map"/"recenter"). -->
+     next free IDs at merge time). ALL THREE filed AND shipped this session — moved to
+     BACKLOG-DONE.md: B203 (Schedule picker showed Site projects — CRITICAL data-access), B204
+     (module-contextual home crumb: "Map" in Site, "Dashboard" in Schedule), and B205 (the owner
+     clarified via screenshot that the "center map" he meant was the planner's redundant center
+     "‹ Map" back-button — now that B204 renamed the breadcrumb crumb to "Map" there were two;
+     removed the center one). -->
 
-### B205 — Remove the "center map" / recenter control in the Site module `[Site Planner / UI]` (task)  *(owner-reported 2026-06-19, tentative "maybe"; minted **B205** — concurrent `main` (#169–#172) took B194–B202 and this session took B203–B204, so this is the real next free ID after B204)*
-`[?]` Owner: in the Site module, "maybe we can get rid of the center map recall / the center map button." **Blocked on which control.** Audited the Site module (MapFinder + SitePlanner) — there is **no control literally named "center map" / "recenter" / "recall."** The candidates, none clearly "the center map button":
-  1. Plan-mode **"Zoom to fit"** (⤢) bottom-right of the canvas (`SitePlanner.jsx` zoom cluster → `fit()`) — fits the layout to the viewport; useful, and `fit`/`frameToActiveParcels` are reused by the Layers "show on map" path.
-  2. The **basemap on/off toggle** (the aerial "Map" control; `basemapOn`) — essential, not a "center" action.
-  3. The MapFinder per-site **"Show on map"** (⊕ `flyToSite`) row buttons — zoom to a saved site; useful.
-  Per the owner's own note ("if removal touches shared map-centering logic used elsewhere, confirm before deleting; otherwise remove") and the tentative "maybe," this needs a one-line confirm (which button / a screenshot) before deleting — removing the wrong one (e.g. Zoom-to-fit) would cost a useful control. **Question posed to the owner 2026-06-19.**
+<!-- Filed 2026-06-19 from the Cowork storage-backend chat (arrived as "NEW-1".."NEW-4"). Provisionally
+     B203–B206 (highest was B202 when filed), but concurrent `main` shipped B203/B204 (Schedule picker,
+     home crumb) + filed B205 (center map) while this was in flight, so renumbered at merge time to the
+     real next free IDs **B206–B209**. These are the /server file-storage tranche UNDER the file-filing
+     UI (B180) + auto-filing. Per the owner: live Google Drive wiring is blocked on his manual Workspace
+     + OAuth setup (being done in parallel with Cowork), so the architecture (B206), the link abstraction
+     (B208), and the no-silent-failure contract (B209) are BUILT + tested now, with the Drive backend
+     (B207) scaffolded behind them. Code in server/storage/ (walled off from the public Pages build); see
+     server/storage/README.md for the exact env/credentials the Drive backend needs from Cowork. -->
+
+### B206 — Storage-adapter discipline: confine all backend-specific logic to one module `[Server]` (task)  *(arrived as "NEW-1"; provisionally B203, renumbered **B206** — `main` took B203–B205)*
+`[x]` Shipped 2026-06-19 (branch `claude/laughing-ritchie-k5narx`). A **single storage-adapter module is the only thing the app talks to for file ops** (save / fetch / list / move / rename / delete / share-link). The app references files **only by Planyr's own stable keys** — never a Google Drive file id, Drive folder path, or Drive sharing handle. The adapter's internal **mapping table is the only place Planyr-key ↔ backend-id translation exists**; no backend id leaks past it. **NEW-2/3/4 all sit behind this.**
+- **What shipped:** `server/storage/adapter.js` (the only entry point — save/fetch/list/move/rename/remove/shareLink, all returning result objects, never throwing), `idMap.js` (the sole Planyr-key↔backend-id translator; in-memory store now, Supabase-Postgres-backed later), `result.js` (the `{ok}` result + `attempt()` wrapper), and `index.js` (server-side assembly — the one place creds are read). **20 unit tests** (`test/storageAdapter.test.js`) incl. the **acceptance test**: an "app consumer" written only against the adapter behaves identically across two different backends, and a list never exposes a backend id (an unbound backend object is invisible to the app).
+> **Dedup:** the adapter is the **bytes** layer; the **index of file facts** (B180's `fileFacts` view-model + the `doc_reviews` table) is the separate catalog layer that records *which* file is *what* — they meet only at the Planyr key. Existing direct Supabase-Storage calls (`reviewStore.uploadSource/downloadSource`, `overlayStorage.js`) are the **adoption targets**: route them through the adapter when the Drive backend goes live (so the swap is verified end-to-end with real creds), not as risky blind surgery now.
+
+### B207 — Google Drive storage backend behind the adapter `[Server]` (feature)  *(arrived as "NEW-2"; provisionally B204, renumbered **B207** — `main` took B203–B205)*
+`[~]` Drive as one adapter backend against a **Workspace Drive on planyr.io**: store/fetch/list/move/rename **bytes only**. This is the **substrate beneath auto-filing, NOT a redefinition of it** — auto-filing's own spec (title-block read → match project + aliases → rename/route into the folder structure → "needs filing" holding area for no-match / low-confidence, **never auto-guess** → queryable index of file facts) stays authoritative and **writes through this backend**. The **index records live in Supabase Postgres, not Drive.**
+- **✅ Shipped this session (scaffold):** `server/storage/backends/driveBackend.js` — the full backend contract, with every op returning a clear **"Drive isn't connected yet"** failure (never a throw, never a false success) until credentials arrive. The expected Drive REST `client` interface is documented inline (a fill-in, not a rebuild). Decisions baked in per spec: OAuth app **Internal** (Workspace user type → skips Google verification + the 7-day refresh-token expiry); scope **`drive.file`** (least privilege — app only touches files it creates, which still show in the owner's Drive for manual drag-to-email; broader Drive scope is a flagged decision, not a default); **credentials + refresh token server-side ONLY** (never the frontend build, never a `VITE_` var, never committed, never on the public Cloudflare Pages deploy — same isolation as the APS key). Moving storage to Drive **removes the Supabase 50 MB-per-file ceiling.**
+- **⏳ Blocked on the owner's manual setup (in progress via Cowork):** the Workspace OAuth app + the `GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN / PLANYR_DRIVE_ROOT_FOLDER` env values (see `server/storage/README.md`). Once provided: write the thin Drive REST `client`, swap the in-memory `idMap` store for a Supabase-Postgres one, set `PLANYR_STORAGE_BACKEND=drive`. No app changes.
+> **Cross-link:** the auto-filing item (title-block read → match → route → index) writes through this backend; this is its storage substrate, not a competing spec. Also unblocks the >50 MB drawings the Supabase free tier rejects.
+
+### B208 — Share-by-link via a link-provider abstraction (Drive links now, Planyr links later) `[Server]` (feature)  *(arrived as "NEW-3"; provisionally B205, renumbered **B208** — `main` took B203–B205)*
+`[x]` Shipped 2026-06-19. Sharing emits a link from a **single link-provider interface** (`server/storage/linkProvider.js`). For now it returns the backend's **native Drive share link** (recipients see a familiar Google Drive link — intentional, keeps the owner's company comfortable). **ALL link generation routes through this one interface**, so switching later to Planyr-native signed links (`planyr.io/s/<token>` → backend mints a temporary signed URL, serves bytes through the adapter) is a **one-place change** (`kind: "planyr"` + a `signer`). No Drive link call is hardcoded in UI/app code. **Tested** both kinds (Drive-native via the backend; Planyr signed via an injected signer; not-configured fails visibly).
+> **Non-goal (deferred):** drag-a-file-out-of-the-browser-into-an-email — a desktop sync-client gesture; the owner uses Drive directly for that for now.
+
+### B209 — File operations must surface success/failure; no silent file failures `[Server]` (task)  *(arrived as "NEW-4"; provisionally B206, renumbered **B209** — `main` took B203–B205)*
+`[x]` Shipped 2026-06-19. Every adapter op (upload, fetch, move, rename, delete, link-generation) returns a **visible success/failure result** (`server/storage/result.js`): the adapter **never throws** and **never reports a half-finished op as success** — a throwing backend, a backend `{ok:false}`, or an unmapped key all surface as `{ ok:false, error }`. **Same severity class as the silent cloud-save failures that caused prior data loss.** Covered by the no-silent-failure tests in `test/storageAdapter.test.js`.
+> **Dedup / align:** this **extends** the existing save-status-visibility guarantee (B125 — make cloud save status visible, no silent failures) to **Drive file operations**; it is the storage-layer contract, surfaced in the UI through the same honest-status pattern the persistence layer already uses (don't build a parallel status system — when the adapter is adopted, its `{ok:false}` feeds the existing save badge / banners).
 
 <!-- Filed 2026-06-19 from the Cowork storage-backend chat (arrived as "NEW-1".."NEW-4"). Provisionally
      B203–B206 (highest was B202 when filed), but concurrent `main` shipped B203/B204 (Schedule picker,
@@ -68,7 +91,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > **Dedup / align:** this **extends** the existing save-status-visibility guarantee (B125 — make cloud save status visible, no silent failures) to **Drive file operations**; it is the storage-layer contract, surfaced in the UI through the same honest-status pattern the persistence layer already uses (don't build a parallel status system — when the adapter is adopted, its `{ok:false}` feeds the existing save badge / banners).
 
 <!-- B189 (Site Analysis query failures) + B190 (click a constraint card → show its layer on the
-     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
+     map) were filed AND shipped this same session (2026-06-19) — moved to BACKLOG-DONE.md.
+     B210–B212 (Schedule Gantt brackets, task-fill, configurable columns) filed AND shipped
+     this same session (2026-06-19) — moved to BACKLOG-DONE.md. -->
 
 <!-- Filed 2026-06-19 from a parallel chat's backlog (arrived as "NEW-1".."NEW-4" → minted
      B180–B183 here; provisionally B176–B179, but concurrent `main` (#159) took B176 (shipped)
@@ -80,6 +105,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      browser-first; the auto-filing index + the heavier placement geometry (NEW-2 capture,
      NEW-3 rungs 1–2) follow the backend tranche and are stubbed behind a clean interface so
      the UI never blocks on missing infra. -->
+
+<!-- Filed 2026-06-19 (arrived as "NEW-1".."NEW-3" → B206/B207/B208, renumbered B213/B214/B215 after PRs #175 and #177 both raced for the same IDs) AND shipped the same
+     session — moved to BACKLOG-DONE.md (branch claude/sharp-edison-7gdn3y). -->
 
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*
 `[~]` A project-level **file repository** opened from **Row 1 (the project-name area), NOT a fourth module tab.** Rationale (owner): tabs are *workspaces* (modes of working — Site / Schedule / Markup); **Files is a shelf every workspace reaches into**, so it must be openable from inside any of them. "Folders" are **saved views over a tagged index, never a hand-maintained tree** — "All surveys", "All title commitments", "this project's civil set" are all *queries* against file facts. Two document classes: **spatial** (can live on the map — drawings, surveys, legal descriptions) vs **reference** (geotech, environmental, contracts — pulled and read, never a map object); a **title commitment is BOTH** (a reference document, but Schedule A's legal description feeds the boundary polygon and Schedule B's exceptions feed easement objects). Drawer: files grouped by discipline; per-file state **Filed** (automatic) vs **On map** (calibrated once); a **drop zone** (auto-file by title block) and a **"needs filing"** holding area with one-click confirm for low-confidence / no-match.
