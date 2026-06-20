@@ -1,6 +1,6 @@
-// B222 + B223 — verify on the built app (dist/):
-//  • idle prefetch injects a <link rel=prefetch> for the Schedule iframe doc (B222)
-//  • navigating to Schedule shows the themed "assembling" loader in #7F77DD (B223)
+// B223 + B224 — verify on the built app (dist/):
+//  • idle prefetch injects a <link rel=prefetch> for the Schedule iframe doc (B223)
+//  • navigating to Schedule shows the themed "assembling" loader in #7F77DD (B224)
 //  • no boot regressions from the new wiring.
 import { chromium } from "playwright";
 import { createServer } from "node:http";

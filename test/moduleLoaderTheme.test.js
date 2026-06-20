@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { resolveLoaderTheme, LOADER_SKINS, SHOW_DELAY_MS } from "../src/shared/ui/moduleLoaderTheme.js";
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
 
-describe("moduleLoaderTheme — reusable per-module loader theming (B223)", () => {
+describe("moduleLoaderTheme — reusable per-module loader theming (B224)", () => {
   it("themes Schedule as the Gantt skin in the Schedule accent #7F77DD", () => {
     const t = resolveLoaderTheme("scheduler");
     expect(t.kind).toBe("gantt");

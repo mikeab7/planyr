@@ -10,7 +10,7 @@
  *   • Site      → a site plan drawing itself: a parcel outline stroke-draws and
  *                 building footprints fade in, in the Site accent #1D9E75.
  * One animation engine, a per-module skin + accent (reuses MODULE_ACCENT), so the
- * loading UX stays consistent as the suite grows. (B223)
+ * loading UX stays consistent as the suite grows. (B224)
  *
  * Accessibility: honors prefers-reduced-motion — the cascade + sweep are dropped
  * for a static skeleton with a gentle opacity pulse.
