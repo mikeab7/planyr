@@ -60,6 +60,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V67 — Doc Review (Markup) auto-calibrates a sheet from its stated scale (B267) ✅ (self-verified headless on the owner's real sets — fully done for vector PDFs; ⏳ OCR slice pending a scanned sample)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, the owner's real KG B1 ARCH + Jacintoport FS sets from branch `mikeab7-patch-1`) · **Next check** — optional: a signed-in run on planyr.io confirming an auto-cal persists across reload; and the OCR path once a scanned sample exists.
+- **Steps:** Markup → open a multi-sheet PDF → watch the sheet list + the takeoff badge.
+- **✅ Architectural set auto-calibrates:** KG B1 (19 sheets) — **17 sheets auto-calibrated** from their stated architectural scales (1/16″=1′-0″, 1/4″=1′-0″, …), the **2 no-scale cover/notes sheets stay "not calibrated"**, and an auto sheet's badge reads **"scale from sheet: 1/16″=1′-0″ · verify"** (distinct amber, not a silent green). Sidebar shows **·≈** on auto sheets. `ui-audit/verify-new3-autoscale.mjs`.
+- **✅ NOT-TO-SCALE set is flagged, not calibrated:** Jacintoport FS (9 sheets) — all badge **"marked NOT TO SCALE"**, none auto-calibrated.
+- **✅ No cross-document bleed:** opening a second file resets calibrations — **0 stale ·≈ markers** carried from the prior file (a bug found + fixed during this verification).
+- **⏳ Pending:** the **OCR fallback** for scanned/raster sheets (B267 remaining) — no scanned sample on hand to drive it; the owner's two sets are vector, which the shipped embedded-text path covers.
+
 ### V66 — Project Files persistent drop-zone + processing queue (B270) ⏳ (active group self-verified headless; ⏳ signed-in check for the filed-row demote)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 (partial — see below).
 - **✅ Self-verified headless (logged-out, real component in a real browser):** mounted the real `ProjectFilesDrawer` with `signedIn` and drove a **mixed 3-file pick** (2 PDFs + 1 PNG) in one action → the tray showed **"PROCESSING · 3"** (Amendment A: one independent row per file, not a batch row), the PNG became a clear **"Not a PDF — only PDFs can be filed."** rejection row with a Dismiss ×, the two PDFs showed **Retry** buttons, and there were **0 JS / console errors and no `window.alert`**. The existing `ui-audit/verify-files-refile.mjs` also still PASSes (drawer mounts cleanly with the new imports/components). Screenshot captured (`ui-audit/screens/upload-tray.png`, gitignored).
