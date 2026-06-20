@@ -22,6 +22,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
+     into an unreadable cluster past the footprint edges when zoomed out. Filed B221 (NEW-1:
+     size-gate the buttons) + B222 (NEW-2: only on the selected/hovered building) — highest B#
+     across both files was B220, so B221/B222 are the real next free IDs. Deduped: the buttons
+     ALREADY rendered only on the selected building (never all), so NEW-2 folded into NEW-1 as
+     ONE visibility rule (footprint-size gate AND selected-or-hovered, hover added). Both filed
+     AND shipped this same session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION
+     V51). -->
+
 <!-- 2026-06-20: B220 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
      the planner-canvas fix that missed the map-finder call site). Minted B218, renumbered
      B220 — concurrent `main` PR #183 took B218 (dead header controls) + B219 (map-furniture
