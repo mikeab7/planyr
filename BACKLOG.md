@@ -22,6 +22,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: B300 (parcel click-vs-drag) + B301 (select-parcels toggle) were filed here and
+     SHIPPED the same session per STANDING RULE #1 — moved to BACKLOG-DONE.md (headless-verified V75). -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
      interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B288–B296**
      (renumbered from a first-filed B273–B281: by merge time concurrent `main` had consumed B273–B281
