@@ -824,7 +824,16 @@ _Move items here with the date and who/what checked them._
   - 0 boot console errors; lint 0 · **419 tests** (5 new in `test/moduleLoaderTheme.test.js`) · build green; the `Scheduler` / `SitePlannerApp` / `DocReview` lazy chunks intact.
 - **Not covered (logged-out limits):** the signed-in path is identical (the loader/prefetch are auth-agnostic shell chrome); the Site-Planner skin (`#1D9E75` footprints) shares the one engine + is unit-tested, shown on the SitePlannerApp chunk's first load.
 
-### V53 — Redesigned Site Yield panel: composition donut + legend + grouped rows (B225) ✅
+### V53 — Building feature-edit buttons hide when the on-screen footprint is too small; show only on the selected/hovered building (B225 + B226) ✅
+- **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bug + feature acceptance)
+- **Steps:** seeded one **400′×300′ cross-dock building** in a parcel, resumed into the planner. **B225:** selected it, then swept the wheel zoom from large to tiny, and at each step measured the building footprint rect's on-screen px **and** counted the drawn feature-add buttons (the +/− circles with an "Add …"/"Remove this" `<title>`), comparing to the count predicted by the per-axis rule. **B226:** with nothing selected, moved the cursor off the building, onto it, and off again, counting buttons each time. Script `ui-audit/verify-b225-b226.mjs`.
+- **Result ✅ (all checks passed):**
+  - **B225 size-gate (per-axis):** **8** buttons while the footprint was large (494×370 … 127×95px); **2** (the long-side sidewalk buttons only) at **81×60px** — height < 72 ≤ width, so the cramped short-end + corner buttons correctly drop while the long-side ones persist (the overlap/"also check" case, handled without a collapse menu); **0** once tiny (≤ 64×48px) — no spill, no cluster. The drawn count matched the rule predicted from the measured px at **every** non-ambiguous step. Screens: `b225-zoomed-in.png`, `b225-partial-longside.png`, `b225-zoomed-out.png`.
+  - **B226 selected-or-hovered:** nothing-selected & not-hovering = **0** buttons; hovering the building = **8** (revealed by hover alone — `b226-hover.png` shows the add-buttons with NO selection grips); moving off = **0**. So the buttons appear on the ONE active building only, gated by the same size rule.
+  - lint 0 errors · **414 tests** · build green; `SitePlannerApp` lazy chunk intact.
+- **Not covered (logged-out headless limits):** none material — the feature is purely client-side geometry/render; no auth or network path involved. The map's **Building Pin + Progress Arc** (`MapFinder.jsx`) are a separate component and were deliberately left untouched (still visible at every zoom).
+
+### V54 — Redesigned Site Yield panel: composition donut + legend + grouped rows (B227) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (feature acceptance)
 - **Steps:** seeded two logged-out sites and opened the **Yield** tab. **Seed A (spec example):** a 29.25-ac parcel with a 226,576-sf building + paving only, no pond → coverage 18 %, impervious 31 %. **Seed B:** added a parking field + a detention pond. Read back the donut arcs' `stroke-dasharray`, the legend, the KPI cards, and the grouped rows; also toggled the header to confirm collapse/expand. Script `ui-audit/verify-yield.mjs` (+ a collapse probe).
 - **Result ✅:**
