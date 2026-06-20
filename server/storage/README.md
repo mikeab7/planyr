@@ -41,3 +41,22 @@ is documented at the top of `driveBackend.js`) — a fill-in, not a rebuild — 
 Supabase-Postgres-backed `idMap` store in place of the in-memory one. No app changes.
 
 Note: moving file storage to Drive **removes the Supabase free-tier 50 MB-per-file ceiling**.
+
+## OAuth client — the redirect (callback) URI to register
+
+When creating the OAuth **client** (Application type = Web application), Google asks for
+**Authorized redirect URIs**. These must match what the backend sends byte-for-byte, so
+they are pinned in code at `server/oauth/config.js` — register these exact strings:
+
+| Authorized redirect URI | When |
+|---|---|
+| `https://planyr.io/api/auth/google/callback` | **Production — register this** (the live integration) |
+| `http://localhost:8788/api/auth/google/callback` | Optional — only for exercising the flow against a local backend |
+
+Hosting decision (2026-06-19): the backend runs at the **same origin** as the app under
+`/api` (Cloudflare Pages Functions / Worker on the planyr.io domain), so the callback is
+same-origin — no second host, no CORS. Reversible: if hosting moves, edit the authorized
+URIs in Google **and** `server/oauth/config.js` together. The OAuth client also yields the
+`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` above; the `GOOGLE_REFRESH_TOKEN` is minted
+once by completing the consent flow through that client.
+
