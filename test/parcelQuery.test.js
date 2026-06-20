@@ -6,7 +6,7 @@ const COUNTIES_HARRIS_URL = COUNTIES.harris.layerUrl;
 
 // buildParcelWhere is the ONE place a parcel-search where-clause is built, so the
 // primary CAD query and the statewide-backup (TxGIO) query construct it identically —
-// same numeric/LIKE choice, same county scoping, same injection guard (B47/B239/B240).
+// same numeric/LIKE choice, same county scoping, same injection guard (B47/B244/B245).
 const META = { fields: [
   { name: "prop_id", type: "esriFieldTypeInteger" },
   { name: "situs_addr", type: "esriFieldTypeString" },

@@ -49,6 +49,7 @@ import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
+import { jpegToPdf } from "./lib/imagePdf.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -781,6 +782,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [printPaper, setPrintPaper] = useState("letter");   // "letter" | "tabloid"
   const [printOrient, setPrintOrient] = useState("landscape"); // "landscape" | "portrait"
   const [printOverlay, setPrintOverlay] = useState(true);   // include placed site-plan overlays in print/export (B131); re-defaulted to on-screen visibility on entering print mode
+  const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
@@ -2932,7 +2934,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // One shared lookup: builds the (county-scoped, injection-safe) where-clause and,
       // if the county's own CAD server is down, automatically retries the statewide
       // TxGIO layer scoped to this one county so the search still answers and can't
-      // match a like-named parcel elsewhere (B239/B240).
+      // match a like-named parcel elsewhere (B244/B245).
       const r = await lookupParcels({ county, lookupUrl: lookupUrl.trim(), mode: searchMode, value: v });
       if (!r.feats.length) { setLookupErr("No matches. Check spelling, try a shorter/partial value, or switch search mode."); return; }
       if (r.backup) setLookupErr(`Using the statewide backup (TxGIO) for ${r.backupCounty} — the county’s own server is unavailable; results may lag county updates.`);
@@ -3282,37 +3284,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
     return null; // full
   };
-  // "+" — add the next outward zone to every dock side that's at the current (uniform)
-  // level, so the set advances as a unit; then re-lay each side.
+  // "+" — grow the building's dock apron outward by one ring: add the NEXT outward zone to
+  // EVERY dock side that isn't full (each side adds its own next: court → trailer → buffer).
+  // Per-side (not min-level), so an uneven building is never stuck adding courts.
   const addDockZone = (b) => {
     const { dockSides } = dockSidesOf(b);
-    const level = dockStackLevel(b);
-    if (!dockSides.length || level >= MAX_DOCK_ZONES) return;
+    if (!dockSides.length || dockSides.every((s) => stackCountIn(els, b, s) >= MAX_DOCK_ZONES)) return;
     pushHistory();
     setEls((a) => {
       let next = a;
-      dockSides.forEach((side) => { if (stackCountIn(next, b, side) === level) { const z = buildNextZone(next, b, side); if (z) next = [...next, z]; } });
+      dockSides.forEach((side) => { if (stackCountIn(next, b, side) < MAX_DOCK_ZONES) { const z = buildNextZone(next, b, side); if (z) next = [...next, z]; } });
       dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
     });
     setSel({ kind: "el", id: b.id });
   };
-  // "−" — peel the OUTERMOST present zone off every dock side at the deepest level
-  // (LIFO: buffer → trailer → court); cascade its children; re-lay each side.
+  // "−" — pull the apron in by one ring: peel the OUTERMOST zone off EVERY dock side that has
+  // one (LIFO per side: buffer → trailer → court); cascade children; re-lay each side.
   const removeOuterDockZone = (b) => {
     const { dockSides } = dockSidesOf(b);
-    const maxL = dockStackMax(b);
-    if (maxL <= 0) return;
+    if (!dockSides.some((s) => stackCountIn(els, b, s) > 0)) return;
     pushHistory();
     setEls((a) => {
       const rm = [];
-      dockSides.forEach((side) => { if (stackCountIn(a, b, side) === maxL) { const z = findZoneIn(a, b, side, maxL - 1); if (z) rm.push(z.id); } });
+      dockSides.forEach((side) => { const n = stackCountIn(a, b, side); if (n > 0) { const z = findZoneIn(a, b, side, n - 1); if (z) rm.push(z.id); } });
       let next = removeWithChildren(a, rm);
       dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
     });
     setSel({ kind: "el", id: b.id });
   };
+  // Remove the outermost zone on ONE dock side (the on-canvas per-side "−").
+  const removeOuterZoneOnSide = (b, side) => {
+    const court = findCourtIn(els, b, side); if (!court) return;
+    const trailer = findTrailerIn(els, court);
+    const buffer = findBufferIn(els, trailer);
+    removeFeature((buffer || trailer || court).id); // removeFeature cascades children + re-lays the side
+  };
+  // True if ANY / the given dock side can still grow / shrink (for enabling the +/− controls).
+  const dockCanAdd = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) < MAX_DOCK_ZONES); };
+  const dockCanRemove = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) > 0); };
   // Inline depth edit for zone index `i`, applied across every dock side (the stack is
   // mirrored, so depths stay uniform); outer zones shift out via relayout.
   const setZoneDepthAll = (b, i, newDepth) => {
@@ -3336,10 +3347,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Car parking on the building ENDS (non-dock short sides) — tracked OUTSIDE the
   // dock-face LIFO stack, with its own add/remove. [B228 assumption, flagged for Michael.]
-  const carEndsSides = (b) => (b.w >= b.h ? ["left", "right"] : ["top", "bottom"]);
+  // Car parking goes on every NON-dock side (the short ends, plus the long side opposite the
+  // docks on a single-load building) — wherever there's no truck court / trailer / buffer.
+  const carEndsSides = (b) => { const dock = dockSidesOf(b).dockSides; return ["top", "bottom", "left", "right"].filter((s) => !dock.includes(s)); };
   const carParkingEnds = (b) => els.filter((x) => x.attachedTo === b.id && x.sideParkSide && carEndsSides(b).includes(x.sideParkSide));
   const addCarParkingEnds = (b) => { carEndsSides(b).forEach((name) => addParkingRowSide(b, name)); };
   const removeCarParkingEnds = (b) => { const ids = new Set(carParkingEnds(b).map((x) => x.id)); if (!ids.size) return; pushHistory(); setEls((a) => a.filter((x) => !ids.has(x.id))); };
+  const carParkingOpenSides = (b) => carEndsSides(b).filter((s) => !els.some((x) => x.attachedTo === b.id && x.sideParkSide === s)); // ends still free
   // Remove every bump-out at once (the "−" counterpart to "+ Bump-outs"; footprint modifier).
   const removeAllDogEars = (b) => {
     const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
@@ -3934,7 +3948,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pts.forEach((p) => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
   };
-  const buildExportSvg = (frame, includeOverlay = true) => {
+  const buildExportSvg = (frame, includeOverlay = true, paper = PAL.paper) => {
     if (!svgRef.current) return null;
     let x, y, w, h;
     if (frame) { // explicit print crop (feet) → exact paper-aspect viewBox
@@ -3966,7 +3980,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     clone.removeAttribute("style");
     const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     bg.setAttribute("x", x); bg.setAttribute("y", y); bg.setAttribute("width", w); bg.setAttribute("height", h);
-    bg.setAttribute("fill", PAL.paper);
+    bg.setAttribute("fill", paper); // PDF export passes white (screen cream wastes ink); PNG keeps the screen page colour
     clone.insertBefore(bg, clone.firstChild);
     // Always include the aerial underlay (even if it's hidden on screen), placed
     // beneath everything but the paper, so prints/exports keep the satellite.
@@ -4044,7 +4058,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
       canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((png) => {
-        if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Print to PDF."); return; }
+        if (!png) { alert("Couldn't render the PNG (the framed area may be too large). Try a tighter print frame, or use Download PDF."); return; }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(png);
         aEl.download = `${sheetFileName({ project: siteLabel, plan: planLabel })}.png`; // B201
@@ -4054,30 +4068,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } catch (_) {
       // image.onerror, a CORS-tainted canvas (the aerial basemap), or drawImage failing
       // used to reject silently (unhandled) with no download — now surfaced (B50).
-      alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Print to PDF.");
+      alert("PNG export failed — the aerial basemap can taint the canvas (cross-origin). Turn the basemap off and retry, or use Download PDF.");
     } finally { URL.revokeObjectURL(url); }
   };
-  const printPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
-    // Timing instrumentation (B202): surface where prep spends its time so a future
-    // stall is diagnosable rather than a mystery 60-second "Preparing print…".
+  // Resolution / quality knobs for the rasterized PDF. 300 DPI keeps text crisp and the
+  // aerial photo-grade at print size; the pixel cap guards memory on big sheets (Tabloid
+  // @300 ≈ 16.8M px, under the cap; only larger custom sizes would scale down).
+  const PDF_DPI = 300, PDF_MAX_PX = 22e6, PDF_JPEG_Q = 0.92;
+  // exportPDF (NEW-1) — REPLACES the old browser-print path (window.open + window.print
+  // on a blank window). That path handed our composed sheet to the BROWSER's print
+  // dialog, which stamps on chrome we can't strip (a date/time header, the about:blank
+  // URL, a page number) and bleeds the on-screen cream page colour onto paper. Here we
+  // keep the exact same single-SVG sheet composition (B200/B197) but DELIVER it as a real
+  // PDF we build ourselves: rasterize the sheet at high DPI, JPEG-encode it, wrap it with
+  // jpegToPdf, and download it. Generating the PDF ourselves is what removes the injected
+  // chrome; the page size is declared explicitly (no Letter-on-Tabloid float); paper is
+  // forced white (the cream is a screen-only page colour).
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
-    const mark = (label, since = t0) => { try { console.debug(`[print] ${label}: ${Math.round(now() - since)}ms`); } catch (_) {} };
-    const built = buildExportSvg(printFrame, includeOverlay);
-    if (!built) { alert("Nothing to print yet — add a parcel or some elements first."); return; }
-    // Open the window synchronously (before any await) so it isn't pop-up-blocked.
-    const win = window.open("", "_blank");
-    if (!win) { alert("Pop-up blocked — allow pop-ups for this site to print."); return; }
-    win.document.write("<!doctype html><title>Preparing…</title><body style='font-family:sans-serif;padding:24px;color:#555'>Preparing print…</body>");
+    const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff"); // force WHITE paper for print/PDF
+    if (!built) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
+    setExportingPDF(true);
     try {
-      const tIn = now();
-      await inlineImages(built.clone, false); // embed the satellite (keep remote href if blocked); time-boxed (B202)
-      mark("inline images", tIn);
-      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg>
-      // sized to the layout's plan box (it keeps its own viewBox), then the title
-      // block, the buildings table (B197) and the metrics live in the SAME outer SVG
-      // coordinate system — one viewBox, one scaling transform, so every layer scales
-      // together at any print zoom and prints as one cohesive PDF.
+      // Embed the aerial (and any placed overlay) as data URLs; DROP any we can't fetch so
+      // a cross-origin image can't taint the canvas and abort the whole export (B202).
+      await inlineImages(built.clone, true);
+      mark("inline images");
+      // Compose the WHOLE sheet as ONE SVG (B200): nest the plan as an inner <svg> sized to
+      // the layout's plan box (it keeps its own viewBox); the title block, buildings table
+      // (B197) and metrics live in the SAME outer SVG coordinate system.
       const rows = buildingRows();
       const layout = printSheetLayout({ paper, orient, buildingCount: rows.length });
       const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
@@ -4103,31 +4124,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         metrics: metricPairs,
         note: "Concept site plan — planning-level estimates, not a survey.",
         buildings: rows.map((r) => ({ name: r.name, sf: r.sf, clearHeight: r.clearHeight.value, slab: r.slab.value })),
-        pal: PAL,
+        pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
       });
-      // Suggested PDF filename comes from the document <title> (B201) — date · project · plan name.
-      const fileName = sheetFileName({ project: siteLabel, plan: planLabel });
-      const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-      const pageCss = paper === "tabloid"
-        ? (orient === "portrait" ? "11in 17in" : "17in 11in")
-        : (orient === "portrait" ? "letter portrait" : "letter landscape");
-      // @page margin 0 + the SVG's intrinsic inch size = exactly one page; the inset
-      // border in the sheet keeps content off the printer's unprintable edge.
-      win.document.open();
-      win.document.write(`<!doctype html><html><head><title>${escAttr(fileName)}</title><style>
-        @page { size: ${pageCss}; margin: 0; }
-        html,body{margin:0;padding:0;background:#fff}
-        svg{display:block;margin:0 auto}
-      </style></head><body>${sheetSvg}</body></html>`);
-      win.document.close();
-      mark("ready");
-      // Print once the aerial has loaded (or after a beat if it's cached/absent).
-      const go = () => setTimeout(() => { try { win.focus(); win.print(); } catch (_) {} }, 350);
-      if (win.document.readyState === "complete") go(); else win.onload = go;
+      // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
+      // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
+      const { page } = layout;
+      let pxW = Math.round(page.wIn * PDF_DPI), pxH = Math.round(page.hIn * PDF_DPI);
+      if (pxW * pxH > PDF_MAX_PX) { const k = Math.sqrt(PDF_MAX_PX / (pxW * pxH)); pxW = Math.round(pxW * k); pxH = Math.round(pxH * k); }
+      const url = URL.createObjectURL(new Blob([sheetSvg], { type: "image/svg+xml" }));
+      try {
+        const image = new Image();
+        await new Promise((res, rej) => { image.onload = res; image.onerror = () => rej(new Error("sheet render failed")); image.src = url; });
+        const canvas = document.createElement("canvas");
+        canvas.width = pxW; canvas.height = pxH;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, pxW, pxH); // JPEG has no alpha — paint white, not black
+        ctx.drawImage(image, 0, 0, pxW, pxH);
+        mark("rasterized");
+        const jpegBlob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", PDF_JPEG_Q));
+        const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
+        const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
+        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName });
+        const aEl = document.createElement("a");
+        aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+        aEl.download = `${fileName}.pdf`;
+        aEl.click();
+        mark("downloaded");
+        setTimeout(() => URL.revokeObjectURL(aEl.href), 8000);
+      } finally { URL.revokeObjectURL(url); }
     } catch (_) {
-      try { win.close(); } catch (e2) {} // don't strand a blank "Preparing…" window if inlining/serialization threw (B50)
-      alert("Couldn't prepare the print view — the aerial basemap may have blocked it. Turn the basemap off and retry.");
-    }
+      // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
+      alert("Couldn't build the PDF — the aerial basemap can block it (cross-origin). Turn the basemap off and retry.");
+    } finally { setExportingPDF(false); }
   };
 
   /* ------------ print-frame placement ------------ */
@@ -4159,7 +4187,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printAspectKey]);
   const overlayPrintable = hasPrintableOverlay(sheetOverlays); // gates the "Print overlay" checkbox — no dead control when nothing's loaded
-  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => printPDF(p, o, ov), 60); };
+  const doPrint = () => { const p = printPaper, o = printOrient, ov = printOverlay; setPrintMode(false); setTimeout(() => exportPDF(p, o, ov), 60); };
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -4439,6 +4467,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B242 — a "+ / −" PAIR (both visible together) for the on-building controls: a coloured "+"
+  // to extend out and a red "−" to pull in, side by side along the wall tangent. When only one
+  // action applies it sits centred. This is what the owner asked for — grow AND shrink right on
+  // the building, not a single toggle that hides the "+" once something's there.
+  const glyphPlus = (cx, cy, color, r, title, onClick) => (
+    <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
+      <title>{title}</title>
+      <circle cx={cx} cy={cy} r={r} fill={color} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx} y1={cy - r * 0.5} x2={cx} y2={cy + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />
+    </g>
+  );
+  const glyphMinus = (cx, cy, r, title, onClick) => (
+    <g style={{ cursor: "pointer" }} onPointerDown={(e) => { if (e.button !== 0) return; e.stopPropagation(); onClick(); }}>
+      <title>{title}</title>
+      <circle cx={cx} cy={cy} r={r} fill="#b91c1c" stroke="#ffffff" strokeWidth={1.75} />
+      <line x1={cx - r * 0.5} y1={cy} x2={cx + r * 0.5} y2={cy} stroke="#ffffff" strokeWidth={1.75} />
+    </g>
+  );
+  const featPair = (key, pos, tan, opt, r = 9) => {
+    const both = opt.canAdd && opt.canRemove, gap = r + 3;
+    const aP = both ? { x: pos.x - tan.x * gap, y: pos.y - tan.y * gap } : pos;
+    const rP = both ? { x: pos.x + tan.x * gap, y: pos.y + tan.y * gap } : pos;
+    return (
+      <g key={key}>
+        {opt.canAdd && glyphPlus(aP.x, aP.y, opt.addColor, r, opt.addTitle, opt.onAdd)}
+        {opt.canRemove && glyphMinus(rP.x, rP.y, r, opt.removeTitle, opt.onRemove)}
+      </g>
+    );
+  };
   // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
   // one, or (when nothing is selected) the one under the cursor — never every building
   // in view. featActiveId is that building; each node group below ALSO gates each button
@@ -4450,41 +4508,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
-    // they don't get their own dock / sidewalk / trailer handles.
+    // they don't get their own dock / parking / bump-out handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
-    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
     const sides = [["top", 0, -1], ["bottom", 0, 1], ["left", -1, 0], ["right", 1, 0]];
+    const depths = zoneDepthDefaults(settings);
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
-          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
-          // cluster; below that it piles onto the opposite wall's button. A long/narrow
-          // footprint thus keeps its long-side buttons and drops only the cramped short-end
-          // ones — overlap handled without a collapse menu.
+          // B225: an inset control needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall. A long/narrow footprint keeps
+          // its long-side controls and drops only the cramped short ends.
           if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-          const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          if (dockSides.includes(name)) { // long side → dock-zone stack (court → trailer → buffer)
-            const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
-            return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${Math.round(zoneDepthDefaults(settings)[0])}′ truck court (then trailer parking, then buffer)`,
-              () => addZoneOnSide(el, name),
-              existing ? () => removeFeature(existing.id) : null);
+          const pos = { x: ms.x - ux * 24, y: ms.y - uy * 24 }; // just inside the wall, on the building
+          const tan = { x: -uy, y: ux };                        // along the wall (side-by-side +/−)
+          if (dockSides.includes(name)) {
+            // dock side → "+ / −" walking the zone stack OUT/IN (court → trailer parking → buffer)
+            const n = stackCountIn(els, el, name);
+            const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label.toLowerCase() : null;
+            return featPair(`dock${name}`, pos, tan, {
+              canAdd: n < MAX_DOCK_ZONES, addColor: "#b45309",
+              addTitle: nextLabel ? `Extend out — add ${Math.round(depths[n])}′ ${nextLabel}` : "All dock zones added",
+              onAdd: () => addZoneOnSide(el, name),
+              canRemove: n > 0, removeTitle: "Pull in — remove the outer dock zone",
+              onRemove: () => removeOuterZoneOnSide(el, name),
+            });
           }
-          // short (non-dock) side → progress: + sidewalk → + parking row → − parking
-          const sw = kids.find((x) => isWallStrip(x) && !x.points && sideOfKid(el, x) === name);
+          // non-dock side (a short end, or the long side opposite single-load docks) → car parking
           const park = kids.find((x) => x.sideParkSide === name);
-          return featNode(`add${name}`, pos, !!park,
-            sw ? "#2563eb" : "#16a34a",
-            sw ? "Add a parking row + drive aisle" : `Add ${SIDEWALK_W}′ sidewalk`,
-            sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
-            park ? () => removeFeature(park.id) : null);
+          return featPair(`end${name}`, pos, tan, {
+            canAdd: !park, addColor: "#16a34a", addTitle: "Add a car-parking row",
+            onAdd: () => addParkingRowSide(el, name),
+            canRemove: !!park, removeTitle: "Remove car parking",
+            onRemove: () => park && removeFeature(park.id),
+          });
         })}
-        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
+            one thing there, per the owner); needs room on BOTH axes (B225) */}
         {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
@@ -4500,46 +4566,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         })}
       </g>
     );
-  })();
-
-  // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
-  // parking backs in. Adds striped trailer parking (stack zone 1), or removes it.
-  const courtAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
-    const el = els.find((x) => x.id === featActiveId);
-    if (!el || el.locked || el.points || !el.truckCourt) return null;
-    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
-    const existing = els.find((x) => x.forCourt === el.id);
-    const [nx, ny] = SIDE_N[el.truckCourt.side];
-    const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
-    const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });        // outer-edge midpoint
-    const cpx = f2p({ x: el.cx, y: el.cy });
-    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-    const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
-    return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${Math.round(zoneDepthDefaults(settings)[1])}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
-  })();
-
-  // "+" / "−" on a selected TRAILER PARKING row, on its far (outer) edge — adds the
-  // buffer (stack zone 2, the outermost), or removes it if present.
-  const trailerAddNodes = (() => {
-    if (tool !== "select" || !featActiveId) return null;
-    const el = els.find((x) => x.id === featActiveId);
-    if (!el || el.locked || el.points || el.type !== "trailer" || !el.forCourt) return null;
-    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
-    const court = els.find((x) => x.id === el.forCourt);
-    const b = court && els.find((x) => x.id === court.attachedTo);
-    const side = court && court.truckCourt && court.truckCourt.side;
-    if (!b || !side) return null;
-    const existing = els.find((x) => x.forTrailer === el.id);
-    const u = outwardUnit(b, side);
-    const ly = rot2(0, 1, el.rot);                              // trailer local-y in world
-    const sgn = (ly.x * u.x + ly.y * u.y) >= 0 ? 1 : -1;        // toward the far (outer) edge
-    const off = rot2(0, sgn * el.h / 2, el.rot);
-    const ms = f2p({ x: el.cx + off.x, y: el.cy + off.y });
-    const cpx = f2p({ x: el.cx, y: el.cy });
-    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-    const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };
-    return <g>{featNode("trailerBuffer", pos, !!existing, "#7f9a63", `Add ${Math.round(zoneDepthDefaults(settings)[2])}′ buffer behind the trailer parking`, () => addZoneOnSide(b, side), existing ? () => removeFeature(existing.id) : null)}</g>;
   })();
 
   // Grow a parking field one row deeper (keeping its near edge fixed); the stall
@@ -5258,7 +5284,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onChange={(e) => { importJSONFile(e.target.files?.[0]); e.target.value = ""; }} />
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then print or save as PDF" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Print / pick frame…</button>
+            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
           </AnchoredMenu>
@@ -5964,8 +5990,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parcelEdgeLabels}
                 {handleNodes}
                 {sideAddNodes}
-                {courtAddNodes}
-                {trailerAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
@@ -6180,6 +6204,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
+          {/* NEW-1 — "Preparing PDF…" pill while the sheet is composed/rasterized/downloaded
+              (replaces the old blank "Preparing print…" pop-up window). */}
+          {exportingPDF && (
+            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 9, background: "rgba(25,22,19,0.94)", color: "#fff", padding: "7px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 6px 22px rgba(0,0,0,0.28)", zIndex: 10 }}>
+              <span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+              Preparing PDF…
+            </div>
+          )}
+
           {/* print-frame toolbar */}
           {printMode && (() => {
             const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
@@ -6206,7 +6239,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...chip, fontWeight: 600, background: printOptsOpen ? PAL.accentSoft : "#fff" }} onClick={() => setPrintOptsOpen((o) => !o)}
                     title="Clear-height & slab defaults and per-building overrides that drive the printed buildings table">Options ▾</button>
                 </div>
-                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint}>Print</button>
+                <button style={{ ...btn(true), padding: "6px 14px" }} onClick={doPrint} title="Build a finished PDF and download it — no browser print dialog, no headers, white background">Download PDF</button>
                 <button style={{ ...chip }} onClick={() => { setPrintMode(false); setPrintFrame(null); }}>Cancel</button>
                 {/* B199 — print options flyout: edit the global clear-height/slab rules (B198)
                     and per-building overrides; portal-mounted (AnchoredMenu) so it escapes
@@ -6770,19 +6803,35 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                     </>
                   ) : isDockZone(selEl) ? (() => {
-                    // A dock-zone stack member (court / trailer / buffer): edit its DEPTH inline;
-                    // length + rotation are stack-controlled (full wall, flush-outward). Changing
-                    // it pushes the zones beyond it outward (B228).
+                    // A dock-zone stack member (court / trailer / buffer). Edit its DEPTH inline,
+                    // and — the button Michael relies on — a "＋" to add the NEXT outward zone on
+                    // THIS side (court → trailer parking → buffer), plus a direct remove. This is the
+                    // per-zone add restored (B239): selecting the truck court gives you "＋ Add trailer
+                    // parking" again, independent of the other dock side.
                     const b = els.find((x) => x.id === selEl.attachedTo);
                     const side = b && zoneSideOf(els, selEl);
                     const i = zoneIndexOf(selEl);
+                    const n = b && side ? stackCountIn(els, b, side) : 0; // zones present on this side (1..3)
+                    const nextLabel = n < MAX_DOCK_ZONES ? DOCK_ZONES[n].label : null; // the next one out
                     return (
                       <>
                         <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
-                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n) => b && side && setZoneDepthAll(b, i, n)} />
+                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n2) => b && side && setZoneDepthAll(b, i, n2)} />
                         </Field>
+                        {b && side && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2, marginBottom: 4 }}>
+                            {nextLabel && (
+                              <button style={{ ...chip, textAlign: "left", color: "#0e7490" }}
+                                title={`Add ${Math.round(zoneDepthDefaults(settings)[n])}′ ${nextLabel.toLowerCase()} flush beyond this, on this dock side`}
+                                onClick={() => addZoneOnSide(b, side)}>＋ Add {nextLabel.toLowerCase()}</button>
+                            )}
+                            <button style={{ ...chip, textAlign: "left", color: "#b3361b" }}
+                              title={`Remove this ${DOCK_ZONES[i].label.toLowerCase()}${n > i + 1 ? " and the zones beyond it" : ""}`}
+                              onClick={() => removeFeature(selEl.id)}>－ Remove {DOCK_ZONES[i].label.toLowerCase()}{n > i + 1 ? " (+ outer)" : ""}</button>
+                          </div>
+                        )}
                         <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
-                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? " · both dock sides" : ""}. Select the building to add / remove zones.
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? "" : ""}. Or select the building to grow / shrink every dock side at once.
                         </div>
                       </>
                     );
@@ -6853,58 +6902,53 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const b = selEl;
                     const { dockSides } = dockSidesOf(b);
                     const noDock = dockSides.length === 0;
-                    const level = dockStackLevel(b);          // zones present on every dock side (the unit level)
-                    const maxL = dockStackMax(b);             // deepest dock side (the LIFO removal level)
-                    const hasEnds = carParkingEnds(b).length > 0;
+                    const level = dockStackLevel(b);          // shallowest dock side
                     const hasBumps = els.some((x) => x.attachedTo === b.id && x.dogEar);
-                    const nextLabel = DOCK_ZONES[level] ? DOCK_ZONES[level].label : null;
-                    const outerLabel = maxL > 0 && DOCK_ZONES[maxL - 1] ? DOCK_ZONES[maxL - 1].label : null;
                     const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
+                    // Uniform square +/− buttons so every control row lines up (B242 — the owner asked
+                    // for "+ and − next to each other" at a consistent size).
+                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid #ddd6c5", background: "#fff", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    // One control row: label (+ sub) on the left, "＋" and (optionally) "−" on the right.
+                    const ctlRow = (label, sub, { onAdd, addOn, addTitle, onRem = null, remOn = false, remTitle = "" }) => (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, color: PAL.ink }}>{label}</div>
+                          {sub && <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.3 }}>{sub}</div>}
+                        </div>
+                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={sq(addOn, false)}>＋</button>
+                        {onRem !== null && <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={sq(remOn, true)}>－</button>}
+                      </div>
+                    );
                     return (
                       <div style={{ marginTop: 4 }}>
                         <div style={muteHdr}>Dock features</div>
-                        {/* add-controls on top — the dock-zone stack +/− (court → trailer → buffer) */}
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button style={{ ...chip, flex: 1, textAlign: "left", ...((noDock || level >= MAX_DOCK_ZONES) ? { opacity: 0.45, cursor: "default" } : {}) }}
-                            disabled={noDock || level >= MAX_DOCK_ZONES}
-                            title={noDock ? "Pick a dock side first (Building ▾ → Cross-dock or Single-load)" : level >= MAX_DOCK_ZONES ? "All dock zones added" : `Add ${nextLabel} outward from the dock face`}
-                            onClick={() => addDockZone(b)}>＋ {level >= MAX_DOCK_ZONES ? "All zones" : `Add ${nextLabel ? nextLabel.toLowerCase() : "zone"}`}</button>
-                          <button style={{ ...chip, flex: 1, textAlign: "left", ...(maxL <= 0 ? { opacity: 0.45, cursor: "default" } : { color: "#b3361b" }) }}
-                            disabled={maxL <= 0}
-                            title={maxL > 0 ? `Remove ${outerLabel} — the outermost zone (LIFO)` : "No dock zones to remove"}
-                            onClick={() => removeOuterDockZone(b)}>－ {maxL > 0 ? `Remove ${outerLabel ? outerLabel.toLowerCase() : "outer"}` : "Remove outer"}</button>
-                        </div>
+                        {ctlRow("Dock zones", "court → trailer parking → buffer", {
+                          onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
+                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone",
+                          onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
+                        })}
+                        {ctlRow("Car parking", "non-dock sides (the ends)", {
+                          onAdd: () => addCarParkingEnds(b), addOn: carParkingOpenSides(b).length > 0,
+                          addTitle: "Add a car-parking row on each open non-dock side",
+                          onRem: () => removeCarParkingEnds(b), remOn: carParkingEnds(b).length > 0, remTitle: "Remove the non-dock-side car parking",
+                        })}
+                        {ctlRow("Bump-outs", `footprint modifier · ${DOGEAR_W}′×${DOGEAR_D}′ corners`, {
+                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: "Add dock-corner bump-outs",
+                          onRem: hasBumps ? () => removeAllDogEars(b) : null, remOn: hasBumps, remTitle: "Remove all bump-outs",
+                        })}
                         {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
-                        {/* car parking — OUTSIDE the dock-face LIFO stack; occupies the ends (non-dock sides) */}
-                        <button style={{ ...chip, textAlign: "left", width: "100%", marginTop: 6 }}
-                          title={hasEnds ? "Remove the end (non-dock side) car parking" : "Add a car-parking row on each end (non-dock side)"}
-                          onClick={() => (hasEnds ? removeCarParkingEnds(b) : addCarParkingEnds(b))}>{hasEnds ? "－ Car parking (ends)" : "＋ Car parking (ends)"}</button>
-                        {/* bump-outs — a FOOTPRINT modifier, kept here but visually distinct from the outward band stack */}
-                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${PAL.panelLine}` }}>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1, textAlign: "left", color: "#7c3aed", borderColor: "#e4d4fb" }} onClick={() => addDogEars(b)}>＋ Bump-outs</button>
-                            {hasBumps && <button style={{ ...chip, flex: 1, textAlign: "left", color: "#7c3aed", borderColor: "#e4d4fb" }} onClick={() => removeAllDogEars(b)}>－ Bump-outs</button>}
-                          </div>
-                          <div style={note}>Footprint modifier ({DOGEAR_W}′×{DOGEAR_D}′ corners) — adds to building sf, not an outward band.</div>
-                        </div>
-                        {/* active dock-face zones, outward order, inline editable depth + LIFO − */}
+                        {/* active dock-face zones, outward order, inline editable depth */}
                         {level > 0 && (
                           <div style={{ marginTop: 9 }}>
-                            <div style={muteHdr}>Zones · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
-                            {DOCK_ZONES.slice(0, level).map((z, i) => {
-                              const isOuter = i === level - 1;
-                              return (
-                                <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i + 1}. {z.label}</span>
-                                  <NumInput style={{ ...numInput, width: 52 }} value={zoneDepthShown(b, i)} min={1} onCommit={(n) => setZoneDepthAll(b, i, n)} />
-                                  <span style={{ fontSize: 11, color: PAL.muted }}>′</span>
-                                  <button title={isOuter ? `Remove ${z.label} (outermost — LIFO)` : "Remove the outer zone first (LIFO)"}
-                                    onClick={isOuter ? () => removeOuterDockZone(b) : undefined}
-                                    style={{ ...chip, padding: "3px 8px", fontWeight: 700, ...(isOuter ? { color: "#b3361b" } : { color: PAL.panelLine, cursor: "default" }) }}>－</button>
-                                </div>
-                              );
-                            })}
+                            <div style={muteHdr}>Zone depths · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
+                            {DOCK_ZONES.slice(0, level).map((z, i) => (
+                              <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                                <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i + 1}. {z.label}</span>
+                                <NumInput style={{ ...numInput, width: 52 }} value={zoneDepthShown(b, i)} min={1} onCommit={(n) => setZoneDepthAll(b, i, n)} />
+                                <span style={{ fontSize: 11, color: PAL.muted }}>′</span>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>

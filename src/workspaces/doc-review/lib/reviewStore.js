@@ -187,6 +187,30 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
+/* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Additive:
+ * the file is already filed in Supabase by fileNewReview; this puts a copy in the company
+ * Drive so it shows up there. Best-effort — returns { ok } / { ok:false, error } and never
+ * throws. No-op (skipped:true) when the Drive backend isn't wired yet on the deploy. */
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
+  if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
+  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
+  const name = fileName || "document.pdf";
+  try {
+    const resp = await fetch("/api/files", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": file.type || "application/pdf",
+        "x-planyr-key": `${folder}/${name}`, "x-planyr-folder": folder, "x-planyr-name": name },
+      body: file,
+    });
+    if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
+    let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
+    return resp.ok && jr.ok ? { ok: true } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
 // File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
 // the bytes, then upsert the indexed record. Returns { ok, id }.
 export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", blob, fileName }) {

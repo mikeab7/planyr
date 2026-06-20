@@ -9,7 +9,7 @@
 // Patterns cover both the per-county CAD columns AND the statewide TxGIO columns
 // (prop_id, owner_name, situs_addr, legal_area/gis_area, land_value, imp_value,
 // mkt_value, stat_land_use, year_built) so a parcel answered by the statewide backup
-// surfaces the same curated rows as one from its home county (B239).
+// surfaces the same curated rows as one from its home county (B244).
 export const APPR_FIELDS = [
   [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
   [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],

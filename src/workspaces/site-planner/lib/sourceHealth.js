@@ -1,4 +1,4 @@
-/* Per-source circuit breaker for county parcel servers (B239).
+/* Per-source circuit breaker for county parcel servers (B244).
  *
  * County appraisal-district endpoints go down (FBCAD's whole ArcGIS server was
  * unreachable on 2026-06-19 — 503s then total timeouts). Once we know a source is
@@ -22,7 +22,7 @@ const _state = new Map(); // key -> { fails, openUntil }
  * to healthy; a failure increments the streak and opens the breaker once it reaches
  * the threshold. Only pass `ok=false` for a genuine source FAILURE (server down /
  * timeout / HTTP or ArcGIS error) — never for a healthy "no parcel at this point",
- * which is a valid answer, not a failure (B240). */
+ * which is a valid answer, not a failure (B245). */
 export function recordSourceResult(key, ok, now = Date.now()) {
   if (!key) return;
   if (ok) { _state.delete(key); return; }

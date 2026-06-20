@@ -59,8 +59,8 @@ describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
 
 // The statewide TxGIO layer is the universal fallback when a county's own CAD server
 // is down. statewideFallbackFor returns that layer scoped to the requested county, so
-// an ID/address search can't leak into another county (B239).
-describe("statewideFallbackFor — county-scoped TxGIO backup (B239)", () => {
+// an ID/address search can't leak into another county (B244).
+describe("statewideFallbackFor — county-scoped TxGIO backup (B244)", () => {
   it("exposes the statewide key(s) and the all-Texas layer URL", () => {
     expect(STATEWIDE_KEYS).toContain("chambers"); // the configured statewide source
     expect(STATEWIDE_PARCEL_LAYER).toMatch(/stratmap_land_parcels/);

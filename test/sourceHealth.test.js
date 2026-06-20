@@ -4,10 +4,10 @@ import {
   resetSourceHealth, SOURCE_FAIL_THRESHOLD, SOURCE_COOLDOWN_MS,
 } from "../src/workspaces/site-planner/lib/sourceHealth.js";
 
-// The per-source circuit breaker (B239): after N consecutive failures a county's
+// The per-source circuit breaker (B244): after N consecutive failures a county's
 // parcel server is skipped for a cooldown so clicks stop re-hammering a dead host,
 // then auto-resumes. `now` is injected so this is deterministic without real timers.
-describe("sourceHealth — parcel-server circuit breaker (B239)", () => {
+describe("sourceHealth — parcel-server circuit breaker (B244)", () => {
   beforeEach(resetSourceHealth);
 
   it("stays closed below the failure threshold", () => {

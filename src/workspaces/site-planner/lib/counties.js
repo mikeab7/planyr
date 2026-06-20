@@ -265,7 +265,7 @@ export function candidateCountiesForPoint(lat, lng) {
 // The county keys whose parcel source is the STATEWIDE TxGIO layer (covers all 254
 // Texas counties). The circuit breaker must never skip these (they're the universal
 // fallback), and a hit FROM one of them standing in for a real-CAD county is what the
-// honest "statewide backup" badge keys off (B239).
+// honest "statewide backup" badge keys off (B244).
 export const STATEWIDE_KEYS = Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide).map(([k]) => k);
 
 // The statewide TxGIO parcel layer URL (all of Texas) — the search/click fallback for
@@ -275,7 +275,7 @@ export const STATEWIDE_PARCEL_LAYER = COUNTIES.chambers.layerUrl;
 // The value of TxGIO's `county` attribute for each configured county — used to SCOPE a
 // statewide-backup ID/address search to that one county, so an account number or street
 // name can't match a like-named parcel in another county (the Chambers caveat applied
-// to every county that falls back, B239). Click-to-select is a point query and needs no
+// to every county that falls back, B244). Click-to-select is a point query and needs no
 // scope (it can only hit one lot).
 const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "CHAMBERS" };
 
@@ -283,7 +283,7 @@ const TXGIO_COUNTY_NAME = { harris: "HARRIS", fortbend: "FORT BEND", chambers: "
  * or null when there's no stand-in. Returns null for a county that has NO statewide
  * scope wired, and for one whose PRIMARY is already the statewide layer (Chambers —
  * it has no separate fallback). The returned `scopeWhere` confines the search to that
- * county on the all-Texas layer (B239). */
+ * county on the all-Texas layer (B244). */
 export function statewideFallbackFor(county) {
   const name = TXGIO_COUNTY_NAME[county];
   if (!name) return null;

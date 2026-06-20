@@ -9,7 +9,7 @@ import { FEET_WKID } from "./counties.js";
  * healthy "no parcel at this point" — which is NOT an error (the query returns an
  * empty feature list, never a throw). So every ParcelFetchError means the source was
  * UNAVAILABLE; `.unavailable` is the flag the circuit breaker (sourceHealth.js) and
- * the honest "statewide backup" labeling key off (B239/B240). `kind`:
+ * the honest "statewide backup" labeling key off (B244/B245). `kind`:
  * 'timeout' | 'http' | 'arcgis' | 'network'. */
 export class ParcelFetchError extends Error {
   constructor(kind, message, status = null) {
@@ -25,7 +25,7 @@ export class ParcelFetchError extends Error {
  * hang — the TCP connection opens but no response ever comes (FBCAD did exactly this
  * on 2026-06-19, freezing the tab ~45s on a single parcel click). An AbortController
  * cap turns an indefinite hang into a prompt, typed 'timeout' failure so the fallback
- * chain can take over instead of locking the UI (B239). */
+ * chain can take over instead of locking the UI (B244). */
 export const PARCEL_FETCH_TIMEOUT_MS = 8000;
 
 async function fetchJson(url, params) {
@@ -48,7 +48,7 @@ async function fetchJson(url, params) {
   }
   // Validate the RESPONSE BODY, not just the HTTP status: ArcGIS routinely returns
   // HTTP 200 with a JSON `{error:…}` body (e.g. 499 Token Required) for a failed
-  // query, which must read as a failure — not a silent success (B240).
+  // query, which must read as a failure — not a silent success (B245).
   if (!res.ok) throw new ParcelFetchError("http", `The county server returned HTTP ${res.status}.`, res.status);
   let j;
   try {
@@ -200,7 +200,7 @@ export async function identifyParcelAcross(candidates, lng, lat) {
  * from "a service answered, but there's no parcel at this point" (responded > 0,
  * hits empty) — two states that must read differently (B233). Also returns a
  * per-source outcome list so the caller can update each source's circuit-breaker
- * health (B239): `ok` = the server answered (a hit OR an honest empty), false = it
+ * health (B244): `ok` = the server answered (a hit OR an honest empty), false = it
  * failed (timeout / HTTP / ArcGIS error / network). Returns
  * { hits:[{county,feature}], responded, errors, sources:[{county,ok,hit,error}] }. */
 export async function identifyParcelDetailed(candidates, lng, lat) {
@@ -333,7 +333,7 @@ export function aerialPlacement(bbox, lon0, lat0, opts = {}) {
 
 // Turn fetch/CORS failures into something actionable for a non-technical user.
 export function humanizeError(e) {
-  // Typed parcel-fetch failures (B239/B240) carry a `kind` — give each its own plain
+  // Typed parcel-fetch failures (B244/B245) carry a `kind` — give each its own plain
   // wording so "the server is down" reads differently from "no parcel here".
   if (e && e.kind) {
     if (e.kind === "timeout")

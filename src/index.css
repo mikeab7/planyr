@@ -10,6 +10,17 @@
   --chrome-line: #2e2a23;
   --chrome-ink: #ece7db;
   --chrome-muted: #9b9482;
+
+  /* Brand — Planyr coral mark palette (mirrors src/shared/brand/tokens.js).
+     Three isometric tiers, each a lit top face + two darker side faces. */
+  --coral-base: #a8482b; --coral-base-l: #963f26; --coral-base-r: #823620;
+  --coral-mid:  #dc6b42; --coral-mid-l:  #c85f3a; --coral-mid-r:  #b25431;
+  --coral-top:  #f8946a; --coral-top-l:  #e8825a; --coral-top-r:  #d6744e;
+  /* Linework for the full-finish mark on a dark surface */
+  --brand-grid: #e89a78; --brand-glass-edge: #f0a888; --brand-wire: #fbb89a;
+  /* Brand surfaces + wordmark */
+  --brand-ink: #15171c; --brand-cream: #f4efe6;
+  --brand-wordmark-dark: #f4f1e9; --brand-wordmark-light: #2a211c;
 }
 
 html, body, #root {
@@ -120,6 +131,9 @@ input[type="range"] { height: 18px; }
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .35; transform: scale(.7); }
 }
+
+/* spinner — e.g. the "Preparing PDF…" indicator */
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* keyboard hint chips */
 kbd {

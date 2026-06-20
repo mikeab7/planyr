@@ -275,7 +275,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
-  const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B239)
+  const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
@@ -599,7 +599,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
   /* Build the parcel-query candidates for a point. Drops any primary whose circuit
      breaker is OPEN — we just saw it fail, so don't re-hammer it on every click and
-     re-incur the (now time-boxed) failure (B239) — but ALWAYS keeps the statewide
+     re-incur the (now time-boxed) failure (B244) — but ALWAYS keeps the statewide
      source so coverage holds. Also returns the real (non-statewide) CAD candidates so
      a statewide answer can be honestly flagged as a "backup". */
   const resolveCandidates = (latlng) => {
@@ -628,7 +628,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
       if (!res.hits.length) {
         // "Couldn't reach any parcel server" reads differently from "reached one, but
-        // there's no parcel at this exact point" (B240).
+        // there's no parcel at this exact point" (B245).
         setErr(res.responded === 0
           ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
           : "No parcel right there — zoom in and click directly on a lot.");
@@ -1039,7 +1039,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
             all-Texas TxGIO layer because the county's own server was down; be honest
             about provenance so a possibly-staler source is never mistaken for the
-            county's own record (B239). */}
+            county's own record (B244). */}
         {backupNotice && !err && (
           <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
             <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.

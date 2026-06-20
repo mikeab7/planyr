@@ -4,7 +4,7 @@ import { apprRows, apprVal, findAttr } from "../src/workspaces/site-planner/lib/
 // A parcel answered by the statewide TxGIO backup must surface the SAME curated
 // appraisal rows as one from its home county — otherwise the backup looks broken even
 // though the data is there. TxGIO's column names differ from the CADs', so the field
-// map covers both (B239 field normalization).
+// map covers both (B244 field normalization).
 const TXGIO = {
   prop_id: 40594,
   geo_id: "0001-00-000-0010-901",
@@ -23,7 +23,7 @@ const TXGIO = {
   Shape_Area: 537293.1, // a system field — must be ignored
 };
 
-describe("apprRows — TxGIO statewide-backup field mapping (B239)", () => {
+describe("apprRows — TxGIO statewide-backup field mapping (B244)", () => {
   const rows = apprRows(TXGIO);
   const byLabel = Object.fromEntries(rows.map((r) => [r.label, String(r.value)]));
 

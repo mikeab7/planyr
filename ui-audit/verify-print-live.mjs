@@ -36,7 +36,7 @@ const log = {};
 // Open File ▾ menu → Print / pick frame…
 await page.locator('button:has-text("File ▾")').first().click({ timeout: 8000 }).catch((e) => errors.push("File menu: " + e.message));
 await page.waitForTimeout(300);
-await page.locator('button:has-text("Print / pick frame")').first().click({ timeout: 8000 }).catch((e) => errors.push("Print item: " + e.message));
+await page.locator('button:has-text("Download PDF / pick frame")').first().click({ timeout: 8000 }).catch((e) => errors.push("Print item: " + e.message));
 await page.waitForTimeout(500);
 log.printToolbar = await page.locator('text=Print frame').count();
 // Open the Options flyout (B199)

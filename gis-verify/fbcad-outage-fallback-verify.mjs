@@ -1,4 +1,4 @@
-/* B239/B240 live verification — FBCAD outage → statewide TxGIO fallback.
+/* B244/B245 live verification — FBCAD outage → statewide TxGIO fallback.
  *
  * Simulates the real 2026-06-19 outage (FBCAD's whole ArcGIS server returning 503 on
  * every path) by intercepting the gis.fbcad.org host, then clicks a Fort Bend lot and
@@ -70,7 +70,7 @@ const backupNotice = /statewide backup/i.test(bodyText);
 const hl = await page.evaluate(() => [...document.querySelectorAll(".leaflet-overlay-pane path")].filter((p) => { const s = (p.getAttribute("stroke") || "").toLowerCase(); return /e85|ea58|c241|d97|f59/.test(s); }).length);
 const acres = (bodyText.match(/[\d.]+\s*AC/gi) || []);
 
-console.log("\n--- B239/B240 FBCAD-OUTAGE FALLBACK VERIFY (clicked Fort Bend / Sugar Land) ---");
+console.log("\n--- B244/B245 FBCAD-OUTAGE FALLBACK VERIFY (clicked Fort Bend / Sugar Land) ---");
 console.log("  point queries fired:", JSON.stringify(q));
 console.log("  FBCAD requests intercepted as 503:", fbcadHits, "(its query never freezes the click)");
 console.log("  selected within:", elapsed, "ms");

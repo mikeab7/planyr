@@ -66,8 +66,8 @@ describe("outerRingsLngLat — multipart parcel support (Pearland B36c fix)", ()
 // A parcel fetch must validate the RESPONSE BODY, not just the HTTP status, and must
 // distinguish a SERVER failure (typed ParcelFetchError → "unavailable") from a healthy
 // "no parcel at this point" (an empty feature list → null, NOT an error). This is the
-// classification the fallback + circuit breaker key off (B239/B240).
-describe("queryAtPoint — body validation + typed failures (B240)", () => {
+// classification the fallback + circuit breaker key off (B244/B245).
+describe("queryAtPoint — body validation + typed failures (B245)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("a healthy empty result returns null (no parcel here ≠ an error)", async () => {
@@ -90,7 +90,7 @@ describe("queryAtPoint — body validation + typed failures (B240)", () => {
     await expect(queryAtPoint(LAYER, -95, 29)).rejects.toMatchObject({ kind: "network", unavailable: true });
   });
 
-  it("a hung request is aborted at the timeout (the ~45s tab-freeze fix, B239)", async () => {
+  it("a hung request is aborted at the timeout (the ~45s tab-freeze fix, B244)", async () => {
     vi.useFakeTimers();
     // fetch that never resolves on its own — only the AbortController can end it.
     vi.stubGlobal("fetch", vi.fn((_url, { signal }) => new Promise((_res, rej) => {
@@ -105,7 +105,7 @@ describe("queryAtPoint — body validation + typed failures (B240)", () => {
   });
 });
 
-describe("identifyParcelDetailed — per-source outcomes feed the breaker (B239)", () => {
+describe("identifyParcelDetailed — per-source outcomes feed the breaker (B244)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("separates a down source from an empty one from a hit", async () => {
