@@ -38,6 +38,14 @@ export default function Shell() {
   const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
   const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
   const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
+  // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
+  // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
+  // from the Site side can't be handed to a component that doesn't exist yet. We stash the
+  // requested review (token-stamped so a repeat click re-fires), switch to Document Review,
+  // and DR consumes the pending intent once it mounts. Without this the open is dropped and
+  // DR boots to its empty placeholder until a second click.
+  const [docIntent, setDocIntent] = useState(null);
+  const openReviewInDocReview = (row) => { setDocIntent({ kind: "open-review", row, token: Date.now() }); setActive("doc-review"); };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -162,9 +170,11 @@ export default function Shell() {
               onShellSwitch={setActive}
               authControl={authControl}
               navIntent={navIntent}
+              docIntent={docIntent}
               onGoDashboard={goDashboard}
               onOpenProject={openProjectInPlanner}
               onNewProject={newProjectInPlanner}
+              onOpenReviewInDocReview={openReviewInDocReview}
             />
           </Suspense>
         </ErrorBoundary>
