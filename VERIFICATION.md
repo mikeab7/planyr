@@ -60,6 +60,17 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V71 — Document Review editing batch: undo/redo, Calibrate validation, toolbar, sheet paging, label position (B283–B287) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out — these are browser-only editing features, no auth path).
+- **✅ Self-verified 2026-06-20 (`ui-audit/verify-b283-b287.mjs`, 17/17 checks, 0 page errors)** on a generated 4-sheet PDF (`ui-audit/make-sample-pdf.mjs` — the owner's real sets live on `mikeab7-patch-1`, B269, off this branch), covering BOTH the single-sheet viewer and the Stitcher:
+  - **B283 undo/redo** — draw a rect → Ctrl-Z removes it → Ctrl-Shift-Z and Ctrl-Y each restore it; ↶/↷ disabled before any edit; Stitcher: draw distance → Ctrl-Z undoes.
+  - **B284 Calibrate validation** — inline box opens (no `window.prompt`); **"1/8" rejected + stays uncalibrated**, "1:240" rejected as a ratio, **"100" → sheet calibrated**; same in the Stitcher.
+  - **B285 toolbar** — Open/Stitch/Library compute `white-space:nowrap`, single 25px line, no wrapping.
+  - **B286 paging** — Next 1/4→2/4; → / ← keys page 3/4 / 2/4.
+  - **B287 label** — horizontal distance label at x≈454 (midpoint ≈450), not pts[0] (~250).
+- **Note on the sandbox browser:** pdf.js v6 rendering uses `Map.prototype.getOrInsertComputed`, which the older `chromium-1194` build lacks (render rejects, canvas blank) — drive doc-review harnesses with **`chromium-1228`** (`/opt/pw-browsers/chromium-1228/chrome-linux64/chrome`). The app itself is unaffected on real/modern Chrome.
+- **Why fully done logged-out:** all five are browser-only editing features (no cloud/auth path); the persistence of the resulting state rides the already-verified doc-review save path.
+
 ### V70 — Opening a file from the global Project Files panel opens it in Markup on the FIRST click (B282) ✅ (self-verified headless — no-crash + mount/remount proven; ⏳ signed-in first-click open)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — one **signed-in** run on planyr.io (the file-list + open are auth-gated; the sandbox proxy blocks sign-in).
 - **Steps (signed-in, on planyr.io):** make sure **Markup** hasn't been opened yet this session → Site → open a project (e.g. Jacintoport) → top-bar **🗂 Files** → click a filed document (e.g. the MEP set). **Expect:** it switches to **Markup** and the document **opens on the first click** (sheets render), and the breadcrumb shows the project (not "Select a project"). Previously the first click landed on the empty "Open or drop a construction PDF" placeholder and only a second click worked.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  dist, pathLength, polyArea, measureValue, measureLabel, rollup,
+  dist, pathLength, polyArea, measureValue, measureLabel, rollup, midOfPath, centroidOf,
 } from "../src/workspaces/doc-review/lib/takeoff.js";
 
 describe("doc-review takeoff geometry + unit conversion", () => {
@@ -47,6 +47,47 @@ describe("doc-review takeoff geometry + unit conversion", () => {
   it("measureLabel: count is a bare number; uncalibrated says 'set scale'", () => {
     expect(measureLabel({ kind: "count", pts: [{}, {}, {}] }, 0)).toBe("3");
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }, 0)).toBe("set scale");
+  });
+
+  // B287: labels used to land on a vertex (distance) / vertex-average (area).
+  it("midOfPath: a 2-point line labels at its MIDPOINT, not pts[0]", () => {
+    expect(midOfPath([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toEqual({ x: 5, y: 0 });
+  });
+
+  it("midOfPath: arc-length midpoint of an L (not the middle vertex)", () => {
+    // total length 30; halfway (15) is 5 into the second segment
+    const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 20 }];
+    expect(midOfPath(pts)).toEqual({ x: 10, y: 5 });
+  });
+
+  it("midOfPath: closed walks the wrap-around edge", () => {
+    const sq = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+    const m = midOfPath(sq, true); // perimeter 40, halfway lands on the far corner
+    expect(m).toEqual({ x: 10, y: 10 });
+  });
+
+  it("centroidOf: a square's centroid is its center", () => {
+    const sq = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+    expect(centroidOf(sq)).toEqual({ x: 5, y: 5 });
+  });
+
+  it("centroidOf: a concave L's label is clamped INSIDE the shape", () => {
+    // L-shape whose area-weighted centroid falls in the missing notch (outside).
+    const L = [
+      { x: 0, y: 0 }, { x: 30, y: 0 }, { x: 30, y: 10 },
+      { x: 10, y: 10 }, { x: 10, y: 30 }, { x: 0, y: 30 },
+    ];
+    const c = centroidOf(L);
+    // point-in-polygon check (ray cast) — the returned anchor must be interior
+    const inside = (() => {
+      let r = false;
+      for (let i = 0, j = L.length - 1; i < L.length; j = i++) {
+        const xi = L[i].x, yi = L[i].y, xj = L[j].x, yj = L[j].y;
+        if ((yi > c.y) !== (yj > c.y) && c.x < ((xj - xi) * (c.y - yi)) / ((yj - yi) || 1e-12) + xi) r = !r;
+      }
+      return r;
+    })();
+    expect(inside).toBe(true);
   });
 
   it("rollup totals calibrated items and counts uncalibrated ones", () => {
