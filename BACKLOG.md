@@ -22,6 +22,52 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — an **Infra / automated-testing** tranche
+     (Playwright regression net, error telemetry, seeded test account, CI wiring). Filed at **B278–B281**.
+     ⚠ NUMBERING / COLLISION NOTE (renumbered TWICE by concurrent `main`): first filed B271–B274, then
+     B275–B278 when open PR #217 took B271–B273 — but on merge `main` had consumed **B271–B277** outright
+     (pointer-lockout B271, main-thread-stall B272, filing-practice B273, stale-save B274, multi-tab B275,
+     and PR #217's overlay B276/B277). Two items sharing a number across the two files = the one thing the
+     rules forbid, so this tranche lands at the next clear band **B278–B281**. (Owner flagged exactly this:
+     "make sure no one else is working on B271." They were — heavily.) The "NEW-#" labels are scratch.
+     **B279 (error telemetry) — BUILT + headless-verified + SHIPPED this session; full block in
+     BACKLOG-DONE.md.** B278 / B280 / B281 stay Open below.
+     Deduped before filing:
+       • B278 (Playwright @playwright/test suite) — NET-NEW. NOT the `ui-audit/*.mjs` harnesses (ad-hoc
+         single-purpose Chromium screenshot/verify scripts vs a deterministic regression suite); package.json
+         carries vitest only. REUSE the ui-audit cert-proxy launch flag (`--ignore-certificate-errors`).
+       • B279 (error telemetry) — NET-NEW; its "stale-chunk fix" reference is ALREADY SHIPPED (B221's
+         `vite:preloadError` guard in `src/app/chunkReload.js`), so it hooked telemetry onto that EXISTING
+         handler — no open stale-chunk item to wait on. (Built this session.)
+       • B280 (seeded test account) — NET-NEW. Distinct from B269's real-PDF Doc-Review build fixtures.
+       • B281 (CI + auto-file @claude issue) — NET-NEW; the "previously-parked @claude workflow" it cites was
+         never filed in either file. Extends `.github/workflows/build.yml`.
+     Inter-deps: B278 ↔ B280 (the seed values are the assertion contract); B281 depends on B278 + B280. -->
+
+### B278 — Playwright regression harness against preview deploys `[Infra / E2E]` (task)  *(arrived as "NEW-1" 2026-06-20 owner chat; filed **B278** — jumped past B271–B277, consumed by concurrent `main` + PR #217; batch B278–B281)*
+`[ ]` Stand up Playwright as the **deterministic regression net** — headless in CI, **not** via Cowork. **Why not Cowork:** its vision/screenshot tokens cost multiples more per run; reserve Cowork for exploratory discovery + live sign-off, use Playwright for the repeatable assertions.
+- **Approach:** add `@playwright/test`; config targets the Cloudflare **per-branch preview URL** (read from an env var so CI injects the branch's preview). Log in via a **dedicated test account** (B280), never the owner's real creds.
+- **First flows (highest-severity paths):** (1) login succeeds + app comes up **Cloud on** — assert the "Cloud off" state is NOT present (the silent `VITE_SUPABASE_URL`/`ANON_KEY`-missing build is a known crash-severity incident); (2) load a **Pearland** parcel → assert correct county resolution (point-in-polygon: Brazoria/Harris/Fort Bend) → guards the boundary-mismatch bug; (3) draw a measurement → save → reload → assert value persisted → directly tests silent-save-failure; (4) run **Site Analysis** on a multi-parcel selection → assert *source unavailable* renders distinct from *not present*.
+- **Gotchas:** tests must run against a **properly built preview** (env vars baked in pre-build) or flow (1) will *correctly* fail — that's the point, but document it so a red run isn't misread as a harness bug. Use stable **`data-testid`** selectors, not text/CSS that the brand refactor will churn.
+- **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
+- **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
+- **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
+> **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
+
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
+`[ ]` Create a **dedicated test user** with deterministic seeded data on a preview/staging deploy; **never** use the owner's real login in automated loops.
+- **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
+- **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
+- **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
+> Do alongside B278 — its assertions are blocked without these fixed values.
+
+### B281 — CI wiring: Playwright on preview + failure auto-files an @claude issue `[Infra / CI]` (feature) — depends on B278 + B280  *(arrived as "NEW-4" 2026-06-20 owner chat; filed **B281**; batch B278–B281)*
+`[ ]` Run B278 in **GitHub Actions** on each preview branch; on failure, **auto-open an issue tagged `@claude`** so Claude Code picks it up async — the genuinely remote/async scenario the previously-parked `@claude` workflow was reserved for.
+- **Dependency:** requires **B278** (the suite) + **B280** (the seeded account). **Defer until those land.**
+- **Edge case:** **dedupe issue creation** — don't open a fresh issue every run for the same persistent failure; update/reuse the existing one.
+- **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
+> Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
      overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
      drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
