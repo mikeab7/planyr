@@ -22,6 +22,21 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
+     deal." Filed B228 — highest B# across both files was B227, so this is the real next free ID.
+     Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab
+     holds a previous build's index.html → its content-hashed Scheduler-<hash>.js 404s after redeploy),
+     NOT a Scheduler/iframe logic bug — ruled out: the embedded Gantt renders 44 task rows the instant
+     its chunk loads (ui-audit/diagnose-scheduler.mjs). B221 already auto-reloads, but two recovery gaps
+     let it still dead-end: (1) a plain location.reload() can be served the browser's OWN hard-cached
+     stale index.html → same dead chunk → cooldown → error screen (the no-cache _headers can't retro-fix
+     an already-cached HTML); (2) the ErrorBoundary's PRIMARY button was "Try again" (re-renders the same
+     dead lazy import — a no-op for this error). Deduped against B221 (this hardens it, same family) and
+     the PDF.js import() items (B72/B67/B180 — unrelated on-demand library loads). Filed AND shipped this
+     same session — moved to BACKLOG-DONE.md: B228 (reloadFresh cache-busting reload + chunk-aware
+     ErrorBoundary "A new version of Planyr is ready / Reload to update", in src/app/chunkReload.js +
+     ErrorBoundary.jsx; _headers unchanged). Browser-verified (VERIFICATION V55). -->
+
 <!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
      into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
      size-gate the buttons) + B226 (NEW-2: only on the selected/hovered building) — highest B#

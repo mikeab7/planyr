@@ -61,6 +61,14 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V55 — Schedule module recovers after a deploy instead of dead-ending (B228) ✅ (self-verified headless — fully done) · ⏳ one optional production click-through
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — one optional live confirm on planyr.io after deploy (steps below)
+- **Harness:** `ui-audit/diagnose-scheduler.mjs` (three scenarios: normal click, stale-but-recoverable chunk, permanently-missing chunk) + `ui-audit/verify-chunk-reload.mjs` (the B221 guard contract).
+- **✅ A (module not broken):** clicking **Schedule** on a fresh load mounts the `/sequence/` iframe and the embedded Gantt renders **44 task rows** — confirms the failure was never the Scheduler/iframe code, only the chunk-fetch recovery.
+- **✅ B (stale chunk recovers):** a `Scheduler-<hash>.js` that 404s once then succeeds → the `vite:preloadError` guard performs a **cache-busting** reload and lands in the module (no error screen).
+- **✅ C (chunk permanently missing):** the boundary surfaces **"A new version of Planyr is ready"** (no reload loop), and clicking the single primary **"Reload to update"** does a real cache-busting reload — captured nav trail `"/" → "/?_r=<ts>" → "/"` (param added to force fresh HTML, then stripped on the recovered load). `verify-chunk-reload.mjs` still **3/3** (reload-once · cooldown holds · re-arms).
+- **⏳ Optional live confirm:** on planyr.io, open the app in a tab, deploy a new build, then (in the still-open tab) click into **Schedule** — expect it to self-heal (auto cache-busting reload) and land in the Gantt, not the error screen. Low-risk (the recovery path is fully headless-verified); worth one real-deploy click if convenient.
+
 ### V49 — Header cleanup + cartographic furniture restyle (B218 / B219) ✅ (self-verified headless — fully done, no signed-in check needed)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, vite preview, logged-out, live Harris-county aerial) · **Next check** — none (pure UI; no auth/cloud path involved)
 - **Harness:** `ui-audit/verify-new1to2.mjs` (seeds a located demo site → boots into the planner → asserts the header + furniture DOM, captures console/page errors, screenshots the header and both furniture corners).
