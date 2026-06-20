@@ -281,7 +281,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     goPlan(id);
   };
 
-  // Delete a SINGLE plan from its site (B250) — distinct from deleting the whole site.
+  // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
   // Never removes the last plan in a group (that's the map's whole-site delete). If the
   // deleted plan was the one open, switch to a sibling so the planner lands somewhere valid.
   const deletePlan = (id) => {

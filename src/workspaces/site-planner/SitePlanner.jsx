@@ -179,7 +179,7 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
 // element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
-// `groupId` is included so a LONE paste/duplicate starts ungrouped (B247) — duplicating a
+// `groupId` is included so a LONE paste/duplicate starts ungrouped (B261) — duplicating a
 // whole group is a separate path that re-stamps a fresh shared group id (duplicateGroup).
 const ORPHAN_TAGS = ["attachedTo", "groupId", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
@@ -734,14 +734,14 @@ const ensureIdAbove = (ids) => {
 // It defaults OFF every time the app is opened and is remembered only within the
 // current browser-tab session (sessionStorage) — so it stays put while you switch
 // plans/projects this session, but never silently carries over to the next session
-// or to a freshly opened tab (B249: it used to be globally sticky in localStorage, so
+// or to a freshly opened tab (B263: it used to be globally sticky in localStorage, so
 // it could be on without anyone enabling it "this session"). We still mirror it into
 // `settings.snap` so every read site is unchanged, but the per-site saved value is
 // ignored on load/import in favour of this pref. Snap only ALIGNS positions (grid /
-// flush against neighbours) — it never bonds or groups anything (B247/B248).
+// flush against neighbours) — it never bonds or groups anything (B261/B262).
 const SNAP_PREF_KEY = "planarfit:snap";
 const loadSnapPref = () => {
-  try { localStorage.removeItem(SNAP_PREF_KEY); } catch (_) {} // retire the old globally-sticky key (B249)
+  try { localStorage.removeItem(SNAP_PREF_KEY); } catch (_) {} // retire the old globally-sticky key (B263)
   try { return sessionStorage.getItem(SNAP_PREF_KEY) === "1"; } catch { return false; }
 };
 const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0"); } catch (_) {} };
@@ -797,7 +797,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const printOptAnchor = useRef(null);
   const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
-  const [planDelArm, setPlanDelArm] = useState(null);    // B250: plan id whose inline "Delete?" confirm is showing
+  const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
@@ -839,7 +839,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
-  // B247: while a persistent group is selected, double-clicking a member "drills in" to
+  // B261: while a persistent group is selected, double-clicking a member "drills in" to
   // edit just that one element in place (without ungrouping). drillId = that member's id,
   // or null when we're operating on the group as a whole.
   const [drillId, setDrillId] = useState(null);
@@ -1276,7 +1276,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
-  // B250: when THIS plan is being deleted, suppress every save path (debounced autosave,
+  // B264: when THIS plan is being deleted, suppress every save path (debounced autosave,
   // the leave/unmount persist, the beforeunload/visibility flush, and flushSite) so the
   // unmounting planner can't immediately re-write the row we just deleted.
   const deletedSelfRef = useRef(false);
@@ -1309,7 +1309,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
   const persistOrDrop = () => {
-    if (!siteId || deletedSelfRef.current) return; // B250: this plan was just deleted — don't resurrect it
+    if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
     if (isBlankSite(s) && !loadSite(siteId)?.origin) { deleteSite(siteId); onSiteDropped?.(siteId); }
     else saveSite({ id: siteId, ...metaRef.current, ...s });
@@ -1567,7 +1567,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B247: Group / Ungroup
+      if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
       if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
@@ -1678,14 +1678,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "el", id: el.id });
   };
 
-  /* ------------ explicit element groups (B247: a deliberate Group, no content lock) ------------ */
+  /* ------------ explicit element groups (B261: a deliberate Group, no content lock) ------------ */
   // A persistent group = a shared `groupId` on ≥2 els/markups. It is DISTINCT from a
   // temporary multi-selection (which evaporates on the next click) and from the building-
   // host `attachedTo` assembly (a rigid child→host bind that resize-refits). Grouped
   // members move / copy / delete and SELECT as one unit, but are NOT content-locked: a
   // double-click drills into a member to edit it in place, and each member keeps its own
   // properties. Grouping happens ONLY from the explicit Group command — never from a plain
-  // drag or click, and snap never bonds (B248).
+  // drag or click, and snap never bonds (B262).
   const newGroupId = () => "g" + uid();
   const objOf = (ref) => (ref && ref.kind === "el" ? els.find((x) => x.id === ref.id) : ref && ref.kind === "markup" ? markups.find((x) => x.id === ref.id) : null);
   const groupRefs = (gid) => [
@@ -2541,7 +2541,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (d.kind === "el") {
         // Snap based on the grabbed element, then shift the whole assembly by that delta.
         // Snap here only ALIGNS position (grid + flush against neighbours) — it NEVER
-        // bonds or groups elements (grouping is now the explicit Group tool, B247/B248).
+        // bonds or groups elements (grouping is now the explicit Group tool, B261/B262).
         const g = d.members.find((m) => m.id === d.id);
         let effDx, effDy;
         const gel = els.find((x) => x.id === d.id);
@@ -2714,7 +2714,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setDraftRect(null);
     }
     // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
-    // B247/B248. A plain/Shift drag only moves; snap only aligns position.)
+    // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
     drag.current = null;
     setPanning(false);
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -3596,7 +3596,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (multi.length > 1 && inMulti("el", id)) { startGroupMove(e); return; } // drag a member → move the current selection as a unit
-    // Persistent group (B247): a single click selects & moves the WHOLE group as one
+    // Persistent group (B261): a single click selects & moves the WHOLE group as one
     // unit — unless we've drilled into this exact member (double-click) to edit it in place.
     if (el.groupId && drillId !== id) {
       const refs = groupRefs(el.groupId);
@@ -3790,7 +3790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
-  // place (without ungrouping, B247). Otherwise open its actions menu (dock/sidewalk/…).
+  // place (without ungrouping, B261). Otherwise open its actions menu (dock/sidewalk/…).
   const onElDouble = (e, id) => {
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
@@ -4013,7 +4013,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const handleOpenSite = (id) => { closeHdrMenus(); if (id === siteId) return; flushSite(); onOpenSite?.(id); };
   const handleDuplicate = () => { closeHdrMenus(); flushSite(); onDuplicateSite?.(siteId); };
   const handleNewPlan = () => { closeHdrMenus(); flushSite(); onNewPlanSameParcel?.(siteId); };
-  // Delete a single plan (B250). Never the last plan in a site (that's the whole-site delete
+  // Delete a single plan (B264). Never the last plan in a site (that's the whole-site delete
   // from the map). If we're deleting the current plan, suppress its flush so the delete sticks.
   const handleDeletePlan = (id) => {
     if (plansHere.length <= 1) return;
@@ -5802,7 +5802,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <rect key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} width={Math.abs(p1.x - p0.x) + 4} height={Math.abs(p1.y - p0.y) + 4} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />;
               })}
               {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill={PAL.accent} fillOpacity={0.08} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />; })()}
-              {/* persistent GROUP outline (B247): a dashed enclosing box that reads "these
+              {/* persistent GROUP outline (B261): a dashed enclosing box that reads "these
                   stay together" — a pure indicator, NO resize handles (a group never scales
                   as a whole — site elements are real feet; resize a member by double-clicking
                   into it). Hidden while drilled into a member (then it shows its own selection). */}
