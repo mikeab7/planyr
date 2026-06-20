@@ -8,7 +8,7 @@ import { createFilingServer } from "../server/filing/server.js";
 
 const bytes = (s) => Buffer.from(s);
 
-describe("filingConfig — env parsing, key dormant by default (B270)", () => {
+describe("filingConfig — env parsing, key dormant by default (B297)", () => {
   it("ANTHROPIC_API_KEY is null unless set (read stays dormant)", () => {
     expect(filingConfig({}).anthropic.apiKey).toBeNull();
     expect(filingConfig({ ANTHROPIC_API_KEY: "sk-x" }).anthropic.apiKey).toBe("sk-x");
@@ -66,7 +66,7 @@ describe("toPlacementFacts — maps the read into placementFacts shape", () => {
   });
 });
 
-describe("matcher — confident single match, else needs-filing (never auto-guess) (B270)", () => {
+describe("matcher — confident single match, else needs-filing (never auto-guess) (B297)", () => {
   const projects = [
     { id: "g1", name: "Katy Grand", aliases: { addresses: ["1234 FM 1093, Katy TX"], parcels: ["1234567000001"], jobNumbers: ["KG-2025"] } },
     { id: "g2", name: "Cypress Logistics Park" },
@@ -113,7 +113,7 @@ describe("matcher — confident single match, else needs-filing (never auto-gues
   });
 });
 
-describe("readTitleBlock — server-side read, no silent failures (B270)", () => {
+describe("readTitleBlock — server-side read, no silent failures (B297)", () => {
   const cfg = { anthropic: { apiKey: "sk-test", model: "claude-opus-4-8", baseUrl: "https://api.test", version: "2023-06-01", maxTokens: 100, timeoutMs: 0 } };
   const apiReturning = (obj) => async () => ({ ok: true, status: 200, json: async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(obj) }] }) });
   const sample = { projectName: "Katy Grand", projectNumber: "KG-2025", address: "", parcel: "", discipline: "Civil", sheetNumber: "C-2.01", sheetTitle: "GRADING PLAN", revision: "IFC", date: "2026-06-20", placement: { embeddedCoords: false, coordSystem: "", scaleBarPresent: true, statedScale: "1\"=40'", northArrowPresent: true, boundaryPresent: true, dimensions: [] } };
@@ -164,7 +164,7 @@ describe("readTitleBlock — server-side read, no silent failures (B270)", () =>
   });
 });
 
-describe("fileDocument — read → match → decision (B270)", () => {
+describe("fileDocument — read → match → decision (B297)", () => {
   const cfg = filingConfig({});
   const projects = [{ id: "g1", name: "Katy Grand" }, { id: "g2", name: "Cypress Logistics Park" }];
   const okRead = (fields) => async () => ({ ok: true, fields: { projectName: "", projectNumber: "", address: "", parcel: "", discipline: "Other", sheetNumber: "", sheetTitle: "", revision: "", date: "", ...fields }, placement: toPlacementFacts({}) });
@@ -196,7 +196,7 @@ describe("fileDocument — read → match → decision (B270)", () => {
 });
 
 // Drive the real HTTP server with an injected service (no key / network needed).
-describe("filing HTTP server — routes + honest status codes (B270)", () => {
+describe("filing HTTP server — routes + honest status codes (B297)", () => {
   const listen = (server) => new Promise((res) => { server.listen(0, "127.0.0.1", () => res(`http://127.0.0.1:${server.address().port}`)); });
   const decision = { matched: true, projectId: "g1", project: "Katy Grand", discipline: "Civil", item: "GRADING PLAN", suggestedName: "Katy Grand - GRADING PLAN - 2026.06.20", needsFiling: false, reason: "matched" };
 

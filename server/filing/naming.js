@@ -1,4 +1,4 @@
-/* Auto-name a filed document (B270) — pure, dependency-free.
+/* Auto-name a filed document (B297) — pure, dependency-free.
  *
  * MIRRORS the canonical client convention in
  * src/workspaces/doc-review/lib/reviewStore.js (`composeTitle` / `fmtDocDate`):

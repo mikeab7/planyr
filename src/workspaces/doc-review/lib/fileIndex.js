@@ -1,4 +1,4 @@
-/* Auto-filing file-facts index — pure view-model helpers (B270).
+/* Auto-filing file-facts index — pure view-model helpers (B297).
  *
  * The queryable index of what each filed drawing IS (project / discipline / sheet / revision
  * / date + placement-readiness facts), captured once by the server-side title-block read

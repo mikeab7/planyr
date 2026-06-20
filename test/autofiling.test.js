@@ -4,7 +4,7 @@ import { encodeProjects, interpretResponse, autofile, createAutofilingProvider }
 
 const placementIn = { captured: true, embeddedCoords: { present: false, crs: null }, scaleBar: { present: true, drawnLenPx: null, realLenFt: null }, statedScale: { present: true, text: "1\"=40'", feetPerInch: 40 }, northArrow: { present: true, orientationDeg: null }, boundary: { present: true }, dimensions: [{ valueFt: 240, label: "240'", p1: null, p2: null }] };
 
-describe("fileIndex.toFactsRow — server facts → one DB row (B270)", () => {
+describe("fileIndex.toFactsRow — server facts → one DB row (B297)", () => {
   it("maps to snake_case columns with a complete placement object", () => {
     const row = toFactsRow({ projectId: "g1", discipline: "Civil", item: "GRADING PLAN", sheetNumber: "C-2.01", revision: "IFC", docDate: "2026-06-20", matchConfidence: 0.92, needsFiling: false, placement: placementIn }, { id: "rv1", reviewId: "rv1", sourceFile: "sheet.pdf" });
     expect(row).toMatchObject({ id: "rv1", review_id: "rv1", project_id: "g1", discipline: "Civil", sheet_number: "C-2.01", revision: "IFC", doc_date: "2026-06-20", needs_filing: false, source_file: "sheet.pdf" });
@@ -94,7 +94,7 @@ describe("autofiling.autofile — posts to the proxy with auth + projects header
   });
 });
 
-describe("autofiling provider — honest backendReady gating (B270)", () => {
+describe("autofiling provider — honest backendReady gating (B297)", () => {
   it("disabled (default) → backendReady false, autofile skips, never calls the network", async () => {
     let called = false;
     const p = createAutofilingProvider({ enabled: false, fetchImpl: async () => { called = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => "tok" });

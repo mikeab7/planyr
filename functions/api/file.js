@@ -1,4 +1,4 @@
-/* /api/file — auto-file a dropped drawing (B270 wiring).
+/* /api/file — auto-file a dropped drawing (B297 wiring).
  *
  * Cloudflare Pages Function (server-side, same origin as the app). The Project Files drawer
  * POSTs a dropped PDF here; this forwards it to the Cloud Run auto-filing service

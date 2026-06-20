@@ -125,8 +125,13 @@ export async function deleteReview(id) {
   // then the row. RLS scopes both stores to the owner.
   try {
     const rec = await loadReview(id);
-    const keys = ((rec && rec.sources) || []).map((s) => s.storageKey).filter(Boolean);
+    const srcs = (rec && rec.sources) || [];
+    const keys = srcs.map((s) => s.storageKey).filter(Boolean);
     if (keys.length) await supabase.storage.from(BUCKET).remove(keys);
+    // Also remove the Google Drive copy (B207) so a Drive-only file doesn't orphan bytes
+    // in Drive when its review is deleted. Best-effort, in parallel; never blocks the row.
+    const driveKeys = srcs.map((s) => s.driveKey).filter(Boolean);
+    if (driveKeys.length) await Promise.allSettled(driveKeys.map((k) => deleteFromDrive(k)));
     if (uid) { // back-compat: also clear any legacy <uid>/<reviewId>/ folder
       const { data: files } = await supabase.storage.from(BUCKET).list(`${uid}/${id}`);
       if (files && files.length) await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`));
@@ -187,7 +192,7 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
-/* --------------------------- file-facts index (B270) ----------------------- */
+/* --------------------------- file-facts index (B297) ----------------------- */
 // The queryable auto-filing index (db/file_facts.sql): one small row per filed drawing, so the
 // library can answer "this project's Civil set, latest revision" WITHOUT re-reading the PDF.
 // Degrades gracefully — if the migration hasn't run (or the user's signed out) upsert no-ops
@@ -231,6 +236,20 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
     return resp.ok && jr.ok ? { ok: true, driveKey } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
+/* Delete a file's bytes FROM Google Drive (DELETE /api/files?key=…). Best-effort —
+ * returns true on a clean delete, false otherwise; never throws. Called when a review is
+ * deleted so a Drive-only file doesn't orphan a copy in Drive. */
+export async function deleteFromDrive(driveKey) {
+  if (!supabase || !driveKey) return false;
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return false; }
+  if (!token) return false;
+  try {
+    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    return resp.ok;
+  } catch (_) { return false; }
 }
 
 /* Read a file's bytes back FROM Google Drive (B207 read-back). Returns an ArrayBuffer

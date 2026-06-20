@@ -110,8 +110,13 @@ planner's map; an engineer's drawing overlays the planner's layout).
 - **Shared coordinate spine.** One real-world coordinate system underpins everything:
   **EPSG:2278 — NAD83 / Texas State Plane, South Central zone, US survey feet**
   (correct for the Houston/Katy area). This is what lets a deed polygon, an overlay,
-  and the site layout all live in the same space. Currently a stub in
-  `src/shared/coordinates/`, not yet wired in.
+  and the site layout all live in the same space. `src/shared/coordinates/` now has a
+  **real EPSG:2278 ↔ WGS84 projection** (`projectToGrid`/`gridToProject`, Lambert
+  Conformal Conic, validated vs pyproj <1e-4°); its first consumer is the **layer
+  coverage engine** (B283), which reprojects each GIS service's published extent to
+  test whether its data reaches the view. This is a **read-only screening use** — the
+  Site Planner still keeps its own per-site feet frame for drawn geometry; grow the
+  shared grid additively, not via a big-bang planner rewrite.
 - **Document Review layer model.** The imported drawing is an **immutable backdrop**
   (a fixed background, never altered). The user's measurements, markups, test-fit
   massing, and parsed polygons live on **editable layers stacked over it.** "Editing
@@ -186,6 +191,17 @@ server/                   # placeholder README only — NOT built or deployed; b
   exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
 - Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
   `layers=show:<sublayer IDs>` to paint the mains/pipes.
+- **Layer coverage engine + coverage-aware picker (B283/B284).** Each layer is tagged
+  national/statewide/regional; a regional layer's published `fullExtent` (read from the
+  existing `?f=json` probe, reprojected via the shared EPSG:2278 grid) is intersected
+  with the view so the Layers panel can say **"No data in this area"** instead of leaving
+  a silent blank (the COH-utilities-blank-outside-Houston confusion). A **Relevance**
+  control (Show all / Dim / Hide) + a **nearby-range** slider dim/collapse out-of-coverage
+  layers — **list ordering/visibility only, never the map** (hard rule: coverage never
+  alters a layer's request; the request builders live in `lib/layerRequest.js` and take
+  no coverage input). Fails open everywhere. Mapillary renamed "Poles & hydrants from
+  street imagery" + gated as "needs setup" (B285/B286); jurisdiction vector services now
+  retry transient 5xx with backoff (B287). `lib/coverage.js`.
 
 ### Supabase backend (built, Phases 1–4)
 - Phase 1 — connection to a cloud Postgres database.
@@ -239,7 +255,7 @@ server/                   # placeholder README only — NOT built or deployed; b
   needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
   hasn't run yet, so saving never regresses.
 
-### Document Review — auto-filing backend (B270, new) — BUILT + WIRED, gated dormant
+### Document Review — auto-filing backend (B297, new) — BUILT + WIRED, gated dormant
 - **Drop a drawing → it files itself.** A server-side **title-block read** (`server/filing/`,
   Cloud Run — the key must never reach the browser, so it's `/server` compute, not Supabase)
   reads a dropped PDF with the Claude API, **matches it to a named project** (parcel / job # /
@@ -260,7 +276,7 @@ server/                   # placeholder README only — NOT built or deployed; b
   same-origin proxy `functions/api/file.js` 503s until `DOC_FILING_URL` is set. Off by default
   → the drawer files manually exactly as before (a 404/503 is a graceful skip). **Owner deploy
   to light it up:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` (server-side) +
-  `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V66.)
+  `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V73.)
 
 ## KEY DECISIONS (must persist)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
@@ -386,7 +402,7 @@ conflate them.
      a LibreDWG failure with APS off returns an explicit error, never a silent success).
      Code: `server/convert/` (B238). LibreDWG needs a real container (native binary +
      filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
-   - **Auto-filing title-block read + project match** — `server/filing/` (B270): reads a
+   - **Auto-filing title-block read + project match** — `server/filing/` (B297): reads a
      dropped drawing's title block with the Claude API (key **server-side only**), matches it
      to a named project (**never auto-guesses**), and returns a filing decision + placement
      facts. Dormant behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED`

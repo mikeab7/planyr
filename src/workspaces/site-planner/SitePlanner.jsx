@@ -12,7 +12,8 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -759,7 +760,21 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
+// Eye / eye-off icons for the per-overlay visibility toggle (B277) — inline SVG so the
+// show/hide affordance renders crisply and identically everywhere (the standard layers-UI
+// pattern: Bluebeam/ArcGIS/Photoshop). currentColor lets the button tint them.
+const EyeIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const EyeOffIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
+  </svg>
+);
+
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -837,6 +852,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [panning, setPanning] = useState(false);   // dragging empty canvas to pan
   const spaceRef = useRef(false);                  // Space held → temporary hand-pan over any tool (D4)
   const [spacePan, setSpacePan] = useState(false); // reflects spaceRef for the grab cursor
+  const capturePidRef = useRef(null);              // last pointerId the canvas captured — lets a gesture interrupted without a pointer-up still release capture (NEW-1)
   const [sel, setSel] = useState(null);         // {kind:'el'|'parcel', id}
   const [multi, setMulti] = useState([]);       // multi-select: array of {kind:'el'|'markup', id}
   // B261: while a persistent group is selected, double-clicking a member "drills in" to
@@ -888,6 +904,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // places by hand (immutable backdrop — above the basemap, below markup/massing).
   // Distinct from the GIS map `overlays` (app-shared layer props, declared below).
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
+  // Delete-tombstones (B276): ids of items deliberately removed (today: overlays). Persisted +
+  // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
+  const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
@@ -1046,6 +1065,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
+  const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
@@ -1245,6 +1265,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => clearInterval(iv);
   }, [overlays, origin, basemapOn]); // eslint-disable-line
 
+  /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
+     the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
+     when the view/size/origin settle (debounced past the basemap commit) and when the
+     nearby-range pref changes. Picker-only — never alters a layer's map request. */
+  useEffect(() => {
+    if (!origin) return;
+    let t;
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles()));
+    prefetchExtents(ALL_LAYERS, probeService).then(recompute);
+    t = setTimeout(recompute, 300); // let the basemap commit (≤160ms) settle first
+    const unsub = subscribeRelevance(recompute);
+    return () => { clearTimeout(t); unsub(); };
+  }, [overlays, origin, view, size]);
+
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
@@ -1252,10 +1286,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [] });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds }; });
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -1285,11 +1319,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays })) return; // don't save a still-blank site
+    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
-      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays });
+      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds });
       if (!ok) { setSaveStatus("unsaved"); return; }
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
@@ -1298,7 +1332,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125).
   const retryCloudSave = () => {
     if (!siteId) return;
@@ -1307,7 +1341,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -1349,7 +1383,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
       if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
       setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
     };
     window.addEventListener("storage", onStore);
     return () => window.removeEventListener("storage", onStore);
@@ -1357,7 +1391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0}`).join(";") || "no");
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => {
@@ -1367,7 +1401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -1556,6 +1590,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => wrap.removeEventListener("wheel", onWheel);
   }, []);
 
+  // NEW-1 — never leave the canvas stuck behind a frozen grab/hand cursor that won't click.
+  // A pan/drag captures the pointer and relies on the pointer-UP (onUp) to release capture
+  // and clear `panning`/`drag`. But the browser fires pointer-CANCEL (not pointer-up) when a
+  // gesture is interrupted — a devtools/remote-debugger session attaching to the tab, an OS
+  // gesture takeover, or the window losing focus mid-drag. With no cancel handler that cleanup
+  // never ran, so `panning` stayed true (stuck grab cursor) with pointer-capture held and the
+  // canvas swallowed every click. This tears the whole gesture down so it can self-recover.
+  const abortGesture = (pid = capturePidRef.current) => {
+    if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
+    capturePidRef.current = null;
+    drag.current = null;
+    setPanning(false);
+    setMarquee(null);
+    setMkRect(null);
+    setDraftRect(null);
+  };
+  // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
+  // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
+  // waiting on). Mirrors the Shift-reset effect below; also drops the Space hand-pan so the
+  // grab cursor can't stick on.
+  useEffect(() => {
+    const recover = () => { spaceRef.current = false; setSpacePan(false); abortGesture(); };
+    const onVis = () => { if (document.hidden) recover(); };
+    window.addEventListener("blur", recover);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
@@ -1590,7 +1652,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -1769,6 +1831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* ------------ pointer handlers (svg root) ------------ */
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
     altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
 
@@ -2717,6 +2780,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
     drag.current = null;
     setPanning(false);
+    capturePidRef.current = null;
     try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
   };
 
@@ -2925,6 +2989,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const o = sheetOverlays.find((x) => x.id === id);
     if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
     setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
+    setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
   };
   // Re-rasterize a different page (only while the source doc is still in memory).
@@ -4010,7 +4075,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!v) return;
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
-    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays);
+    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -5462,13 +5527,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       />
 
       {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review. */}
+          the file index needs a signed-in cloud session; reviews open in Document Review.
+          Clicking a file hands the whole review row up to the Shell, which stashes it and
+          switches to Document Review — DR opens it once it mounts. Passing only
+          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
+          (NEW-1). */}
       <ProjectFilesDrawer
         open={filesOpen}
         onClose={() => setFilesOpen(false)}
         signedIn={isCloudActive()}
         projectId={groupId}
-        onOpenReview={() => onShellSwitch?.("doc-review")}
+        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
       {cloudSaveFailed && (
@@ -5506,7 +5575,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
-            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
+            onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
             <defs>
@@ -5567,6 +5636,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   above the basemap/underlay and below parcels/massing/markup; shown
                   even with the basemap on (the point is to overlay onto the aerial). */}
               {sheetOverlays.map((o) => {
+                if (o.visible === false) return null; // B277 — hidden overlays don't render on the map (still listed in the Overlay panel, with the eye toggle to bring them back)
                 const tl = f2p({ x: o.x, y: o.y });
                 const w = o.imgW * o.ftPerPx * view.ppf;
                 const h = o.imgH * o.ftPerPx * view.ppf;
@@ -6227,7 +6297,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
                     <span style={{ flex: 1 }}>Aerial basemap</span>
                   </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} />
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage} />
                   {/* utility-evidence drawing tools */}
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
@@ -6743,6 +6813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "#fff" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
+                        <button style={{ ...chip, color: o.visible === false ? PAL.muted : PAL.ink, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "5px 7px" }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
                         <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
                         <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
                       </div>

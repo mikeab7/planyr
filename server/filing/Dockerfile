@@ -1,4 +1,4 @@
-# Auto-filing service (B270) — Google Cloud Run container.
+# Auto-filing service (B297) — Google Cloud Run container.
 #
 # Build context is the /server folder, so the service code + the shared result helper come
 # along without the frontend repo:

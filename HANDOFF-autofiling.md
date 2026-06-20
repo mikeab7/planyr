@@ -1,10 +1,10 @@
-# Handoff — Auto-filing (B270): drop a drawing → it files itself
+# Handoff — Auto-filing (B297): drop a drawing → it files itself
 
 **For the next session (Claude Cowork / coworker).** This is the orientation brief for the
 auto-filing feature. The code is **built, wired, tested, and merged to `main` — but switched
 OFF (dormant)** until the cloud read service is provisioned. Read this top-to-bottom; the
 deeper record lives in `CLAUDE.md` (DONE & VERIFIED → "Document Review — auto-filing backend"),
-`BACKLOG-DONE.md` (B270), and `VERIFICATION.md` (V66).
+`BACKLOG-DONE.md` (B297), and `VERIFICATION.md` (V73).
 
 ---
 
@@ -23,7 +23,7 @@ PDF files manually exactly as before (a 404/503 from the not-yet-deployed proxy 
 skip, not an error).
 
 - **lint 0 · 602 tests (52 new) · build green**; the doc-review lazy chunk split still holds.
-- **Headless self-verified** (`ui-audit/verify-b270-autofiling.mjs`, logged-out): the Project
+- **Headless self-verified** (`ui-audit/verify-b297-autofiling.mjs`, logged-out): the Project
   Files drawer opens, the new imports evaluate in a real browser, **0 page/console errors**,
   auto-filing dormant by default.
 
@@ -73,7 +73,7 @@ src/workspaces/doc-review/
   components/ProjectFilesDrawer.jsx     # drop handler auto-files when backendReady
   DocReview.jsx                         # passes indexProvider={autofilingProvider}
 test/docFiling.test.js (37)  test/autofiling.test.js (15)
-ui-audit/verify-b270-autofiling.mjs    # headless smoke
+ui-audit/verify-b297-autofiling.mjs    # headless smoke
 ```
 
 ## What remains
@@ -91,7 +91,7 @@ See `server/filing/README.md` for the full deploy notes + the `/api/file` proxy 
 (the Cloud Run service runs `--no-allow-unauthenticated`; wire identity-token/header auth on
 the proxy → service hop at deploy time).
 
-### B. Live verification (VERIFICATION V66) — after A
+### B. Live verification (VERIFICATION V73) — after A
 Signed-in, on planyr.io: Markup → **Files** → drop a real construction sheet (e.g. the owner's
 KG B1 / Jacintoport sets). Confirm it reads the title block, routes to the right project +
 discipline, auto-names it, and a low/ambiguous match lands in the holding area for one-click

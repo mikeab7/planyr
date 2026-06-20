@@ -1,4 +1,4 @@
-/* Project matcher (B270) — pure, dependency-free, the "never auto-guess" core.
+/* Project matcher (B297) — pure, dependency-free, the "never auto-guess" core.
  *
  * Given the fields a title-block read pulled off a drawing, decide which of the named
  * projects it belongs to — and, just as importantly, REFUSE to decide when it isn't sure.

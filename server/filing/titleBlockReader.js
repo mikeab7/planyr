@@ -1,4 +1,4 @@
-/* Title-block reader (B270) — server-side, the auto-filing read pass.
+/* Title-block reader (B297) — server-side, the auto-filing read pass.
  *
  * MIRRORS the proven client pattern in src/workspaces/site-planner/lib/titleReader.js
  * (read a PDF with the Claude API → clean structured fields via a json_schema), but:

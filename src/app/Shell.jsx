@@ -10,6 +10,7 @@ import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import { prefetchOnIdle } from "./modulePrefetch.js";
+import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -37,6 +38,14 @@ export default function Shell() {
   const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
   const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
   const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
+  // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
+  // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
+  // from the Site side can't be handed to a component that doesn't exist yet. We stash the
+  // requested review (token-stamped so a repeat click re-fires), switch to Document Review,
+  // and DR consumes the pending intent once it mounts. Without this the open is dropped and
+  // DR boots to its empty placeholder until a second click.
+  const [docIntent, setDocIntent] = useState(null);
+  const openReviewInDocReview = (row) => { setDocIntent({ kind: "open-review", row, token: Date.now() }); setActive("doc-review"); };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -50,6 +59,10 @@ export default function Shell() {
   // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
   // instant. Lazy-loading still gates the first paint; this only runs after.
   useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
+
+  // B279 — tag telemetry rows with the workspace the user is in, so a reported error
+  // says WHERE it happened (site-planner / doc-review / scheduler).
+  useEffect(() => { setTelemetryModule(active); }, [active]);
 
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
   const Active  = current.Comp;
@@ -157,9 +170,11 @@ export default function Shell() {
               onShellSwitch={setActive}
               authControl={authControl}
               navIntent={navIntent}
+              docIntent={docIntent}
               onGoDashboard={goDashboard}
               onOpenProject={openProjectInPlanner}
               onNewProject={newProjectInPlanner}
+              onOpenReviewInDocReview={openReviewInDocReview}
             />
           </Suspense>
         </ErrorBoundary>
