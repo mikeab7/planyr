@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
 import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -591,8 +591,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const finishDraft = () => {
     if (!draft) return;
     const { kind, pts } = draft;
-    if (kind === "count" && pts.length >= 1) commit({ kind, pts });
-    else if ((kind === "area" || kind === "perimeter") && pts.length >= 2) commit({ kind, pts });
+    // Area + perimeter need ≥3 points to be real polygons; a 2-point area is 0 sf and a
+    // 2-point perimeter is a single segment, both meaningless in the takeoff (B302).
+    if ((kind === "count" || kind === "area" || kind === "perimeter") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
     else setDraft(null);
   };
   const onDbl = (e) => {
@@ -609,7 +610,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const d = toPage(e), tol = 6 / scale;
       const pts = draft.pts.slice();
       while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
-      if (draft.kind === "count" ? pts.length >= 1 : pts.length >= 2) commit({ kind: draft.kind, pts });
+      // Same min-point gate as Enter/finishDraft so a 2-point area/perimeter can't slip in
+      // via double-click either (count ≥1, area/perimeter ≥3). (B302)
+      if (canCommitMeasure(draft.kind, pts.length)) commit({ kind: draft.kind, pts });
       else setDraft(null);
     } else finishDraft();
   };

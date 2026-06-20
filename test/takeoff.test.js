@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  dist, pathLength, polyArea, measureValue, measureLabel, rollup, midOfPath, centroidOf,
+  dist, pathLength, polyArea, measureValue, measureLabel, rollup, midOfPath, centroidOf, canCommitMeasure,
 } from "../src/workspaces/doc-review/lib/takeoff.js";
 
 describe("doc-review takeoff geometry + unit conversion", () => {
@@ -88,6 +88,25 @@ describe("doc-review takeoff geometry + unit conversion", () => {
       return r;
     })();
     expect(inside).toBe(true);
+  });
+
+  // B302: a real area/perimeter needs ≥3 points. The finishDraft gate uses canCommitMeasure
+  // so the degenerate 2-point shapes below can't be committed into the takeoff list.
+  it("B302: canCommitMeasure requires ≥3 pts for area/perimeter, 2 for distance, 1 for count", () => {
+    expect(canCommitMeasure("area", 2)).toBe(false);
+    expect(canCommitMeasure("area", 3)).toBe(true);
+    expect(canCommitMeasure("perimeter", 2)).toBe(false);
+    expect(canCommitMeasure("perimeter", 3)).toBe(true);
+    expect(canCommitMeasure("distance", 1)).toBe(false);
+    expect(canCommitMeasure("distance", 2)).toBe(true);
+    expect(canCommitMeasure("count", 0)).toBe(false);
+    expect(canCommitMeasure("count", 1)).toBe(true);
+  });
+
+  it("B302: the degenerate shapes the gate blocks really are meaningless", () => {
+    expect(polyArea([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toBe(0);                        // 2-pt area = 0 sf
+    expect(pathLength([{ x: 0, y: 0 }, { x: 10, y: 0 }], true)).toBe(10);               // 2-pt "loop" = one 10-unit segment, not 20
+    expect(pathLength([{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }], true)).toBe(12); // a real 3-pt loop closes (3+4+5)
   });
 
   // B296: linear measures (distance/perimeter) now carry one decimal so sub-foot precision
