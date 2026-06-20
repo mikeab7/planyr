@@ -22,6 +22,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2"). Concurrent main took B227–B236 while
+     this was in flight, so these renumbered to **B237** (two-backend architecture doc) + **B238**
+     (DWG→DXF conversion service) — the real next free IDs after B236. Deduped before filing: NEW-1
+     RECONCILED the existing "Two backends — don't conflate" section in CLAUDE.md in place (no
+     duplicate section); NEW-2 ADDED server/convert/ to the ALREADY-EXISTING /server scaffold (the
+     B206–B209 Drive storage layer was there — /server was not absent), reusing the shared
+     no-silent-failure result.js. Both filed AND shipped this same session — full blocks moved to
+     BACKLOG-DONE.md. -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Renumbered twice
      under a hot `main` (B225–B229 → B230–B234 → **B232–B236**; concurrent PRs #188–#191 + #190
      took B225–B231). Filed AND shipped this same session on branch `claude/tender-goldberg-ax4n5w`
