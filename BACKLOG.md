@@ -21,6 +21,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+<!-- 2026-06-20: filed from chat (arrived as "NEW-1"/"NEW-2") — resilient county parcel fetch. Minted
+     **B239** (NEW-1: resilient fetch + TxGIO statewide fallback) + **B240** (NEW-2: validate the ArcGIS
+     response BODY, not just HTTP status) — highest B# across both files was B238, so these are the real
+     next free IDs. Deduped before filing: B239 is the RESILIENCE layer on top of the already-done **B137**
+     (which made TxGIO a queryable *candidate* — coverage); B239 adds the 8s AbortController timeout (the
+     ~45s freeze fix), a per-source circuit breaker, honest "statewide backup" labeling, the search-side
+     county-scoped fallback, and TxGIO field normalization. B240 extends **B233**'s "unavailable vs no-parcel"
+     split down into the fetch layer (typed ParcelFetchError) and reuses the `probeService` body-parse
+     principle (HTTP 200 + .error = failed). Distinct from **B36e** (AbortControllers on the busy-gated
+     evidence-fetch path). Both filed AND shipped this same session — full blocks moved to BACKLOG-DONE.md;
+     live headless verified with FBCAD simulated down → Fort Bend lot selected from TxGIO in 1.2s + backup
+     notice shown (VERIFICATION V59). -->
+
 <!-- 2026-06-20: owner-reported (chat) "my scheduling module not working — this is obviously a huge
      deal." Filed B228, renumbered B237 — concurrent `main` took B228–B236 while this was in flight, so B237 is the real next free ID.
      Root cause confirmed = the SAME stale-chunk-after-deploy family as B221 (the open/returning tab

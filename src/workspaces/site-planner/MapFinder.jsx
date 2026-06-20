@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
-import { COUNTIES_MAP, candidateCountiesForPoint } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
+import { recordSourceResult, filterHealthyCandidates } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelAcross,
   identifyParcelDetailed,
   outerRingsLngLat,
   lngLatRingToFeet,
@@ -274,7 +274,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return { complete: true, dead: true };
   });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
-  const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key} — address-search result (B233)
+  const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
+  const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B239)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
@@ -596,21 +597,47 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return { key, attrs, rings };
   };
 
+  /* Build the parcel-query candidates for a point. Drops any primary whose circuit
+     breaker is OPEN — we just saw it fail, so don't re-hammer it on every click and
+     re-incur the (now time-boxed) failure (B239) — but ALWAYS keeps the statewide
+     source so coverage holds. Also returns the real (non-statewide) CAD candidates so
+     a statewide answer can be honestly flagged as a "backup". */
+  const resolveCandidates = (latlng) => {
+    const all = candidateCountiesForPoint(latlng.lat, latlng.lng)
+      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
+      .filter((c) => c.url);
+    const realPrimaries = all.filter((c) => !STATEWIDE_KEYS.includes(c.county));
+    return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
+  };
+  // A statewide-backup answer reports the parcel's true county in its `county` attr
+  // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
+  const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  const backupCountyLabel = (attrs) => { const c = findAttr(attrs, /^county$/i); return c ? titleCase(c) : "This county"; };
+
   const handleClick = async (latlng) => {
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
     // No county pre-selection required; a border straddle queries both and we take
     // the first hit. Candidates with an unresolved URL (service still loading or
-    // down) are skipped this click.
-    const candidates = candidateCountiesForPoint(latlng.lat, latlng.lng)
-      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
-      .filter((c) => c.url);
+    // down), or a primary whose breaker is open, are skipped this click.
+    const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setBackupNotice(null);
     try {
-      const hits = await identifyParcelAcross(candidates, latlng.lng, latlng.lat);
-      if (!hits.length) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
-      const hit = hits[0]; // first county that answered owns the lot
+      const res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
+      res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
+      if (!res.hits.length) {
+        // "Couldn't reach any parcel server" reads differently from "reached one, but
+        // there's no parcel at this exact point" (B240).
+        setErr(res.responded === 0
+          ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
+          : "No parcel right there — zoom in and click directly on a lot.");
+        return;
+      }
+      const hit = res.hits[0]; // first county that answered owns the lot
+      // A hit FROM the statewide layer while a real CAD existed for this spot means
+      // TxGIO stood in for a county whose own server was down/skipped — flag it.
+      const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
       const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
       const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
@@ -621,6 +648,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
         addParcelHit(hit, latlng);
+        if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
       setErr(humanizeError(e));
@@ -634,9 +662,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
      (none) — they mean different things and must read differently. */
   const selectParcelAt = async (latlng, label) => {
-    const candidates = candidateCountiesForPoint(latlng.lat, latlng.lng)
-      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
-      .filter((c) => c.url);
+    const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setParcelInfo({ status: "unavailable", label }); return; }
     let res;
     try {
@@ -644,16 +670,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     } catch (_) {
       setParcelInfo({ status: "unavailable", label }); return;
     }
+    res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
     if (!res.hits.length) {
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
       setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
     }
-    const added = addParcelHit(res.hits[0], latlng);
+    const hit = res.hits[0];
+    const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+    const added = addParcelHit(hit, latlng);
     if (!added) { setParcelInfo({ status: "none", label }); return; }
     setParcelInfo({
-      status: "found", label, key: added.key, county: res.hits[0].county, attrs: added.attrs,
+      status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
       addr: findAttr(added.attrs, ADDR_RE), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+      backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
     });
   };
 
@@ -677,7 +707,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); };
+  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); };
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
@@ -882,6 +912,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
             </div>
             {parcelInfo.status === "found" ? (
               <div style={{ padding: "8px 11px 10px" }}>
+                {parcelInfo.backup && (
+                  <div style={{ marginBottom: 8, padding: "6px 8px", background: "#fdf6e7", border: "1px solid #e6c478", borderRadius: 6, fontSize: 11, color: "#8a5a00", lineHeight: 1.4 }}>
+                    Statewide backup — {parcelInfo.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
+                  </div>
+                )}
                 {parcelInfo.acct && infoRow("Account / ID", parcelInfo.acct)}
                 {parcelInfo.acres != null && infoRow("Acreage (measured)", `${parcelInfo.acres.toFixed(2)} ac`)}
                 {apprRows(parcelInfo.attrs)
@@ -999,6 +1034,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         {err && (
           <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
             {err}
+          </div>
+        )}
+        {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
+            all-Texas TxGIO layer because the county's own server was down; be honest
+            about provenance so a possibly-staler source is never mistaken for the
+            county's own record (B239). */}
+        {backupNotice && !err && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+            <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
           </div>
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}

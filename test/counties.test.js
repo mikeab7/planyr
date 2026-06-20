@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { candidateCountiesForPoint, COUNTIES_MAP } from "../src/workspaces/site-planner/lib/counties.js";
+import {
+  candidateCountiesForPoint, COUNTIES_MAP, STATEWIDE_KEYS,
+  STATEWIDE_PARCEL_LAYER, statewideFallbackFor,
+} from "../src/workspaces/site-planner/lib/counties.js";
 
 // candidateCountiesForPoint routes a map click to the CAD service(s) that could
 // own the clicked lot, WITHOUT a county pre-pick (B11). The statewide TxGIO layer
@@ -51,5 +54,35 @@ describe("candidateCountiesForPoint — click routing (B11/B130)", () => {
     expect(cand[0]).toBe("harris");
     expect(cand).toContain("chambers");
     expect(cand).toEqual(Object.keys(COUNTIES_MAP));
+  });
+});
+
+// The statewide TxGIO layer is the universal fallback when a county's own CAD server
+// is down. statewideFallbackFor returns that layer scoped to the requested county, so
+// an ID/address search can't leak into another county (B239).
+describe("statewideFallbackFor — county-scoped TxGIO backup (B239)", () => {
+  it("exposes the statewide key(s) and the all-Texas layer URL", () => {
+    expect(STATEWIDE_KEYS).toContain("chambers"); // the configured statewide source
+    expect(STATEWIDE_PARCEL_LAYER).toMatch(/stratmap_land_parcels/);
+  });
+
+  it("Fort Bend → the TxGIO layer scoped to FORT BEND", () => {
+    const fb = statewideFallbackFor("fortbend");
+    expect(fb.layerUrl).toBe(STATEWIDE_PARCEL_LAYER);
+    expect(fb.scopeWhere).toBe("county='FORT BEND'");
+    expect(fb.idField).toBe("prop_id");
+    expect(fb.addrField).toBe("situs_addr");
+  });
+
+  it("Harris → the TxGIO layer scoped to HARRIS", () => {
+    expect(statewideFallbackFor("harris").scopeWhere).toBe("county='HARRIS'");
+  });
+
+  it("Chambers → null (its PRIMARY is already TxGIO; no separate backup)", () => {
+    expect(statewideFallbackFor("chambers")).toBeNull();
+  });
+
+  it("an unknown county → null", () => {
+    expect(statewideFallbackFor("nowhere")).toBeNull();
   });
 });

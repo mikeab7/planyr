@@ -60,6 +60,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V59 — County parcel fetch survives a county-server outage (TxGIO statewide fallback) (B239 / B240) ✅ (self-verified headless — fully done; ⏳ optional signed-in confirm)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, live HCAD + TxGIO; FBCAD simulated down) · **Next check** — optional: a signed-in click-through on planyr.io (the resilience path is auth-independent, so logged-out coverage is representative).
+- **Harness:** `gis-verify/fbcad-outage-fallback-verify.mjs` — intercepts the **`gis.fbcad.org`** host as **HTTP 503** to reproduce the real 2026-06-19 FBCAD outage, then enters Select-parcels, recenters on Sugar Land (Fort Bend), and clicks a lot.
+- **✅ No freeze + correct fallback:** the click **selected a real parcel from the statewide TxGIO layer (prop_id 40594, county "FORT BEND") in ~1.2 s** — HCAD answered empty, FBCAD's 503 was intercepted and never froze the tab (the old behavior hung ~45 s with no answerer). Confirms the 8 s `AbortController` timeout + the candidate fallback.
+- **✅ Honest provenance:** the amber **"Statewide backup source — Fort Bend county's own parcel server is unavailable …"** notice rendered on the map (`gis-verify/fbcad-outage-fallback-verified.png`), so a possibly-staler backup is never mistaken for the county's own record.
+- **Deterministic logic** (timeout classification, circuit-breaker open/cooldown/reset, county-scoped where-clause, TxGIO field normalization) is covered by unit tests (`test/arcgis.test.js`, `test/sourceHealth.test.js`, `test/parcelQuery.test.js`, `test/appraisal.test.js`, `test/counties.test.js`) — 517 green.
+- **⏳ Optional:** repeat once on planyr.io while signed in (no behavior difference expected — the parcel fetch path doesn't depend on auth).
+
 ### V58 — Schedule module recovers after a deploy instead of dead-ending (B237) ✅ (self-verified headless — fully done) · ⏳ one optional production click-through
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — one optional live confirm on planyr.io after deploy (steps below)
 - **Harness:** `ui-audit/diagnose-scheduler.mjs` (three scenarios: normal click, stale-but-recoverable chunk, permanently-missing chunk) + `ui-audit/verify-chunk-reload.mjs` (the B221 guard contract).
