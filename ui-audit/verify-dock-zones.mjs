@@ -148,10 +148,19 @@ const f3 = await counts();
 log(f3.trailer === 0 && f3.court === 1, `on-canvas "−" → outer zone off that side: ${JSON.stringify(f3)}`);
 await page.screenshot({ path: OUT + "dock-zones-oncanvas.png" });
 
-// ---- D) Car parking via the panel (non-dock ends) ----
-await clickByTitle(/Add a car-parking row/, { optional: true });
-const pk = (await counts()).parking;
-log(pk >= 1, `car parking added on the ends (${pk})`);
+// ---- D) EMPLOYEE-SIDE build-out (non-dock side): "+" walks sidewalk → parking row → MORE rows ----
+// sidewalk strips are thin (5′) and may rotate, so detect by fill with a long axis
+const swCount = () => page.evaluate(() => [...document.querySelectorAll("svg rect")].filter((r) => { const b = r.getBoundingClientRect(); return (r.getAttribute("fill") || "").toLowerCase() === "#eceae3" && Math.max(b.width, b.height) > 12; }).length);
+// the parking field's DEPTH is the SHORTER bbox side (it's rotated 90° on a short end)
+const parkDepth = async () => { const p = (await zones()).filter((e) => e.kind === "parking").sort((a, b) => b.w * b.h - a.w * a.h)[0]; return p ? Math.min(p.w, p.h) : 0; };
+await clickByTitle(/Add a .{0,3}sidewalk/);                  // 1st "+" → sidewalk (the one Michael lost)
+log((await swCount()) >= 1, `employee "+" → sidewalk restored (${await swCount()})`);
+await clickByTitle(/Add a parking row/);                     // 2nd "+" → first parking row
+const pk1 = (await counts()).parking, pd1 = await parkDepth();
+log(pk1 >= 1, `employee "+" again → first parking row (${pk1})`);
+await clickByTitle(/Add another parking row/);               // 3rd "+" → MORE rows (the thing that was missing)
+const pd2 = await parkDepth();
+log(pd2 > pd1 + 2, `employee "+" again → adds MORE rows (field deepened ${pd1.toFixed(0)}px → ${pd2.toFixed(0)}px)`);
 await page.screenshot({ path: OUT + "dock-zones-parking.png" });
 
 console.log(errors.length ? `\nPAGE ERRORS:\n${errors.slice(0, 8).join("\n")}` : "\n(no page errors)");

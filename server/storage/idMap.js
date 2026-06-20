@@ -24,14 +24,16 @@ export function memoryIdStore() {
 }
 
 export function createIdMap(store = memoryIdStore()) {
+  // All methods are async so the store can be in-memory (sync, awaited transparently) OR
+  // a durable Supabase-backed store (async REST) — the adapter awaits either the same way.
   return {
     // Planyr key → backend id (or null if this file isn't bound to the backend yet).
-    resolve: (planyrKey) => store.get(planyrKey),
+    resolve: async (planyrKey) => store.get(planyrKey),
     // backend id → Planyr key (used to translate a backend listing back to Planyr keys;
     // a backend object with no Planyr binding is intentionally invisible to the app).
-    reverse: (backendId) => store.getByBackend(backendId),
-    bind: (planyrKey, backendId) => store.set(planyrKey, backendId),
-    unbind: (planyrKey) => store.del(planyrKey),
-    list: () => store.all(),
+    reverse: async (backendId) => store.getByBackend(backendId),
+    bind: async (planyrKey, backendId, meta) => store.set(planyrKey, backendId, meta),
+    unbind: async (planyrKey) => store.del(planyrKey),
+    list: async () => store.all(),
   };
 }

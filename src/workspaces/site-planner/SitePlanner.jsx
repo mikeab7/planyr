@@ -3209,7 +3209,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      remove / inline depth-edit / building-resize. Truck court + trailer parking REUSE
      the existing `truckCourt` / `forCourt` tags; the buffer is the new zone (a sage
      `landscape` clear strip), bonded to its trailer via `forTrailer`. Car parking and
-     bump-outs are deliberately NOT in this stack (see addCarParkingEnds / dog-ears). ---- */
+     bump-outs are deliberately NOT in this stack (see growEmployeeSide / dog-ears). ---- */
   // Find the stack members on a side, within a given element array (pure).
   const findCourtIn = (arr, b, side) => arr.find((x) => x.attachedTo === b.id && x.truckCourt && x.truckCourt.side === side && !x.points);
   const findTrailerIn = (arr, court) => (court ? arr.find((x) => x.forCourt === court.id && !x.points) : null);
@@ -3354,10 +3354,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Car parking goes on every NON-dock side (the short ends, plus the long side opposite the
   // docks on a single-load building) — wherever there's no truck court / trailer / buffer.
   const carEndsSides = (b) => { const dock = dockSidesOf(b).dockSides; return ["top", "bottom", "left", "right"].filter((s) => !dock.includes(s)); };
-  const carParkingEnds = (b) => els.filter((x) => x.attachedTo === b.id && x.sideParkSide && carEndsSides(b).includes(x.sideParkSide));
-  const addCarParkingEnds = (b) => { carEndsSides(b).forEach((name) => addParkingRowSide(b, name)); };
-  const removeCarParkingEnds = (b) => { const ids = new Set(carParkingEnds(b).map((x) => x.id)); if (!ids.size) return; pushHistory(); setEls((a) => a.filter((x) => !ids.has(x.id))); };
-  const carParkingOpenSides = (b) => carEndsSides(b).filter((s) => !els.some((x) => x.attachedTo === b.id && x.sideParkSide === s)); // ends still free
+  // Employee / non-dock side build-out (B246): "+" walks sidewalk → first parking row → MORE rows;
+  // "−" reverses (rows → remove parking → remove sidewalk). Mirrors the dock stack for the parking
+  // side, and brings the sidewalk back into the flow (it was dropped in the B242 redesign).
+  const empSideSidewalk = (b, side) => els.find((x) => x.attachedTo === b.id && isWallStrip(x) && !x.points && sideOfKid(b, x) === side);
+  const empSidePark = (b, side) => els.find((x) => x.attachedTo === b.id && x.sideParkSide === side);
+  const empSideRows = (p) => parkRowsForDepth(p.h, cfgOf(p).stallDepth || settings.stallDepth, cfgOf(p).aisle ?? settings.aisle);
+  const growEmployeeSide = (b, side, dir) => {
+    const sw = empSideSidewalk(b, side), park = empSidePark(b, side);
+    if (dir > 0) {
+      if (!sw && !park) addSidewalkSide(b, side);      // 1) a 5′ sidewalk against the wall
+      else if (!park) addParkingRowSide(b, side);       // 2) first parking row, just beyond the sidewalk
+      else growParking(park, +1);                       // 3+) another row, growing outward
+    } else if (park) {
+      if (empSideRows(park) > 1) growParking(park, -1); else removeFeature(park.id);
+    } else if (sw) removeFeature(sw.id);
+  };
+  const empSideAddTitle = (b, side) => { const sw = empSideSidewalk(b, side), park = empSidePark(b, side); return (!sw && !park) ? "Add a 5′ sidewalk" : !park ? "Add a parking row" : "Add another parking row"; };
+  const employeeSideHasAny = (b) => carEndsSides(b).some((s) => empSideSidewalk(b, s) || empSidePark(b, s));
+  const addEmployeeParking = (b) => carEndsSides(b).forEach((s) => growEmployeeSide(b, s, +1));
+  const shrinkEmployeeParking = (b) => carEndsSides(b).forEach((s) => growEmployeeSide(b, s, -1));
   // Remove every bump-out at once (the "−" counterpart to "+ Bump-outs"; footprint modifier).
   const removeAllDogEars = (b) => {
     const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
@@ -4544,13 +4560,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               onRemove: () => removeOuterZoneOnSide(el, name),
             });
           }
-          // non-dock side (a short end, or the long side opposite single-load docks) → car parking
-          const park = kids.find((x) => x.sideParkSide === name);
+          // non-dock side (a short end, or the long side opposite single-load docks) → the
+          // employee build-out: "+" walks sidewalk → parking row → MORE rows; "−" reverses.
+          const sw = empSideSidewalk(el, name), park = empSidePark(el, name);
           return featPair(`end${name}`, pos, tan, {
-            canAdd: !park, addColor: "#16a34a", addTitle: "Add a car-parking row",
-            onAdd: () => addParkingRowSide(el, name),
-            canRemove: !!park, removeTitle: "Remove car parking",
-            onRemove: () => park && removeFeature(park.id),
+            canAdd: true, addColor: "#16a34a", addTitle: empSideAddTitle(el, name),
+            onAdd: () => growEmployeeSide(el, name, 1),
+            canRemove: !!(sw || park), removeTitle: park ? "Remove a parking row" : "Remove the sidewalk",
+            onRemove: () => growEmployeeSide(el, name, -1),
           });
         })}
         {/* dog-ear bump-outs at each corner of every dock side — a single toggle (you only add
@@ -6937,10 +6954,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone",
                           onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
                         })}
-                        {ctlRow("Car parking", "non-dock sides (the ends)", {
-                          onAdd: () => addCarParkingEnds(b), addOn: carParkingOpenSides(b).length > 0,
-                          addTitle: "Add a car-parking row on each open non-dock side",
-                          onRem: () => removeCarParkingEnds(b), remOn: carParkingEnds(b).length > 0, remTitle: "Remove the non-dock-side car parking",
+                        {ctlRow("Car parking", "sidewalk + rows, non-dock sides", {
+                          onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0,
+                          addTitle: "Build out the non-dock sides: sidewalk, then parking rows (one more each click)",
+                          onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
                         })}
                         {ctlRow("Bump-outs", `footprint modifier · ${DOGEAR_W}′×${DOGEAR_D}′ corners`, {
                           onAdd: () => addDogEars(b), addOn: !noDock, addTitle: "Add dock-corner bump-outs",

@@ -21,8 +21,7 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
   if (!backend) throw new Error("createStorageAdapter requires a backend.");
   const links = linkProvider || createLinkProvider({ kind: "drive", backend });
 
-  // Resolve a Planyr key to a backend id or return a uniform "not found" failure — the
-  // one spot that guards against an unmapped key reaching the backend.
+  // Resolve a Planyr key to a backend id (async — the idMap may be a durable store).
   const resolved = (planyrKey) => idMap.resolve(planyrKey);
 
   return {
@@ -37,13 +36,13 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
       const r = await attempt(() => backend.put({ bytes, contentType, name, folder, planyrKey }), "Upload");
       if (!r.ok) return r;
       if (!r.backendId) return fail("Backend did not return an id for the saved file.");
-      idMap.bind(planyrKey, r.backendId);
+      await idMap.bind(planyrKey, r.backendId, { name });
       return ok({ planyrKey });
     },
 
     /* Fetch bytes by Planyr key. */
     async fetch(planyrKey) {
-      const backendId = resolved(planyrKey);
+      const backendId = await resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
       return attempt(() => backend.get(backendId), "Download");
     },
@@ -53,22 +52,22 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
     async list(query = {}) {
       const r = await attempt(() => backend.list(query), "List");
       if (!r.ok) return r;
-      const items = (r.items || [])
-        .map((it) => ({ planyrKey: idMap.reverse(it.backendId), name: it.name, size: it.size, contentType: it.contentType, folder: it.folder }))
-        .filter((it) => it.planyrKey); // drop anything not bound to a Planyr key
-      return ok({ items });
+      const mapped = await Promise.all((r.items || []).map(async (it) => ({
+        planyrKey: await idMap.reverse(it.backendId), name: it.name, size: it.size, contentType: it.contentType, folder: it.folder,
+      })));
+      return ok({ items: mapped.filter((it) => it.planyrKey) }); // drop anything not bound to a Planyr key
     },
 
     /* Move a file to another folder (Planyr-level folder concept). */
     async move(planyrKey, toFolder) {
-      const backendId = resolved(planyrKey);
+      const backendId = await resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
       return attempt(() => backend.move(backendId, toFolder), "Move");
     },
 
     /* Rename a file's display name (its Planyr key is stable and does NOT change). */
     async rename(planyrKey, newName) {
-      const backendId = resolved(planyrKey);
+      const backendId = await resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
       if (!newName) return fail("rename needs a new name.");
       return attempt(() => backend.rename(backendId, newName), "Rename");
@@ -76,16 +75,16 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
 
     /* Delete a file and drop its mapping. */
     async remove(planyrKey) {
-      const backendId = resolved(planyrKey);
+      const backendId = await resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
       const r = await attempt(() => backend.remove(backendId), "Delete");
-      if (r.ok) idMap.unbind(planyrKey);
+      if (r.ok) await idMap.unbind(planyrKey);
       return r;
     },
 
     /* Produce a share link for a file (routed through the link provider — B208). */
     async shareLink(planyrKey, opts = {}) {
-      const backendId = resolved(planyrKey);
+      const backendId = await resolved(planyrKey);
       if (!backendId) return fail(`No file is filed under "${planyrKey}".`);
       return attempt(() => links.link(planyrKey, backendId, opts), "Share link");
     },

@@ -15,7 +15,7 @@
  * the auto-filing index is stubbed behind the index-provider interface.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, pushFileToDrive, DISCIPLINES } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, DISCIPLINES } from "../lib/reviewStore.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
@@ -71,13 +71,12 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
         // Auto-file by title block is the backend tranche; until then, file under the
         // active project (or the holding area when none is selected). The index provider
         // captures placement facts at filing time through the same interface.
+        // fileNewReview files to Supabase AND pushes a copy to Google Drive (B207),
+        // recording the Drive key for read-back. A Drive failure never blocks filing.
         const r = await fileNewReview({ projectId: activeProject || null, project: projName(activeProject), discipline: "Other", blob: f, fileName: f.name });
         if (!r || !r.ok) failed.push(`${f.name} — couldn't file`);
         else if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop on open to view)`);
-        // Additive: also push a copy to Google Drive (B207). Best-effort — the file is
-        // already filed above; a genuine Drive error warns, but "not enabled yet" is silent.
-        const drive = await pushFileToDrive(f, { projectId: activeProject || null, discipline: "Other", fileName: f.name });
-        if (!drive.ok && !drive.skipped) failed.push(`${f.name} — filed, but the Drive copy failed (${drive.error})`);
+        else if (r.driveError) failed.push(`${f.name} — filed, but the Drive copy failed (${r.driveError})`);
       }
     } finally { setBusy(false); refresh(); }
     if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
