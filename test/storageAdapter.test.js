@@ -94,14 +94,14 @@ describe("storage adapter — backend is swappable with zero consumer changes (B
 });
 
 describe("idMap — the only Planyr↔backend translator (B206/NEW-1)", () => {
-  it("round-trips and unbinds", () => {
+  it("round-trips and unbinds", async () => {
     const m = createIdMap(memoryIdStore());
-    m.bind("planyr/a.pdf", "drive_123");
-    expect(m.resolve("planyr/a.pdf")).toBe("drive_123");
-    expect(m.reverse("drive_123")).toBe("planyr/a.pdf");
-    m.unbind("planyr/a.pdf");
-    expect(m.resolve("planyr/a.pdf")).toBe(null);
-    expect(m.reverse("drive_123")).toBe(null);
+    await m.bind("planyr/a.pdf", "drive_123");
+    expect(await m.resolve("planyr/a.pdf")).toBe("drive_123");
+    expect(await m.reverse("drive_123")).toBe("planyr/a.pdf");
+    await m.unbind("planyr/a.pdf");
+    expect(await m.resolve("planyr/a.pdf")).toBe(null);
+    expect(await m.reverse("drive_123")).toBe(null);
   });
 });
 
