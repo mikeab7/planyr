@@ -18,7 +18,7 @@ describe("isTransientStatus — what counts as a retryable blip", () => {
 });
 
 // ---------------------------------------------------------------------------
-// NEW-5/B286 — esri-leaflet FeatureLayer queries get retry/backoff. The DECISION is a
+// NEW-5/B287 — esri-leaflet FeatureLayer queries get retry/backoff. The DECISION is a
 // pure function; attachFeatureRetry (in layers.js) just wires it to the live layer.
 describe("featureRetryDecision — transient retry/backoff policy", () => {
   it("retries a transient 5xx with exponential backoff (400 → 800 → 1600)", () => {

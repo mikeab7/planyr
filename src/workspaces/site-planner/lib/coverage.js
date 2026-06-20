@@ -1,4 +1,4 @@
-/* Layer coverage engine (NEW-1 / B282) — does each layer's DATA reach the view?
+/* Layer coverage engine (NEW-1 / B283) — does each layer's DATA reach the view?
  *
  * Motivation: the City-of-Houston utility layers (water / wastewater / storm) and
  * HCFCD load "green" (HTTP 200) but paint a blank transparent image anywhere outside

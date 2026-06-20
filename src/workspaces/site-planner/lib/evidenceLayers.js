@@ -148,7 +148,7 @@ export function mapillaryLayer(onStatus) {
     if (!map) return;
     if (busy) { pending = true; return; } // a moveend arrived mid-fetch — serve the latest view after (B56d)
     const token = mapillaryToken();
-    // No token isn't a failure — it's just unconfigured (NEW-4/B285). Report a quiet
+    // No token isn't a failure — it's just unconfigured (NEW-4/B286). Report a quiet
     // "unconfigured" status, not the red "failed", if the token is cleared while on.
     if (!token) { group.clearLayers(); lastKey = "no-token"; onStatus && onStatus("unconfigured", "Not configured — add a free access token to enable this layer."); return; }
     if (map.getZoom() < MLY_MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MLY_MIN_ZOOM} to load`); return; }

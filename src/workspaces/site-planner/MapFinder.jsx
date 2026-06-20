@@ -417,7 +417,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return () => clearInterval(iv);
   }, [overlays]); // eslint-disable-line
 
-  /* Coverage (NEW-1/B282): which layers' DATA reaches the current view, for the
+  /* Coverage (NEW-1/B283): which layers' DATA reaches the current view, for the
      Layers panel's relevance picker. Recompute on map move (debounced) and when the
      nearby-range pref changes. Picker-only — never touches the map's requests. */
   useEffect(() => {

@@ -113,7 +113,7 @@ planner's map; an engineer's drawing overlays the planner's layout).
   and the site layout all live in the same space. `src/shared/coordinates/` now has a
   **real EPSG:2278 ↔ WGS84 projection** (`projectToGrid`/`gridToProject`, Lambert
   Conformal Conic, validated vs pyproj <1e-4°); its first consumer is the **layer
-  coverage engine** (B282), which reprojects each GIS service's published extent to
+  coverage engine** (B283), which reprojects each GIS service's published extent to
   test whether its data reaches the view. This is a **read-only screening use** — the
   Site Planner still keeps its own per-site feet frame for drawn geometry; grow the
   shared grid additively, not via a big-bang planner rewrite.
@@ -191,7 +191,7 @@ server/                   # placeholder README only — NOT built or deployed; b
   exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
 - Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
   `layers=show:<sublayer IDs>` to paint the mains/pipes.
-- **Layer coverage engine + coverage-aware picker (B282/B283).** Each layer is tagged
+- **Layer coverage engine + coverage-aware picker (B283/B284).** Each layer is tagged
   national/statewide/regional; a regional layer's published `fullExtent` (read from the
   existing `?f=json` probe, reprojected via the shared EPSG:2278 grid) is intersected
   with the view so the Layers panel can say **"No data in this area"** instead of leaving
@@ -200,8 +200,8 @@ server/                   # placeholder README only — NOT built or deployed; b
   layers — **list ordering/visibility only, never the map** (hard rule: coverage never
   alters a layer's request; the request builders live in `lib/layerRequest.js` and take
   no coverage input). Fails open everywhere. Mapillary renamed "Poles & hydrants from
-  street imagery" + gated as "needs setup" (B284/B285); jurisdiction vector services now
-  retry transient 5xx with backoff (B286). `lib/coverage.js`.
+  street imagery" + gated as "needs setup" (B285/B286); jurisdiction vector services now
+  retry transient 5xx with backoff (B287). `lib/coverage.js`.
 
 ### Supabase backend (built, Phases 1–4)
 - Phase 1 — connection to a cloud Postgres database.
