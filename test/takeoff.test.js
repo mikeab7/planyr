@@ -49,6 +49,18 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }, 0)).toBe("set scale");
   });
 
+  // B281: linear measures (distance/perimeter) now carry one decimal so sub-foot precision
+  // isn't hidden by whole-foot rounding (a 150.6 ft line used to read "151 ft"); area keeps
+  // its 2-dp acres · whole sf. Guards against a regression back to f0.
+  it("B281: calibrated linear labels show one decimal; area unchanged", () => {
+    // 10 page-units × 1.06 ft/unit = 10.6 ft → "10.6 ft" (was "11 ft")
+    expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }, 1.06)).toBe("10.6 ft");
+    // perimeter of a 3-4-5 triangle closed = 12 → "12.0 ft" (one decimal even when whole)
+    expect(measureLabel({ kind: "perimeter", pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }] }, 1)).toBe("12.0 ft");
+    // area still acres-2dp · whole-sf (10×10 raw × 3² = 900 sf)
+    expect(measureLabel({ kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] }, 3)).toBe("0.02 ac · 900 sf");
+  });
+
   it("rollup totals calibrated items and counts uncalibrated ones", () => {
     const markups = [
       { kind: "distance", page: 1, pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] },                         // 10 * 2 = 20 ft
