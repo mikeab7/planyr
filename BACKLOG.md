@@ -22,6 +22,64 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped (chat) as "NEW-3" — light/dark/system theming. Minted **B273**
+     (highest B# across BOTH BACKLOG.md + BACKLOG-DONE.md was B272 → next free is B273).
+     DEDUPE: the owner's note said "NEW-3 supersedes the earlier light/dark NEW-3 stub if it was
+     already filed — fold into one." Checked BOTH files: **no prior light/dark theme stub exists**
+     (the only "theme" hits are the county-resolution *topic* and BrandMark's already-theme-aware
+     `surface` prop + the unrelated "themed loader" animation). So there was nothing to fold — this
+     is the single canonical theming item. RECORDED here so a future session doesn't re-hunt for a stub.
+     DEPENDENCIES (referenced by the spec, NOT yet filed in this backlog): "NEW-1" = a `profiles`
+     row for cross-device prefs (the theme choice mirrors there); "NEW-2" = an account dropdown
+     (the theme control lives there, or in Settings). Build B273 AFTER both — or land the control in
+     Settings if NEW-2 slips. localStorage is the source-of-truth on load regardless, so the profiles
+     mirror is an additive NEW-1 follow-on, not a hard prerequisite for local theming.
+     SCOPE = foundation-scale (see the build-plan note in the item): ~886 hardcoded hex literals across
+     ~30 files + 9 local `PAL` objects + inline styles + index.css literals + the Scheduler iframe — a
+     real multi-pass migration, not a one-session drop-in. Filed-with-a-plan per the "too large to
+     finish this run" carve-out, NOT shipped this session; raised plainly in chat. -->
+
+### B273 — Light / dark / system theme with cool-gray light palette `[AppHeader / theming]` (feature) — foundation-scale  *(owner-dropped 2026-06-20; arrived as "NEW-3"; minted **B273** — next free after B272)*
+`[?]` Add a theme selector with three modes — **Light**, **Dark**, **System** (`prefers-color-scheme`). App is currently hard-locked to one look; this adds the switch. Light mode = cool gray-white surfaces; Dark mode keeps the existing locked dark palette unchanged.
+> **`[?]` AMBIGUITY — confirm before building (don't guess):** the app today is **not literally all-dark** — content surfaces are a warm **cream/paper** ("drafting") palette (`body #efeadf`, panels `#f6f3ec`, ink `#26231e`) sitting under **dark graphite chrome** (top bars + rail, `#14110e`/`#191613`). The spec says "Dark mode keeps the existing locked dark palette unchanged." Confirm what "the existing dark" means: **(a)** preserve today's warm-cream-content + dark-chrome look as the "Dark" theme, or **(b)** build a genuine dark-*surface* mode (dark content panels) as "Dark" and retire the cream. This materially changes the work and the token values. (Owner to decide.)
+
+**Mechanics (from the owner's spec):**
+- Drive theming off `data-theme="light|dark"` on `<html>`. All colors as CSS variables, both themes fully defined.
+- **System** resolves via `prefers-color-scheme` and must update **live mid-session** — attach a `matchMedia('(prefers-color-scheme: dark)')` change listener.
+- Persist the choice (light/dark/system) in **localStorage as source-of-truth on load**; mirror to the `profiles` row (NEW-1) for cross-device. localStorage wins on first paint to avoid a network round-trip.
+- **FOUC gotcha (do this FIRST):** an inline script in `index.html <head>` that reads the stored choice (or system pref) and sets `data-theme` **before React mounts** — otherwise every load flashes the wrong theme. ("FOUC" = flash of un-themed content.)
+- Theme control lives in the **account dropdown (NEW-2)** or **Settings** — consolidate, don't duplicate.
+- Files likely touched: `index.html` (inline pre-paint script), a `ThemeProvider`/context, the token stylesheet (`src/index.css`), the account dropdown (NEW-2), the `profiles` mirror via the NEW-1 hook.
+
+**Light-mode surface tokens (cool gray-white — owner-verified legible):**
+
+| Token | Light value | Dark value |
+|---|---|---|
+| surface-page | `#F3F5F8` | existing locked dark |
+| surface-raised (cards) | `#FFFFFF` | existing locked dark |
+| border-default | `#E1E5EB` | existing |
+| border-strong (hover) | `#CDD3DC` | existing |
+| text-primary | `#1B1E26` | existing |
+| text-secondary (muted) | `#565E6E` | existing |
+| text-tertiary (hints) | `#8B92A1` | existing |
+
+**Accent pair model:** each module accent is **two tokens** — a **fill/brand** value (unchanged, locked hexes — these already live in `src/shared/ui/moduleAccent.js` as `MODULE_ACCENT`) and an **on-light text** value (tuned, AA-passing as foreground). The `-text` token is theme-dependent.
+
+| Module | fill (both modes) | text — light mode | text — dark mode |
+|---|---|---|---|
+| Site | `#1D9E75` | `#0F6E56` | `#5DCAA5` |
+| Schedule | `#7F77DD` | `#534AB7` | `#AFA9EC` |
+| Markup | `#EF9F27` | `#8A5410` | `#EF9F27` |
+
+- **On-fill text rule (both modes):** text/icons **on** an accent fill — Site & Schedule fills carry **white** (`#FFFFFF`); **Markup (amber) fill carries dark text** (`#412402`). White-on-amber is unreadable; enforce wherever a status/tab chip uses the amber fill.
+- **Usage rule:** accent-as-**fill** (tab band, active indicator, status-chip bg) → **fill** token. Accent-as-**foreground** (colored text, thin icons, links) → **`-text`** token, never the fill token.
+- **Edge case — status palette:** the locked status tokens (Pursuit / Active / On Hold / Complete / Dead) need the same discipline. For each status color used as text/icon on a light surface, **derive programmatically** the nearest variant that clears **AA ≥ 4.5** as foreground on `#FFFFFF`/`#F3F5F8`; keep originals as fills with the same on-fill rule. **Flag any status color whose foreground variant can't reach 4.5** for review (don't hand-pick).
+- **Constraint (unchanged):** module accents stay confined to the **top tab row only** — light mode doesn't change that.
+
+> **Build plan / scope (grounds the "foundation-scale" tag) — REUSE, don't rebuild:**
+> The app has **no central theming layer today**: ~**886 hardcoded hex literals across ~30 files**, **9 local `PAL` objects** (`SitePlanner.jsx`, `MapFinder.jsx`, `AuthPanel.jsx`, `ParcelDrawing.jsx`, `DocReview.jsx`, `Stitcher.jsx`, `ProjectLibrary.jsx`, `ProjectFilesDrawer.jsx`, `ReviewsBar.jsx`), inline styles throughout, plus literals inside `src/index.css`. `MODULE_ACCENT` (`moduleAccent.js`) is already the single source for the **fill** colors → extend it with the `-text` counterparts rather than re-listing hexes. `BrandMark` already takes a `surface="dark|light"` prop (theme-aware) → just feed it the active theme. The Scheduler is an **iframe** (`public/sequence/index.html`) with its **own** colors → needs its own token sheet or a postMessage theme bridge (separate surface).
+> Recommended sequence: **(1)** define the full token set for both themes in `:root` / `[data-theme]`; **(2)** FOUC inline script; **(3)** `ThemeProvider` + `matchMedia` live listener + localStorage persistence; **(4)** migrate the 9 PALs + inline literals + `index.css` literals to consume tokens (the bulk — do it per-workspace, verifying each surface); **(5)** AA-derive the status palette; **(6)** theme the Scheduler iframe; **(7)** wire the control into NEW-2/Settings + the NEW-1 cross-device mirror. A shell-only/partial theme that leaves the canvas/map/doc-review hardcoded would be a **misleading half** (per the "finish the job" rule) — so this ships as a deliberate multi-pass foundation, ideally after NEW-1 + NEW-2 land.
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
      and re-used every ID in between (dock-zone build-out, the Scheduler backlog + its B261–B264 renumber,
