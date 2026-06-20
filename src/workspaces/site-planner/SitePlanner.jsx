@@ -43,6 +43,7 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth } from "./lib/siteModel.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone } from "./lib/dockZones.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
@@ -83,6 +84,16 @@ const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
+// B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
+// FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
+// footprint shrinks below them (zoomed out) the cluster grows larger than the
+// footprint and spills past the edges into an unreadable pile. Each button is gated on
+// the on-screen size of the wall it hangs off, in PIXELS (resolution-independent — real
+// building sizes vary too much for one zoom number): a wall's inset +/− only shows when
+// its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
+// each side means opposite buttons overlap below ~68px; this adds a small legibility
+// margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
 const PAL = {
@@ -167,7 +178,7 @@ const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't 
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
 // or duplicate starts standalone, so strip them all — keeping them would dangle a link to an
 // element that wasn't cloned (orphan court / dog-ear metadata that refit/trailer logic reads).
-const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
+const ORPHAN_TAGS = ["attachedTo", "truckCourt", "forCourt", "forTrailer", "dogEar", "oppSide", "sideParkSide", "sidewalkSide"];
 const detachClone = (src) => { const c = { ...src }; for (const k of ORPHAN_TAGS) delete c[k]; return c; };
 const MK_DEFAULT = { stroke: "#c2410c", weight: 2, dash: "solid", fill: "#c2410c", fillOpacity: 0 };
 const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
@@ -719,6 +730,9 @@ const DEFAULT_SETTINGS = {
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
+  // Building-anchored dock-zone stack default depths (B228), outward from the dock
+  // face: truck court → trailer parking → buffer. User-editable in Setup → Dock zones.
+  truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
@@ -819,6 +833,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [cursor, setCursor] = useState(null);   // {x,y} feet
+  const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -2235,7 +2250,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
     const d = drag.current;
-    if (!d) return;
+    if (!d) {
+      // B226: when nothing is selected, preview the hovered building's feature-add
+      // buttons so they appear on the ONE building under the cursor (never all at
+      // once). Position-based (not SVG enter/leave) because the buttons sit INSIDE
+      // the footprint — moving onto one keeps the pointer over the building, so the
+      // hover never flickers off. Only runs while idle in select mode with no
+      // selection (selection otherwise drives the buttons), so there's no churn.
+      if (tool === "select" && !sel) {
+        const hovered = [...els].sort(byZ).reverse().find((x) => {
+          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) return false;
+          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          return fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh;
+        });
+        const hid = hovered ? hovered.id : null;
+        if (hid !== hoverElId) setHoverElId(hid);
+      } else if (hoverElId) setHoverElId(null);
+      return;
+    }
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
@@ -3005,7 +3037,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const WALL_KID_TYPES = ["sidewalk", "landscape", "parking", "trailer", "paving"];
   // noFit children (dog-ears, the rotated opposite-dock trailer strip) keep their
   // fixed size/position when the building is resized instead of scaling with a wall.
-  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
+  // Dock-zone stack members (court/trailer/buffer) are positioned by relayoutSide, not
+  // as wall-hugging kids — exclude them here so they're not double-fit on a resize.
+  const wallKids = (b) => els.filter((x) => x.attachedTo === b.id && !x.noFit && !x.truckCourt && !x.forCourt && !x.forTrailer && WALL_KID_TYPES.includes(x.type) && !x.points).map((c) => {
     const l = rot2(c.cx - b.cx, c.cy - b.cy, -b.rot); // child centre in the building's local frame
     // A child may be turned 90° from the building (e.g. a parking field rotated to
     // run ALONG a side wall). Resolve its extent on each building axis so depth,
@@ -3040,7 +3074,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
-  const TRUCK_COURT_D = 135; // truck dock apron + drive depth
   const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
   const OPP_TRAILER_W = 12;  // trailer stall width for that strip
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -3090,12 +3123,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const fitDogEar = (nb, de) => dogEarGeom(nb, de.side, de.sign);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
-  // Remove a building feature (and anything that hangs off it, e.g. a court's trailer).
-  const removeFeature = (id) => { pushHistory(); setEls((a) => a.filter((e) => e.id !== id && e.forCourt !== id)); };
-  // Add a strip element of `type`/`depth` flush against one side of the building
-  // (local normal nx,ny), full wall length, bonded to the building. Keeps the
-  // building selected so several can be added in a row.
-  const addStripSide = (b, nx, ny, type, depth, extra = {}) => addBuildingEls([makeStrip(b, nx, ny, type, depth, extra)], b.id);
+  // Remove a building feature (and anything that hangs off it — a court's trailer, a
+  // trailer's buffer); then re-lay the host building's dock stack so what's left stays flush.
+  const removeFeature = (id) => {
+    pushHistory();
+    setEls((a) => {
+      const el = a.find((x) => x.id === id);
+      let next = removeWithChildren(a, [id]);
+      const b = el && a.find((x) => x.id === el.attachedTo);
+      if (b && b.type === "building") next = relayoutAllSides(next, b);
+      return next;
+    });
+  };
   // Add a single row of parking + drive aisle flush against a building side, the
   // wall's full length, oriented so it grows OUTWARD (drive on the building side).
   const SIDE_PARK_ANGLE = { top: 180, bottom: 0, left: 90, right: 270 };
@@ -3144,43 +3183,200 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
     return { cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360 };
   };
-  const makeOppTrailer = (b, name, attachId = b.id) => ({
-    id: uid(), type: "trailer", ...oppTrailerGeom(b, name),
-    attachedTo: attachId, noFit: true, cfg: { trailerW: OPP_TRAILER_W, trailerL: OPP_TRAILER_D, trailerAisle: 0, single: true },
-  });
-  // Re-fit a wall-hugging single trailer row to a (resized) host box.
+  // Re-fit a wall-hugging single trailer row to a (resized) host box (the opposite-dock
+  // `oppSide` trailer; the dock-zone stack uses relayoutSide instead).
   const fitWallTrailer = (hostBox, side) => oppTrailerGeom(hostBox, side);
+
+  /* ---- Building-anchored dock-zone stack (B228): truck court → trailer parking →
+     buffer, stacked OUTWARD from each dock face. The building footprint is the
+     control hub: one "+" walks the stack outward, one "−" peels the outermost off
+     (LIFO). A single pure layout (lib/dockZones `layoutZone`) positions all three
+     from their stored depths (`zd`), so they stay flush + depth-correct on add /
+     remove / inline depth-edit / building-resize. Truck court + trailer parking REUSE
+     the existing `truckCourt` / `forCourt` tags; the buffer is the new zone (a sage
+     `landscape` clear strip), bonded to its trailer via `forTrailer`. Car parking and
+     bump-outs are deliberately NOT in this stack (see addCarParkingEnds / dog-ears). ---- */
+  // Find the stack members on a side, within a given element array (pure).
+  const findCourtIn = (arr, b, side) => arr.find((x) => x.attachedTo === b.id && x.truckCourt && x.truckCourt.side === side && !x.points);
+  const findTrailerIn = (arr, court) => (court ? arr.find((x) => x.forCourt === court.id && !x.points) : null);
+  const findBufferIn = (arr, trailer) => (trailer ? arr.find((x) => x.forTrailer === trailer.id && !x.points) : null);
+  const findZoneIn = (arr, b, side, i) => { const c = findCourtIn(arr, b, side); if (i === 0) return c; const t = findTrailerIn(arr, c); if (i === 1) return t; return findBufferIn(arr, t); };
+  // How many zones are present on a side (0..3), within `arr`.
+  const stackCountIn = (arr, b, side) => { const c = findCourtIn(arr, b, side); if (!c) return 0; const t = findTrailerIn(arr, c); if (!t) return 1; return findBufferIn(arr, t) ? 3 : 2; };
+  const courtOnSide = (b, side) => findCourtIn(els, b, side);
+  // Is this element a member of a dock-zone stack, and which zone (0 court / 1 trailer / 2 buffer)?
+  const isDockZone = (el) => !!el && !el.points && !!(el.truckCourt || el.forCourt || el.forTrailer);
+  const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
+  // The min / max stack depth across a building's dock sides (the "+"/"−" operate on
+  // the whole set as a unit, so the min level advances together and the max peels off).
+  const dockStackLevel = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.min(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
+  const dockStackMax = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.max(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
+  // The dock side a stack zone belongs to (court carries it; trailer/buffer inherit via their chain).
+  const zoneSideOf = (arr, z) => {
+    if (!z) return null;
+    if (z.truckCourt) return z.truckCourt.side;
+    if (z.forCourt) { const c = arr.find((x) => x.id === z.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
+    if (z.forTrailer) { const t = arr.find((x) => x.id === z.forTrailer); const c = t && arr.find((x) => x.id === t.forCourt); return c && c.truckCourt ? c.truckCourt.side : null; }
+    return null;
+  };
+  // A zone's depth (feet): stored `zd` wins; else derive its extent along the side
+  // normal (so a legacy court/trailer survives); else fall back to the configured default.
+  const zoneDepthOf = (z, b, side, i) => {
+    if (Number.isFinite(z.zd) && z.zd > 0) return z.zd;
+    const u = outwardUnit(b, side);
+    const ax = rot2(z.w / 2, 0, z.rot || 0), ay = rot2(0, z.h / 2, z.rot || 0);
+    const derived = 2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y));
+    return derived > 0.5 ? derived : zoneDepthDefaults(settings)[i];
+  };
+  // Re-lay the whole stack on one side of building `b` (pure over `arr`): each present
+  // zone flush-outward from the building face, full wall length, depth-correct.
+  const relayoutSide = (arr, b, side) => {
+    const court = findCourtIn(arr, b, side);
+    if (!court) return arr;
+    const trailer = findTrailerIn(arr, court);
+    const buffer = findBufferIn(arr, trailer);
+    const zones = [court, trailer, buffer].filter(Boolean);
+    const depths = zones.map((z, i) => zoneDepthOf(z, b, side, i));
+    const patch = new Map();
+    zones.forEach((z, i) => {
+      const g = layoutZone(b, side, i, depths);
+      patch.set(z.id, z.type === "trailer"
+        ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
+        : g);
+    });
+    return arr.map((x) => (patch.has(x.id) ? { ...x, ...patch.get(x.id) } : x));
+  };
+  // Relayout every dock side of `b` that currently carries a court.
+  const relayoutAllSides = (arr, b) => {
+    const sides = new Set(arr.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
+    let next = arr; sides.forEach((s) => { next = relayoutSide(next, b, s); }); return next;
+  };
+  // Remove ids + anything bonded to them (a court's trailer, a trailer's buffer).
+  const removeWithChildren = (arr, ids) => {
+    const kill = new Set(ids);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      arr.forEach((x) => { if (!kill.has(x.id) && ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer)))) { kill.add(x.id); grew = true; } });
+    }
+    return arr.filter((x) => !kill.has(x.id));
+  };
+  // Zone element factories (final geometry is set by relayoutSide).
+  const baseZone = (b, extra) => ({ id: uid(), cx: b.cx, cy: b.cy, w: 1, h: 1, rot: ((b.rot % 360) + 360) % 360, attachedTo: b.id, ...extra });
+  const makeCourtZone = (b, side) => baseZone(b, { type: "paving", truckCourt: { side }, zd: zoneDepthDefaults(settings)[0] });
+  const makeTrailerZone = (b, court) => baseZone(b, { type: "trailer", forCourt: court.id, noFit: true, zd: zoneDepthDefaults(settings)[1], cfg: { trailerW: settings.trailerW || OPP_TRAILER_W, trailerL: zoneDepthDefaults(settings)[1], trailerAisle: 0, single: true } });
+  const makeBufferZone = (b, trailer) => baseZone(b, { type: "landscape", forTrailer: trailer.id, buffer: true, noFit: true, zd: zoneDepthDefaults(settings)[2] });
+  // The next-zone element (index = present count) for a side, within `arr`.
+  const buildNextZone = (arr, b, side) => {
+    const n = stackCountIn(arr, b, side);
+    if (n === 0) return makeCourtZone(b, side);
+    if (n === 1) { const c = findCourtIn(arr, b, side); return c ? makeTrailerZone(b, c) : null; }
+    if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
+    return null; // full
+  };
+  // "+" — add the next outward zone to every dock side that's at the current (uniform)
+  // level, so the set advances as a unit; then re-lay each side.
+  const addDockZone = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    const level = dockStackLevel(b);
+    if (!dockSides.length || level >= MAX_DOCK_ZONES) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => { if (stackCountIn(next, b, side) === level) { const z = buildNextZone(next, b, side); if (z) next = [...next, z]; } });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // "−" — peel the OUTERMOST present zone off every dock side at the deepest level
+  // (LIFO: buffer → trailer → court); cascade its children; re-lay each side.
+  const removeOuterDockZone = (b) => {
+    const { dockSides } = dockSidesOf(b);
+    const maxL = dockStackMax(b);
+    if (maxL <= 0) return;
+    pushHistory();
+    setEls((a) => {
+      const rm = [];
+      dockSides.forEach((side) => { if (stackCountIn(a, b, side) === maxL) { const z = findZoneIn(a, b, side, maxL - 1); if (z) rm.push(z.id); } });
+      let next = removeWithChildren(a, rm);
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Inline depth edit for zone index `i`, applied across every dock side (the stack is
+  // mirrored, so depths stay uniform); outer zones shift out via relayout.
+  const setZoneDepthAll = (b, i, newDepth) => {
+    const { dockSides } = dockSidesOf(b);
+    const nd = Math.max(1, Math.round(newDepth));
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => { const z = findZoneIn(next, b, side, i); if (z) next = next.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)); });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  // The depth shown for zone index `i` (first dock side that has it).
+  const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
+  // Per-side "+" used by the on-canvas add nodes — adds that side's next zone, stack-compatible.
+  const addZoneOnSide = (b, side) => {
+    pushHistory();
+    setEls((a) => { const z = buildNextZone(a, b, side); return z ? relayoutSide([...a, z], b, side) : a; });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Car parking on the building ENDS (non-dock short sides) — tracked OUTSIDE the
+  // dock-face LIFO stack, with its own add/remove. [B228 assumption, flagged for Michael.]
+  const carEndsSides = (b) => (b.w >= b.h ? ["left", "right"] : ["top", "bottom"]);
+  const carParkingEnds = (b) => els.filter((x) => x.attachedTo === b.id && x.sideParkSide && carEndsSides(b).includes(x.sideParkSide));
+  const addCarParkingEnds = (b) => { carEndsSides(b).forEach((name) => addParkingRowSide(b, name)); };
+  const removeCarParkingEnds = (b) => { const ids = new Set(carParkingEnds(b).map((x) => x.id)); if (!ids.size) return; pushHistory(); setEls((a) => a.filter((x) => !ids.has(x.id))); };
+  // Remove every bump-out at once (the "−" counterpart to "+ Bump-outs"; footprint modifier).
+  const removeAllDogEars = (b) => {
+    const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
+    if (!des.length) return;
+    pushHistory();
+    setEls((a) => { let next = a; des.forEach((de) => { const ss = bumpSidewalkSide(de.dogEar.side, de.dogEar.sign); next = next.filter((x) => x.id !== de.id && x.forCourt !== de.id).map((x) => (isBumpSidewalk(x, b, ss) ? adjustSidewalkForBump(x, de.dogEar.side, -1) : x)); }); return next; });
+  };
+
   // Re-fit every feature bonded to a resized building so the whole assembly stays
   // stuck together: dog-ears slide to the corner, wall strips scale, the
   // opposite-side trailer re-hugs its wall, and a court's trailer follows the
   // (re-scaled) court's far edge.
   const refitChildren = (a, buildingId, nb, kids) => {
-    const courtBox = {}; // court id -> { box, side } for trailers that back onto it
-    const pass1 = a.map((x) => {
-      if (x.id === buildingId) {
-        // NEW-4: when the resized element IS a truck court, register its NEW box so the
-        // trailer parking flush against its far edge (forCourt) follows the moved edge —
-        // grow/shrink the depth and the trailer is pushed/pulled out to stay flush.
-        if (x.truckCourt) courtBox[x.id] = { box: { cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot ?? x.rot ?? 0 }, side: x.truckCourt.side };
-        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h };
-      }
+    const resized = a.find((x) => x.id === buildingId);
+    let next = a.map((x) => {
+      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
-      if (k) { const g = fitKid(nb, k); if (x.truckCourt) courtBox[x.id] = { box: g, side: x.truckCourt.side }; return { ...x, ...g }; }
+      if (k) return { ...x, ...fitKid(nb, k) };
       return x;
     });
-    return pass1.map((x) => (x.forCourt && courtBox[x.forCourt]) ? { ...x, ...fitWallTrailer(courtBox[x.forCourt].box, courtBox[x.forCourt].side) } : x);
+    // Re-lay the dock-zone stack from stored depths so court → trailer → buffer stay
+    // flush + depth-correct. The resized element may be the building (relay its dock
+    // sides) or a stack zone itself (re-derive that zone's depth from its new box, then
+    // relay its side so the trailer/buffer beyond it follow — the old "court drags its
+    // trailer" behaviour, now extended through the buffer).
+    if (resized && resized.type === "building" && !resized.dogEar) {
+      next = relayoutAllSides(next, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot });
+    } else if (resized && (resized.truckCourt || resized.forCourt || resized.forTrailer)) {
+      const b = next.find((x) => x.id === resized.attachedTo);
+      const side = zoneSideOf(next, resized);
+      if (b && side) {
+        const u = outwardUnit(b, side), rr = nb.rot != null ? nb.rot : resized.rot;
+        const ax = rot2(nb.w / 2, 0, rr), ay = rot2(0, nb.h / 2, rr);
+        const newDepth = Math.max(1, Math.round(2 * (Math.abs(ax.x * u.x + ax.y * u.y) + Math.abs(ay.x * u.x + ay.y * u.y))));
+        next = next.map((x) => (x.id === buildingId ? { ...x, zd: newDepth } : x));
+        next = relayoutSide(next, b, side);
+      }
+    }
+    return next;
   };
-  // Trailer parking flush against the FAR (outer) edge of a truck court — where
-  // trailers actually back in. Bonded to the court's building so it moves as one.
-  const addCourtTrailer = (tc) => { if (els.some((x) => x.forCourt === tc.id)) return; const root = rootIdOf(tc.id); addBuildingEls([{ ...makeOppTrailer(tc, tc.truckCourt.side, root), forCourt: tc.id }], root); };
-  // 135′ truck court on every dock side that doesn't already have one (tagged so it can sprout trailer parking).
-  const addTruckCourt = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
-    addBuildingEls(dockSides.filter((s) => !have.has(s)).map((s) => makeStrip(b, ...SIDE_N[s], "paving", TRUCK_COURT_D, { truckCourt: { side: s } })), b.id);
-  };
+  // Trailer parking flush against the FAR (outer) edge of a truck court — where trailers
+  // actually back in. Routes through the stack ("+" adds the next zone, here the trailer).
+  const addCourtTrailer = (tc) => { const b = buildingOf(tc); if (b && tc.truckCourt && !findTrailerIn(els, tc)) addZoneOnSide(b, tc.truckCourt.side); };
   // A dock-corner bump-out lengthens the building's perpendicular wall by its
   // projection — so a sidewalk on that wall should grow to match. Which side that
   // sidewalk is on, and the direction it extends, follow from the corner.
@@ -4070,8 +4266,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     seenLabels.add(dupKey);
     let lines, pondAdd = null;
     if (el.type === "sidewalk" || el.type === "landscape") {
-      // e.g. "5′ Sidewalk" / "5′ Landscape" — width only, no sf / length
-      const name = el.type === "landscape" ? "Landscape" : "Sidewalk";
+      // e.g. "5′ Sidewalk" / "15′ Buffer" / "5′ Landscape" — width only, no sf / length
+      const name = el.buffer ? "Buffer" : el.type === "landscape" ? "Landscape" : "Sidewalk";
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
       // B140/B157: label shows acres + sf (was sf only). In expansion mode (B139) the
@@ -4230,13 +4426,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
+  // one, or (when nothing is selected) the one under the cursor — never every building
+  // in view. featActiveId is that building; each node group below ALSO gates each button
+  // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
+  // they can cluster/spill when zoomed out.
+  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
   const sideAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / sidewalk / trailer handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -4244,14 +4447,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
+          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall's button. A long/narrow
+          // footprint thus keeps its long-side buttons and drops only the cramped short-end
+          // ones — overlap handled without a collapse menu.
+          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
           const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 }; // just inside the wall
-          if (dockSides.includes(name)) { // long side → truck dock + drive
+          if (dockSides.includes(name)) { // long side → dock-zone stack (court → trailer → buffer)
             const existing = kids.find((x) => x.truckCourt && x.truckCourt.side === name);
-            return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${TRUCK_COURT_D}′ truck dock + drive`,
-              () => addStripSide(el, nx, ny, "paving", TRUCK_COURT_D, { truckCourt: { side: name } }),
+            return featNode(`add${name}`, pos, !!existing, "#b45309", `Add ${Math.round(zoneDepthDefaults(settings)[0])}′ truck court (then trailer parking, then buffer)`,
+              () => addZoneOnSide(el, name),
               existing ? () => removeFeature(existing.id) : null);
           }
           // short (non-dock) side → progress: + sidewalk → + parking row → − parking
@@ -4263,8 +4471,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
             park ? () => removeFeature(park.id) : null);
         })}
-        {/* dog-ear bump-outs at each corner of every dock side */}
-        {dockSides.flatMap((name) => {
+        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
           return [1, -1].map((sign) => {
@@ -4282,11 +4490,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   })();
 
   // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
-  // parking backs in. Adds 50′ striped trailer parking, or removes it if present.
+  // parking backs in. Adds striped trailer parking (stack zone 1), or removes it.
   const courtAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || !el.truckCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const existing = els.find((x) => x.forCourt === el.id);
     const [nx, ny] = SIDE_N[el.truckCourt.side];
     const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
@@ -4294,7 +4503,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cpx = f2p({ x: el.cx, y: el.cy });
     let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
     const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };      // just inside the outer edge
-    return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${OPP_TRAILER_D}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
+    return <g>{featNode("courtTrailer", pos, !!existing, "#0e7490", `Add ${Math.round(zoneDepthDefaults(settings)[1])}′ striped trailer parking on the court's far side`, () => addCourtTrailer(el), existing ? () => removeFeature(existing.id) : null)}</g>;
+  })();
+
+  // "+" / "−" on a selected TRAILER PARKING row, on its far (outer) edge — adds the
+  // buffer (stack zone 2, the outermost), or removes it if present.
+  const trailerAddNodes = (() => {
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
+    if (!el || el.locked || el.points || el.type !== "trailer" || !el.forCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
+    const court = els.find((x) => x.id === el.forCourt);
+    const b = court && els.find((x) => x.id === court.attachedTo);
+    const side = court && court.truckCourt && court.truckCourt.side;
+    if (!b || !side) return null;
+    const existing = els.find((x) => x.forTrailer === el.id);
+    const u = outwardUnit(b, side);
+    const ly = rot2(0, 1, el.rot);                              // trailer local-y in world
+    const sgn = (ly.x * u.x + ly.y * u.y) >= 0 ? 1 : -1;        // toward the far (outer) edge
+    const off = rot2(0, sgn * el.h / 2, el.rot);
+    const ms = f2p({ x: el.cx + off.x, y: el.cy + off.y });
+    const cpx = f2p({ x: el.cx, y: el.cy });
+    let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    const pos = { x: ms.x - ux * 22, y: ms.y - uy * 22 };
+    return <g>{featNode("trailerBuffer", pos, !!existing, "#7f9a63", `Add ${Math.round(zoneDepthDefaults(settings)[2])}′ buffer behind the trailer parking`, () => addZoneOnSide(b, side), existing ? () => removeFeature(existing.id) : null)}</g>;
   })();
 
   // Grow a parking field one row deeper (keeping its near edge fixed); the stall
@@ -4362,9 +4594,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -5791,6 +6024,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {handleNodes}
                 {sideAddNodes}
                 {courtAddNodes}
+                {trailerAddNodes}
                 {parkingAddNodes}
                 {parcelHandles}
                 {elPolyHandles}
@@ -6591,7 +6825,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(Math.max(selEl.w, selEl.h))} min={1} onCommit={(n) => setRoadLength(selEl, n)} /></Field>
                       <Field label="Travel width (ft)"><NumInput style={numInput} value={Math.round(roadTravel(selEl))} min={1} onCommit={(n) => setRoadTravel(selEl, n)} /></Field>
                     </>
-                  ) : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
+                  ) : isDockZone(selEl) ? (() => {
+                    // A dock-zone stack member (court / trailer / buffer): edit its DEPTH inline;
+                    // length + rotation are stack-controlled (full wall, flush-outward). Changing
+                    // it pushes the zones beyond it outward (B228).
+                    const b = els.find((x) => x.id === selEl.attachedTo);
+                    const side = b && zoneSideOf(els, selEl);
+                    const i = zoneIndexOf(selEl);
+                    return (
+                      <>
+                        <Field label={`${DOCK_ZONES[i].label} depth (ft)`}>
+                          <NumInput style={numInput} value={zoneDepthShown(b || selEl, i)} min={1} onCommit={(n) => b && side && setZoneDepthAll(b, i, n)} />
+                        </Field>
+                        <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginBottom: 4 }}>
+                          Dock zone {i + 1} of 3 (outward: truck court → trailer parking → buffer){dockSidesOf(b || selEl).dockSides.length > 1 ? " · both dock sides" : ""}. Select the building to add / remove zones.
+                        </div>
+                      </>
+                    );
+                  })() : (selEl.type === "sidewalk" || selEl.type === "landscape") && selEl.attachedTo ? (
                     <>
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(swThick(selEl))} min={1} onCommit={(n) => setSidewalkWidth(selEl, n)} /></Field>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
@@ -6602,6 +6853,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
                     </>
                   )}
+                  {!isDockZone(selEl) && (
                   <Field label="Rotation (°)">
                     <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
@@ -6611,6 +6863,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </span>
                     </span>
                   </Field>
+                  )}
                   {selEl.type === "building" && (
                     <Field label="Docks">
                       <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
@@ -6648,21 +6901,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </>
                     );
                   })()}
-                  {selEl.type === "building" && (
-                    <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Dock features</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addTruckCourt(selEl)}>＋ {TRUCK_COURT_D}′ truck court</button>
-                        <button style={{ ...chip, textAlign: "left" }} onClick={() => addDogEars(selEl)}>＋ Bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                  {selEl.type === "building" && !selEl.dogEar && (() => {
+                    // B229 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
+                    // car parking, and the visually-distinct bump-outs footprint modifier),
+                    // then the active dock-face zones listed in outward order with inline depths
+                    // + the LIFO "−". The footprint/dock-doors summary stays at the bottom (below).
+                    const b = selEl;
+                    const { dockSides } = dockSidesOf(b);
+                    const noDock = dockSides.length === 0;
+                    const level = dockStackLevel(b);          // zones present on every dock side (the unit level)
+                    const maxL = dockStackMax(b);             // deepest dock side (the LIFO removal level)
+                    const hasEnds = carParkingEnds(b).length > 0;
+                    const hasBumps = els.some((x) => x.attachedTo === b.id && x.dogEar);
+                    const nextLabel = DOCK_ZONES[level] ? DOCK_ZONES[level].label : null;
+                    const outerLabel = maxL > 0 && DOCK_ZONES[maxL - 1] ? DOCK_ZONES[maxL - 1].label : null;
+                    const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
+                    const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
+                    return (
+                      <div style={{ marginTop: 4 }}>
+                        <div style={muteHdr}>Dock features</div>
+                        {/* add-controls on top — the dock-zone stack +/− (court → trailer → buffer) */}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button style={{ ...chip, flex: 1, textAlign: "left", ...((noDock || level >= MAX_DOCK_ZONES) ? { opacity: 0.45, cursor: "default" } : {}) }}
+                            disabled={noDock || level >= MAX_DOCK_ZONES}
+                            title={noDock ? "Pick a dock side first (Building ▾ → Cross-dock or Single-load)" : level >= MAX_DOCK_ZONES ? "All dock zones added" : `Add ${nextLabel} outward from the dock face`}
+                            onClick={() => addDockZone(b)}>＋ {level >= MAX_DOCK_ZONES ? "All zones" : `Add ${nextLabel ? nextLabel.toLowerCase() : "zone"}`}</button>
+                          <button style={{ ...chip, flex: 1, textAlign: "left", ...(maxL <= 0 ? { opacity: 0.45, cursor: "default" } : { color: "#b3361b" }) }}
+                            disabled={maxL <= 0}
+                            title={maxL > 0 ? `Remove ${outerLabel} — the outermost zone (LIFO)` : "No dock zones to remove"}
+                            onClick={() => removeOuterDockZone(b)}>－ {maxL > 0 ? `Remove ${outerLabel ? outerLabel.toLowerCase() : "outer"}` : "Remove outer"}</button>
+                        </div>
+                        {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
+                        {/* car parking — OUTSIDE the dock-face LIFO stack; occupies the ends (non-dock sides) */}
+                        <button style={{ ...chip, textAlign: "left", width: "100%", marginTop: 6 }}
+                          title={hasEnds ? "Remove the end (non-dock side) car parking" : "Add a car-parking row on each end (non-dock side)"}
+                          onClick={() => (hasEnds ? removeCarParkingEnds(b) : addCarParkingEnds(b))}>{hasEnds ? "－ Car parking (ends)" : "＋ Car parking (ends)"}</button>
+                        {/* bump-outs — a FOOTPRINT modifier, kept here but visually distinct from the outward band stack */}
+                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${PAL.panelLine}` }}>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button style={{ ...chip, flex: 1, textAlign: "left", color: "#7c3aed", borderColor: "#e4d4fb" }} onClick={() => addDogEars(b)}>＋ Bump-outs</button>
+                            {hasBumps && <button style={{ ...chip, flex: 1, textAlign: "left", color: "#7c3aed", borderColor: "#e4d4fb" }} onClick={() => removeAllDogEars(b)}>－ Bump-outs</button>}
+                          </div>
+                          <div style={note}>Footprint modifier ({DOGEAR_W}′×{DOGEAR_D}′ corners) — adds to building sf, not an outward band.</div>
+                        </div>
+                        {/* active dock-face zones, outward order, inline editable depth + LIFO − */}
+                        {level > 0 && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={muteHdr}>Zones · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
+                            {DOCK_ZONES.slice(0, level).map((z, i) => {
+                              const isOuter = i === level - 1;
+                              return (
+                                <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                                  <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i + 1}. {z.label}</span>
+                                  <NumInput style={{ ...numInput, width: 52 }} value={zoneDepthShown(b, i)} min={1} onCommit={(n) => setZoneDepthAll(b, i, n)} />
+                                  <span style={{ fontSize: 11, color: PAL.muted }}>′</span>
+                                  <button title={isOuter ? `Remove ${z.label} (outermost — LIFO)` : "Remove the outer zone first (LIFO)"}
+                                    onClick={isOuter ? () => removeOuterDockZone(b) : undefined}
+                                    style={{ ...chip, padding: "3px 8px", fontWeight: 700, ...(isOuter ? { color: "#b3361b" } : { color: PAL.panelLine, cursor: "default" }) }}>－</button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  )}
-                  {selEl.truckCourt && (
-                    <div style={{ marginTop: 4 }}>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" }}>Truck court</div>
-                      <button style={{ ...chip, textAlign: "left", color: "#0e7490", width: "100%" }} onClick={() => addCourtTrailer(selEl)}>＋ {OPP_TRAILER_D}′ trailer parking (far side)</button>
-                    </div>
-                  )}
+                    );
+                  })()}
                   {selEl.type === "parking" && (() => {
                     const pc = cfgOf(selEl);
                     return (
@@ -7163,44 +7466,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* metrics */}
           {leftPanel === "yield" && (<>
-          <Section title="Site yield" accent={PAL.accent}>
-            {/* hero stat tiles */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 10 }}>
-              {[
-                ["Site", `${f2(siteSqft / SQFT_PER_ACRE)}`, "ac"],
-                ["Building", `${f0(bldg / 1000)}k`, "sf"],
-                ["Coverage", `${f0(cov)}`, "%"],
-              ].map(([k, v, u]) => (
-                <div key={k} style={{ background: "linear-gradient(160deg,#fbf8f2,#f3eee3)", border: "1px solid #ece4d4", borderRadius: 9, padding: "8px 9px" }}>
-                  <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>{k}</div>
-                  <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: PAL.ink, fontSize: 16, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{v}<span style={{ fontSize: 10.5, color: PAL.muted, fontWeight: 500, marginLeft: 2 }}>{u}</span></div>
-                </div>
-              ))}
-            </div>
-            {metricRow("Site area", `${f2(siteSqft / SQFT_PER_ACRE)} ac`, `(${f0(siteSqft)} sf)`)}
-            {parcels.some((p) => p.active === false) && (
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "-2px 0 6px" }}>
-                Excludes {parcels.filter((p) => p.active === false).length} inactive parcel{parcels.filter((p) => p.active === false).length > 1 ? "s" : ""} — toggle in the Parcel panel.
-              </div>
-            )}
-            {metricRow("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-            {bumpCount > 0 && metricRow("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`)}
-            {metricRow("FAR", f2(far), "(1-story)")}
-            {metricRow("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
-            {metricRow("Trailer stalls", f0(trailers))}
-            {metricRow("Impervious", `${f0(impPct)}%`)}
-            {metricRow("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
-            {metricRow("Detention %", `${f0(detPct)}%`)}
-            {metricRow("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
-            {easeAll.length > 0 && <>
-              {metricRow("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
-              {metricRow("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "")}
-              {easePaveArea > 0 && metricRow("· Restrict paving", `${f0(easePaveArea)} sf`)}
-              <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 0" }}>
-                Gross of overlaps; subtracted from buildable area by the future yield engine.
-              </div>
-            </>}
-          </Section>
+          <YieldPanel
+            siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
+            trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
+            bumpCount={bumpCount} bumpArea={bumpArea}
+            inactiveCount={parcels.filter((p) => p.active === false).length}
+            easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
+          />
           {(() => {
             // Road cost takeoff (B180/B181): paving (SY, FC-FC — curb excluded) + curb
             // (LF, both sides), split by curb type so each rides its own unit price.
@@ -7257,6 +7529,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <Section title="Trailers" collapsed>
             <Field label="Trailer W / L"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.trailerW} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerW: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.trailerL} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerL: n }))} /></span></Field>
             <Field label="Trailer aisle"><NumInput style={numInput} value={settings.trailerAisle} min={0} onCommit={(n) => setSettings((s) => ({ ...s, trailerAisle: n }))} /></Field>
+          </Section>
+
+          {/* Default depths for the building-anchored dock-zone stack (B228), outward from
+              the dock face. Editable per plan — the building "+" reads these. */}
+          <Section title="Dock zones" collapsed>
+            <Field label="Truck court (ft)"><NumInput style={numInput} value={settings.truckCourtD ?? 135} min={1} onCommit={(n) => setSettings((s) => ({ ...s, truckCourtD: n }))} /></Field>
+            <Field label="Trailer parking (ft)"><NumInput style={numInput} value={settings.trailerParkD ?? 50} min={1} onCommit={(n) => setSettings((s) => ({ ...s, trailerParkD: n }))} /></Field>
+            <Field label="Buffer (ft)"><NumInput style={numInput} value={settings.bufferD ?? 15} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bufferD: n }))} /></Field>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Outward from the dock face: truck court → trailer parking → buffer. New zones use these depths; each is still editable per building.</div>
           </Section>
 
           <Section title="Roads" collapsed>
@@ -7570,13 +7851,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </button>
                     </>
                   )}
-                  {isBuildingRect && (
-                    <>
-                      <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
-                      <button style={menuItem(false)} onClick={() => { addTruckCourt(t); setTypeMenu(null); }}>Add {TRUCK_COURT_D}′ truck court</button>
-                      <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
-                    </>
-                  )}
+                  {isBuildingRect && (() => {
+                    const lvl = dockStackLevel(t), mx = dockStackMax(t);
+                    const nextL = DOCK_ZONES[lvl] ? DOCK_ZONES[lvl].label : null;
+                    const outerL = mx > 0 && DOCK_ZONES[mx - 1] ? DOCK_ZONES[mx - 1].label : null;
+                    return (
+                      <>
+                        <div style={hdr(t.type === "sidewalk" || t.type === "landscape")}>Dock features</div>
+                        {nextL && <button style={menuItem(false)} onClick={() => { addDockZone(t); setTypeMenu(null); }}>＋ Add {nextL.toLowerCase()} (outward)</button>}
+                        {outerL && <button style={menuItem(false)} onClick={() => { removeOuterDockZone(t); setTypeMenu(null); }}>－ Remove {outerL.toLowerCase()} (outermost)</button>}
+                        <button style={menuItem(false)} onClick={() => { addDogEars(t); setTypeMenu(null); }}>Add bump-outs ({DOGEAR_W}′×{DOGEAR_D}′)</button>
+                      </>
+                    );
+                  })()}
                   {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
@@ -7822,5 +8109,174 @@ function NumInput({ value, onCommit, min, max, style, placeholder }) {
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(value == null ? "" : String(value)); e.currentTarget.blur(); } }}
     />
+  );
+}
+
+// ---- Site Yield panel (B225) ----------------------------------------------
+// Presentational reskin of the yield readout: an identity-tile header, the three
+// KPI cards, a composition donut + legend, and grouped detail rows. Every value is
+// passed in from the engine's existing computation — nothing is recomputed here
+// except the donut's four partition percentages, and those are derived from engine
+// OUTPUTS (coverage %, impervious %, detention %), never from raw geometry. One
+// semantic colour = one meaning across the donut arcs, the legend swatches, and the
+// group dots, so the eye carries the same mapping everywhere.
+const YMONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const YIELD_PAL = {
+  building: "#C45A32", buildingAccent: "#C0532E", // terracotta — footprint coverage
+  paving: "#B6AB9B",                               // warm taupe — paving / parking
+  green: "#4FA587",                                // sage — open / green
+  detention: "#6E94AB", detZeroFill: "#DCE5EB", detZeroBorder: "#C2D2DC", // dusty blue
+  panelBg: "#FBF8F2", border: "#E7DFD2", cardBg: "#F2ECE1",
+  text: "#3A352D", rowLabel: "#6F675B", muted: "#A89C8C", faint: "#B4A99B",
+  hairline: "#EBE3D6", track: "#ECE3D5", iconTile: "#F6E7DD",
+};
+
+function YieldPanel({
+  siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
+  bumpCount, bumpArea, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+}) {
+  const [openPanel, setOpenPanel] = useState(!collapsed);
+  const Y = YIELD_PAL;
+  const acres = siteSqft / SQFT_PER_ACRE;
+  const hasSite = siteSqft > 0;
+
+  // Composition — read engine OUTPUTS, never re-derive geometry. The four shares sum
+  // to 100 by construction (open is the clamped remainder), so the ring always closes.
+  const buildingPct = hasSite ? cov : 0;
+  const pavingPct = hasSite ? Math.max(0, impPct - cov) : 0;
+  const detentionPct = hasSite ? detPct : 0;
+  const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
+  const slices = [
+    { key: "building", label: "Building", pct: buildingPct, color: Y.building },
+    { key: "paving", label: "Paving", pct: pavingPct, color: Y.paving },
+    { key: "green", label: "Open / green", pct: openPct, color: Y.green },
+    { key: "detention", label: "Detention", pct: detentionPct, color: Y.detention },
+  ];
+  // Donut geometry: ~100px circle, 13px stroke. Each arc is a dashed full circle —
+  // dash = its share of the circumference, offset = −(sum of earlier arcs) so they
+  // butt up contiguously; the group is rotated −90° so the first arc starts at top.
+  const R = 43.5, C = 2 * Math.PI * R;
+  let cumLen = 0;
+  const arcs = slices.map((s) => {
+    const len = (Math.max(0, s.pct) / 100) * C;
+    const node = { ...s, len, offset: -cumLen };
+    cumLen += len;
+    return node;
+  });
+
+  const kpi = (label, value, unit) => (
+    <div style={{ background: Y.cardBg, borderRadius: 11, padding: "9px 10px" }}>
+      <div style={{ fontSize: 9.5, color: Y.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontFamily: YMONO, fontWeight: 700, color: Y.text, fontSize: 17, lineHeight: 1.05, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>
+        {value}<span style={{ fontSize: 10, color: Y.muted, fontWeight: 500, marginLeft: 2 }}>{unit}</span>
+      </div>
+    </div>
+  );
+  const groupHead = (color, label) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "13px 0 5px" }}>
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: color, flex: "none" }} />
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: Y.rowLabel }}>{label}</span>
+    </div>
+  );
+  const row = (label, value, sub, muted) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", borderBottom: `1px solid ${Y.hairline}` }}>
+      <span style={{ fontSize: 12, color: muted ? Y.muted : Y.rowLabel }}>{label}</span>
+      <span style={{ fontFamily: YMONO, fontSize: 13, color: muted ? Y.muted : Y.text, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
+        {value}{sub ? <span style={{ color: Y.muted, fontWeight: 400, fontSize: 10.5 }}> {sub}</span> : null}
+      </span>
+    </div>
+  );
+  const note = (text) => <div style={{ fontSize: 10.5, color: Y.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
+
+  return (
+    <div style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+      {/* header — identity tile + label + collapse chevron (collapse preserved) */}
+      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
+        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
+            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
+            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
+          </svg>
+        </span>
+        <span style={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
+        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10 }}>▶</span>
+      </div>
+
+      {openPanel && (
+        <div style={{ padding: "0 12px 13px" }}>
+          {/* KPI cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 13 }}>
+            {kpi("Site", f2(acres), "ac")}
+            {kpi("Building", `${f0(bldg / 1000)}k`, "sf")}
+            {kpi("Coverage", `${f0(cov)}`, "%")}
+          </div>
+
+          {/* composition donut + legend */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "2px 0 4px" }}>
+            <svg width="100" height="100" viewBox="0 0 100 100" style={{ flex: "none" }}>
+              <circle cx="50" cy="50" r={R} fill="none" stroke={Y.track} strokeWidth="13" />
+              <g transform="rotate(-90 50 50)">
+                {hasSite && arcs.map((a) => (
+                  <circle key={a.key} cx="50" cy="50" r={R} fill="none" stroke={a.color} strokeWidth="13"
+                    strokeLinecap="butt" strokeDasharray={`${a.len} ${C - a.len}`} strokeDashoffset={a.offset} />
+                ))}
+              </g>
+              <text x="50" y="46" textAnchor="middle" dominantBaseline="central" style={{ fontFamily: YMONO, fontSize: 16, fontWeight: 700, fill: Y.text, fontVariantNumeric: "tabular-nums" }}>{f2(acres)}</text>
+              <text x="50" y="61" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 8.5, fill: Y.muted, letterSpacing: "0.06em" }}>acres</text>
+            </svg>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+              {slices.map((s) => {
+                const zero = Math.round(s.pct) === 0;
+                // A zeroed share is present-and-zero, never hidden — Detention especially
+                // always shows, with a muted hollow swatch to read as "0%, not omitted".
+                const sw = s.key === "detention" && zero
+                  ? { background: Y.detZeroFill, border: `1px solid ${Y.detZeroBorder}` }
+                  : { background: s.color };
+                return (
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, flex: "none", ...sw }} />
+                    <span style={{ flex: 1, fontSize: 11.5, color: zero ? Y.muted : Y.rowLabel }}>{s.label}</span>
+                    <span style={{ fontFamily: YMONO, fontSize: 12, fontWeight: 650, color: zero ? Y.muted : Y.text, fontVariantNumeric: "tabular-nums" }}>{Math.round(s.pct)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* hairline divider */}
+          <div style={{ height: 1, background: Y.hairline, margin: "8px 0 0" }} />
+
+          {/* grouped detail rows — one semantic dot per group */}
+          {groupHead(Y.green, "Land")}
+          {row("Site area", `${f2(acres)} ac`, `(${f0(siteSqft)} sf)`)}
+          {inactiveCount > 0 && note(`Excludes ${inactiveCount} inactive parcel${inactiveCount > 1 ? "s" : ""} — toggle in the Parcel panel.`)}
+          {row("FAR", f2(far), "(1-story)")}
+          {row("Open / green", `${f2(open / SQFT_PER_ACRE)} ac`)}
+
+          {groupHead(Y.building, "Building")}
+          {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
+          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`, true)}
+          {row("Coverage", `${f0(cov)}%`)}
+
+          {groupHead(Y.paving, "Parking")}
+          {row("Car stalls", f0(stalls), ratio ? `· ${f2(ratio)}/1k sf` : "")}
+          {row("Trailer stalls", f0(trailers))}
+
+          {groupHead(Y.detention, "Stormwater")}
+          {row("Impervious", `${f0(impPct)}%`)}
+          {row("Detention", `${f0(pondArea)} sf`, `· ${f2(pondArea / SQFT_PER_ACRE)} ac`)}
+          {row("Detention %", `${f0(detPct)}%`)}
+
+          {easeAll.length > 0 && (<>
+            {groupHead(Y.faint, "Easements")}
+            {row("Easements", `${f2(easeArea / SQFT_PER_ACRE)} ac`, `${easeAll.length} · ${f0(easeArea)} sf gross`)}
+            {row("· Restrict buildings", `${f0(easeBldgArea)} sf`, easeBldgArea ? `· ${f2(easeBldgArea / SQFT_PER_ACRE)} ac` : "", true)}
+            {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} sf`, "", true)}
+            {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
+          </>)}
+        </div>
+      )}
+    </div>
   );
 }

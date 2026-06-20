@@ -22,18 +22,39 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Minted
-     **B225–B229** (highest B# across both files was B224). Filed AND shipped this same session
-     on branch `claude/tender-goldberg-ax4n5w` — all five moved to BACKLOG-DONE.md: B225 (address
-     search recenters — Esri geocoder, biased to the map, replaces the no-bias Nominatim that
-     returned nothing for bare street addresses), B226 (address search selects the parcel + shows
-     its appraisal info, reusing the click pipeline + the planner's appraisal labeller; source-
-     unavailable ≠ no-parcel-here), B227 (one shared status-token set — color + glyph per state —
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. First filed
+     B225–B229, but a concurrent session merged a DIFFERENT B225–B229 (building feature-buttons /
+     Site Yield donut / dock-zone stack) into `main` while this was in flight, so renumbered to the
+     real next free IDs **B230–B234**. Filed AND shipped this same session on branch
+     `claude/tender-goldberg-ax4n5w` — all five moved to BACKLOG-DONE.md: B230 (address search
+     recenters — Esri geocoder biased to the map, replaces the no-bias Nominatim that returned
+     nothing for bare street addresses), B231 (address search selects the parcel + shows its
+     appraisal info, reusing the click pipeline + the planner's appraisal labeller; source-
+     unavailable ≠ no-parcel-here), B232 (one shared status-token set — color + glyph per state —
      across chips, list markers, and map pins; module accents confined to the tab row; amends
-     B161's pins), B228 (left rail: chips-as-filters + type-to-filter + collapsible status groups,
-     Complete/Dead collapsed by default; consumes B227), and B229 (per-layer source-vintage stamp,
+     B161's pins), B233 (left rail: chips-as-filters + type-to-filter + collapsible status groups,
+     Complete/Dead collapsed by default; consumes B232), and B234 (per-layer source-vintage stamp,
      distinct from refreshed-age; "vintage unknown" never fabricated; the ship-now half of B96's
-     data-age surfacing). All self-verified headless (V53). -->
+     data-age surfacing). All self-verified headless (V56). -->
+
+<!-- 2026-06-20: B228 (building-anchored dock-zone stack with LIFO +/−) + B229 (Dock Features
+     panel reorg) — owner-reported (chat), arrived as "NEW-1"/"NEW-2"; filed provisionally as
+     B221/B222 but concurrent `main` took B221–B227 (PRs #186 lazy-chunk reload, #188 B225/B226
+     feature-button visibility, #189 B227 yield panel, #184 B222–B224 Schedule) while this was in
+     flight, so renumbered to the real next free IDs **B228/B229** at merge time. Filed AND shipped
+     this same session — moved to BACKLOG-DONE.md. Deduped vs B71 (trailer curb) / B78 (stall-layout
+     freeze) AND vs main's B225/B226 (#188 size-GATES these feature buttons — orthogonal: that's
+     button visibility, this is the zone stack the buttons drive). REUSES the existing court /
+     far-side-trailer / bump-out machinery rather than re-adding it. -->
+
+<!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
+     into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
+     size-gate the buttons) + B226 (NEW-2: only on the selected/hovered building) — highest B#
+     across both files was B220, so B225/B226 are the real next free IDs. Deduped: the buttons
+     ALREADY rendered only on the selected building (never all), so NEW-2 folded into NEW-1 as
+     ONE visibility rule (footprint-size gate AND selected-or-hovered, hover added). Both filed
+     AND shipped this same session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION
+     V53). -->
 
 <!-- 2026-06-20: owner-reported (chat) "Document Review (and all lazy modules) fail to load after a
      deploy — Failed to fetch dynamically imported module." Arrived as "NEW-1"; provisionally B218,
