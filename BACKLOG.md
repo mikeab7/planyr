@@ -22,13 +22,37 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: B221 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
+<!-- 2026-06-20: B227 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
      right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
      dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
-     measures / markup poly-line / easements) + B222 (cartographic detention pond — radial steel-teal
+     measures / markup poly-line / easements) + B228 (cartographic detention pond — radial steel-teal
      gradient, constant teal outline, no orange, no wavy hatch, Inter slate label). Both arrived as
-     "NEW-1"/"NEW-2", minted B221/B222 (highest across both files was B220). Filed AND shipped this same
-     session — moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V51. -->
+     "NEW-1"/"NEW-2"; provisionally B221/B222, renumbered **B227/B228** — concurrent `main` (PRs #184/#186/
+     #188) took B221–B226 (lazy-chunk recovery, Schedule fixes, building-button gating) while this was in
+     flight, so B227/B228 are the real next free IDs after B226. Filed AND shipped this same session —
+     moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b221-b222.mjs), V54. -->
+
+<!-- 2026-06-20: owner-reported (chat, w/ screenshot) the building feature-edit buttons spill
+     into an unreadable cluster past the footprint edges when zoomed out. Filed B225 (NEW-1:
+     size-gate the buttons) + B226 (NEW-2: only on the selected/hovered building) — highest B#
+     across both files was B220, so B225/B226 are the real next free IDs. Deduped: the buttons
+     ALREADY rendered only on the selected building (never all), so NEW-2 folded into NEW-1 as
+     ONE visibility rule (footprint-size gate AND selected-or-hovered, hover added). Both filed
+     AND shipped this same session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION
+     V53). -->
+
+<!-- 2026-06-20: owner-reported (chat) "Document Review (and all lazy modules) fail to load after a
+     deploy — Failed to fetch dynamically imported module." Arrived as "NEW-1"; provisionally B218,
+     renumbered **B221** — concurrent `main` (PR #183) took B218 (dead header controls) + B219
+     (map-furniture restyle) and a parallel session took B220 (map-finder over-zoom) while this was in
+     flight, so B221 is the real next free ID after B220 (the branch's first commit + the PR say "B218").
+     Root cause confirmed = the standard Vite stale-chunk-after-deploy problem (an open tab holds the
+     previous build's index.html → references the old content-hashed chunk filenames, which 404 once the
+     new deploy replaces them), NOT a DocReview logic bug and NOT a broken build. Deduped against the
+     PDF.js import() items (B72/B67/B180 lazy-load a heavy library on demand — unrelated). Filed AND
+     shipped this same session — moved to BACKLOG-DONE.md: B221 (global vite:preloadError reload-once
+     guard with a sessionStorage loop-guard, in src/app/chunkReload.js + src/main.jsx, applied to every
+     lazy workspace; Cloudflare public/_headers — no-cache HTML / immutable hashed assets). -->
 
 <!-- 2026-06-20: B220 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
      the planner-canvas fix that missed the map-finder call site). Minted B218, renumbered

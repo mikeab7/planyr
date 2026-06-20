@@ -83,6 +83,16 @@ const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
+// B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
+// FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
+// footprint shrinks below them (zoomed out) the cluster grows larger than the
+// footprint and spills past the edges into an unreadable pile. Each button is gated on
+// the on-screen size of the wall it hangs off, in PIXELS (resolution-independent — real
+// building sizes vary too much for one zoom number): a wall's inset +/− only shows when
+// its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
+// each side means opposite buttons overlap below ~68px; this adds a small legibility
+// margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
 const PAL = {
@@ -275,7 +285,7 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
-// B221 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
+// B227 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
 // drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
 // old fixed midpoint. Returns the point + its distance for hit-testing.
 const projToSeg = (p, a, b) => {
@@ -856,6 +866,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [cursor, setCursor] = useState(null);   // {x,y} feet
+  const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -994,7 +1005,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
-  // B221 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
+  // B227 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
   // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
   // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
   // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
@@ -1584,7 +1595,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
-      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B221: a selected control point → delete just that vertex (not the whole shape)
+      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B227: a selected control point → delete just that vertex (not the whole shape)
       if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
@@ -1593,7 +1604,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
 
-  // B221 — track the Shift modifier (for the candidate-insertion dot) independent of the big
+  // B227 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
   useEffect(() => {
     const sync = (e) => setShiftHeld(e.shiftKey);
@@ -2090,7 +2101,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Attribute edit on the selected easement (re-derives the ring so width edits re-offset live).
   const setSelEasement = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? withEaseRing(m, patch) : m)); };
-  // B221 — drag an easement path vertex (the active control point). Inserting / deleting a
+  // B227 — drag an easement path vertex (the active control point). Inserting / deleting a
   // control point is handled by the shared edge/vertex affordances (Shift-click / right-click an
   // edge to add; right-click a vertex or press Delete to remove), not a per-handle "+" / Shift-click.
   const startEaseVertex = (ev, id, index) => {
@@ -2115,7 +2126,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ parcel vertex editing (B221: drag only; insert/delete via shared edge/vertex) ------------ */
+  /* ------------ parcel vertex editing (B227: drag only; insert/delete via shared edge/vertex) ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     if (parcels.find((p) => p.id === id)?.locked) { e.stopPropagation(); setSel({ kind: "parcel", id }); return; }
@@ -2167,7 +2178,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ B221: shared Bluebeam vertex editing across EVERY editable path ------------
+  /* ------------ B227: shared Bluebeam vertex editing across EVERY editable path ------------
      One resolver + one hit-test + one insert/delete, so Shift-click / right-click / Delete
      behaves identically on a parcel, a polygon element, a measurement, a markup poly/line, or
      an easement — no per-type forks. The always-on "+" midpoint handles are gone; a control
@@ -2296,7 +2307,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
     const d = drag.current;
-    if (!d) return;
+    if (!d) {
+      // B226: when nothing is selected, preview the hovered building's feature-add
+      // buttons so they appear on the ONE building under the cursor (never all at
+      // once). Position-based (not SVG enter/leave) because the buttons sit INSIDE
+      // the footprint — moving onto one keeps the pointer over the building, so the
+      // hover never flickers off. Only runs while idle in select mode with no
+      // selection (selection otherwise drives the buttons), so there's no churn.
+      if (tool === "select" && !sel) {
+        const hovered = [...els].sort(byZ).reverse().find((x) => {
+          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) return false;
+          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          return fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh;
+        });
+        const hid = hovered ? hovered.id : null;
+        if (hid !== hoverElId) setHoverElId(hid);
+      } else if (hoverElId) setHoverElId(null);
+      return;
+    }
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
@@ -4220,7 +4248,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
-    // B222 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
+    // B228 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
     // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
     const carto = d.carto;
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
@@ -4296,13 +4324,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
+  // one, or (when nothing is selected) the one under the cursor — never every building
+  // in view. featActiveId is that building; each node group below ALSO gates each button
+  // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
+  // they can cluster/spill when zoomed out.
+  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
   const sideAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / sidewalk / trailer handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -4310,6 +4345,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
+          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall's button. A long/narrow
+          // footprint thus keeps its long-side buttons and drops only the cramped short-end
+          // ones — overlap handled without a collapse menu.
+          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
@@ -4329,8 +4369,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
             park ? () => removeFeature(park.id) : null);
         })}
-        {/* dog-ear bump-outs at each corner of every dock side */}
-        {dockSides.flatMap((name) => {
+        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
           return [1, -1].map((sign) => {
@@ -4350,9 +4390,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
   // parking backs in. Adds 50′ striped trailer parking, or removes it if present.
   const courtAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || !el.truckCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const existing = els.find((x) => x.forCourt === el.id);
     const [nx, ny] = SIDE_N[el.truckCourt.side];
     const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
@@ -4428,9 +4469,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -4532,7 +4574,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   })();
 
-  // B221 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
+  // B227 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
   // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
   // point instead. The active control point (the Delete-key target) is shown inverted.
   const vtxRect = (key, c, on, cursor, onDown) => (
@@ -4593,13 +4635,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     }
     if (m.kind === "easement") {
-      // B221 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
+      // B227 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
       // spine). Insert via Shift-click / right-click an edge; the old "+" midpoint dots are gone.
       const px = easeEditPath(m).map(f2p);
       return <g>{px.map((p, i) => vtxRect(`ev${i}`, p, isSelVtx("ease", m.id, i), "move", (e) => startEaseVertex(e, m.id, i)))}</g>;
     }
     if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
-    // B221 — line/polyline/polygon control points as draggable squares (no "+" dots).
+    // B227 — line/polyline/polygon control points as draggable squares (no "+" dots).
     const px = mkPts(m).map(f2p);
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
@@ -5178,7 +5220,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
               </pattern>
-              {/* B222 — cartographic water body: a radial steel-teal gradient that deepens
+              {/* B228 — cartographic water body: a radial steel-teal gradient that deepens
                   toward the center so a pond reads as water with volume (replaces the old
                   decorative wavy-line hatch). objectBoundingBox units → auto-fits each pond. */}
               <radialGradient id="grad-water" cx="50%" cy="50%" r="62%">
@@ -5655,7 +5697,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && tool === "select" && (
                       <g>
-                        {/* B221: draggable SQUARE control points (no "+" dots) — Shift-click /
+                        {/* B227: draggable SQUARE control points (no "+" dots) — Shift-click /
                             right-click an edge inserts a point; right-click / Delete removes one.
                             The active control point (Delete target) is shown inverted. */}
                         {pts.map((p, k) => {
@@ -5789,7 +5831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parcelHandles}
                 {elPolyHandles}
                 {markupHandles}
-                {/* B221 — transient candidate-insertion dot, snapped to the nearest point on the
+                {/* B227 — transient candidate-insertion dot, snapped to the nearest point on the
                     edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
                 {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
                 {attachHint && (() => {
@@ -7529,7 +7571,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
-      {/* B221 — Add / Delete control-point menu, portal-mounted at the document root so it can
+      {/* B227 — Add / Delete control-point menu, portal-mounted at the document root so it can
           never be clipped or trapped behind the canvas / tool-rail stacking contexts. */}
       {vtxMenu && createPortal(
         <>
@@ -7625,7 +7667,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;
-  // B222 — cartographic water body (detention pond): a radial steel-teal gradient fill at
+  // B228 — cartographic water body (detention pond): a radial steel-teal gradient fill at
   // ~80% opacity + a constant-screen-pixel teal outline. NEVER orange (the Markup accent), so
   // a pond never reads as redline — selection is shown by a thicker teal stroke + the vertex
   // handles, not a colour change.

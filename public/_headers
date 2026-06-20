@@ -1,0 +1,26 @@
+# Cloudflare Pages response headers — fixes "stale chunk after deploy" (B221).
+# Format docs: https://developers.cloudflare.com/pages/configuration/headers/
+# This file is copied verbatim from public/ to the deploy root (dist/_headers).
+
+# Content-hashed build assets (JS chunks, CSS, fonts, images) are immutable: a given
+# filename's bytes never change across deploys, so cache them for a year and skip
+# revalidation. This is what makes returning visits load instantly.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# HTML entry points must NEVER be cached hard. The HTML is what points at the current
+# build's hashed asset filenames; if a browser keeps serving an old cached copy, it
+# keeps requesting the previous deploy's (now-deleted) chunks and 404s on lazy load.
+# no-cache = the browser revalidates with the server every time (cheap 304 when
+# unchanged), so a new deploy's asset hashes propagate on the next load.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+
+# The standalone Sequence page is a self-contained HTML document (no hashed chunks),
+# but it's still HTML — keep it revalidated so a redeploy propagates immediately.
+/sequence/
+  Cache-Control: no-cache
+/sequence/index.html
+  Cache-Control: no-cache

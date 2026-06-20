@@ -17,7 +17,7 @@ export const TYPE = {
   paving: { fill: "#d6d1c7", stroke: "#9a9384", label: "Paving / Drive", weight: 1.25 },
   parking: { fill: "#cdd7dd", stroke: "#7d949e", label: "Car Parking", weight: 1.25 },
   trailer: { fill: "#e3d4b2", stroke: "#b09a6c", label: "Trailer Parking", weight: 1.25, pattern: "trailer" },
-  // B222 — cartographic water-body token (no wavy hatch). The fill is the EDGE tone of a
+  // B228 — cartographic water-body token (no wavy hatch). The fill is the EDGE tone of a
   // radial steel-teal gradient that deepens toward the center (`#2F6675`) in the renderer;
   // the outline is a constant-screen-pixel teal. `cartoWater` is the reusable style token so
   // future water/basin features inherit the same treatment. No orange — that's the Markup accent.

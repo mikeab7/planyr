@@ -21,6 +21,8 @@
  */
 import { useEffect, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import { prefetchModule } from "../../app/modulePrefetch.js";
+import { MODULE_ACCENT } from "./moduleAccent.js";
 
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
@@ -28,11 +30,9 @@ const LINE   = "#2e2a23";
 // NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
 const TAB_IDLE = "#c9c3b4";
 
-export const MODULE_ACCENT = {
-  "site-planner": "#1D9E75",
-  "scheduler":    "#7F77DD",
-  "doc-review":   "#EF9F27",
-};
+// Re-exported from the pure accent module (single source of truth) so existing
+// `import { MODULE_ACCENT } from "./AppHeader.jsx"` consumers keep working.
+export { MODULE_ACCENT };
 
 // Module tab definitions — label + inline SVG icon path group
 const MODULES = [
@@ -83,7 +83,9 @@ function ModuleTab({ m, isActive, onClick }) {
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setHover(true)}
+      // Hover = nav intent: warm the target workspace's chunk (and Schedule's
+      // iframe doc) so the click loads from cache. Idempotent + best-effort. (B223)
+      onMouseEnter={() => { setHover(true); if (!isActive) prefetchModule(m.id); }}
       onMouseLeave={() => setHover(false)}
       aria-current={isActive ? "page" : undefined}
       style={{

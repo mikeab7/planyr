@@ -7004,18 +7004,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             return (
               <div key={task.id} onClick={()=>setSelectedId?.(task.id)} style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,borderBottom:"1px solid rgba(0,0,0,0.1)",borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}}>
 
-                {/* Bar fill resolution: an explicit per-task rowColor override beats the
-                    health-derived ganttBar color. Same field that paints the row background
-                    also paints the bar, so the override reads as one cohesive choice. */}
+                {/* B222 — Bars, milestone diamonds and summary brackets keep their OWN identity
+                    hue (neutral gray / depth-navy), INDEPENDENT of the row fill. rowColor paints
+                    the row BACKGROUND only, so a fill can never repaint the on-row data its own
+                    color and hide it. Each datum also carries a hairline edge so it stays legible
+                    on any fill color. Paint order is locked by z-index: the row fill lives on the
+                    row <div> (z auto, bottom) → grid / today / dependency lines (z2–4) → bars and
+                    milestones (z5, the data layer) → bar + name labels (z6–7, top). */}
                 {(() => { return null; })()}
                 {isMilestone ? (<>
                   {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; return <span style={{position:"absolute",left:bx,transform:"translateX(-50%)",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
                   {(() => {
                     // Milestone diamond — same monochrome language as task bars (B211): the task
-                    // gray (or a rowColor override), filled when complete, hollow outline otherwise.
-                    const hue = task.rowColor || "#94a3b8";
+                    // gray, filled when complete, hollow outline otherwise. B222: the hue is the
+                    // diamond's own identity, NOT the row fill, and its border is a darker slate
+                    // than the fill so the diamond reads even if a fill matches its gray.
+                    const hue = "#94a3b8";
                     const done = displayHealth === "green" || (task.percentComplete||0) >= 100;
-                    return <div style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:done?hue:"#fff",border:`1.25px solid ${hue}`,boxSizing:"border-box",zIndex:5}} />;
+                    return <div style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:done?hue:"#fff",border:"1.25px solid #475569",boxSizing:"border-box",zIndex:5}} />;
                   })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
@@ -7030,10 +7036,12 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // darkness (navy → lighter navy tint), span thickness, and leg length. Beyond
                     // ~4 levels the ramp stops deepening (the table's indented name carries depth
                     // from there). Neutral navy only: status hue is reserved for task bars (B211).
-                    // An explicit per-task rowColor override still wins.
+                    // B222: the bracket keeps its depth-navy independent of the row fill (rowColor
+                    // is the row background only) so a fill can't swallow it; navy reads on any of
+                    // the (all-light) fill swatches.
                     const d    = Math.min(task.level||0, 3);
                     const NAVY = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
-                    const col  = task.rowColor || NAVY;
+                    const col  = NAVY;
                     const SPAN = [7,5,4,4][d];                    // horizontal span thickness, px
                     const LEG  = [0.30,0.22,0.16,0.13][d]*ROW_H;  // downward leg length, steps by depth
                     const legW = 1.5;                             // vertical leg stroke width
@@ -7059,26 +7067,28 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                       {L && <span style={{position:"absolute",left:bx-4,transform:"translateX(-100%)",top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{L}</span>}
                       {R && <span style={{position:"absolute",left:bx+bw+4,top:ROW_H-11.5,fontSize:8,color:"#6b7280",whiteSpace:"nowrap",pointerEvents:"none",zIndex:6,fontFamily:"'Inter',system-ui,sans-serif"}}>{R}</span>}
                     </>); })()}
-                  {/* Outline/stripe styles are reserved for status semantics (unscheduled / paused); an
-                      explicit per-task fillColor override switches to a solid bar so the user's choice
-                      isn't visually competing with status hatching. */}
+                  {/* B211 status reads as a FILL treatment (hollow → partial → solid), never as
+                      color. B222: the bar's hue is its own neutral identity, NOT the row fill, and
+                      every state carries a hairline EDGE (a slate darker than the fill) so the bar
+                      stays legible on any row fill — including the solid/complete bar, which used
+                      to be borderless and vanished when a fill matched its gray. */}
                   {(() => {
-                    // B211 — status as a single FILL treatment, not color. Every task bar keeps
-                    // one identity hue (the task gray, or an explicit per-task rowColor override);
-                    // 0→100% complete reads as hollow → partial → solid. The red/paused/overdue
-                    // signal stays in the row background + the table, so status never collides
-                    // with the navy hierarchy of the summary brackets.
-                    const hue = task.rowColor || "#94a3b8";
+                    // The leaf bar keeps one identity hue (neutral task gray); 0→100% complete
+                    // reads as hollow → partial → solid. The red/paused/overdue signal stays in the
+                    // row background + the table, so status never collides with the navy hierarchy
+                    // of the summary brackets — and the row fill stays pure background decoration.
+                    const hue  = "#94a3b8";   // neutral identity, independent of task.rowColor (B222)
+                    const EDGE = "#475569";   // hairline edge, darker than the fill → legible on any fill
                     const pct = displayHealth === "green" ? 100 : Math.max(0, Math.min(100, task.percentComplete||0));
                     const top = ROW_H - LEAF_H - 1;
                     const barW = Math.max(bw, 9);   // min-width floor: a 0% bar can't collapse to a sliver
                     const base = {position:"absolute",left:bx,top,height:LEAF_H,width:barW,zIndex:5,borderRadius:LEAF_H/2,boxSizing:"border-box"};
                     if (pct >= 100)
-                      return <div style={{...base,background:hue}} />;                                    // Complete → solid
+                      return <div style={{...base,background:hue,border:`1px solid ${EDGE}`}} />;          // Complete → solid + hairline edge
                     if (pct <= 0)
-                      return <div style={{...base,background:"#fff",border:`1.5px solid ${hue}`}} />;       // Not started → hollow pill
+                      return <div style={{...base,background:"#fff",border:`1.5px solid ${EDGE}`}} />;      // Not started → hollow pill
                     return (                                                                               // In progress → partial fill
-                      <div style={{...base,background:"#fff",border:`1px solid ${hue}`,overflow:"hidden",display:"flex",alignItems:"stretch"}}>
+                      <div style={{...base,background:"#fff",border:`1px solid ${EDGE}`,overflow:"hidden",display:"flex",alignItems:"stretch"}}>
                         <div style={{width:`${pct}%`,background:hue,flexShrink:0}} />
                         <div style={{flex:1,background:hue,opacity:0.22}} />
                       </div>
