@@ -1,4 +1,4 @@
-/* B218 verification — map-finder imagery over-zoom placeholder.
+/* B220 verification — map-finder imagery over-zoom placeholder.
  *
  * The map finder (MapFinder.jsx) layers Esri World_Imagery with detectRetina:true.
  * On a retina/HiDPI display detectRetina fetches one zoom level HIGHER than the
@@ -6,7 +6,7 @@
  * arcgisonline answers with the gray "Map data not yet available" PLACEHOLDER as an
  * HTTP 200 (the error-tile fallback never fires; the canvas fills with gray while the
  * labels overlay keeps rendering on top). B182 fixed this on the PLANNER CANVAS only;
- * B218 brings the retina-offset clamp to the map finder + caps the labels overlay so
+ * B220 brings the retina-offset clamp to the map finder + caps the labels overlay so
  * the two layers don't diverge.
  *
  * This drives the headless map finder at DPR 1 and DPR 2, zooms in DEEP over a Katy

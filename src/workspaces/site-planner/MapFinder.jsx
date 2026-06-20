@@ -32,7 +32,7 @@ const PAL = {
 // HTTP 200 (not an error), so Leaflet's error-tile fallback never fires and the whole
 // view goes blank. The imagery layer below clamps fetches to this ceiling (minus the
 // retina offset) and lets maxZoom upscale the deepest real tile beyond it. Any new
-// source MUST carry its own `maxNative`. (B218 — recurrence of B182)
+// source MUST carry its own `maxNative`. (B220 — recurrence of B182)
 const BASEMAPS = {
   esri: {
     label: "Esri",
@@ -307,8 +307,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // maxZoom:21 upscale it past that (slightly soft, never blank). Applies to EVERY
     // source in the dropdown via bm.maxNative. This is the same retina-offset fix B182
     // shipped for the planner-canvas backdrop (SitePlanner.jsx GEO_BASEMAP's
-    // detailMaxNative); B218 brings it to the map-finder layer B182 missed. Do NOT drop
-    // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B218)
+    // detailMaxNative); B220 brings it to the map-finder layer B182 missed. Do NOT drop
+    // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B220)
     const srcMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
     const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: srcMaxNative, detectRetina: true, attribution: bm.attr }));
     layer.setZIndex(1);
@@ -328,7 +328,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // without this cap the labels kept rendering crisp while the imagery (clamped to its
     // native ceiling) had nothing there — the exact "labels float over gray" diagnostic
     // tell. No detectRetina on this overlay, so there's no retina offset to subtract.
-    // Keep this aligned with the imagery layer's native ceiling above. (B218)
+    // Keep this aligned with the imagery layer's native ceiling above. (B220)
     const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, maxNativeZoom: 19, opacity: initOpacity });
     layer.setZIndex(2);
     layer.addTo(map);

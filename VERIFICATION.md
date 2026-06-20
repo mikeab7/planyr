@@ -61,6 +61,12 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V49 — Header cleanup + cartographic furniture restyle (B218 / B219) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, vite preview, logged-out, live Harris-county aerial) · **Next check** — none (pure UI; no auth/cloud path involved)
+- **Harness:** `ui-audit/verify-new1to2.mjs` (seeds a located demo site → boots into the planner → asserts the header + furniture DOM, captures console/page errors, screenshots the header and both furniture corners).
+- **✅ B218 (dead header controls removed):** on **both** the Site and Schedule modules the header has **0** `[aria-label="Menu"]` (hamburger) and **0** `[aria-label="Settings"]` (gear); the planyr wordmark + Site/Schedule/Markup tabs still render; Row 1 reflows clean (logo left, account right — no orphaned padding). **0 console errors.**
+- **✅ B219 (cartographic north arrow + scale bar):** the on-screen furniture renders as the two-tone surveyor's needle (**2 `<path>` halves, 0 `<circle>`** — no compass rose) + the thin segmented bar (6 `<rect>` = plate + 4 segments + north plate) with **FEET** + **N** labels on the new subtle warm plate (`rgba(249,248,244,0.84)`); corner screenshots confirm both read as clean cartographic furniture, legible over busy aerial imagery. Shared `lib/sheetFurniture.js` primitives, so the print/PNG export inherits the same look. **0 console errors.**
+
 ### V46 — Schedule Gantt brackets + task-fill + configurable columns (B210 / B211 / B212) ✅ self-verified headless · ⏳ one signed-in cloud check
 - **Added** 2026-06-19 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-19 ✅ (headless Chromium, static-served `public/sequence/`, logged-out seed) · **Next check** — one signed-in cloud round-trip (below)
 - **Harness:** `ui-audit/verify-sequence.mjs` (renders the embedded Schedule app, captures console/page errors, probes bar colors, screenshots). **Note for future sessions:** the Schedule app's CDN deps (React/Babel/Supabase) **are reachable** in this environment — serve `public/` statically and load `/sequence/` (the app falls back to its embedded `__PLANAR_DATA__` seed when logged-out). JSX-only syntax pre-check: `ui-audit/jsxcheck-sequence.mjs` (esbuild).
@@ -791,7 +797,7 @@ _Move items here with the date and who/what checked them._
   - lint 0 errors · **411 tests** (14 in `test/edgeRuns.test.js`) · build green; the original **B213–B215 acceptance still 7/7** (`ui-audit/verify-edge-runs.mjs`).
 - **Not covered (logged-out headless limits):** signed-in cloud-reload of an edited irregular-parcel setback (rides the same Site-Model persistence as the V46/V47 cases); self-touching / zero-area degenerate rings (guarded by `offsetPolygon` + the `edgeRuns` degenerate-input unit tests, not separately driven in-browser).
 
-### V49 — Map-finder Esri imagery no longer over-zooms to the gray "Map data not yet available" placeholder on retina (B218) ✅
+### V50 — Map-finder Esri imagery no longer over-zooms to the gray "Map data not yet available" placeholder on retina (B220) ✅
 - **Added** 2026-06-20 · **Checked** 2026-06-20 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (bugfix acceptance)
 - **Steps:** booted the **map finder** over a Katy parcel (29.786, −95.83) at **deviceScaleFactor 1 (standard)** and **2 (retina)**, fit to the parcel, then wheel-zoomed in deep (toward maxZoom 21) with the labels overlay on, recording the `{z}` of every `World_Imagery` (imagery) and `World_Transportation` (labels) tile actually requested + any past-native / placeholder-sized responses. Script `gis-verify/mapfinder-overzoom-verify.mjs`.
 - **Result ✅ (4/4):**

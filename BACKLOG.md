@@ -22,9 +22,11 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: B218 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
-     the planner-canvas fix that missed the map-finder call site) filed AND shipped this same
-     session — moved to BACKLOG-DONE.md. -->
+<!-- 2026-06-20: B220 (map-finder Esri imagery over-zoom placeholder — recurrence of B182,
+     the planner-canvas fix that missed the map-finder call site). Minted B218, renumbered
+     B220 — concurrent `main` PR #183 took B218 (dead header controls) + B219 (map-furniture
+     restyle) while this was in flight. Filed AND shipped this same session — moved to
+     BACKLOG-DONE.md. -->
 
 <!-- 2026-06-19: owner-reported (chat) "can't access my scheduling projects — this is imperative."
      Filed B203–B205 (arrived as B194–B196, but concurrent `main` #169–#172 minted B194–B202 for
