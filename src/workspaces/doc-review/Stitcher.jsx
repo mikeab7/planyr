@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength } from "./lib/takeoff.js";
+import { inv, solveM, sheetBBox, degenerateAlign, overUnaligned } from "./lib/stitchGeom.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
@@ -23,22 +24,6 @@ const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
-
-// page-units → world, and inverse
-const fwd = (M, p) => ({ x: M.A * p.x - M.B * p.y + M.e, y: M.B * p.x + M.A * p.y + M.f });
-const inv = (M, w) => { const det = M.A * M.A + M.B * M.B || 1; const dx = w.x - M.e, dy = w.y - M.f; return { x: (M.A * dx + M.B * dy) / det, y: (-M.B * dx + M.A * dy) / det }; };
-// similarity transform mapping b1→A1, b2→A2 (page-units → world)
-function solveM(b1, b2, A1, A2) {
-  const vb = { x: b2.x - b1.x, y: b2.y - b1.y }, vA = { x: A2.x - A1.x, y: A2.y - A1.y };
-  const lb = Math.hypot(vb.x, vb.y) || 1, scale = Math.hypot(vA.x, vA.y) / lb;
-  const theta = Math.atan2(vA.y, vA.x) - Math.atan2(vb.y, vb.x);
-  const A = scale * Math.cos(theta), B = scale * Math.sin(theta);
-  return { A, B, e: A1.x - (A * b1.x - B * b1.y), f: A1.y - (B * b1.x + A * b1.y) };
-}
-function sheetBBox(s) {
-  const c = [{ x: 0, y: 0 }, { x: s.baseW, y: 0 }, { x: s.baseW, y: s.baseH }, { x: 0, y: s.baseH }].map((p) => fwd(s.M, p));
-  return { minX: Math.min(...c.map((p) => p.x)), maxX: Math.max(...c.map((p) => p.x)), minY: Math.min(...c.map((p) => p.y)), maxY: Math.max(...c.map((p) => p.y)) };
-}
 
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -131,7 +116,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       setPlaced((arr) => {
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
-        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false }];
+        // First sheet is the world anchor (always "aligned"); every later sheet needs an
+        // Align before its measurements can be trusted against the shared scale (B298).
+        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0 }];
       });
     } finally { setBusy(false); }
   };
@@ -149,13 +136,28 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       else if (align.step === 2) setAlign({ ...align, step: 3, A2: w });
       else {
         const b2 = inv(sheet.M, w);
+        // B297: reject a near-coincident baseline (two clicks on ~the same point, on either
+        // sheet) — solveM would divide by ~0 and fling the sheet off-canvas at a wild scale,
+        // silently and with no undo. Mirror DocReview's calibrate "line too short" guard.
+        if (degenerateAlign(align.b1, b2, align.A1, align.A2)) {
+          setErr("Those two alignment points are too close together — pick points farther apart.");
+          setAlign(null);
+          return;
+        }
         const M = solveM(align.b1, b2, align.A1, align.A2);
-        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M } : s)));
+        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M, aligned: true } : s)));
         setAlign(null);
       }
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
+    // B298: a measurement/calibration point on a not-yet-aligned sheet would be scored with
+    // the shared (sheet-1) calibration — a silently wrong quantity when scales differ. Block
+    // it until that sheet is aligned.
+    if ((tool === "calibrate" || tool === "distance" || tool === "area") && overUnaligned(placed, w)) {
+      setErr("That sheet isn't aligned yet — align it before measuring on it.");
+      return;
+    }
     if (tool === "calibrate" || tool === "distance") {
       if (!draft) setDraft({ kind: tool, pts: [w] });
       else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); setDraft(null); }
@@ -209,7 +211,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned === true })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -259,7 +261,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         const e = srcEntries.find((x) => x.srcId === s.srcId);
         let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
         if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
+        // Back-compat: reviews saved before B298 carry no `aligned` flag — treat them as
+        // aligned (don't retro-flag a set the user already aligned); new saves carry the real state.
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: s.aligned !== false });
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
       suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
@@ -296,6 +300,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     else if (m.kind === "area") { const u = polyArea(m.pts); if (ftPerUnit) t.areaSf += u * ftPerUnit * ftPerUnit; }
     return t;
   }, { distFt: 0, areaSf: 0 });
+  const unalignedCount = placed.reduce((n, s, i) => n + (i > 0 && s.aligned !== true ? 1 : 0), 0); // B298
 
   const tray = pdfs.flatMap((p) => Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":" + (i + 1), pdf: p, page: i + 1 })));
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
@@ -345,8 +350,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>
             <g transform={G}>
-              {placed.map((s) => {
+              {placed.map((s, i) => {
                 const aligning = align && align.sheetId === s.id;
+                const needsAlign = i > 0 && s.aligned !== true && !aligning; // B298
                 const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
                 if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
                   return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
@@ -354,8 +360,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
                   </g>;
                 }
-                return <image key={s.id} href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
-                  transform={xf} opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />;
+                return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
+                  <image href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
+                    style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />
+                  {needsAlign && <>
+                    <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#d9770618" stroke="#d97706" strokeWidth={ls(2.5)} strokeDasharray={`${ls(9)} ${ls(6)}`} />
+                    <text x={s.baseW / 2} y={ls(22)} fontSize={ls(15)} textAnchor="middle" fill="#b45309" fontWeight="700" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>⚠ Needs alignment — click “Align”</text>
+                  </>}
+                </g>;
               })}
               {/* measures (world coords) */}
               {measures.map((m) => {
@@ -387,19 +399,33 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         {/* right panel: placed sheets + takeoff */}
         <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
-          {placed.map((s, i) => (
-            <div key={s.id} style={{ border: `1px solid ${align && align.sheetId === s.id ? PAL.accent : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6 }}>
-              <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
+          {placed.map((s, i) => {
+            const aligningThis = align && align.sheetId === s.id;
+            const needsAlign = i > 0 && s.aligned !== true; // B298
+            return (
+            <div key={s.id} style={{ border: `1px solid ${aligningThis ? PAL.accent : needsAlign ? "#e7b667" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fdf6ea" : "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ flex: 1, fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {s.name}</span>
+                {needsAlign
+                  ? <span style={{ flex: "none", fontSize: 9, fontWeight: 800, letterSpacing: "0.03em", color: "#fff", background: "#d97706", borderRadius: 4, padding: "1px 5px" }}>NEEDS ALIGN</span>
+                  : i > 0 && <span style={{ flex: "none", fontSize: 11, fontWeight: 700, color: "#15803d" }} title="Aligned">✓</span>}
+              </div>
               <div style={{ display: "flex", gap: 6 }}>
-                {i > 0 && <button style={{ ...btn(align && align.sheetId === s.id), padding: "3px 8px", fontSize: 11 }} onClick={() => startAlign(s.id)}>Align</button>}
+                {i > 0 && <button style={{ ...btn(aligningThis), padding: "3px 8px", fontSize: 11, ...(needsAlign && !aligningThis ? { borderColor: "#d97706", color: "#b45309" } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
                 <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {placed.length > 0 && (
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
               <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
+              {unalignedCount > 0 && (
+                <div style={{ fontSize: 10.5, color: "#b45309", background: "#fdf6ea", border: "1px solid #f0d49a", borderRadius: 6, padding: "4px 7px", marginBottom: 6, lineHeight: 1.4 }}>
+                  ⚠ {unalignedCount} sheet{unalignedCount > 1 ? "s" : ""} still need alignment — measuring on {unalignedCount > 1 ? "them" : "it"} is blocked until you Align.
+                </div>
+              )}
               {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f0(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}

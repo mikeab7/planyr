@@ -24,6 +24,13 @@ export function polyArea(pts) {
   return Math.abs(a) / 2;
 }
 
+// Minimum vertices required to commit each measurement kind. Area + perimeter need a real
+// polygon (≥3): a 2-point area is 0 sf (polyArea returns 0 for <3 pts) and a 2-point
+// "closed" perimeter measures only its single segment — both are meaningless takeoff
+// entries. distance/rect/cloud are 2-point spans; count is ≥1. (B299)
+export const MIN_PTS = { count: 1, distance: 2, rect: 2, cloud: 2, area: 3, perimeter: 3 };
+export const canCommitMeasure = (kind, n) => n >= (MIN_PTS[kind] || 1);
+
 /* Real-world value of one measurement markup, given the sheet's calibration
  * (`ftPerUnit`, feet per page unit; 0/undefined = uncalibrated). Returns
  * { kind, calibrated, ...values }. Area in sf + acres; lengths in ft; count int. */

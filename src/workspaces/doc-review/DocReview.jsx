@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
 import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
-import { measureLabel, rollup, dist } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, canCommitMeasure } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
@@ -520,8 +520,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const finishDraft = () => {
     if (!draft) return;
     const { kind, pts } = draft;
-    if (kind === "count" && pts.length >= 1) commit({ kind, pts });
-    else if ((kind === "area" || kind === "perimeter") && pts.length >= 2) commit({ kind, pts });
+    // Area/perimeter need ≥3 points: a 2-point area is 0 sf and a 2-point "closed" perimeter
+    // measures only its single segment — meaningless takeoff. canCommitMeasure centralizes
+    // the per-kind minimum (shared with the double-click finish path). (B299)
+    if (canCommitMeasure(kind, pts.length)) commit({ kind, pts });
     else setDraft(null);
   };
   const onDbl = (e) => {
@@ -538,7 +540,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const d = toPage(e), tol = 6 / scale;
       const pts = draft.pts.slice();
       while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
-      if (draft.kind === "count" ? pts.length >= 1 : pts.length >= 2) commit({ kind: draft.kind, pts });
+      // Same per-kind minimum as the Enter path: count ≥1, area/perimeter ≥3. (B299)
+      if (canCommitMeasure(draft.kind, pts.length)) commit({ kind: draft.kind, pts });
       else setDraft(null);
     } else finishDraft();
   };

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  dist, pathLength, polyArea, measureValue, measureLabel, rollup,
+  dist, pathLength, polyArea, measureValue, measureLabel, rollup, canCommitMeasure,
 } from "../src/workspaces/doc-review/lib/takeoff.js";
 
 describe("doc-review takeoff geometry + unit conversion", () => {
@@ -59,6 +59,27 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "perimeter", pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }] }, 1)).toBe("12.0 ft");
     // area still acres-2dp · whole-sf (10×10 raw × 3² = 900 sf)
     expect(measureLabel({ kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] }, 3)).toBe("0.02 ac · 900 sf");
+  });
+
+  // B299: a 2-point area/perimeter is degenerate — polyArea is 0 for <3 pts, and a 2-point
+  // "closed" perimeter only measures its single segment (not the doubled-back loop). The
+  // commit guard must require ≥3 for area/perimeter so these never reach the takeoff list.
+  it("B299: 2-point area is 0 sf and 2-point closed perimeter is a single segment", () => {
+    const ab = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+    expect(polyArea(ab)).toBe(0);                 // would save as a 0-sf area
+    expect(pathLength(ab, true)).toBe(10);        // single segment, not 20 (no wrap for <3 pts)
+  });
+  it("B299: canCommitMeasure requires ≥3 pts for area/perimeter, ≥2 for spans, ≥1 for count", () => {
+    expect(canCommitMeasure("area", 2)).toBe(false);
+    expect(canCommitMeasure("area", 3)).toBe(true);
+    expect(canCommitMeasure("perimeter", 2)).toBe(false);
+    expect(canCommitMeasure("perimeter", 3)).toBe(true);
+    expect(canCommitMeasure("distance", 1)).toBe(false);
+    expect(canCommitMeasure("distance", 2)).toBe(true);
+    expect(canCommitMeasure("rect", 2)).toBe(true);
+    expect(canCommitMeasure("cloud", 2)).toBe(true);
+    expect(canCommitMeasure("count", 1)).toBe(true);
+    expect(canCommitMeasure("count", 0)).toBe(false);
   });
 
   it("rollup totals calibrated items and counts uncalibrated ones", () => {
