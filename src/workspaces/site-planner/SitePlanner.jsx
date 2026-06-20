@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
@@ -32,6 +33,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
+import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -285,6 +287,16 @@ const MK_BOX_KINDS = ["rect", "ellipse"];
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
+// B230 — nearest point on segment a→b to p (all {x,y}); lets a Shift-click / right-click
+// drop a control point EXACTLY where the user touched the edge (Bluebeam-style), not at the
+// old fixed midpoint. Returns the point + its distance for hit-testing.
+const projToSeg = (p, a, b) => {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const x = a.x + t * dx, y = a.y + t * dy;
+  return { x, y, d: Math.hypot(p.x - x, p.y - y) };
+};
 const pathLen = (pts) => { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); return t; };
 
 function lineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
@@ -666,36 +678,9 @@ const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumF
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* --------------- county appraisal-district attribute view --------------- */
-// Curated, human-labelled rows pulled from the raw county GIS attributes that
-// rode along with a map-imported parcel.
-const APPR_FIELDS = [
-  [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
-  [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
-  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre)/i, "Acreage"],
-  [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
-  [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
-  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt)/i, "Total value"],
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type)/i, "Land use"],
-  [/zoning/i, "Zoning"],
-  [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
-];
-const prettyKey = (k) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-const apprRows = (attrs) => {
-  if (!attrs) return [];
-  const used = new Set(), rows = [];
-  for (const [re, label] of APPR_FIELDS) {
-    const k = Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
-    if (k) { used.add(k); rows.push({ label, value: attrs[k] }); }
-  }
-  return rows;
-};
-const apprAll = (attrs) => Object.entries(attrs || {})
-  .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
-  .map(([k, v]) => ({ label: prettyKey(k), value: v }));
-// Format a value, adding $ + thousands for the money fields.
-const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
-const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== ""); return k ? String(attrs[k]) : null; };
+// The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
+// now lives in ./lib/appraisal.js so the map finder's address-search info card shares
+// the exact same labelling (B233). countyAcres stays here (planner-only geometry check).
 // County stated acreage from the attributes. Prefer an explicit acres field;
 // fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
 // { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
@@ -998,6 +983,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
+  // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
+  // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
+  // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
+  // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
+  const [selVtx, setSelVtx] = useState(null);   // {layer, id, index}
+  const [vtxMenu, setVtxMenu] = useState(null); // {mode:"vertex"|"edge", layer, id, index, ptFeet?, canDelete?, x, y}
+  const [insHint, setInsHint] = useState(null); // {x,y} screen px (snapped to the nearest edge point)
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const selVtxRef = useRef(selVtx); selVtxRef.current = selVtx;
   const [showShortcuts, setShowShortcuts] = useState(false); // ? keyboard overlay
 
   // Title reader + metes-and-bounds plotter (Schedule B → checklist; legal
@@ -1576,9 +1570,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
+      if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
       if ((e.key === "Delete" || e.key === "Backspace") && (selRef.current || multiRef.current.length)) { e.preventDefault(); deleteSel(); } // read live selection (refs) — not the listener's possibly-stale closure
     };
     const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") { spaceRef.current = false; setSpacePan(false); } };
@@ -1586,6 +1581,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [sel, tool, splitPath, els, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
+
+  // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
+  // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
+  useEffect(() => {
+    const sync = (e) => setShiftHeld(e.shiftKey);
+    const clear = () => setShiftHeld(false);
+    window.addEventListener("keydown", sync);
+    window.addEventListener("keyup", sync);
+    window.addEventListener("blur", clear);
+    return () => { window.removeEventListener("keydown", sync); window.removeEventListener("keyup", sync); window.removeEventListener("blur", clear); };
+  }, []);
 
   const deleteSel = () => {
     const sel = selRef.current, multi = multiRef.current; // live selection — robust to a stale keydown closure (NEW-1)
@@ -2012,7 +2018,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The hand-editable path of an easement: the boundary ring for mode B, else the
   // centerline/edge-run spine that gets offset into the strip.
   const easeEditPath = (e) => (e.mode === "boundary" ? (e.pts || []) : (e.centerline || []));
-  const easeEditClosed = (e) => e.mode === "boundary";
   // Apply a patch and RE-DERIVE the drawn ring, so a width/vertex change re-offsets
   // the strip live (NEW-1). Boundary mode derives pts = the path itself.
   const withEaseRing = (e, patch) => {
@@ -2074,34 +2079,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Attribute edit on the selected easement (re-derives the ring so width edits re-offset live).
   const setSelEasement = (patch) => { pushHistory(); setMarkups((a) => a.map((m) => m.id === selMarkup.id ? withEaseRing(m, patch) : m)); };
-  // Vertex editing of the selected easement's path (drag; Shift-click deletes; ＋ adds).
+  // B230 — drag an easement path vertex (the active control point). Inserting / deleting a
+  // control point is handled by the shared edge/vertex affordances (Shift-click / right-click an
+  // edge to add; right-click a vertex or press Delete to remove), not a per-handle "+" / Shift-click.
   const startEaseVertex = (ev, id, index) => {
     if (tool !== "select" || ev.button !== 0) return;
     ev.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m || m.locked) { setSel({ kind: "markup", id }); return; }
-    if (ev.shiftKey) {
-      const minN = m.mode === "boundary" ? 3 : 2;
-      if (easeEditPath(m).length > minN) { pushHistory(); setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, easeEditPath(x).filter((_, i) => i !== index)) : x)); }
-      return;
-    }
     setSel({ kind: "markup", id });
+    setSelVtx({ layer: "ease", id, index });
     pushHistory();
     drag.current = { mode: "easeVertex", id, index };
     svgRef.current.setPointerCapture(ev.pointerId);
-  };
-  const addEaseVertex = (ev, id, index) => {
-    if (tool !== "select" || ev.button !== 0) return;
-    ev.stopPropagation();
-    const m = markups.find((x) => x.id === id);
-    if (!m || m.locked) return;
-    pushHistory();
-    setMarkups((a) => a.map((x) => {
-      if (x.id !== id) return x;
-      const path = easeEditPath(x), p = path[index], q = path[(index + 1) % path.length];
-      const np = [...path]; np.splice(index + 1, 0, snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }));
-      return setEasePath(x, np);
-    }));
   };
   const startMoveCallout = (e, id, part) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -2114,137 +2104,156 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
-  /* ------------ parcel vertex editing ------------ */
+  /* ------------ parcel vertex editing (B230: drag only; insert/delete via shared edge/vertex) ------------ */
   const startVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     if (parcels.find((p) => p.id === id)?.locked) { e.stopPropagation(); setSel({ kind: "parcel", id }); return; }
     e.stopPropagation();
     pushHistory();
-    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
-      setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3
-        ? { ...pc, points: pc.points.filter((_, i) => i !== index) } : pc));
-      return;
-    }
     setSel({ kind: "parcel", id });
+    setSelVtx({ layer: "parcel", id, index });
     drag.current = { mode: "vertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addVertex = (e, id, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    if (parcels.find((p) => p.id === id)?.locked) return;
-    e.stopPropagation();
-    pushHistory();
-    setParcels((a) => a.map((pc) => {
-      if (pc.id !== id) return pc;
-      const p = pc.points[index], q = pc.points[(index + 1) % pc.points.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const points = [...pc.points];
-      points.splice(index + 1, 0, mid);
-      return { ...pc, points };
-    }));
-    setSel({ kind: "parcel", id });
-  };
 
-  /* ------------ polygon element vertex editing (drag/add/delete points) ------------ */
+  /* ------------ polygon element vertex editing (drag only) ------------ */
   const startElVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const el = els.find((x) => x.id === id);
     if (!el || !el.points || el.locked) return;
     pushHistory();
-    if (e.shiftKey) { // shift-click removes a vertex (keep a triangle minimum)
-      setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3
-        ? { ...x, points: x.points.filter((_, i) => i !== index) } : x));
-      return;
-    }
     setSel({ kind: "el", id });
+    setSelVtx({ layer: "el", id, index });
     drag.current = { mode: "elVertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addElVertex = (e, id, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    const el = els.find((x) => x.id === id);
-    if (!el || !el.points || el.locked) return;
-    pushHistory();
-    setEls((a) => a.map((x) => {
-      if (x.id !== id || !x.points) return x;
-      const p = x.points[index], q = x.points[(index + 1) % x.points.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const points = [...x.points];
-      points.splice(index + 1, 0, mid);
-      return { ...x, points };
-    }));
-    setSel({ kind: "el", id });
-  };
 
-  /* ------------ measurement vertex editing (B141: Bluebeam-style add/drag/delete) ------------
-     Mirrors the element-vertex handlers for the measures[] layer; area/perimeter recompute
-     live because the label is derived from the points. Legacy {a,b} records migrate to
-     {mode,pts} on first edit. */
+  /* ------------ measurement vertex editing (drag only; area/perimeter recompute live because
+     the label is derived from the points; legacy {a,b} records migrate to {mode,pts} on edit) ------------ */
   const startMeasureVertex = (e, i, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = measures[i];
     if (!m) return;
-    const pts = measPts(m), min = measMode(m) === "area" ? 3 : 2;
     pushHistory();
-    if (e.shiftKey) { // shift-click deletes the vertex (keep the mode's minimum)
-      if (pts.length > min) setMeasures((arr) => arr.map((mm, k) => k === i ? { ...mm, mode: measMode(mm), pts: pts.filter((_, j) => j !== index) } : mm));
-      return;
-    }
     setSel({ kind: "measure", i });
+    setSelVtx({ layer: "measure", id: i, index });
     drag.current = { mode: "measureVertex", i, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addMeasureVertex = (e, i, index) => {
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    pushHistory();
-    setMeasures((arr) => arr.map((mm, k) => {
-      if (k !== i) return mm;
-      const pts = measPts(mm), p = pts[index], q = pts[(index + 1) % pts.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const np = [...pts];
-      np.splice(index + 1, 0, mid);
-      return { ...mm, mode: measMode(mm), pts: np };
-    }));
-    setSel({ kind: "measure", i });
-  };
 
-  /* ------------ markup geometry editing (Bluebeam-style: drag/add/delete vertices,
-     resize + rotate boxes). Mirrors the element/measure vertex + resize/rotate handlers
-     for the markups[] layer. ------------ */
+  /* ------------ markup geometry editing (drag a vertex; box resize/rotate handlers below) ------------ */
   const startMarkupVertex = (e, id, index) => {
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
     if (!m || m.locked) return;
     pushHistory();
-    if (e.shiftKey) { // shift-click deletes the vertex (keep the kind's minimum)
-      const pts = mkPts(m);
-      if (pts.length > mkMinPts(m)) setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, pts.filter((_, j) => j !== index)) : x));
-      return;
-    }
     setSel({ kind: "markup", id });
+    setSelVtx({ layer: "markup", id, index });
     drag.current = { mode: "mkVertex", id, index };
     svgRef.current.setPointerCapture(e.pointerId);
   };
-  const addMarkupVertex = (e, id, index) => { // ＋ on an edge midpoint (polyline/polygon)
-    if (tool !== "select" || e.button !== 0) return;
-    e.stopPropagation();
-    const m = markups.find((x) => x.id === id);
-    if (!m || m.locked) return;
-    pushHistory();
-    setMarkups((a) => a.map((x) => {
-      if (x.id !== id) return x;
-      const pts = mkPts(x), p = pts[index], q = pts[(index + 1) % pts.length];
-      const mid = snapPt({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
-      const np = [...pts]; np.splice(index + 1, 0, mid);
-      return setMkPts(x, np);
-    }));
-    setSel({ kind: "markup", id });
+
+  /* ------------ B230: shared Bluebeam vertex editing across EVERY editable path ------------
+     One resolver + one hit-test + one insert/delete, so Shift-click / right-click / Delete
+     behaves identically on a parcel, a polygon element, a measurement, a markup poly/line, or
+     an easement — no per-type forks. The always-on "+" midpoint handles are gone; a control
+     point is dropped exactly where the edge was touched. */
+  // Which closed/open path (if any) is vertex-editable right now, given the selection.
+  const editablePath = () => {
+    if (tool !== "select" || !sel) return null;
+    if (sel.kind === "parcel") { const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "el") { const el = els.find((x) => x.id === sel.id); return el && el.points && !el.locked ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min: closed ? 3 : 2 }; }
+    if (sel.kind === "markup") {
+      const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
+      if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
+      if (m.kind === "polyline" || m.kind === "polygon") return { layer: "markup", id: m.id, pts: mkPts(m), closed: m.kind === "polygon", min: mkMinPts(m) };
+    }
+    return null;
   };
+  // Nearest vertex / nearest edge of `path` to a feet point, each within a screen-PIXEL
+  // tolerance (so the grab radius is zoom-independent). A corner wins a tie over its edges.
+  const hitEditPath = (path, fp) => {
+    const vTol = 9 / view.ppf, eTol = 11 / view.ppf, n = path.pts.length;
+    let v = null;
+    path.pts.forEach((p, i) => { const d = Math.hypot(fp.x - p.x, fp.y - p.y); if (d <= vTol && (!v || d < v.d)) v = { index: i, d }; });
+    let e = null;
+    const lastEdge = path.closed ? n : n - 1;
+    for (let i = 0; i < lastEdge; i++) {
+      const pr = projToSeg(fp, path.pts[i], path.pts[(i + 1) % n]);
+      if (pr.d <= eTol && (!e || pr.d < e.d)) e = { index: i, pt: { x: pr.x, y: pr.y }, d: pr.d };
+    }
+    return { v, e };
+  };
+  // Insert a control point at `ptFeet` (the nearest point on edge `edgeIndex`) into whichever
+  // layer owns the path, and select the new point so Delete can remove it.
+  const insertVtx = (layer, id, edgeIndex, ptFeet) => {
+    const np = snapPt(ptFeet);
+    const ins = (arr) => { const a = [...arr]; a.splice(edgeIndex + 1, 0, np); return a; };
+    pushHistory();
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points) } : pc));
+    else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
+    else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
+    else if (layer === "markup") setMarkups((a) => a.map((x) => x.id === id ? setMkPts(x, ins(mkPts(x))) : x));
+    setSelVtx({ layer, id, index: edgeIndex + 1 });
+  };
+  // Delete control point `index` from its path, but never below the geometry's minimum.
+  const deleteVtx = (layer, id, index) => {
+    const rm = (arr) => arr.filter((_, j) => j !== index);
+    pushHistory();
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3 ? { ...pc, points: rm(pc.points) } : pc));
+    else if (layer === "el") setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3 ? { ...x, points: rm(x.points) } : x));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => { if (k !== id) return mm; const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : 2; return pts.length > min ? { ...mm, mode: measMode(mm), pts: rm(pts) } : mm; }));
+    else if (layer === "ease") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; return p.length > min ? setEasePath(x, rm(p)) : x; }));
+    else if (layer === "markup") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const pts = mkPts(x); return pts.length > mkMinPts(x) ? setMkPts(x, rm(pts)) : x; }));
+    setSelVtx(null);
+  };
+  // Capture-phase pointer / contextmenu / move on the canvas, so the SAME interaction reaches
+  // every editable layer BEFORE its own handlers — without overlaying hit targets that would
+  // block a normal click/drag. Shift+click an edge inserts; right-click a vertex/edge opens the
+  // menu; a plain click on a vertex marks it active for Delete; hovering an edge shows the dot.
+  const onCanvasVtxDownCapture = (e) => {
+    const path = editablePath();
+    if (!path) { if (selVtxRef.current) setSelVtx(null); return; }
+    const fp = p2f(e.clientX, e.clientY);
+    const { v, e: edge } = hitEditPath(path, fp);
+    if (e.button === 0 && e.shiftKey && edge && !v) { // Shift+click an edge (away from a corner) → insert here
+      e.preventDefault(); e.stopPropagation();
+      altSnapOffRef.current = !!e.altKey;
+      insertVtx(path.layer, path.id, edge.index, edge.pt);
+      setInsHint(null);
+      return;
+    }
+    if (e.button === 0 && !e.shiftKey) setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
+  };
+  const onCanvasVtxContextCapture = (e) => {
+    const path = editablePath();
+    if (!path) return;
+    const fp = p2f(e.clientX, e.clientY);
+    const { v, e: edge } = hitEditPath(path, fp);
+    if (v) { // near a vertex (corner) → Delete control point — a corner ALWAYS wins over its edges
+      e.preventDefault(); e.stopPropagation();
+      setSelVtx({ layer: path.layer, id: path.id, index: v.index });
+      setVtxMenu({ mode: "vertex", layer: path.layer, id: path.id, index: v.index, canDelete: path.pts.length > path.min, x: e.clientX, y: e.clientY });
+    } else if (edge) { // on an edge (away from any corner) → Add control point here
+      e.preventDefault(); e.stopPropagation();
+      setVtxMenu({ mode: "edge", layer: path.layer, id: path.id, index: edge.index, ptFeet: edge.pt, x: e.clientX, y: e.clientY });
+    }
+    // else: not near the path → let the element's own context menu open
+  };
+  const onCanvasVtxMoveCapture = (e) => {
+    if (drag.current || tool !== "select") { if (insHint) setInsHint(null); return; }
+    const path = editablePath();
+    if (!path) { if (insHint) setInsHint(null); return; }
+    const { v, e: edge } = hitEditPath(path, p2f(e.clientX, e.clientY));
+    if (edge && !v) { const sp = f2p(edge.pt); setInsHint((h) => (h && Math.abs(h.x - sp.x) < 0.5 && Math.abs(h.y - sp.y) < 0.5 ? h : sp)); }
+    else if (insHint) setInsHint(null);
+  };
+
   const startMarkupResize = (e, id, hx, hy) => { // hx/hy ∈ {-1,0,1}: corner = both, edge = one
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
@@ -4358,13 +4367,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // in place rather than floating outside). stripLabelRot reads the candidate's own char width.
     let cfs = fs, clh = lh, ccharW = charW, noLeader = false;
     if (el.type === "trailer") { ({ fs: cfs, lh: clh, charW: ccharW } = trailerLabelFont(el, lines, poly)); noLeader = true; }
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader });
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, lines, ccharW, view.ppf), fs: cfs, lh: clh, charW: ccharW, noLeader, carto: el.type === "pond" });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
       const a = pondAdd.addA;
       labelCands.push({ el, lid: `${el.id}#add`, added: true, c: f2p(pondAdd.pt),
-        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false });
+        lines: ["Additional Detention", `+${f2(a / SQFT_PER_ACRE)} ac · +${f0(a)} sf`], importance: area + 1, halfW, halfH, fs, lh, charW, noLeader: false, carto: true });
     }
   }
   const labelShow = layoutLabels(
@@ -4381,16 +4390,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const top = y - (lines.length * dlh) / 2, first = top + dfs * 0.82;
     // Inside labels contrast against the element fill; a leadered label sits OUT on the paper,
     // so ink it dark with a white halo to read over any background (B121 round 2b).
-    const ink = leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill);
+    // B231 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
+    // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
+    const carto = d.carto;
+    const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
+    const halo = carto || leader;
+    const ink = carto ? "#0E2E36" : (leader ? PAL.ink : labelInk(elStyle(d.el, settings).fill));
     return (
       <g key={`lbl${d.lid}`} pointerEvents="none">
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
         {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
-          fontFamily="ui-monospace, Menlo, monospace" fill={ink}
-          stroke={leader ? "#fff" : undefined} strokeWidth={leader ? 3 * dls : undefined} paintOrder={leader ? "stroke" : undefined}
-          style={{ fontWeight: 600, letterSpacing: "0.02em" }}>
+          fontFamily={fam} fill={ink}
+          stroke={halo ? "#fff" : undefined} strokeWidth={halo ? (carto ? 2.75 : 3) * dls : undefined} paintOrder={halo ? "stroke" : undefined}
+          style={{ fontWeight: 600, letterSpacing: carto ? "0" : "0.02em" }}>
           {lines.map((t, i) => <tspan key={i} x={x} dy={i === 0 ? 0 : dlh}>{t}</tspan>)}
         </text>
       </g>
@@ -4725,64 +4739,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   })();
 
-  // Draggable vertices + add-point (+) handles on the selected parcel (select tool).
+  // B230 — draggable SQUARE vertex handles on the selected parcel. The always-on "+" midpoint
+  // handles are gone: Shift-click (or right-click) an edge inserts a control point at the click
+  // point instead. The active control point (the Delete-key target) is shown inverted.
+  const vtxRect = (key, c, on, cursor, onDown) => (
+    <rect key={key} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
+      fill={on ? PAL.paper : PAL.accent} stroke={on ? PAL.accent : PAL.paper} strokeWidth={on ? 2 : 1.5}
+      style={{ cursor }} onPointerDown={onDown} />
+  );
+  const isSelVtx = (layer, id, i) => !!selVtx && selVtx.layer === layer && String(selVtx.id) === String(id) && selVtx.index === i;
   const parcelHandles = (() => {
     if (sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
     if (!pc) return null;
-    const nodes = [];
-    pc.points.forEach((a, i) => {
-      const b = pc.points[(i + 1) % pc.points.length];
-      const am = f2p(a), bm = f2p(b);
-      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-      nodes.push(
-        <g key={`addv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addVertex(e, pc.id, i)}>
-          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    pc.points.forEach((a, i) => {
-      const c = f2p(a);
-      nodes.push(
-        <rect key={`pv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startVertex(e, pc.id, i)} />
-      );
-    });
-    return <g>{nodes}</g>;
+    return <g>{pc.points.map((a, i) => vtxRect(`pv${i}`, f2p(a), isSelVtx("parcel", pc.id, i), "move", (e) => startVertex(e, pc.id, i)))}</g>;
   })();
 
-  // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond):
-  // drag a dot to move a corner, click a ＋ on an edge to add one, Shift-click a
-  // dot to delete it — same as parcels.
+  // Vertex handles on a selected polygon ELEMENT (e.g. a non-rectangular pond): drag a square
+  // to move a corner. Add via Shift-click / right-click an edge; delete via right-click / Delete.
   const elPolyHandles = (() => {
     if (sel?.kind !== "el" || tool !== "select") return null;
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
-    const nodes = [];
-    el.points.forEach((a, i) => {
-      const b = el.points[(i + 1) % el.points.length];
-      const am = f2p(a), bm = f2p(b);
-      const mid = { x: (am.x + bm.x) / 2, y: (am.y + bm.y) / 2 };
-      nodes.push(
-        <g key={`eaddv${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addElVertex(e, el.id, i)}>
-          <circle cx={mid.x} cy={mid.y} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x - 2.5} y1={mid.y} x2={mid.x + 2.5} y2={mid.y} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mid.x} y1={mid.y - 2.5} x2={mid.x} y2={mid.y + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    el.points.forEach((a, i) => {
-      const c = f2p(a);
-      nodes.push(
-        <rect key={`epv${i}`} x={c.x - 5} y={c.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startElVertex(e, el.id, i)} />
-      );
-    });
-    return <g>{nodes}</g>;
+    return <g>{el.points.map((a, i) => vtxRect(`epv${i}`, f2p(a), isSelVtx("el", el.id, i), "move", (e) => startElVertex(e, el.id, i)))}</g>;
   })();
 
   // Bluebeam-style editing chrome on a selected markup (select tool):
@@ -4821,50 +4800,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       );
     }
     if (m.kind === "easement") {
-      // Grips on the editable PATH (boundary ring, or the centerline/edge-run spine).
-      const path = easeEditPath(m);
-      const px = path.map(f2p);
-      const closed = easeEditClosed(m);
-      const nodes = [];
-      px.forEach((p, i) => {
-        if (!closed && i === px.length - 1) return; // open spine: no edge past the last point
-        const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
-        nodes.push(
-          <g key={`eav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addEaseVertex(e, m.id, i)}>
-            <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-            <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
-            <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-          </g>
-        );
-      });
-      px.forEach((p, i) => nodes.push(
-        <rect key={`ev${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-          fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-          style={{ cursor: "move" }} onPointerDown={(e) => startEaseVertex(e, m.id, i)} />
-      ));
-      return <g>{nodes}</g>;
+      // B230 — draggable squares on the editable PATH (boundary ring, or the centerline/edge-run
+      // spine). Insert via Shift-click / right-click an edge; the old "+" midpoint dots are gone.
+      const px = easeEditPath(m).map(f2p);
+      return <g>{px.map((p, i) => vtxRect(`ev${i}`, p, isSelVtx("ease", m.id, i), "move", (e) => startEaseVertex(e, m.id, i)))}</g>;
     }
     if (!MK_VERTEX_KINDS.includes(m.kind)) return null;
+    // B230 — line/polyline/polygon control points as draggable squares (no "+" dots).
     const px = mkPts(m).map(f2p);
-    const isPoly = m.kind === "polyline" || m.kind === "polygon";
-    const nodes = [];
-    if (isPoly) px.forEach((p, i) => {
-      if (m.kind === "polyline" && i === px.length - 1) return; // open path: no edge past the last point
-      const q = px[(i + 1) % px.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
-      nodes.push(
-        <g key={`mkav${i}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMarkupVertex(e, m.id, i)}>
-          <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={PAL.accent} strokeWidth={1.25} />
-          <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={PAL.accent} strokeWidth={1.25} />
-        </g>
-      );
-    });
-    px.forEach((p, i) => nodes.push(
-      <rect key={`mkv${i}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-        fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
-        style={{ cursor: "move" }} onPointerDown={(e) => startMarkupVertex(e, m.id, i)} />
-    ));
-    return <g>{nodes}</g>;
+    return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
   // Accuracy state — the single source of truth for measurement / acreage trust.
@@ -5430,6 +5374,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
+            onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
@@ -5440,9 +5385,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <pattern id="pat-landscape" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="9" stroke="#7f9a63" strokeWidth="0.8" opacity="0.5" />
               </pattern>
-              <pattern id="pat-water" width="22" height="10" patternUnits="userSpaceOnUse">
-                <path d="M0 5 q5.5 -4 11 0 t11 0" fill="none" stroke="#5d8497" strokeWidth="0.8" opacity="0.45" />
-              </pattern>
+              {/* B231 — cartographic water body: a radial steel-teal gradient that deepens
+                  toward the center so a pond reads as water with volume (replaces the old
+                  decorative wavy-line hatch). objectBoundingBox units → auto-fits each pond. */}
+              <radialGradient id="grad-water" cx="50%" cy="50%" r="62%">
+                <stop offset="0%" stopColor="#2F6675" />
+                <stop offset="100%" stopColor="#5B97A5" />
+              </radialGradient>
               <pattern id="pat-encumber" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <line x1="0" y1="0" x2="0" y2="8" stroke="#7c3aed" strokeWidth="1" opacity="0.55" />
               </pattern>
@@ -5913,24 +5862,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           pointerEvents={tool === "select" ? "stroke" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />}
                     {isSel && tool === "select" && (
                       <g>
-                        {/* B141: add-vertex ＋ on each editable edge (area wraps closed; line/polyline don't) */}
+                        {/* B230: draggable SQUARE control points (no "+" dots) — Shift-click /
+                            right-click an edge inserts a point; right-click / Delete removes one.
+                            The active control point (Delete target) is shown inverted. */}
                         {pts.map((p, k) => {
-                          if (!isArea && k === pts.length - 1) return null;
-                          const q = pts[(k + 1) % pts.length], mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+                          const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
                           return (
-                            <g key={`mav${k}`} style={{ cursor: "copy" }} onPointerDown={(e) => addMeasureVertex(e, i, k)}>
-                              <circle cx={mx} cy={my} r={5.5} fill={PAL.paper} stroke={mcolor} strokeWidth={1.25} />
-                              <line x1={mx - 2.5} y1={my} x2={mx + 2.5} y2={my} stroke={mcolor} strokeWidth={1.25} />
-                              <line x1={mx} y1={my - 2.5} x2={mx} y2={my + 2.5} stroke={mcolor} strokeWidth={1.25} />
-                            </g>
+                            <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+                              fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
+                              style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
                           );
                         })}
-                        {/* B141: draggable vertex dots — drag to reshape, Shift-click to delete */}
-                        {pts.map((p, k) => (
-                          <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
-                            fill={mcolor} stroke={PAL.paper} strokeWidth={1.5}
-                            style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
-                        ))}
                         {/* delete the whole measurement */}
                         <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
                           <circle cx={anchor.x} cy={anchor.y - 22} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
@@ -6055,6 +5997,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {parcelHandles}
                 {elPolyHandles}
                 {markupHandles}
+                {/* B230 — transient candidate-insertion dot, snapped to the nearest point on the
+                    edge under the cursor; faint on hover, brighter while Shift arms the insert. */}
+                {insHint && <circle cx={insHint.x} cy={insHint.y} r={shiftHeld ? 4.5 : 3.5} fill={PAL.accent} fillOpacity={shiftHeld ? 0.9 : 0.42} stroke="#fff" strokeWidth={1} pointerEvents="none" />}
                 {attachHint && (() => {
                   const p = f2p(attachHint);
                   return (
@@ -7839,6 +7784,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>
       )}
 
+      {/* B230 — Add / Delete control-point menu, portal-mounted at the document root so it can
+          never be clipped or trapped behind the canvas / tool-rail stacking contexts. */}
+      {vtxMenu && createPortal(
+        <>
+          <div onClick={() => setVtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setVtxMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 6000 }} />
+          <div className="menu" style={{ ...menuPanel, position: "fixed", left: Math.min(vtxMenu.x + 2, window.innerWidth - 200), top: Math.min(vtxMenu.y + 2, window.innerHeight - 64), zIndex: 6001, minWidth: 190 }}>
+            {vtxMenu.mode === "edge"
+              ? <button style={menuItem(false)} onClick={() => { insertVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index, vtxMenu.ptFeet); setVtxMenu(null); }}>＋&nbsp; Add control point</button>
+              : <button disabled={!vtxMenu.canDelete} style={{ ...menuItem(false), color: vtxMenu.canDelete ? "#b3361b" : "#b9b3a6", cursor: vtxMenu.canDelete ? "pointer" : "default" }} onClick={() => { if (vtxMenu.canDelete) { deleteVtx(vtxMenu.layer, vtxMenu.id, vtxMenu.index); setVtxMenu(null); } }}>✕&nbsp; Delete control point{vtxMenu.canDelete ? "" : " (min reached)"}</button>}
+          </div>
+        </>,
+        document.body,
+      )}
+
       {parcelMenu && (
         <>
           <div onClick={() => setParcelMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
@@ -7926,22 +7885,29 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const st = elStyle(el, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
-  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : st.water ? "url(#pat-water)" : null;
+  const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;
+  // B231 — cartographic water body (detention pond): a radial steel-teal gradient fill at
+  // ~80% opacity + a constant-screen-pixel teal outline. NEVER orange (the Markup accent), so
+  // a pond never reads as redline — selection is shown by a thicker teal stroke + the vertex
+  // handles, not a colour change.
+  const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
+  const waterOp = st.cartoWater ? 0.8 : fillOp;
+  const elStroke = st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke);
   // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
   // feet, drawn dashed so the user sees what the pond grew from. Same path for the
   // polygon and rect branches (the rect branch counter-rotates it back to world).
   const ghostRing = el.type === "pond" && el.det?.baseline?.ring?.length >= 3 ? el.det.baseline.ring : null;
   const ghostPath = ghostRing ? ghostRing.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
-  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#5d8497" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
+  const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#2C5D6B" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElDouble) { e.preventDefault(); onElDouble(e, el.id); } }}>
-        <path d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />
+        <path d={dPath} fill={waterFill} fillOpacity={waterOp} stroke="none" />
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
-        <path d={dPath} fill="none" stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 1.25 : st.weight} />
+        <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
       </g>
     );
@@ -7952,8 +7918,8 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
   const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={st.fill} fillOpacity={fillOp}
-    stroke={isSel ? PAL.accent : st.stroke} strokeWidth={isSel ? st.weight + 0.75 : st.weight} rx={rx} />);
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={waterFill} fillOpacity={waterOp}
+    stroke={st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.
