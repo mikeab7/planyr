@@ -51,7 +51,7 @@ export function measureValue(m, ftPerUnit) {
 const f0 = (n) => Math.round(n).toLocaleString();
 // One-decimal feet for LINEAR measures (distance/perimeter): whole-foot rounding hid
 // sub-foot precision (a 150.6 ft line read "151 ft") and clashed with the 2-dp acres
-// shown for area — takeoff wants the extra digit. (B291)
+// shown for area — takeoff wants the extra digit. (B296)
 const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
