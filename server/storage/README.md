@@ -32,15 +32,30 @@ frontend build, never a `VITE_` var, never committed (same rule as the APS key):
 |---|---|
 | `GOOGLE_CLIENT_ID` | OAuth client id — from a Google Cloud project, OAuth app set to **Internal** (Workspace user type, so no Google verification + no 7-day token expiry) |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret (server-side only) |
-| `GOOGLE_REFRESH_TOKEN` | A refresh token minted once with scope **`drive.file`** (least privilege — the app only touches files it creates; broader Drive scope only if Planyr must read pre-existing files, which is a deliberate decision, not a default) |
-| `PLANYR_DRIVE_ROOT_FOLDER` | The Drive folder id under which Planyr files everything |
+| `GOOGLE_REFRESH_TOKEN` | A refresh token minted once via the consent flow below (scope **`drive.file`** — least privilege) |
 | `PLANYR_STORAGE_BACKEND` | set to `drive` to flip off the memory stub |
 
-Once those exist, the only remaining code is the thin Drive REST `client` (the interface
-is documented at the top of `driveBackend.js`) — a fill-in, not a rebuild — plus a
-Supabase-Postgres-backed `idMap` store in place of the in-memory one. No app changes.
+**No `PLANYR_DRIVE_ROOT_FOLDER` needed.** Under the least-privilege `drive.file` scope the
+app can only touch files **it** creates, so it makes its own `Planyr/…` folder tree
+(`driveClient.folderId`). A hand-made folder id would NOT be writable — don't supply one.
+
+The Drive REST client (`backends/driveClient.js`) + the Google auth helper
+(`oauth/googleAuth.js`) + the consent routes (`functions/api/auth/google/*`) are **built**
+and unit-tested. `buildStorageAdapter` auto-wires the live client once the three Google
+env vars are present (`defaultDriveClientFactory`). The remaining real-DB step is swapping
+the in-memory `idMap` for a Supabase-Postgres-backed store. No frontend changes.
 
 Note: moving file storage to Drive **removes the Supabase free-tier 50 MB-per-file ceiling**.
+
+## Going live — the activation sequence
+
+1. **Owner:** rotate the client secret (if it ever touched a chat), then set `GOOGLE_CLIENT_ID`
+   + `GOOGLE_CLIENT_SECRET` in the Cloudflare Pages deploy env (Production, encrypted).
+2. **Owner (one click):** visit `https://planyr.io/api/auth/google/start`, approve on Google's
+   consent screen → the callback page shows a **refresh token**. Paste it into the deploy env
+   as `GOOGLE_REFRESH_TOKEN` (straight into env, never a chat).
+3. **Owner:** set `PLANYR_STORAGE_BACKEND=drive`, redeploy. The backend now files to Drive.
+4. The `/api/auth/google/*` routes are only needed for step 2; they no-op without creds.
 
 ## OAuth client — the redirect (callback) URI to register
 
