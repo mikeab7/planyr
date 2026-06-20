@@ -12,6 +12,19 @@ export async function loadPdf(fileOrBuffer) {
   return pdfjsLib.getDocument({ data }).promise;
 }
 
+/* Pull a page's embedded text as one string (for stated-scale / title-block reads, B267).
+ * CAD-origin PDFs carry real vector text, so this is exact + cheap. Returns "" if the page
+ * has no embedded text (a scanned/raster sheet) — the caller's cue to fall back to OCR. */
+export async function extractPageText(pdf, pageNum) {
+  try {
+    const page = await pdf.getPage(pageNum);
+    const tc = await page.getTextContent();
+    return tc.items.map((i) => i.str).join(" ");
+  } catch (_) {
+    return "";
+  }
+}
+
 /* Pick how dense to render the canvas backing store. We draw at the device's pixel
  * ratio (so note text is crisp on HiDPI / Retina screens instead of a blurry upscale),
  * but cap it to a pixel budget so a big E-size sheet at high zoom can't blow up canvas

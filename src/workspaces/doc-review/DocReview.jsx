@@ -5,7 +5,8 @@
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
+import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
+import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
 import { measureLabel, rollup, dist } from "./lib/takeoff.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -87,6 +88,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [tool, setTool] = useState("select");
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
+  const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
@@ -119,6 +121,33 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   /* ---- load ---- */
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
+
+  // Auto-detect each sheet's stated scale (B267): read the page's embedded text, parse a
+  // scale callout, and — ONLY when the page is a standard plot size — pre-fill calibration
+  // from it, flagged "from sheet scale (verify)". Never overwrites a page the user (or a
+  // loaded review) already calibrated. Runs in the background after a fresh open; a page
+  // with no embedded text (scanned/raster) is skipped — that's the seam for the OCR
+  // fallback (B267 remaining). Superseded if another file opens mid-scan.
+  const scanTok = useRef(0);
+  const autoDetectScales = useCallback(async (pdf, pages) => {
+    const tok = ++scanTok.current;
+    for (let p = 1; p <= pages; p++) {
+      if (tok !== scanTok.current) return;             // a newer open superseded this scan
+      const text = await extractPageText(pdf, p);
+      if (tok !== scanTok.current) return;
+      if (!text) continue;                             // no embedded text → leave for OCR (future)
+      const r = parseSheetScale(text);
+      if (!r) continue;
+      if (r.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: r.label } })); continue; }
+      if (!r.ftPerInch) continue;
+      const vp = (await pdf.getPage(p)).getViewport({ scale: 1 });
+      if (tok !== scanTok.current) return;
+      if (!detectSheet(vp.width, vp.height).std) continue; // non-standard plot → don't trust the printed scale
+      setCalByPage((c) => (c[p] ? c : { ...c, [p]: ftPerPointForScale(r.ftPerInch) }));
+      setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: r.label } }));
+    }
+  }, []);
+
   const openFile = async (file) => {
     if (!file) return;
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
@@ -133,9 +162,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       setPage(1);
       setScale(0); // 0 = fit-to-width on next render
       setRedrop("");
+      // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
+      // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
+      // of the SAME file keeps them (its saved/auto cals still apply). (B267)
+      const reuse = sourceRef.current && sameName(sourceRef.current.name, file.name);
+      if (!reuse) { setCalByPage({}); setCalInfo({}); }
+      autoDetectScales(pdf, pdf.numPages); // B267: background stated-scale auto-calibration
       // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
       // known file (so its markups stay bound); otherwise mint one and upload once.
-      const keepId = sourceRef.current && sameName(sourceRef.current.name, file.name) ? sourceRef.current.srcId : null;
+      const keepId = reuse ? sourceRef.current.srcId : null;
       const srcId = keepId || newSourceId();
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
@@ -206,14 +241,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: source ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, oversize: !!source.oversize }] : [],
-    single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage },
-  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage]);
+    single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
+  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
   const { status, suspendSave } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
-    deps: [reviewId, meta, source, markups, calByPage],
+    deps: [reviewId, meta, source, markups, calByPage, calInfo],
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
@@ -249,9 +284,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
-    setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
+    setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop("");
+    scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
     await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
@@ -261,7 +297,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMarkupProject(null);
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setScale(0);
-    setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
+    setMarkups([]); setCalByPage({}); setCalInfo({}); setDraft(null); setSel(null); setTool("select");
+    scanTok.current++; // cancel any in-flight scan from a prior file
   };
   // Open a saved review from either toolbar OR the global Project Files panel; route single
   // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
@@ -373,6 +410,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const ft = parseFloat(v);
     if (!isFinite(ft) || ft <= 0) return;
     setCalByPage((c) => ({ ...c, [page]: ft / u }));
+    setCalInfo((m) => ({ ...m, [page]: { src: "manual" } })); // a hand-calibration supersedes any auto guess (B267)
     setErr("");
   };
 
@@ -585,9 +623,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Sheets · {numPages}</div>
             {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
               <button key={n} onClick={() => { setPage(n); setScale(0); setDraft(null); setSel(null); }}
+                title={calInfo[n]?.label ? `Scale ${calInfo[n].label}${calInfo[n].src === "auto" ? " — from sheet, verify" : ""}` : undefined}
                 style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
                   border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "#fbf3ee" : "#fff", color: PAL.ink }}>
-                Sheet {n}{calByPage[n] ? " ·✓" : ""}
+                Sheet {n}{calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : ""}
               </button>
             ))}
           </div>
@@ -609,8 +648,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           {/* takeoff */}
           <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 2 }}>Takeoff</div>
-            <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 8 }}>
-              {ftPerUnit ? `Sheet ${page} calibrated` : `Sheet ${page} not calibrated — use Calibrate`}
+            <div style={{ fontSize: 11, marginBottom: 8 }}>
+              {(() => {
+                const info = calInfo[page];
+                if (ftPerUnit && info?.src === "auto")
+                  return <span style={{ color: "#b45309" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
+                if (ftPerUnit) return <span style={{ color: "#15803d" }}>Sheet {page} calibrated</span>;
+                if (info?.src === "nts") return <span style={{ color: "#b45309" }}>Sheet {page} — marked NOT TO SCALE</span>;
+                return <span style={{ color: "#b45309" }}>Sheet {page} not calibrated — use Calibrate</span>;
+              })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
             {pageMarks.filter((m) => MEASURE.has(m.kind)).length === 0

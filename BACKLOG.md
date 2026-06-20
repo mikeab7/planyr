@@ -22,6 +22,88 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — an **Infra / automated-testing** tranche
+     (Playwright regression net, error telemetry, seeded test account, CI wiring). Filed at **B278–B281**.
+     ⚠ NUMBERING / COLLISION NOTE (renumbered TWICE by concurrent `main`): first filed B271–B274, then
+     B275–B278 when open PR #217 took B271–B273 — but on merge `main` had consumed **B271–B277** outright
+     (pointer-lockout B271, main-thread-stall B272, filing-practice B273, stale-save B274, multi-tab B275,
+     and PR #217's overlay B276/B277). Two items sharing a number across the two files = the one thing the
+     rules forbid, so this tranche lands at the next clear band **B278–B281**. (Owner flagged exactly this:
+     "make sure no one else is working on B271." They were — heavily.) The "NEW-#" labels are scratch.
+     **B279 (error telemetry) — BUILT + headless-verified + SHIPPED this session; full block in
+     BACKLOG-DONE.md.** B278 / B280 / B281 stay Open below.
+     Deduped before filing:
+       • B278 (Playwright @playwright/test suite) — NET-NEW. NOT the `ui-audit/*.mjs` harnesses (ad-hoc
+         single-purpose Chromium screenshot/verify scripts vs a deterministic regression suite); package.json
+         carries vitest only. REUSE the ui-audit cert-proxy launch flag (`--ignore-certificate-errors`).
+       • B279 (error telemetry) — NET-NEW; its "stale-chunk fix" reference is ALREADY SHIPPED (B221's
+         `vite:preloadError` guard in `src/app/chunkReload.js`), so it hooked telemetry onto that EXISTING
+         handler — no open stale-chunk item to wait on. (Built this session.)
+       • B280 (seeded test account) — NET-NEW. Distinct from B269's real-PDF Doc-Review build fixtures.
+       • B281 (CI + auto-file @claude issue) — NET-NEW; the "previously-parked @claude workflow" it cites was
+         never filed in either file. Extends `.github/workflows/build.yml`.
+     Inter-deps: B278 ↔ B280 (the seed values are the assertion contract); B281 depends on B278 + B280. -->
+
+### B278 — Playwright regression harness against preview deploys `[Infra / E2E]` (task)  *(arrived as "NEW-1" 2026-06-20 owner chat; filed **B278** — jumped past B271–B277, consumed by concurrent `main` + PR #217; batch B278–B281)*
+`[ ]` Stand up Playwright as the **deterministic regression net** — headless in CI, **not** via Cowork. **Why not Cowork:** its vision/screenshot tokens cost multiples more per run; reserve Cowork for exploratory discovery + live sign-off, use Playwright for the repeatable assertions.
+- **Approach:** add `@playwright/test`; config targets the Cloudflare **per-branch preview URL** (read from an env var so CI injects the branch's preview). Log in via a **dedicated test account** (B280), never the owner's real creds.
+- **First flows (highest-severity paths):** (1) login succeeds + app comes up **Cloud on** — assert the "Cloud off" state is NOT present (the silent `VITE_SUPABASE_URL`/`ANON_KEY`-missing build is a known crash-severity incident); (2) load a **Pearland** parcel → assert correct county resolution (point-in-polygon: Brazoria/Harris/Fort Bend) → guards the boundary-mismatch bug; (3) draw a measurement → save → reload → assert value persisted → directly tests silent-save-failure; (4) run **Site Analysis** on a multi-parcel selection → assert *source unavailable* renders distinct from *not present*.
+- **Gotchas:** tests must run against a **properly built preview** (env vars baked in pre-build) or flow (1) will *correctly* fail — that's the point, but document it so a red run isn't misread as a harness bug. Use stable **`data-testid`** selectors, not text/CSS that the brand refactor will churn.
+- **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
+- **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
+- **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
+> **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
+
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
+`[ ]` Create a **dedicated test user** with deterministic seeded data on a preview/staging deploy; **never** use the owner's real login in automated loops.
+- **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
+- **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
+- **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
+> Do alongside B278 — its assertions are blocked without these fixed values.
+
+### B281 — CI wiring: Playwright on preview + failure auto-files an @claude issue `[Infra / CI]` (feature) — depends on B278 + B280  *(arrived as "NEW-4" 2026-06-20 owner chat; filed **B281**; batch B278–B281)*
+`[ ]` Run B278 in **GitHub Actions** on each preview branch; on failure, **auto-open an issue tagged `@claude`** so Claude Code picks it up async — the genuinely remote/async scenario the previously-parked `@claude` workflow was reserved for.
+- **Dependency:** requires **B278** (the suite) + **B280** (the seeded account). **Defer until those land.**
+- **Edge case:** **dedupe issue creation** — don't open a fresh issue every run for the same persistent failure; update/reuse the existing one.
+- **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
+> Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
+     overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
+     drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
+     was in flight, so the batch was renumbered to the real next free IDs **B274–B277**. Deduped — all
+     four net-new (no existing OPEN item covers them), each REUSING prior art:
+       • B274 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
+         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold): those reconcile on
+         the CLIENT by union; B274 adds a SERVER-side version guard that REJECTS a stale write with a
+         loud "reload before saving" prompt — the gate B134 #4 ("409 conflict") + #5 only gestured at.
+         Reusable: the foundation for the DEFERRED multi-user team-workspace feature.
+       • B275 (multi-tab warning + optional single-editor lock) — pairs with B274; B127 made two
+         same-browser tabs silently CONVERGE, B275 makes it VISIBLE (BroadcastChannel banner) +
+         optionally elects one editor (Web Locks). Same-browser only; cross-device = B274.
+       • B276 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" returns on reload);
+         the per-item tombstone B126 deferred. (Distinct from B260, the overlay *scale* misread, done.)
+       • B277 (overlay visibility toggle) — B131 reserved the `visible !== false` shape; B277 implements
+         the per-overlay show/hide the print path already honours. Distinct from B276's delete.
+     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **B276 + B277 fixed + shipped (PR #217 →
+     `main`)** — moved to BACKLOG-DONE.md (owner-reported overlay bug + its companion toggle). **B274 +
+     B275 are being built THIS session** (owner said go ahead): the larger data-integrity pair — B274 is
+     a server-side change to the critical save path (the B124/B126/B127/B134 incident surface) + the
+     foundation for the deferred multi-user feature, and B275 depends on it. -->
+
+### B274 — Reject stale saves (optimistic concurrency on the save path) `[Platform / Persistence]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B274** — concurrent `main` consumed B270–B273; batch B274–B277)*
+`[ ]` Repro: open the same project in two tabs/sessions; edit the same object (e.g. Building 1 footprint) in both; save from tab A, then save from tab B. Tab B **silently overwrites** tab A (last-write-wins), and a reload/interleave can produce an inconsistent object (dimension label, geometry, and sf drawn from different edit states). Expected: saves carry a version (or `updated_at`) guard; a save against a stale version is **rejected, not applied**, and surfaces a loud "this project was changed in another session — reload to get the latest before saving" prompt. No silent clobber.
+- **Impl:** add a `version` (integer) to the relevant Supabase tables (`public.sites`, `public.doc_reviews`); conditional update `WHERE id = ? AND version = ?` (or compare `updated_at`); **0 rows affected → return a typed conflict to the client**, which surfaces the loud reload prompt instead of applying; bump `version` on every successful write. Migration in the existing one-shot idempotent SQL pattern (client degrades to current behaviour until it's run, like `project_library.sql`).
+- **Reuse, don't duplicate:** the client already content-merges copies (B126 `mergeSiteContent` union-by-id; B127 two-tab fold) — those stay as the *local* reconciliation; B270 is the *server* gate on top. Build the version/conflict primitive **reusable** — it is the foundation for the **DEFERRED multi-user team-workspace** feature, not a one-off.
+> **Data-safety sensitive:** touches the exact save path behind the B124/B126/B127/B134 incidents. Keep the union-merge intact, and prove a stale write is *rejected* (not lost, not silently merged-away) before shipping. Coordinate with B276's tombstones (a delete is a write that must advance the version).
+
+### B275 — Multi-tab open warning + optional single-editor lock `[App Shell]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B275** — concurrent `main` consumed B270–B273; batch B274–B277)*
+`[ ]` Detect when the same Planyr origin/project is already open in another tab of the same browser via **BroadcastChannel** (or the **Web Locks API**). Show a non-blocking banner in the AppHeader: "Planyr is open in another tab — editing in multiple tabs can conflict." Optionally elect a single active-editor tab via Web Locks; non-leader tabs go read-only with a "make this tab active" affordance. Banner clears when the other tab closes. **Known limitation: same-browser only** — cross-device conflicts are caught by **B274**'s server-side guard, not this. Pairs with B274.
+> Builds on B127 (which made two same-browser tabs silently *converge*) by making the multi-tab state *visible*; it doesn't replace it. Depends on B274 for the cross-device half, so sequence it after B274.
+
+<!-- B276 (overlay delete doesn't persist) + B277 (overlay visibility toggle) were fixed +
+     shipped this session → moved to BACKLOG-DONE.md. B274 + B275 (above) are being built next. -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
      and re-used every ID in between (dock-zone build-out, the Scheduler backlog + its B261–B264 renumber,
@@ -42,11 +124,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > **Ready to build (corpus in hand: KG B1 ARCH 19pp + Jacintoport FS 9pp).** Largest of the three — the variable-position title-block locator is the real work. NEW-2/B265 (render fidelity) shipped this session.
 
 ### B267 — Auto-calibrate a sheet from its stated scale callout `[Doc Review / Markup]` (feature)  *(arrived as "NEW-3" 2026-06-20; renumbered **B267**; batch B265–B269)*
-`[ ]` Detect a stated-scale callout and **auto-set that sheet's calibration**, replacing the **"Sheet N not calibrated — use Calibrate"** prompt (`DocReview.jsx`) when confidently found. **Per-sheet** (a set mixes scales; a sheet with no graphic scale stays uncalibrated, **never inherits a neighbour's**). **"NOT TO SCALE"/"AS NOTED"/unparseable → leave uncalibrated and say so explicitly** (*not present* ≠ *couldn't parse*).
-- **Confirmed on the owner's real sheets (2026-06-20):** KG B1 carries **architectural fractional** scales as text — **1/16″=1′-0″**, **1/4″=1′-0″** — and Jacintoport carries **"SCALE: NOT TO SCALE"**. Build: extend **`parseScaleNote`** (`overlayScale.js`, B73 — today only engineer's "1″=100′") for **architectural fractional** ("1/4″=1′-0″"→4 ft/in) + **ratio** ("1:200"→16.67), map "NOT TO SCALE"/"AS NOTED"→null; then `getTextContent()` → parse → `calByPage[page] = ftPerPointForScale(...)`. ⚠ architectural ft/in fall **below** the parser's 10–1000 floor — **add patterns with their own range, don't loosen the civil one** (it also feeds the Site Planner overlay). NB: main's 2026-06-20 overlayScale change (B260's viewport guard) is adjacent — re-read before extending.
-- **OCR is REQUIRED (owner, 2026-06-20):** the callout must also read on **scanned/raster sheets** — embedded-text-first, OCR fallback (shared with B266). A scanned half-size copy is where the stated scale is least trustworthy → leans harder on **B268**.
-- **Honesty:** gate auto-apply on `detectSheet()` (B73) matching a standard sheet size; **label it "from sheet scale — verify"**, distinct from a user-confirmed calibration.
-> **Ready to build (most tractable; corpus in hand).** Ship with **B268** (the geometry cross-check that catches a non-1:1 plot), or as a first-cut suggestion-only behind `detectSheet`. Co-designs with B181 / B182 / B183.
+`[~]` Detect a stated-scale callout and **auto-set that sheet's calibration**, replacing the **"Sheet N not calibrated — use Calibrate"** prompt (`DocReview.jsx`) when confidently found. **Per-sheet** (a set mixes scales; a sheet with no graphic scale stays uncalibrated, **never inherits a neighbour's**). **"NOT TO SCALE"/"AS NOTED"/unparseable → leave uncalibrated and say so explicitly** (*not present* ≠ *couldn't parse*).
+- **✅ Shipped this session — embedded-text path (branch `claude/friendly-euler-hw8v1t`).** New **`parseSheetScale()`** (`overlayScale.js`) reads engineer's (1″=50′), **architectural fractional** (1/4″=1′-0″ → 4 ft/in), **ratio** (1:200), and explicit **NOT TO SCALE / AS NOTED** — each with its own sane range; the civil `parseScaleNote` is left untouched (Site Planner overlay). `pdf.js` `extractPageText()` reads the page text; `DocReview.jsx` runs a **background per-sheet scan** on open → fills `calByPage` (gated on `detectSheet()` standard plot size) + a new `calInfo {src,label}` driving the sidebar (·≈ auto / ·✓ manual) and the badge ("scale from sheet … verify" / "NOT TO SCALE" / "calibrated"). Per-sheet, never overwrites a manual/loaded cal, persisted; opening a different file resets cals (a cross-document bleed bug found + fixed during verification). **7 unit tests + verified on the owner's real sets** (`ui-audit/verify-new3-autoscale.mjs`, **V67**): KG B1 **17/19** auto-calibrated (no-scale cover left alone), Jacintoport all **NOT TO SCALE**, 0 bleed. lint 0 · 569 tests · build green.
+- **⏳ Remaining slice — OCR fallback for scanned/raster sheets (owner: REQUIRED).** `extractPageText()` returns "" on a scanned page (the seam); the fallback (Tesseract.js in a Web Worker / server-side → rasterize → OCR → `parseSheetScale`) needs a **scanned sample** to build + verify (the owner's two sets are vector, so the shipped path covers them today). Kept `[~]` until OCR lands; shared OCR path with **B266**.
+- **Design (as built):** extended `parseScaleNote`'s domain via a sibling `parseSheetScale` rather than loosening the civil 10–1000 floor (architectural ft/in fall below it). A title-block "SCALE: NOT TO SCALE" wins outright; otherwise a real numeric plan scale beats a stray "NTS" detail note. Gated on `detectSheet()` + labeled "from sheet scale — verify". Co-designs with **B268** (the geometry cross-check that catches a non-1:1 plot) / B181 / B182 / B183.
 
 ### B268 — Independent scale cross-check against on-sheet geometry (verify the stated scale) `[Doc Review / Markup]` (feature) — depends on B267  *(arrived as "NEW-4" 2026-06-20; renumbered **B268**; batch B265–B269)*
 `[ ]` After B267 sets a scale from text, **independently check** it by measuring a known on-sheet reference — primarily the **graphic scale bar** (the printed ruler), which survives plotting/resizing where stated-scale text doesn't. Agree within tolerance → **"verified"**; disagree → **surface loudly, make the user choose — never silently pick one** (silent wrong-calibration is crash-severity; it poisons every downstream takeoff). No scale bar → report **"no reference found"**, don't fail.
@@ -58,6 +139,11 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 `[ ]` The owner uploaded two real construction sets as build/test fixtures — **"2025.06.30 KG B1 - ARCH IFP REDLINE.pdf"** (6.2 MB) + **"Jacintoport - Fire Sprinkler IFC.pdf"** (6.4 MB) — on branch **`mikeab7-patch-1`** (PR **#207**). Needed to build/verify **B266/B267/B268**, but **NOT for merging into `main`** (12 MB+ of binaries would bloat the repo history permanently). **Do NOT merge PR #207.**
 - **Disposition:** keep the fixtures reachable until B266/B267/B268 are verified against them, **then close PR #207 + delete the `mikeab7-patch-1` branch** (or relocate fixtures to the private Supabase `doc-review-files` bucket). The owner plans to drop **more** sample files on the same branch for filing-workflow practice — same disposition.
 > Tracked explicitly so the big binaries don't silently ride into `main` (owner ask).
+
+### B273 — Filing-workflow practice: read a dropped file's title block → propose its project / discipline / sheet / date `[Doc Review / filing]` (task)  *(owner-requested 2026-06-20; minted **B273** — concurrent `main` took B270–B272 while this was in flight)*
+`[ ]` The owner is dropping sample files specifically to **practice filing** them. Until the backend auto-filer (B180/B181) is deployed, demonstrate the *logic* in-session: for each dropped PDF, **read its title block** (reuse B266's title-block reader + the `extractPageText` / `parseSheetScale` plumbing already shipped for B267), extract **{project, discipline, sheet #, revision, doc date}**, and **propose the filing** — which project + discipline folder + the `"<Project> - <Item> - YYYY.MM.DD"` name — for one-click confirm. This serves the owner's practice request AND **exercises/validates the title-block reader** that B266 and the real auto-filer depend on. **No-auto-guess:** low-confidence / no-match → a "needs filing" proposal the owner confirms, never a silent route.
+- **Heads-up (owner, 2026-06-20):** more sample files are incoming on `mikeab7-patch-1` for this — run the prototype on them (and the existing KG B1 / Jacintoport sets), report the proposed filing, don't auto-commit.
+> **Dedup:** NOT a new filing system — a manual/prototype run of the **existing auto-filing spec (B180/B181)**; findings feed those. Distinct from **B270** (the persistent drop-zone + upload queue — the ingestion *plumbing*, already shipped); this is the title-block→routing *intelligence* on top. Dropped files follow **B269**'s fixture disposition (don't ride into `main`).
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — the "deliberate Group" tranche for the Site
      Planner. Minted **B261–B264** (highest B# across both files was B246, so these are the real next free
@@ -1257,6 +1343,9 @@ Original spec:
 
 ### B259 — Scheduler off in-browser Babel → a real build step `[Scheduler / build]` (project)  *(orig "P1/M1"; minted **B259**)*
 `[ ]` The entire Scheduler (`public/sequence/index.html`, ~9.6k lines) is compiled by `@babel/standalone` in the browser on every load. Project-level work: move to a real build step / modularize. **Entangled** with the file's ability to save its own data back into itself (the File System Access auto-save rewrites the `<script id="planar-data">` block inside the HTML), so any change must preserve self-save. Plan deliberately; not required for any other Scheduler item. Deferred by design.
+
+### B272 — Rule out a main-thread stall from non-Workerized heavy parsing `[Core / Site Planner]` (bug, low priority)  *(owner-dropped 2026-06-20 via chat; arrived as "NEW-2"; minted **B272** — secondary hypothesis to B271)*
+`[ ]` Secondary hypothesis for the same "unclickable canvas" symptom: heavy CAD/PDF parse (or other compute) running on the **main thread** instead of a Web Worker, jamming the tab. **Investigated 2026-06-20 (B271 session):** PDF parsing already runs **off** the main thread — PDF.js uses its worker (a separate `pdf.worker` chunk in the build); DWG→DXF conversion is a **backend** (`/server`) concern, never in the browser. The reported incident's symptom (a frozen grab/hand cursor + clicks swallowed, with **no** Chrome "Page Unresponsive — Wait/Exit" prompt) is the signature of stuck pointer state, not a CPU stall, and is fully explained + fixed by **B271**. **No actionable main-thread-stall bug found.** Per the owner's note this drops to **low priority** now that B271 resolves the lockout — kept here (not closed) so it stays on the radar. **Escalate only** if an actual stall is ever observed: then instrument long-task timing, reproduce with a large drawing, and move any straggler heavy compute into a Worker per the standing architecture rule.
 
 - **Enforced merge gate via GitHub branch protection** (the settings half of **B63**): require a PR + a passing build check + "branch up to date before merging" on `main`, plus repo auto-merge. On the **private** repo this only *enforces* on a paid plan (GitHub Pro+); on Free the rules save but don't block — so B63's branch → PR → green discipline is the backstop until then. Keep it a manual owner toggle rather than granting the Claude Code app admin rights on a credential-bound repo.
 

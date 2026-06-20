@@ -13,6 +13,17 @@
  * chosen method + why higher methods were skipped — honest about what's automatic today
  * vs. what waits on the auto-filing backend. Reuses the existing reviewStore plumbing;
  * the auto-filing index is stubbed behind the index-provider interface.
+ *
+ * Ingestion (B260, arrived as "NEW-1"): the drop zone is a persistent processing queue.
+ *  - Multi-file is first-class (Amendment A): drop, the native picker, OR a clipboard
+ *    paste can carry many files at once — each becomes ONE independent queue item with its
+ *    own uploadId, run through a small concurrency pool (8 files => 8 concurrent rows, not
+ *    a batch row and not a serial chain). Non-PDFs get a clear per-file rejection row.
+ *  - The tray is persistent, not a vanishing toast (Amendment B): a filed row goes to a
+ *    calm "done" state, lingers a beat, then demotes into a collapsible "Recently filed"
+ *    trail — never an abrupt removal. Exceptions (needs-filing / failed / rejected) stay in
+ *    the active group until the user acts. Both groups are a DERIVED view over one queue
+ *    array (see shared/files/uploadQueue.js), not two separate lists.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, DISCIPLINES } from "../lib/reviewStore.js";
@@ -21,8 +32,13 @@ import {
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
 } from "../../../shared/files/fileFacts.js";
 import { choosePlacement, METHOD } from "../../../shared/placement/placeOnMap.js";
+import {
+  QUEUE_STATUS, RECENT_COLLAPSE_AT,
+  makeQueueItems, splitQueue, hasPendingDemote, runPool,
+} from "../../../shared/files/uploadQueue.js";
 
 const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c" };
+const MINI_BTN = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "2px 8px" };
 const CLASS_TAG = {
   [DOC_CLASS.SPATIAL]: { label: "spatial", color: "#15803d" },
   [DOC_CLASS.REFERENCE]: { label: "reference", color: "#6b6557" },
@@ -40,6 +56,14 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const [busy, setBusy] = useState(false);
   const [placePlan, setPlacePlan] = useState(null); // { fileId, plan } — the cascade result to show
   const [refileSel, setRefileSel] = useState({});   // fileId -> { projectId, discipline } for the one-click confirm
+  const [pendingDel, setPendingDel] = useState(null); // fileId armed for inline delete-confirm
+
+  // Persistent processing queue (B260). One flat array; the active/recently-filed split is
+  // a derived view over it (splitQueue), never two lists.
+  const [queue, setQueue] = useState([]);
+  const [recentOpen, setRecentOpen] = useState(false); // user-expanded the collapsed trail?
+  const [tick, setTick] = useState(0);                 // re-render pulse so done rows demote on time
+  const fileInputRef = useRef(null);
 
   const reqRef = useRef(0); // in-flight token (B44)
   const refresh = async () => {
@@ -56,32 +80,76 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   const groups = useMemo(() => groupByDiscipline(shown), [shown]);
   const unfiled = useMemo(() => needsFiling(facts), [facts]);
 
+  // Keep re-rendering while a freshly-filed row is inside its confirmation beat, so it
+  // demotes into the "Recently filed" trail on time even with no further user action. The
+  // loop self-stops the moment nothing is pending (tick is in the deps to re-arm).
+  useEffect(() => {
+    if (!hasPendingDemote(queue)) return undefined;
+    const t = setTimeout(() => setTick((n) => n + 1), 400);
+    return () => clearTimeout(t);
+  }, [queue, tick]);
+
   if (!open) return null;
 
   const projName = (id) => (projects.find((p) => p.id === id) || {}).name || "";
 
-  const drop = async (e) => {
-    e.preventDefault(); e.stopPropagation(); setDropTarget(false);
-    const files = [...(e.dataTransfer?.files || [])].filter((f) => /pdf$/i.test(f.name) || f.type === "application/pdf");
-    if (!files.length) return;
-    setBusy(true);
-    const failed = [];
+  const patchItem = (uploadId, patch) => setQueue((q) => q.map((it) => (it.uploadId === uploadId ? { ...it, ...patch } : it)));
+  const removeItem = (uploadId) => setQueue((q) => q.filter((it) => it.uploadId !== uploadId));
+  const clearRecent = () => setQueue((q) => {
+    const ids = new Set(splitQueue(q, Date.now()).recent.map((it) => it.uploadId));
+    return q.filter((it) => !ids.has(it.uploadId));
+  });
+
+  // Run one queue item through the filing pipeline. Each file has its own row, so every
+  // outcome lands on THAT row — no shared window.alert (KEY DECISION: no dialog boxes).
+  const processItem = async (item) => {
+    patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
+    const proj = activeProject || null;
+    const target = proj ? projName(proj) : "Holding area";
     try {
-      for (const f of files) {
-        // Auto-file by title block is the backend tranche; until then, file under the
-        // active project (or the holding area when none is selected). The index provider
-        // captures placement facts at filing time through the same interface.
-        // fileNewReview files to Supabase AND pushes a copy to Google Drive (B207),
-        // recording the Drive key for read-back. A Drive failure never blocks filing.
-        const r = await fileNewReview({ projectId: activeProject || null, project: projName(activeProject), discipline: "Other", blob: f, fileName: f.name });
-        if (!r || !r.ok) failed.push(`${f.name} — couldn't file`);
-        else if (r.uploadFailed) failed.push(`${f.name} — filed, but the upload failed (re-drop on open to view)`);
-        else if (r.driveError) failed.push(`${f.name} — filed, but the Drive copy failed (${r.driveError})`);
-      }
-    } finally { setBusy(false); refresh(); }
-    if (failed.length) window.alert("Some files had problems:\n• " + failed.join("\n• "));
+      // Auto-file by title block is the backend tranche; until then, file under the active
+      // project (or the holding area when none is selected). fileNewReview stores the bytes
+      // (Drive-first, Supabase fallback — the B207 cutover) and captures placement facts
+      // through the index provider; a Drive failure never blocks filing.
+      const r = await fileNewReview({ projectId: proj, project: proj ? projName(proj) : "", discipline: "Other", blob: item.file, fileName: item.name });
+      if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
+      // Filed. A degraded byte-store is non-fatal — flag it on the row, don't fail it.
+      let warn = null;
+      if (r.oversize) warn = "too large to store (50 MB cap) — re-drop on open to view";
+      else if (r.uploadFailed) warn = "couldn’t be stored — re-drop on open to view";
+      else if (r.driveError) warn = "filed; Drive copy failed";
+      patchItem(item.uploadId, {
+        status: proj ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,
+        reviewId: r.id, filedAt: Date.now(), warn, target,
+      });
+    } catch (e) {
+      patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (e && e.message) || "Couldn't file." });
+    }
   };
-  const del = async (e, id) => { e.stopPropagation(); if (!window.confirm("Delete this file and its stored PDF?")) return; await deleteReview(id); refresh(); };
+
+  // The single ingestion path: drop / native picker / clipboard paste all funnel through
+  // here. Every file becomes its own independent queue row up front (8 files => 8 rows at
+  // once), then the accepted PDFs run through a small concurrency pool — concurrent, not a
+  // serial chain. Unsupported types are already REJECTED rows, so they explain themselves.
+  const ingest = async (fileList) => {
+    const items = makeQueueItems(fileList);
+    if (!items.length) return;
+    setQueue((q) => [...items, ...q]); // newest on top
+    const accepted = items.filter((it) => it.status === QUEUE_STATUS.PROCESSING);
+    if (!accepted.length) return;
+    await runPool(accepted, processItem, 3);
+    refresh(); // pull the filed rows into the discipline list / holding area
+  };
+
+  const drop = (e) => { e.preventDefault(); e.stopPropagation(); setDropTarget(false); ingest(e.dataTransfer?.files); };
+  const onPick = (e) => { ingest(e.target.files); e.target.value = ""; };
+  const onPaste = (e) => { const f = e.clipboardData?.files; if (f && f.length) { e.preventDefault(); ingest(f); } };
+  const retry = (item) => { runPool([item], processItem, 1); };
+  const triage = (uploadId) => { setView("needs-filing"); removeItem(uploadId); }; // hand off to the holding-area flow
+  // Delete uses an INLINE confirm (the × arms a ✓/✕ in place), never window.confirm:
+  // a native modal blocks the main thread, which hard-freezes the tab when it's already
+  // memory-pressured from a large rendered PDF — and dialog boxes are banned by rule.
+  const del = async (id) => { setPendingDel(null); await deleteReview(id); refresh(); };
 
   // One-click confirm out of the "needs filing" holding area: assign a project +
   // discipline to an unfiled file. Never auto-guesses (a misfiled drawing is worse than
@@ -107,7 +175,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     <div style={{ position: "absolute", inset: 0, zIndex: 70, display: "flex" }}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)" }} />
-      <div style={{ position: "relative", width: 400, maxWidth: "88%", height: "100%", background: "#fff", borderRight: `1px solid ${PAL.line}`, boxShadow: "4px 0 24px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+      <div onPaste={onPaste} style={{ position: "relative", width: 400, maxWidth: "88%", height: "100%", background: "#fff", borderRight: `1px solid ${PAL.line}`, boxShadow: "4px 0 24px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
         {/* header */}
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${PAL.line}` }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink, flex: 1 }}>Project Files</div>
@@ -144,13 +212,19 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
               ))}
             </div>
 
-            {/* drop zone */}
-            <div onDragOver={(e) => { e.preventDefault(); setDropTarget(true); }} onDragLeave={() => setDropTarget(false)} onDrop={drop}
-              style={{ flex: "none", margin: "8px 12px", padding: "10px", borderRadius: 8, textAlign: "center", fontSize: 11.5, lineHeight: 1.4,
+            {/* drop zone — drop, paste, or click; multiple files at once (B260) */}
+            <input ref={fileInputRef} type="file" accept="application/pdf" multiple style={{ display: "none" }} onChange={onPick} />
+            <div onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDropTarget(true); }} onDragLeave={() => setDropTarget(false)} onDrop={drop}
+              style={{ flex: "none", margin: "8px 12px", padding: "10px", borderRadius: 8, textAlign: "center", fontSize: 11.5, lineHeight: 1.4, cursor: "pointer",
                 border: `2px dashed ${dropTarget ? PAL.accent : PAL.line}`, background: dropTarget ? "#fbf3ee" : "#faf8f3", color: PAL.muted }}>
-              Drop a PDF to file it {activeProject ? `under "${projName(activeProject)}"` : "(into the holding area)"}.
-              <div style={{ fontSize: 10, marginTop: 2 }}>Auto-file by title block arrives with the filing backend.</div>
+              Drop, paste, or click to add PDFs {activeProject ? `to "${projName(activeProject)}"` : "(they’ll go to the holding area)"}.
+              <div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine. Auto-file by title block arrives with the filing backend.</div>
             </div>
+
+            {/* processing tray (B260): persistent — filed rows stay accountable, never vanish */}
+            <UploadTray queue={queue} recentOpen={recentOpen} onToggleRecent={() => setRecentOpen((o) => !o)}
+              onRetry={retry} onTriage={triage} onDismiss={removeItem} onClearRecent={clearRecent} />
 
             {/* file list */}
             <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px" }}>
@@ -177,7 +251,15 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                           </div>
                           {isSpatial(f) && <button onClick={() => planPlacement(f)} title="Place this drawing on the map (auto-placement cascade)"
                             style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "3px 7px" }}>Place on map</button>}
-                          <button onClick={(e) => del(e, f.id)} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
+                          {pendingDel === f.id ? (
+                            <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: PAL.muted }}>
+                              <span>Delete?</span>
+                              <button onClick={(e) => { e.stopPropagation(); del(f.id); }} title="Confirm delete" style={{ border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2, fontWeight: 700 }}>✓</button>
+                              <button onClick={(e) => { e.stopPropagation(); setPendingDel(null); }} title="Cancel" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>✕</button>
+                            </span>
+                          ) : (
+                            <button onClick={(e) => { e.stopPropagation(); setPendingDel(f.id); }} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
+                          )}
                         </div>
                         {f.unfiled && <RefileRow projects={projects} value={refileSel[f.id]} onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />}
                         {showPlan && <PlacePlan plan={placePlan.plan} onGo={() => { onPlaceOnMap?.(reviews.find((x) => x.id === f.id) || f, placePlan.plan); setPlacePlan(null); onClose?.(); }} onDismiss={() => setPlacePlan(null)} />}
@@ -247,6 +329,74 @@ function PlacePlan({ plan, onGo, onDismiss }) {
         </button>
         <button onClick={onDismiss} style={{ fontSize: 11, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d7e3dc", background: "#fff", color: "#4b5563", padding: "3px 9px" }}>Cancel</button>
       </div>
+    </div>
+  );
+}
+
+/* The persistent upload tray (B260, arrived as "NEW-1"). Two groups, but ONE source array
+ * (splitQueue is a derived view):
+ *   • active — in-flight + exceptions; the live to-do list. Filed items linger here a beat.
+ *   • recently filed — the calm, accountable trail; collapses once it grows past a few.
+ * Filed rows never auto-vanish (the user, not a timer, clears the trail). Exceptions
+ * (needs-filing / failed / rejected) stay in the active group until the user acts. */
+function UploadTray({ queue, recentOpen, onToggleRecent, onRetry, onTriage, onDismiss, onClearRecent }) {
+  const { active, recent } = splitQueue(queue, Date.now());
+  if (!active.length && !recent.length) return null;
+  const collapsible = recent.length > RECENT_COLLAPSE_AT;
+  const showRecent = collapsible ? recentOpen : true;
+  return (
+    <div style={{ flex: "none", margin: "0 12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+      {active.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted, padding: "2px 2px 0" }}>Processing · {active.length}</div>
+          {active.map((it) => <QueueRow key={it.uploadId} item={it} onRetry={() => onRetry(it)} onTriage={() => onTriage(it.uploadId)} onDismiss={() => onDismiss(it.uploadId)} />)}
+        </>
+      )}
+      {recent.length > 0 && (
+        <div style={{ marginTop: 2 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 2px 0" }}>
+            <button onClick={collapsible ? onToggleRecent : undefined}
+              style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: collapsible ? "pointer" : "default", padding: 0,
+                fontSize: 10, fontFamily: "inherit", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>
+              {collapsible ? (showRecent ? "▾ " : "▸ ") : ""}Recently filed · {recent.length}
+            </button>
+            <button onClick={onClearRecent} title="Clear the recently-filed trail" style={{ fontSize: 10, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", color: PAL.muted, border: "none", background: "transparent", padding: "2px 4px" }}>Clear</button>
+          </div>
+          {showRecent && recent.map((it) => <QueueRow key={it.uploadId} item={it} recent />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* One queue row. Self-explaining: the status icon + sub-label say exactly what happened to
+ * THIS file (filed where, needs filing, failed why, not a PDF) — no shared dialog box. */
+function QueueRow({ item, recent = false, onRetry, onTriage, onDismiss }) {
+  const S = QUEUE_STATUS;
+  const meta = ({
+    [S.PROCESSING]: { color: PAL.muted, label: "Filing…" },
+    [S.DONE]: { icon: "✓", color: "#15803d", label: item.target ? `Filed · ${item.target}` : "Filed" },
+    [S.NEEDS_FILING]: { icon: "⚠", color: "#92400e", label: "Needs filing — pick a project" },
+    [S.FAILED]: { icon: "⚠", color: "#b3361b", label: item.error || "Failed" },
+    [S.REJECTED]: { icon: "⦸", color: "#b3361b", label: item.error || "Unsupported file" },
+  })[item.status] || { icon: "•", color: PAL.muted, label: item.status };
+  return (
+    <div className={`pf-queue-row${recent ? " pf-queue-recent" : ""}`}
+      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 6, border: `1px solid ${PAL.line}`, background: recent ? "#faf9f5" : "#fff", opacity: recent ? 0.92 : 1 }}>
+      <span style={{ flex: "none", width: 14, textAlign: "center", color: meta.color, fontSize: 12, lineHeight: 1 }}>
+        {item.status === S.PROCESSING
+          ? <span style={{ display: "inline-block", width: 10, height: 10, border: `2px solid ${PAL.line}`, borderTopColor: PAL.muted, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+          : meta.icon}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11.5, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+        <div style={{ fontSize: 10, color: meta.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {meta.label}{item.warn ? ` · ${item.warn}` : ""}
+        </div>
+      </div>
+      {item.status === S.FAILED && <button onClick={onRetry} style={MINI_BTN}>Retry</button>}
+      {item.status === S.NEEDS_FILING && <button onClick={onTriage} style={MINI_BTN}>Triage</button>}
+      {item.status === S.REJECTED && <button onClick={onDismiss} title="Dismiss" style={{ ...MINI_BTN, fontSize: 13, lineHeight: 1, color: "#b3361b", padding: "0 6px" }}>×</button>}
     </div>
   );
 }
