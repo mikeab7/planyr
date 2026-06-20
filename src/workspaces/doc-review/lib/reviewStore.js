@@ -138,7 +138,7 @@ export async function deleteReview(id) {
 }
 
 // Re-file an existing review under a (different) project/discipline — the one-click
-// confirm out of the "needs filing" holding area (B189). Loads the full record, updates
+// confirm out of the "needs filing" holding area (B217). Loads the full record, updates
 // only the filing fields, and re-upserts; the work layer + sources are untouched. (The
 // stored object path doesn't move — storageKey already encodes the prior location and
 // stays valid; re-pathing the bytes is a backend-tranche nicety, not needed to re-file.)

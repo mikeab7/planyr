@@ -82,7 +82,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
 
   // One-click confirm out of the "needs filing" holding area: assign a project +
   // discipline to an unfiled file. Never auto-guesses (a misfiled drawing is worse than
-  // an unfiled one) — the user confirms each. (B189)
+  // an unfiled one) — the user confirms each. (B217)
   const doRefile = async (f) => {
     const sel = refileSel[f.id] || {};
     if (!sel.projectId) return;
@@ -203,7 +203,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
   );
 }
 
-/* One-click confirm for an unfiled file (B189): pick a project + discipline and file it.
+/* One-click confirm for an unfiled file (B217): pick a project + discipline and file it.
  * Inline on every unfiled row so the "needs filing" holding area is actionable, not just
  * a label. Never auto-guesses — a misfiled drawing is worse than an unfiled one. */
 function RefileRow({ projects, value = {}, onChange, onFile }) {
