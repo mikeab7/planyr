@@ -36,7 +36,7 @@ export function createStorageAdapter({ backend, idMap = createIdMap(), linkProvi
       const r = await attempt(() => backend.put({ bytes, contentType, name, folder, planyrKey }), "Upload");
       if (!r.ok) return r;
       if (!r.backendId) return fail("Backend did not return an id for the saved file.");
-      await idMap.bind(planyrKey, r.backendId);
+      await idMap.bind(planyrKey, r.backendId, { name });
       return ok({ planyrKey });
     },
 
