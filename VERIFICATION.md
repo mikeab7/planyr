@@ -60,6 +60,9 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V62 — Scheduler bug-fix batch: Export-modal focus + boots clean (B246–B252) ✅ (self-verified headless — fully done, no signed-in check needed)
+Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/sequence/` in headless Chromium). Result **ALL PASS**: the board renders (so the **B246** module-scope hoist didn't break module eval and the **B250** render-nudge doesn't loop), the Export → "Header / Cover" Title field accepts "ALTA & Topo Survey — Phase 2" typed **character-by-character with focus retained and the full value intact** (B246 fixed — pre-fix it remounted per keystroke), and **0 real console/page errors** (no "Maximum update depth"). Syntax of the in-browser-Babel block also re-checked clean via `ui-audit/jsxcheck-sequence.mjs`. B247 (HTML-export escaping), B248 (status-delete guard/reassign), B249 (import normalization) are pure data-logic mirroring already-shipped patterns and ride the same clean boot; B251 (undo cap) and B252 (today already-fresh) need no UI check. No signed-in check needed — none of these touch auth.
+
 ### V61 — County parcel fetch survives a county-server outage (TxGIO statewide fallback) (B244 / B245) ✅ (self-verified headless — fully done; ⏳ optional signed-in confirm)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, live HCAD + TxGIO; FBCAD simulated down) · **Next check** — optional: a signed-in click-through on planyr.io (the resilience path is auth-independent, so logged-out coverage is representative).
 - **Harness:** `gis-verify/fbcad-outage-fallback-verify.mjs` — intercepts the **`gis.fbcad.org`** host as **HTTP 503** to reproduce the real 2026-06-19 FBCAD outage, then enters Select-parcels, recenters on Sugar Land (Fort Bend), and clicks a lot.
