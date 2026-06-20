@@ -49,7 +49,7 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }, 0)).toBe("set scale");
   });
 
-  // B287: labels used to land on a vertex (distance) / vertex-average (area).
+  // B303: labels used to land on a vertex (distance) / vertex-average (area).
   it("midOfPath: a 2-point line labels at its MIDPOINT, not pts[0]", () => {
     expect(midOfPath([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toEqual({ x: 5, y: 0 });
   });
@@ -88,6 +88,18 @@ describe("doc-review takeoff geometry + unit conversion", () => {
       return r;
     })();
     expect(inside).toBe(true);
+  });
+
+  // B296: linear measures (distance/perimeter) now carry one decimal so sub-foot precision
+  // isn't hidden by whole-foot rounding (a 150.6 ft line used to read "151 ft"); area keeps
+  // its 2-dp acres · whole sf. Guards against a regression back to f0.
+  it("B296: calibrated linear labels show one decimal; area unchanged", () => {
+    // 10 page-units × 1.06 ft/unit = 10.6 ft → "10.6 ft" (was "11 ft")
+    expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }, 1.06)).toBe("10.6 ft");
+    // perimeter of a 3-4-5 triangle closed = 12 → "12.0 ft" (one decimal even when whole)
+    expect(measureLabel({ kind: "perimeter", pts: [{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }] }, 1)).toBe("12.0 ft");
+    // area still acres-2dp · whole-sf (10×10 raw × 3² = 900 sf)
+    expect(measureLabel({ kind: "area", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] }, 3)).toBe("0.02 ac · 900 sf");
   });
 
   it("rollup totals calibrated items and counts uncalibrated ones", () => {

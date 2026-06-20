@@ -110,8 +110,13 @@ planner's map; an engineer's drawing overlays the planner's layout).
 - **Shared coordinate spine.** One real-world coordinate system underpins everything:
   **EPSG:2278 — NAD83 / Texas State Plane, South Central zone, US survey feet**
   (correct for the Houston/Katy area). This is what lets a deed polygon, an overlay,
-  and the site layout all live in the same space. Currently a stub in
-  `src/shared/coordinates/`, not yet wired in.
+  and the site layout all live in the same space. `src/shared/coordinates/` now has a
+  **real EPSG:2278 ↔ WGS84 projection** (`projectToGrid`/`gridToProject`, Lambert
+  Conformal Conic, validated vs pyproj <1e-4°); its first consumer is the **layer
+  coverage engine** (B283), which reprojects each GIS service's published extent to
+  test whether its data reaches the view. This is a **read-only screening use** — the
+  Site Planner still keeps its own per-site feet frame for drawn geometry; grow the
+  shared grid additively, not via a big-bang planner rewrite.
 - **Document Review layer model.** The imported drawing is an **immutable backdrop**
   (a fixed background, never altered). The user's measurements, markups, test-fit
   massing, and parsed polygons live on **editable layers stacked over it.** "Editing
@@ -186,6 +191,17 @@ server/                   # placeholder README only — NOT built or deployed; b
   exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
 - Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
   `layers=show:<sublayer IDs>` to paint the mains/pipes.
+- **Layer coverage engine + coverage-aware picker (B283/B284).** Each layer is tagged
+  national/statewide/regional; a regional layer's published `fullExtent` (read from the
+  existing `?f=json` probe, reprojected via the shared EPSG:2278 grid) is intersected
+  with the view so the Layers panel can say **"No data in this area"** instead of leaving
+  a silent blank (the COH-utilities-blank-outside-Houston confusion). A **Relevance**
+  control (Show all / Dim / Hide) + a **nearby-range** slider dim/collapse out-of-coverage
+  layers — **list ordering/visibility only, never the map** (hard rule: coverage never
+  alters a layer's request; the request builders live in `lib/layerRequest.js` and take
+  no coverage input). Fails open everywhere. Mapillary renamed "Poles & hydrants from
+  street imagery" + gated as "needs setup" (B285/B286); jurisdiction vector services now
+  retry transient 5xx with backoff (B287). `lib/coverage.js`.
 
 ### Supabase backend (built, Phases 1–4)
 - Phase 1 — connection to a cloud Postgres database.
@@ -194,6 +210,13 @@ server/                   # placeholder README only — NOT built or deployed; b
 - Phase 4 — cloud save/load: logged-in users' data lives in the cloud and syncs
   across devices. No migration of old browser-stored sites (few enough to recreate
   by hand — intentional).
+- User profiles (B297/B298) — first/last name captured at signup now persist to a
+  queryable **`public.profiles`** table (one row per `auth.uid()`, private-by-default
+  RLS, a `handle_new_user` signup trigger that copies names from the signup metadata,
+  plus a backfill for existing users). The header pill shows the user's **name** (never
+  blank: First Last → first → last → metadata → email) and opens an **account dropdown**
+  (Profile / Settings / Sign out). Reuses the existing anon client + session — no new
+  keys. Migration: `src/workspaces/site-planner/db/profiles.sql` (run once, idempotent).
 
 ### Multi-workspace foundation (new)
 - Monorepo restructure landed via **PR #3** (the new clean `main`): the shell, the
@@ -495,6 +518,30 @@ create policy "Users update own sites" on public.sites for update to authenticat
 create policy "Users delete own sites" on public.sites for delete to authenticated using ((select auth.uid()) = user_id);
 ```
 No anon policy, no admin/cross-user policy (deferred by decision).
+
+**User profiles (`lib/profile.js`, `shared/profile/useProfile.js`, `db/profiles.sql`; B297/B298).**
+Names captured at signup live in a queryable `public.profiles` table (one row per
+`auth.uid()`) — NOT just auth `user_metadata` — so they're the scalable foundation for the
+B2B direction (org/role/prefs later). `signUp` still seeds `options.data` (first/last/org);
+a **`handle_new_user` SECURITY DEFINER trigger** on `auth.users insert` copies those into
+`profiles` (trigger route avoids the client follow-up-insert race), and a one-time backfill
+seeds rows for pre-existing users. RLS is the same own-row private-by-default shape as
+`public.sites` (`auth.uid() = id`; select/insert/update; no delete — `on delete cascade`).
+`profile.js` = pure I/O (`loadProfile`/`saveProfile`, reuses the anon client + session, no
+new keys); `useProfile(user)` = the hook → `{ profile, loading, displayName, firstName, org,
+initial, reload, save }` with a never-blank display chain (First Last → first → last →
+metadata → email; pure `displayNameFor`/`firstNameFor`/`initialFor`, unit-tested). The Shell
+pill reads it and opens an account dropdown (`AnchoredMenu` portal); `AuthPanel` is a tabbed
+Profile/Settings panel (Profile edits name/org → `profiles`; Settings hosts Change password,
+reusing `updatePassword`). Run `db/profiles.sql` once in the SQL editor (idempotent).
+```sql
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  first_name text, last_name text, org text,
+  updated_at timestamptz not null default now() );
+-- RLS: 3 own-row policies (select/insert/update) keyed on auth.uid() = id.
+-- Trigger handle_new_user() inserts the row from raw_user_meta_data on signup; + backfill.
+```
 
 ## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +
