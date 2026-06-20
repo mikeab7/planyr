@@ -30,10 +30,11 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // `toPush` = ids the cloud is missing, has an OLDER copy of, or now has LESS content than
 // the merged result — re-push so a building kept from the local side actually reaches the
 // cloud instead of being stranded on one device.
-// (Trade-off: a delete made in only one copy can reappear once if a stale copy still has
-// it — recoverable by deleting again; silently losing work is not. Per-item tombstones
-// are the fully-correct follow-up. The new local version history makes any surprise
-// recoverable in the meantime — see BACKLOG B126.)
+// (Delete handling: mergeSiteContent now honors per-item tombstones (`deletedIds`, B272), so a
+// deliberate delete that recorded a tombstone — e.g. removing a placed overlay — stays deleted
+// across this merge instead of being resurrected. Collections not yet wired to record a tombstone
+// keep the old recoverable "a delete can reappear once" trade-off; never silent data loss, and
+// the local version history makes any surprise recoverable meanwhile — see BACKLOG B126/B272.)
 export function mergePulledSites(existing, cloudModels) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }

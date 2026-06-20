@@ -759,6 +759,20 @@ const DEFAULT_SETTINGS = {
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
+// Eye / eye-off icons for the per-overlay visibility toggle (B273) — inline SVG so the
+// show/hide affordance renders crisply and identically everywhere (the standard layers-UI
+// pattern: Bluebeam/ArcGIS/Photoshop). currentColor lets the button tint them.
+const EyeIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const EyeOffIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
+  </svg>
+);
+
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
@@ -888,6 +902,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // places by hand (immutable backdrop — above the basemap, below markup/massing).
   // Distinct from the GIS map `overlays` (app-shared layer props, declared below).
   const [sheetOverlays, setSheetOverlays] = useState(() => restored?.sheetOverlays || []);
+  // Delete-tombstones (B272): ids of items deliberately removed (today: overlays). Persisted +
+  // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
+  const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
@@ -1252,10 +1269,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
   // Undo/redo history (snapshots of the editable state, stored by reference).
-  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [] });
+  const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
   const pastRef = useRef([]);
   const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays }; });
+  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds }; });
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -1285,11 +1302,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
-    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays })) return; // don't save a still-blank site
+    if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
     const t = setTimeout(() => {
-      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays });
+      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds });
       if (!ok) { setSaveStatus("unsaved"); return; }
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
@@ -1298,7 +1315,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
-  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays]);
+  }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125).
   const retryCloudSave = () => {
     if (!siteId) return;
@@ -1307,7 +1324,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
-  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays }; });
+  useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds }; });
   const persistOrDrop = () => {
     if (!siteId || deletedSelfRef.current) return; // B264: this plan was just deleted — don't resurrect it
     const s = liveRef.current;
@@ -1349,7 +1366,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const sig = (m) => [m.parcels, m.els, m.measures, m.callouts, m.markups, m.sheetOverlays].map((a) => (a && a.length) || 0).join("/");
       if (sig(merged) === sig(liveModel)) return; // the other tab added nothing new → leave our canvas alone
       setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
     };
     window.addEventListener("storage", onStore);
     return () => window.removeEventListener("storage", onStore);
@@ -1357,7 +1374,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const histKey = (s) =>
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0}`).join(";") || "no");
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
   const pushHistory = () => {
@@ -1367,7 +1384,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     touchHist();
   };
   const applySnapshot = (s) => {
-    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []);
+    setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => {
@@ -2925,6 +2942,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const o = sheetOverlays.find((x) => x.id === id);
     if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
     setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
+    setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B272: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
   };
   // Re-rasterize a different page (only while the source doc is still in memory).
@@ -4010,7 +4028,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!v) return;
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
-    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays);
+    setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -5567,6 +5585,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   above the basemap/underlay and below parcels/massing/markup; shown
                   even with the basemap on (the point is to overlay onto the aerial). */}
               {sheetOverlays.map((o) => {
+                if (o.visible === false) return null; // B273 — hidden overlays don't render on the map (still listed in the Overlay panel, with the eye toggle to bring them back)
                 const tl = f2p({ x: o.x, y: o.y });
                 const w = o.imgW * o.ftPerPx * view.ppf;
                 const h = o.imgH * o.ftPerPx * view.ppf;
@@ -6743,6 +6762,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "#fff" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
+                        <button style={{ ...chip, color: o.visible === false ? PAL.muted : PAL.ink, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "5px 7px" }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
                         <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
                         <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
                       </div>

@@ -22,6 +22,49 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
+     overlay lifecycle. Highest B# across BOTH files was B269, so minted **B270–B273** (the real next
+     free IDs). Deduped before filing — all four are net-new (no existing OPEN item covers them), but
+     each has prior art to REUSE, not duplicate:
+       • B270 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
+         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold via storage events):
+         those reconcile copies on the CLIENT by union; B270 adds a SERVER-side version guard that
+         REJECTS a stale write with a loud "reload before saving" prompt — the gate B134 #4 ("409
+         conflict") + #5 ("newest-wins, single source of truth") only gestured at. Build it reusable:
+         it's the foundation for the DEFERRED multi-user team-workspace feature.
+       • B271 (multi-tab warning + optional single-editor lock) — pairs with B270; B127 made two
+         same-browser tabs silently CONVERGE, B271 makes the situation VISIBLE (BroadcastChannel
+         banner) + optionally elects one editor (Web Locks). Same-browser only; cross-device = B270.
+       • B272 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" layer returns on
+         reload). Prime suspect = B126's documented union-merge trade-off ("a delete made in only one
+         copy can reappear once — per-item tombstones are the fully-correct future hardening"):
+         `mergeSiteContent` unions `sheetOverlays` by id, so a deleted overlay is RESURRECTED from any
+         copy that still has it. B272 is the concrete trigger to build those tombstones. Composes with
+         B270's version guard. (Distinct from B260, which was the overlay *scale* misread, now done.)
+       • B273 (overlay visibility toggle) — B131 already RESERVED the data shape ("forward-compatible
+         with a future per-overlay hide, `visible !== false`"); B273 implements the per-overlay show/
+         hide the print path already honours. Distinct from B272's delete (hide ≠ delete).
+     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **B272 + B273 fixed + shipped this
+     session** (moved to BACKLOG-DONE.md) — the owner-reported overlay bug and its companion toggle.
+     **B270 + B271 stay OPEN** as the larger data-integrity pair: B270 is a server-side change to the
+     critical save path (the B124/B126/B127/B134 incident surface) that needs its own careful, fully-
+     verified pass and is the foundation for the DEFERRED multi-user feature; B271 depends on it. Filed
+     in full here so the design + dedup survive; not started to avoid a rushed change to the data-safety
+     core in a session already shipping the overlay fixes. -->
+
+### B270 — Reject stale saves (optimistic concurrency on the save path) `[Platform / Persistence]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B270** — highest B# across both files was B269)*
+`[ ]` Repro: open the same project in two tabs/sessions; edit the same object (e.g. Building 1 footprint) in both; save from tab A, then save from tab B. Tab B **silently overwrites** tab A (last-write-wins), and a reload/interleave can produce an inconsistent object (dimension label, geometry, and sf drawn from different edit states). Expected: saves carry a version (or `updated_at`) guard; a save against a stale version is **rejected, not applied**, and surfaces a loud "this project was changed in another session — reload to get the latest before saving" prompt. No silent clobber.
+- **Impl:** add a `version` (integer) to the relevant Supabase tables (`public.sites`, `public.doc_reviews`); conditional update `WHERE id = ? AND version = ?` (or compare `updated_at`); **0 rows affected → return a typed conflict to the client**, which surfaces the loud reload prompt instead of applying; bump `version` on every successful write. Migration in the existing one-shot idempotent SQL pattern (client degrades to current behaviour until it's run, like `project_library.sql`).
+- **Reuse, don't duplicate:** the client already content-merges copies (B126 `mergeSiteContent` union-by-id; B127 two-tab fold) — those stay as the *local* reconciliation; B270 is the *server* gate on top. Build the version/conflict primitive **reusable** — it is the foundation for the **DEFERRED multi-user team-workspace** feature, not a one-off.
+> **Data-safety sensitive:** touches the exact save path behind the B124/B126/B127/B134 incidents. Implement on its own branch, keep the union-merge intact, and prove a stale write is *rejected* (not lost, not silently merged-away) before shipping. Coordinate with B272's tombstones (a delete is a write that must advance the version).
+
+### B271 — Multi-tab open warning + optional single-editor lock `[App Shell]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B271**)*
+`[ ]` Detect when the same Planyr origin/project is already open in another tab of the same browser via **BroadcastChannel** (or the **Web Locks API**). Show a non-blocking banner in the AppHeader: "Planyr is open in another tab — editing in multiple tabs can conflict." Optionally elect a single active-editor tab via Web Locks; non-leader tabs go read-only with a "make this tab active" affordance. Banner clears when the other tab closes. **Known limitation: same-browser only** — cross-device conflicts are caught by **B270**'s server-side guard, not this. Pairs with B270.
+> Builds on B127 (which made two same-browser tabs silently *converge*) by making the multi-tab state *visible*; it doesn't replace it. Depends on B270 for the cross-device half, so sequence it after B270.
+
+<!-- B272 (overlay delete doesn't persist) + B273 (overlay visibility toggle) were fixed +
+     shipped this session → moved to BACKLOG-DONE.md. B270 + B271 remain Open above. -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
      and re-used every ID in between (dock-zone build-out, the Scheduler backlog + its B261–B264 renumber,

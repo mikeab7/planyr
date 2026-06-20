@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V66 — Overlay delete persists across reload + per-overlay visibility toggle (B272 / B273) ✅ (self-verified headless — fully done; ⏳ optional signed-in cross-device confirm)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, seeded image overlay) · **Next check** — optional: signed-in, delete an overlay on device A and confirm it does NOT reappear on device B (the cloud-merge resurrection path; its merge logic is unit-tested, so low-risk).
+- **Steps:** Site Planner with a placed site-plan overlay → left rail **Overlay**. (B273) Click the **eye** on the overlay row → it leaves the map but stays listed; reload → still hidden; click the eye again → it returns. (B272) Click **✕ Remove** → it's gone; reload → it stays gone (does not come back).
+- **✅ Self-verified 2026-06-20 (`ui-audit/verify-overlay-delete-hide.mjs`, 13/13 checks, 0 dialogs):** **B273** — hide removes the overlay `<image>` from the canvas but keeps the panel row; the hidden state survives reload (record persists `visible:false`); show restores it. **B272** — delete removes it, survives reload, and the stored record carries the `deletedIds` tombstone (the mechanism that stops a cloud/2-tab merge from resurrecting it). Screens `overlay-1-shown.png` / `overlay-2-hidden.png` / `overlay-3-deleted.png`.
+- **Why fully done logged-out:** the bug + fix live in the shared Site Model + `mergeSiteContent` (auth-independent); the signed-in cloud path uses the SAME merge (unit-tested — B272 cases in `test/storage.test.js`). The ⏳ above is a belt-and-suspenders cross-device click, not a new mechanism.
+
 ### V65 — Doc Review (Markup) sheets render crisp on HiDPI, not blurry (B265) ✅ (self-verified headless — mechanism proven; ⏳ optional live retina eyeball)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, generated 1-page PDF, driven at deviceScaleFactor 1 and 2) · **Next check** — optional: open a real structural/general-notes sheet on planyr.io on a Retina/HiDPI display and confirm note text is sharp at fit-to-page.
 - **Steps:** Markup tab → open/drop a PDF → read note text at fit-to-page, then zoom in.
