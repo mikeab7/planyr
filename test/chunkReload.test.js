@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { shouldReloadAfterPreloadError, RELOAD_COOLDOWN_MS } from "../src/app/chunkReload.js";
 
-// B218 — stale chunk after deploy. The guard reloads once when a code-split chunk
+// B221 — stale chunk after deploy. The guard reloads once when a code-split chunk
 // fails to load (a new build replaced the hashed filename this tab still references),
 // but must never reload-loop when a chunk is genuinely missing.
-describe("chunk-reload guard decision (B218)", () => {
+describe("chunk-reload guard decision (B221)", () => {
   it("reloads when there was no prior auto-reload", () => {
     const now = 1_000_000;
     expect(shouldReloadAfterPreloadError(now, 0)).toBe(true);

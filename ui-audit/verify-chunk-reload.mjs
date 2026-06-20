@@ -1,4 +1,4 @@
-/* Runtime verification for B218 — stale-chunk-after-deploy auto-reload.
+/* Runtime verification for B221 — stale-chunk-after-deploy auto-reload.
  *
  * Drives the BUILT app (vite preview on :4173) in headless Chromium and exercises the
  * real `vite:preloadError` listener installed by src/app/chunkReload.js:

@@ -1,8 +1,8 @@
 /* AppHeader — shared two-row chrome for all workspaces.
  *
- * Row 1 (35px): hamburger | logo + wordmark | divider | nav links
+ * Row 1 (35px): logo + wordmark | divider | nav links
  *               || project name (center) ||
- *               save slot | settings | auth control
+ *               save slot | auth control
  *
  * Row 2 (36px): module tabs (Site · Schedule · Markup)
  *               || toolbar slot (workspace-specific tools) ||
@@ -24,7 +24,6 @@ import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 
 const CHROME = "#14110e";
 const LINE   = "#2e2a23";
-const MUTED  = "#9b9482";
 // Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on CHROME).
 // NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
 const TAB_IDLE = "#c9c3b4";
@@ -114,23 +113,6 @@ function ModuleTab({ m, isActive, onClick }) {
   );
 }
 
-const IconBtn = ({ label, children, onClick, style }) => (
-  <button
-    aria-label={label}
-    title={label}
-    onClick={onClick}
-    style={{
-      display: "flex", alignItems: "center", justifyContent: "center",
-      width: 28, height: 28, borderRadius: 6,
-      border: "none", background: "transparent",
-      color: MUTED, cursor: onClick ? "pointer" : "default",
-      ...style,
-    }}
-  >
-    {children}
-  </button>
-);
-
 export default function AppHeader({
   module = "site-planner",
   onSwitch,
@@ -202,15 +184,6 @@ export default function AppHeader({
 
         {/* Left zone */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, paddingLeft: 12, minWidth: 0 }}>
-          {/* Hamburger (placeholder — no behavior yet) */}
-          <IconBtn label="Menu">
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-              <rect x="1" y="3"    width="12" height="1.5" rx="0.7" />
-              <rect x="1" y="6.25" width="12" height="1.5" rx="0.7" />
-              <rect x="1" y="9.5"  width="12" height="1.5" rx="0.7" />
-            </svg>
-          </IconBtn>
-
           {/* Logo — secondary route to the Dashboard (the labeled crumb is primary, B192) */}
           <button
             onClick={onDashboard || undefined}
@@ -267,7 +240,7 @@ export default function AppHeader({
           {centerContent}
         </div>
 
-        {/* Right zone — save · settings · auth */}
+        {/* Right zone — save · auth */}
         <div
           style={{
             flex: 1, display: "flex", alignItems: "center",
@@ -275,12 +248,6 @@ export default function AppHeader({
           }}
         >
           {saveSlot}
-          <IconBtn label="Settings">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </IconBtn>
           {authControl}
         </div>
       </div>

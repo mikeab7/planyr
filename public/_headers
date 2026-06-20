@@ -1,4 +1,4 @@
-# Cloudflare Pages response headers — fixes "stale chunk after deploy" (B218).
+# Cloudflare Pages response headers — fixes "stale chunk after deploy" (B221).
 # Format docs: https://developers.cloudflare.com/pages/configuration/headers/
 # This file is copied verbatim from public/ to the deploy root (dist/_headers).
 

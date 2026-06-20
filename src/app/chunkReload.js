@@ -1,4 +1,4 @@
-/* Stale-chunk-after-deploy recovery (B218).
+/* Stale-chunk-after-deploy recovery (B221).
  *
  * The app is code-split: each workspace (Site Planner, Document Review, Sequence)
  * loads as its own content-hashed chunk, e.g. /assets/DocReview-a1b2c3.js — the hash
