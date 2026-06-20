@@ -2,7 +2,7 @@
  * carries a page-units→world similarity matrix M = {A,B,e,f}:
  *   world.x = A*x − B*y + e ;  world.y = B*x + A*y + f   (SVG matrix(A,B,−B,A,e,f))
  * Kept out of the component so the math is unit-testable on its own — the alignment
- * transform is subtle and a bad one silently flings a sheet off-canvas (B288/B289). */
+ * transform is subtle and a bad one silently flings a sheet off-canvas (B299/B300). */
 
 // page-units → world, and the inverse (world → page-units)
 export const fwd = (M, p) => ({ x: M.A * p.x - M.B * p.y + M.e, y: M.B * p.x + M.A * p.y + M.f });
@@ -27,7 +27,7 @@ export function sheetBBox(s) {
   return { minX: Math.min(...c.map((p) => p.x)), maxX: Math.max(...c.map((p) => p.x)), minY: Math.min(...c.map((p) => p.y)), maxY: Math.max(...c.map((p) => p.y)) };
 }
 
-// B288 — a similarity transform needs two DISTINCT points on each sheet. If the moving
+// B299 — a similarity transform needs two DISTINCT points on each sheet. If the moving
 // sheet's baseline (b1→b2) OR the reference baseline (A1→A2) collapses to ~0, solveM's
 // `hypot()||1` masks the zero and returns an extreme scale/offset that throws the sheet
 // far off-canvas at huge scale — silently, with no undo. Callers must reject the alignment
@@ -43,7 +43,7 @@ export const sheetContains = (s, w) => {
   return p.x >= 0 && p.x <= s.baseW && p.y >= 0 && p.y <= s.baseH;
 };
 
-// B289 — does a measurement (its world points) touch any sheet that isn't aligned yet? A
+// B300 — does a measurement (its world points) touch any sheet that isn't aligned yet? A
 // freshly added sheet drops at identity scale; measuring over it before Align silently
 // applies the composite (sheet-1) calibration, so the reading can be wrong when the
 // sheets' real scales differ. Only sheets explicitly flagged aligned:false count.

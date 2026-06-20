@@ -24,7 +24,7 @@ const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
-// Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B288/B289 alignment guards) lives
+// Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B299/B300 alignment guards) lives
 // in lib/stitchGeom.js so it can be unit-tested away from the component.
 
 const f0 = (n) => Math.round(n).toLocaleString();
@@ -120,7 +120,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
         // The first sheet IS the world frame (auto-aligned). Every later sheet drops at
         // identity scale offset to the right and must be Aligned before its measurements
-        // can be trusted — track that per sheet so we can flag + warn until it is (B289).
+        // can be trusted — track that per sheet so we can flag + warn until it is (B300).
         return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0 }];
       });
     } finally { setBusy(false); }
@@ -131,7 +131,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
 
   // Warn (don't block) when a measurement lands over a sheet that hasn't been aligned yet —
-  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B289).
+  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B300).
   const warnIfOverUnaligned = (pts) => {
     if (measureOverUnaligned(placed, pts)) setErr("Heads up: that measurement is over a sheet that isn’t aligned yet — Align it first, or its length/area may be wrong.");
   };
@@ -145,7 +145,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       else if (align.step === 2) setAlign({ ...align, step: 3, A2: w });
       else {
         const b2 = inv(sheet.M, w);
-        // B288 — reject a degenerate alignment (the two points on either sheet landed on
+        // B299 — reject a degenerate alignment (the two points on either sheet landed on
         // ~the same spot): solveM would divide by a ~0 baseline and fling the sheet far away
         // at huge scale, silently and with no undo. Leave the sheet untouched and restart
         // this alignment (mirrors the Calibrate "line too short" guard).
@@ -267,7 +267,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
         // First placed sheet is always the world frame; older saves predate the `aligned`
         // flag, so treat the rest as aligned (they were saved with a real transform) — only
-        // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B289)
+        // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B300)
         out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false });
         idx++;
       }
@@ -357,7 +357,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <g transform={G}>
               {placed.map((s) => {
                 const aligning = align && align.sheetId === s.id;
-                const unaligned = s.aligned === false && !aligning; // not yet aligned — flag it (B289)
+                const unaligned = s.aligned === false && !aligning; // not yet aligned — flag it (B300)
                 const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
                 if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
                   return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
@@ -406,7 +406,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
           {placed.map((s, i) => {
             const isAligning = align && align.sheetId === s.id;
-            const needsAlign = i > 0 && s.aligned === false; // not aligned yet (B289)
+            const needsAlign = i > 0 && s.aligned === false; // not aligned yet (B300)
             return (
             <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>

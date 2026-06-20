@@ -36,14 +36,14 @@ describe("stitcher geometry (doc-review)", () => {
     expect(bb).toMatchObject({ minX: 10, minY: 20, maxX: 210, maxY: 120 });
   });
 
-  // B288 — the degenerate baseline that the guard now rejects. WITHOUT the guard, solveM's
+  // B299 — the degenerate baseline that the guard now rejects. WITHOUT the guard, solveM's
   // `hypot()||1` masks the zero and returns a runaway transform that flings the sheet.
-  it("B288: solveM on a collapsed moving baseline yields a runaway scale (why the guard exists)", () => {
+  it("B299: solveM on a collapsed moving baseline yields a runaway scale (why the guard exists)", () => {
     const M = solveM({ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 100, y: 0 }); // coincident moving clicks
     expect(Math.hypot(M.A, M.B)).toBeGreaterThan(50); // garbage ×100 scale
   });
 
-  it("B288: alignBaselinesDegenerate flags a collapsed moving OR reference baseline; passes healthy ones", () => {
+  it("B299: alignBaselinesDegenerate flags a collapsed moving OR reference baseline; passes healthy ones", () => {
     const A1 = { x: 0, y: 0 }, A2 = { x: 100, y: 0 };
     expect(alignBaselinesDegenerate({ x: 0, y: 0 }, { x: 0, y: 0 }, A1, A2)).toBe(true);    // moving collapsed
     expect(alignBaselinesDegenerate({ x: 0, y: 0 }, { x: 100, y: 0 }, A1, A1)).toBe(true);  // reference collapsed
@@ -61,9 +61,9 @@ describe("stitcher geometry (doc-review)", () => {
     expect(sheetContains(offset, { x: 50, y: 50 })).toBe(false);
   });
 
-  // B289 — a measurement over a sheet still flagged aligned:false should warn; over the
+  // B300 — a measurement over a sheet still flagged aligned:false should warn; over the
   // aligned base it should not, and an aligned sheet (or no sheets) never warns.
-  it("B289: measureOverUnaligned warns only over a not-yet-aligned sheet", () => {
+  it("B300: measureOverUnaligned warns only over a not-yet-aligned sheet", () => {
     const base = { M: { ...ID }, baseW: 200, baseH: 100, aligned: true };
     const fresh = { M: { ...ID, e: 300 }, baseW: 200, baseH: 100, aligned: false };
     const placed = [base, fresh];

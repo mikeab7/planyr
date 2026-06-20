@@ -27,7 +27,7 @@ export function polyArea(pts) {
 /* Minimum points needed to COMMIT each measurement kind. Area + perimeter describe a
  * polygon, so they need ≥3 distinct points — a 2-point "area" is 0 sf (shoelace) and a
  * 2-point "perimeter" is a single segment drawn back on itself (half the loop it implies),
- * both meaningless in the takeoff. Distance is a 2-point segment; count is ≥1 marker. (B290) */
+ * both meaningless in the takeoff. Distance is a 2-point segment; count is ≥1 marker. (B301) */
 export const MIN_MEASURE_PTS = { distance: 2, perimeter: 3, area: 3, count: 1 };
 export const canCommitMeasure = (kind, n) => (n || 0) >= (MIN_MEASURE_PTS[kind] ?? 1);
 
@@ -56,15 +56,19 @@ export function measureValue(m, ftPerUnit) {
 }
 
 const f0 = (n) => Math.round(n).toLocaleString();
+// One-decimal feet for LINEAR measures (distance/perimeter): whole-foot rounding hid
+// sub-foot precision (a 150.6 ft line read "151 ft") and clashed with the 2-dp acres
+// shown for area — takeoff wants the extra digit. (B296)
+const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Human label for a measurement, e.g. "150.0 ft", "1.83 ac (79,715 sf)", "42".
+// Human label for a measurement, e.g. "150.6 ft", "1.83 ac (79,715 sf)", "42".
 export function measureLabel(m, ftPerUnit) {
   const v = measureValue(m, ftPerUnit);
   if (v.kind === "count") return `${v.count}`;
   if (!v.calibrated) return "set scale";
   if (v.kind === "area") return Number.isFinite(v.areaSf) ? `${f2(v.areaAc)} ac · ${f0(v.areaSf)} sf` : "—";
-  return Number.isFinite(v.lengthFt) ? `${f0(v.lengthFt)} ft` : "—";
+  return Number.isFinite(v.lengthFt) ? `${f1(v.lengthFt)} ft` : "—";
 }
 
 /* Roll up all measurements (across the supplied list) into yield-style totals,
