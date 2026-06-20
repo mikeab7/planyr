@@ -21,6 +21,56 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ---
 
 ## 🔲 Open
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
+     render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
+     and re-used every ID in between (dock-zone build-out, the Scheduler backlog + its B261–B264 renumber,
+     the B260 overlay-scale bug), so this batch landed at the real next-free IDs after B264: **B265**
+     (render fix, shipped) + **B266** (sheet labels) + **B267** (auto-calibrate) + **B268** (cross-check)
+     + **B269** (sample-fixture cleanup). Deduped — Markup-facing siblings of an EXISTING tranche, REUSE
+     not duplicate:
+       • B266 (sheet labels from title block) ↔ B180/B181 title-block read pass; page.getTextContent() + detectSheet() (B73).
+       • B267 (auto-calibrate from stated scale) ↔ B73's parseScaleNote/ftPerPointForScale (same feet-per-point unit as calByPage) — extend for architectural/ratio forms; ↔ B181.
+       • B268 (cross-check vs graphic scale bar) ↔ B182/B183 (geometry-beats-printed-scale + "flag disagreement, never silently choose" already locked); B181 captures the scale-bar facts.
+     **B265 (NEW-2, the PDF render-fidelity / devicePixelRatio bug) — FIXED, headless-verified (verify-new2-dpr.mjs, V65), SHIPPED via PR #205; full block in BACKLOG-DONE.md.**
+     **Corpus in hand (blocker lifted):** owner supplied two real sets 2026-06-20 (KG B1 ARCH IFP 19pp @36×24″; Jacintoport Fire-Sprinkler IFC 9pp @42×30″; PR #207 / branch mikeab7-patch-1) — both vector text, real architectural scales (1/16″=1′-0″, 1/4″=1′-0″) + "NOT TO SCALE" + standard plot sizes — so B266/B267/B268 are ready to build/verify. OCR fallback required for scanned sheets (owner). B269 tracks removing the sample binaries after the features are verified. -->
+
+### B266 — Sheet sidebar labels from the title block (real sheet # + name, not "Sheet N") `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20; renumbered **B266** as concurrent `main` consumed B246–B264; batch B265–B269)*
+`[ ]` In a multi-sheet set the left sidebar shows generic **"Sheet 1 / Sheet 2 / …"** (`DocReview.jsx`). Show instead the real **sheet ID + title** from that sheet's title block (e.g. "A7.10 — …"). The title block sits lower-right on these sets **but its position varies by firm — don't hardcode a region**; locate the block, then extract the sheet-ID + sheet-name fields. Prefer **embedded vector text** (`page.getTextContent()`). **No-auto-guess:** unparseable → fall back to "Sheet N" + flag unparsed, never fabricate. Long title on a hover/secondary line.
+- **Title-block localization is the crux (confirmed by the samples):** a naïve page-wide regex over the owner's KG B1 set caught **detail/grid refs** ("A195", "W21") alongside the real sheet number — so find the **title-block region first** (the authoritative sheet # lives there), don't scan the whole page. Reuse the browser-only, in-Markup sibling of **B180/B181**'s title-block read pass (shared helper the filing index also calls); `detectSheet()` (B73) corroborates plot size; heavy parse in a **Web Worker**.
+- **OCR is REQUIRED, not optional (owner, 2026-06-20):** must also read **scanned/raster PDFs with no embedded text** — `getTextContent()` first, **OCR fallback** (Tesseract.js in a Web Worker / server-side) when empty/sparse. Don't assume vector. Shared OCR path with **B267**.
+> **Ready to build (corpus in hand: KG B1 ARCH 19pp + Jacintoport FS 9pp).** Largest of the three — the variable-position title-block locator is the real work. NEW-2/B265 (render fidelity) shipped this session.
+
+### B267 — Auto-calibrate a sheet from its stated scale callout `[Doc Review / Markup]` (feature)  *(arrived as "NEW-3" 2026-06-20; renumbered **B267**; batch B265–B269)*
+`[ ]` Detect a stated-scale callout and **auto-set that sheet's calibration**, replacing the **"Sheet N not calibrated — use Calibrate"** prompt (`DocReview.jsx`) when confidently found. **Per-sheet** (a set mixes scales; a sheet with no graphic scale stays uncalibrated, **never inherits a neighbour's**). **"NOT TO SCALE"/"AS NOTED"/unparseable → leave uncalibrated and say so explicitly** (*not present* ≠ *couldn't parse*).
+- **Confirmed on the owner's real sheets (2026-06-20):** KG B1 carries **architectural fractional** scales as text — **1/16″=1′-0″**, **1/4″=1′-0″** — and Jacintoport carries **"SCALE: NOT TO SCALE"**. Build: extend **`parseScaleNote`** (`overlayScale.js`, B73 — today only engineer's "1″=100′") for **architectural fractional** ("1/4″=1′-0″"→4 ft/in) + **ratio** ("1:200"→16.67), map "NOT TO SCALE"/"AS NOTED"→null; then `getTextContent()` → parse → `calByPage[page] = ftPerPointForScale(...)`. ⚠ architectural ft/in fall **below** the parser's 10–1000 floor — **add patterns with their own range, don't loosen the civil one** (it also feeds the Site Planner overlay). NB: main's 2026-06-20 overlayScale change (B260's viewport guard) is adjacent — re-read before extending.
+- **OCR is REQUIRED (owner, 2026-06-20):** the callout must also read on **scanned/raster sheets** — embedded-text-first, OCR fallback (shared with B266). A scanned half-size copy is where the stated scale is least trustworthy → leans harder on **B268**.
+- **Honesty:** gate auto-apply on `detectSheet()` (B73) matching a standard sheet size; **label it "from sheet scale — verify"**, distinct from a user-confirmed calibration.
+> **Ready to build (most tractable; corpus in hand).** Ship with **B268** (the geometry cross-check that catches a non-1:1 plot), or as a first-cut suggestion-only behind `detectSheet`. Co-designs with B181 / B182 / B183.
+
+### B268 — Independent scale cross-check against on-sheet geometry (verify the stated scale) `[Doc Review / Markup]` (feature) — depends on B267  *(arrived as "NEW-4" 2026-06-20; renumbered **B268**; batch B265–B269)*
+`[ ]` After B267 sets a scale from text, **independently check** it by measuring a known on-sheet reference — primarily the **graphic scale bar** (the printed ruler), which survives plotting/resizing where stated-scale text doesn't. Agree within tolerance → **"verified"**; disagree → **surface loudly, make the user choose — never silently pick one** (silent wrong-calibration is crash-severity; it poisons every downstream takeoff). No scale bar → report **"no reference found"**, don't fail.
+- **Decision recorded (owner's lean, matches the locked principle):** on disagreement **default to the scale bar (geometry) but flag it loudly**, one-click override to the stated scale — *not* a silent choice. Matches **B182** ("geometry beats printed scale") + **B183** ("flag disagreement as a distinct state, never silently average/choose"). Flip to "always force a manual pick" if preferred.
+- **Reuse:** **B183** already shipped the cross-check *primitives* for the Site Planner cascade; this is the **Markup-canvas application** to scale-bar-vs-stated-scale. **B181** captures the scale-bar facts. The owner's sets also carry **labeled dimensions** ("38′-7 3/4″") — a second independent reference.
+> **Ready to build (largest of the three).** Needs **graphic-scale-bar detection/measurement** (locate the printed ruler on the raster + read its annotated length — light CV), now testable on the owner's sets; depends on B267; ships *with* the loud-surface UI.
+
+### B269 — Remove the uploaded sample drawing PDFs from GitHub (test fixtures, not for `main`) `[Doc Review / repo hygiene]` (task)  *(owner-requested 2026-06-20; renumbered **B269**; batch B265–B269)*
+`[ ]` The owner uploaded two real construction sets as build/test fixtures — **"2025.06.30 KG B1 - ARCH IFP REDLINE.pdf"** (6.2 MB) + **"Jacintoport - Fire Sprinkler IFC.pdf"** (6.4 MB) — on branch **`mikeab7-patch-1`** (PR **#207**). Needed to build/verify **B266/B267/B268**, but **NOT for merging into `main`** (12 MB+ of binaries would bloat the repo history permanently). **Do NOT merge PR #207.**
+- **Disposition:** keep the fixtures reachable until B266/B267/B268 are verified against them, **then close PR #207 + delete the `mikeab7-patch-1` branch** (or relocate fixtures to the private Supabase `doc-review-files` bucket). The owner plans to drop **more** sample files on the same branch for filing-workflow practice — same disposition.
+> Tracked explicitly so the big binaries don't silently ride into `main` (owner ask).
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — the "deliberate Group" tranche for the Site
+     Planner. Minted **B261–B264** (highest B# across both files was B246, so these are the real next free
+     IDs). Deduped before filing: no prior OPEN item covers a Group tool / snap-alignment-only / snap-pref-
+     stickiness / per-plan delete. The relevant prior art is the DONE **B114** (Shift-drag snap+bond + the
+     S-key snap toggle) — B261 replaces its *bonding* half with an explicit Group, B262 strips the bond so
+     snap only aligns, and B263 fixes the snap pref's global stickiness; B114's toggle + Alt-bypass survive.
+     The owner-mentioned "earlier split-snap item" was that B114 family (done), not a separate open item.
+     The still-open, owner-gated **B115** (keyboard-shortcuts pass) referenced the now-removed ⇧-drag bond
+     gesture; its in-app shortcut table was updated here (B115 itself stays open for the deliberate remap
+     pass). All four filed AND shipped this same session on branch `claude/eager-keller-1ueisx` — full
+     blocks moved to BACKLOG-DONE.md; self-verified headless (ui-audit/verify-b261-b264.mjs, 14/14, 0 page
+     errors), VERIFICATION **V64**. lint 0 · 537 tests · build green. -->
 <!-- 2026-06-20: owner dropped his old "Planar — Engineering Backlog" (2026-05-26 code review, re-verified
      2026-06-19) for the **Scheduler** app (`public/sequence/index.html`), said "log this" + "don't worry
      about the email feature." Filed under `[Scheduler]` as B247–B259. The safe wins (B247–B253) were filed
