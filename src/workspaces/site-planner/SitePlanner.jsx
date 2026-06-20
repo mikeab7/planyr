@@ -82,6 +82,16 @@ const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
+// B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
+// FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
+// footprint shrinks below them (zoomed out) the cluster grows larger than the
+// footprint and spills past the edges into an unreadable pile. Each button is gated on
+// the on-screen size of the wall it hangs off, in PIXELS (resolution-independent — real
+// building sizes vary too much for one zoom number): a wall's inset +/− only shows when
+// its PERPENDICULAR on-screen dimension clears the cluster. ~22px inset + 9px radius on
+// each side means opposite buttons overlap below ~68px; this adds a small legibility
+// margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
+const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
 const PAL = {
@@ -845,6 +855,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [view, setView] = useState({ ppf: 0.35, offX: 60, offY: 60 });
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [cursor, setCursor] = useState(null);   // {x,y} feet
+  const [hoverElId, setHoverElId] = useState(null); // B226: building under the cursor (select mode, nothing selected) → preview its feature-add buttons
 
   // parcel drafting + draw drafting + measure
   const [draftPoly, setDraftPoly] = useState(null);  // array of feet pts
@@ -2261,7 +2272,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
     const d = drag.current;
-    if (!d) return;
+    if (!d) {
+      // B226: when nothing is selected, preview the hovered building's feature-add
+      // buttons so they appear on the ONE building under the cursor (never all at
+      // once). Position-based (not SVG enter/leave) because the buttons sit INSIDE
+      // the footprint — moving onto one keeps the pointer over the building, so the
+      // hover never flickers off. Only runs while idle in select mode with no
+      // selection (selection otherwise drives the buttons), so there's no churn.
+      if (tool === "select" && !sel) {
+        const hovered = [...els].sort(byZ).reverse().find((x) => {
+          if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) return false;
+          const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
+          return fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh;
+        });
+        const hid = hovered ? hovered.id : null;
+        if (hid !== hoverElId) setHoverElId(hid);
+      } else if (hoverElId) setHoverElId(null);
+      return;
+    }
     const snapOn = settings.snap && !altSnapOffRef.current; // effective snap for this frame: global toggle minus a held-Alt bypass
 
     if (d.mode === "acChip") { // NEW-3: drag a parcel's acreage chip (offset stored in feet)
@@ -4256,13 +4284,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {!exists && <line x1={pos.x} y1={pos.y - r * 0.5} x2={pos.x} y2={pos.y + r * 0.5} stroke="#ffffff" strokeWidth={1.75} />}
     </g>
   );
+  // B225 + B226: the feature-add buttons render for exactly ONE building — the selected
+  // one, or (when nothing is selected) the one under the cursor — never every building
+  // in view. featActiveId is that building; each node group below ALSO gates each button
+  // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
+  // they can cluster/spill when zoomed out.
+  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
   const sideAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (el && el.locked) return null;
     // dog-ears / bump-outs are building elements but are NOT standalone buildings —
     // they don't get their own dock / sidewalk / trailer handles.
     if (!el || el.type !== "building" || el.points || el.dogEar) return null;
+    const wpx = Math.abs(el.w) * view.ppf, hpx = Math.abs(el.h) * view.ppf; // B225: rendered footprint, px
     const { dockSides } = dockSidesOf(el);
     const kids = els.filter((x) => x.attachedTo === el.id);
     const cpx = f2p({ x: el.cx, y: el.cy });
@@ -4270,6 +4305,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <g>
         {sides.map(([name, nx, ny]) => {
+          // B225: an inset +/− needs its wall's PERPENDICULAR on-screen size to clear the
+          // cluster; below that it piles onto the opposite wall's button. A long/narrow
+          // footprint thus keeps its long-side buttons and drops only the cramped short-end
+          // ones — overlap handled without a collapse menu.
+          if ((ny !== 0 ? hpx : wpx) < FEAT_BTN_MIN_PX) return null;
           const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
           const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
           let ux = ms.x - cpx.x, uy = ms.y - cpx.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
@@ -4289,8 +4329,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             sw ? () => addParkingRowSide(el, name) : () => addSidewalkSide(el, name),
             park ? () => removeFeature(park.id) : null);
         })}
-        {/* dog-ear bump-outs at each corner of every dock side */}
-        {dockSides.flatMap((name) => {
+        {/* dog-ear bump-outs at each corner of every dock side — need room on BOTH axes (B225) */}
+        {Math.min(wpx, hpx) >= FEAT_BTN_MIN_PX && dockSides.flatMap((name) => {
           const [nx, ny] = SIDE_N[name];
           const alongIsX = ny !== 0;
           return [1, -1].map((sign) => {
@@ -4310,9 +4350,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+" / "−" on a selected TRUCK COURT, on its far (outer) edge — where trailer
   // parking backs in. Adds 50′ striped trailer parking, or removes it if present.
   const courtAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || !el.truckCourt) return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const existing = els.find((x) => x.forCourt === el.id);
     const [nx, ny] = SIDE_N[el.truckCourt.side];
     const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
@@ -4388,9 +4429,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // "+ / −" on a selected car-parking field's depth edge: add or remove a row +
   // drive aisle. Keeps stacking, so you can build a multi-aisle lot.
   const parkingAddNodes = (() => {
-    if (sel?.kind !== "el" || tool !== "select") return null;
-    const el = els.find((x) => x.id === sel.id);
+    if (tool !== "select" || !featActiveId) return null;
+    const el = els.find((x) => x.id === featActiveId);
     if (!el || el.locked || el.points || el.type !== "parking") return null;
+    if (Math.min(Math.abs(el.w), Math.abs(el.h)) * view.ppf < FEAT_BTN_MIN_PX) return null; // B225: hide before it clusters
     const o = rot2(0, el.h / 2, el.rot);              // +local-y depth edge midpoint
     const ms = f2p({ x: el.cx + o.x, y: el.cy + o.y });
     const cpx = f2p({ x: el.cx, y: el.cy });
