@@ -35,13 +35,15 @@ export function supabaseIdStore({ supabaseUrl, anonKey, token, fetchImpl = fetch
         return (rows && rows[0] && rows[0].planyr_key) || null;
       } catch (_) { return null; }
     },
-    async set(planyrKey, driveId) {
+    async set(planyrKey, driveId, meta = {}) {
       // Upsert on the (user_id, planyr_key) primary key; user_id defaults to auth.uid().
       try {
+        const row = { planyr_key: planyrKey, drive_id: driveId, updated_at: new Date().toISOString() };
+        if (meta && meta.name) row.name = meta.name; // store the display name (Cowork: was NULL)
         const res = await fetchImpl(REST(supabaseUrl), {
           method: "POST",
           headers: { ...headers, prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify({ planyr_key: planyrKey, drive_id: driveId }),
+          body: JSON.stringify(row),
         });
         if (!res.ok) console.warn(`drive_files set ${res.status} (mapping not persisted; Drive bytes are saved)`);
       } catch (e) { console.warn("drive_files set failed:", e && e.message); }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES,
+  detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES, chooseOverlayScale,
 } from "../src/workspaces/site-planner/lib/overlayScale.js";
 
 const IN = 72; // points per inch
@@ -57,5 +57,52 @@ describe("overlay scale — scale↔size conversion (B73)", () => {
   it("exposes the common civil scales", () => {
     expect(COMMON_SCALES).toContain(100);
     expect(COMMON_SCALES).toContain(20);
+  });
+});
+
+describe("overlay scale — import sizing guard (chooseOverlayScale)", () => {
+  const IMGW = 36 * IN; // 2592 pt = ARCH D width
+  // The user is looking at a ~1500-ft-wide area on a 1000px canvas.
+  const view = { imgW: IMGW, ppf: 1000 / 1500, screenW: 1000 };
+
+  it("trusts a correct plan scale (1\"=30') — sheet lands ~the site, on-screen", () => {
+    const r = chooseOverlayScale({ detectedScale: 30, sheetStd: true, ...view });
+    expect(r.trusted).toBe(true);
+    expect(r.reason).toBe("ok");
+    expect(r.ftPerPx).toBeCloseTo(ftPerPointForScale(30), 9);
+    // ~1080 ft wide drawing (36" * 30'), a hair under the 1500-ft view
+    expect(IMGW * r.ftPerPx).toBeCloseTo(1080, 6);
+  });
+
+  it("distrusts a misread vicinity/key-map scale (1\"=600') — would blanket the map", () => {
+    const r = chooseOverlayScale({ detectedScale: 600, sheetStd: true, ...view });
+    expect(r.trusted).toBe(false);
+    expect(r.reason).toBe("too-big"); // 600' would be ~20× the view
+    // falls back to ~60% of the viewport width, NOT the giant scale
+    expect(IMGW * r.ftPerPx).toBeCloseTo(0.6 * 1500, 6);
+  });
+
+  it("falls back to fit when there's no scale note or a non-standard sheet", () => {
+    expect(chooseOverlayScale({ detectedScale: null, sheetStd: true, ...view }).reason).toBe("no-scale");
+    expect(chooseOverlayScale({ detectedScale: 30, sheetStd: false, ...view }).reason).toBe("no-scale");
+    // both still return a usable, view-fitted size
+    expect(chooseOverlayScale({ detectedScale: null, sheetStd: false, ...view }).ftPerPx).toBeGreaterThan(0);
+  });
+
+  it("distrusts a scale that would render as a tiny speck (deeply zoomed out)", () => {
+    const r = chooseOverlayScale({ detectedScale: 30, sheetStd: true, imgW: IMGW, ppf: 0.01, screenW: 1000 });
+    expect(r.trusted).toBe(false);
+    expect(r.reason).toBe("too-small");
+  });
+
+  it("the fit fallback sizes the sheet to ~60% of the viewport width on screen", () => {
+    const r = chooseOverlayScale({ detectedScale: 600, sheetStd: true, ...view });
+    expect(IMGW * r.ftPerPx * view.ppf).toBeCloseTo(0.6 * view.screenW, 3); // ~600px of a 1000px canvas
+  });
+
+  it("is defensive about bad inputs (no NaN/zero-divide)", () => {
+    const r = chooseOverlayScale({ detectedScale: 30, sheetStd: true, imgW: 0, ppf: 0, screenW: 1000 });
+    expect(Number.isFinite(r.ftPerPx)).toBe(true);
+    expect(r.ftPerPx).toBeGreaterThan(0);
   });
 });

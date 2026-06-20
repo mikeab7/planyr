@@ -2839,6 +2839,7 @@ function App() {
   // re-evaluate on tab focus and roll over at midnight — no reload needed. NOW is module-scope
   // (read by computeDisplayHealth); bumping todayTick forces the re-render that re-reads it.
   const [, setTodayTick] = useState(0);
+  const [, setHealthTick] = useState(0); // bumped after rebuildHEALTH so a new/renamed status renders this beat, not next (B5/M3)
   useEffect(() => {
     const refresh = () => { const t = fdLocal(new Date()); if (t !== NOW) { NOW = t; setTodayTick(x => x + 1); } };
     const onVis = () => { if (!document.hidden) refresh(); };
@@ -2939,13 +2940,14 @@ function App() {
   const projIdRef    = useRef(null);
   const prevHolKey   = useRef(null);
   const skipHolRecasc = useRef(false);
+  const prevHealthKey = useRef(null); // serialized customHealth+labelOverrides; detects real status-config changes (B5/M3)
 
   // Capture a snapshot AFTER every data change, except undo/redo operations
   useEffect(() => {
     if (!data) return;
     if (isUndoing.current) { isUndoing.current = false; prevData.current = data; return; }
     if (prevData.current !== null) {
-      history.current = [...history.current.slice(-49), prevData.current];
+      history.current = [...history.current.slice(-19), prevData.current]; // cap undo at 20 deep snapshots (was 50) to bound memory on large boards
       future.current = []; // any new edit invalidates the redo stack
     }
     prevData.current = data;
@@ -3075,6 +3077,13 @@ function App() {
     HOLIDAY_SET = buildHolidaySet(data.settings?.holidays || DEFAULT_HOLIDAYS);
     ROW_H = Math.min(34, Math.max(20, data.settings?.rowHeight || 24));
     rebuildHEALTH(data.settings?.customHealth || [], data.settings?.healthLabelOverrides || {});
+    // rebuildHEALTH mutates the module-scope HEALTH/HK/HDARK globals but doesn't itself
+    // re-render; without this nudge a just-added/renamed status shows up one beat late
+    // (you'd have to click around). Force one render when the status config actually
+    // changed — keyed so it fires only on real changes, never looping (B5/M3).
+    const healthKey = JSON.stringify([data.settings?.customHealth, data.settings?.healthLabelOverrides]);
+    if (prevHealthKey.current !== null && healthKey !== prevHealthKey.current) setHealthTick(x => x + 1);
+    prevHealthKey.current = healthKey;
     // Recascade all task dates when holidays change
     const holKey = JSON.stringify(data.settings?.holidays);
     if (!skipHolRecasc.current && holKey !== prevHolKey.current && prevHolKey.current !== null) {
@@ -4424,7 +4433,19 @@ function App() {
       }
       // Snapshot the current state with a pre-import label BEFORE applying
       if (data) { try { window.storage.set("hs-v1", JSON.stringify(data), { label: "pre-import", skipSanity: true }); } catch {} }
-      setData(parsed);
+      // Route the import through the SAME normalization + cascade pipeline the cloud/seed
+      // load path uses, so old or partial backups get migrated (predecessor format, holidays,
+      // ids, contacts) and dates are recomputed — instead of being dropped in raw (B4).
+      let d = ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(parsed))));
+      d._pinnedClean = true;
+      HOLIDAY_SET = buildHolidaySet(d.settings?.holidays || DEFAULT_HOLIDAYS);
+      Object.keys(d.projects).forEach(pid => {
+        let tasks = d.projects[pid].tasks.map(({_pinStart, __wasDirectEdit, ...t}) => t);
+        tasks = cascadeDates(tasks);
+        tasks = rollupParentDates(tasks);
+        d.projects[pid] = {...d.projects[pid], tasks};
+      });
+      setData(d);
       showToast(`Imported ${projCount} project${projCount===1?"":"s"}, ${taskCount} task${taskCount===1?"":"s"}.`, { type: "success", duration: 3000 });
     };
     r.readAsText(f);
@@ -4432,8 +4453,8 @@ function App() {
   };
   const exportHTML = () => {
     const rows = Object.values(data.projects).map(p =>
-      `<h2>${p.name}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
-      p.tasks.map(t => `<tr><td>${t.id}</td><td>${t.name}</td><td>${fmtD(t.start)}</td><td>${fmtD(t.end)}</td><td>${t.duration}d</td><td style="color:${HEALTH[t.health].dot}">${HEALTH[t.health].label}</td><td>${t.percentComplete}%</td><td>${t.responsibleParty||"—"}</td></tr>`).join("") +
+      `<h2>${escapeHtml(p.name)}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
+      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${t.duration}d</td><td style="color:${h.dot}">${escapeHtml(h.label)}</td><td>${t.percentComplete}%</td><td>${escapeHtml(t.responsibleParty||"—")}</td></tr>`; }).join("") +
       `</table>`).join("");
     dl(`<!DOCTYPE html><html><head><title>planar</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>Hillwood Schedule — ${new Date().toLocaleDateString()}</h1>${rows}</body></html>`,
       "hillwood-schedule-export.html", "text/html");
@@ -5368,8 +5389,16 @@ function StatusHeaderDropdown({data, setData}) {
   };
 
   const removeOption = k => {
-    setData(d => ({...d, settings:{...d.settings,
-      customHealth:(d.settings?.customHealth||[]).filter(c=>c.k!==k)}}));
+    setData(d => {
+      // Reassign any task still carrying the deleted status back to "Not Started" (gray)
+      // BEFORE removing it, so no view dereferences a now-missing HEALTH key and crashes (B1).
+      const projects = {};
+      Object.entries(d.projects || {}).forEach(([pid, p]) => {
+        projects[pid] = {...p, tasks: (p.tasks || []).map(t => t.health === k ? {...t, health: "gray"} : t)};
+      });
+      return {...d, projects, settings:{...d.settings,
+        customHealth:(d.settings?.customHealth||[]).filter(c=>c.k!==k)}};
+    });
   };
 
   const OptionIcon = ({hk}) => {
@@ -6697,7 +6726,7 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
       return (
         <span style={{...s,gap:6}}>
           <span style={{width:50,height:3,background:"#e2e8f0",borderRadius:2,overflow:"hidden",flexShrink:0}}>
-            <span style={{width:`${task.percentComplete}%`,height:"100%",background:HEALTH[task.health].dot,display:"block"}} />
+            <span style={{width:`${task.percentComplete}%`,height:"100%",background:(HEALTH[task.health]||HEALTH.gray).dot,display:"block"}} />
           </span>
           <span style={{...mono,fontSize:11,color:"var(--mut)"}}>{task.percentComplete}%</span>
         </span>
@@ -8776,6 +8805,40 @@ ${forPreview?`<script>(function(){document.addEventListener("click",function(e){
 }
 
 // ── PDFExportModal ────────────────────────────────────────
+// PDFExportModal presentational helpers, hoisted to module scope so React keeps a STABLE
+// component identity across renders. Defined inside the modal, each render minted a fresh
+// identity, so React unmounted the live <input> and mounted a new one — stealing focus
+// after every keystroke in the Header/Cover fields (B3/M4). Props-only (no closure over
+// modal state); SHdr deliberately stays inside the modal because it closes over setSecOpen.
+const Toggle = ({on,onChange}) => (
+  <span onClick={()=>onChange(!on)} style={{width:28,height:15,borderRadius:8,background:on?"var(--amber)":"var(--bd2)",
+    display:"inline-flex",alignItems:"center",cursor:"pointer",flexShrink:0,transition:"background .15s",padding:"0 2px"}}>
+    <span style={{width:11,height:11,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",
+      transform:on?"translateX(13px)":"translateX(0)",transition:"transform .15s",flexShrink:0}} />
+  </span>
+);
+const SegBtn = ({options,value,onChange,small}) => (
+  <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:4,overflow:"hidden",flexShrink:0}}>
+    {options.map(o=>(
+      <span key={o.v} onClick={()=>onChange(o.v)} style={{padding:small?"2px 7px":"3px 9px",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",
+        background:value===o.v?"var(--amber)":"transparent",color:value===o.v?"#fff":"var(--mut)",
+        transition:"background .12s,color .12s",fontWeight:value===o.v?500:400}}>{o.l}</span>
+    ))}
+  </div>
+);
+const Field = ({value,onChange,placeholder}) => (
+  <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""}
+    style={{width:"100%",background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:3,
+      padding:"3px 7px",fontSize:11,color:"var(--txt)",fontFamily:"inherit",outline:"none"}}
+    onFocus={e=>e.target.style.borderColor="var(--blue)"}
+    onBlur={e=>e.target.style.borderColor="var(--bd2)"} />
+);
+const Row = ({label,children}) => (
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",gap:8,minHeight:26}}>
+    <span style={{fontSize:11,color:"var(--txt)",flexShrink:0}}>{label}</span>
+    {children}
+  </div>
+);
 function PDFExportModal({data, activePid, onClose}) {
   const projs = Object.values(data.projects);
   const now = new Date();
@@ -8920,29 +8983,7 @@ function PDFExportModal({data, activePid, onClose}) {
     w.document.write(html); w.document.close();
   };
 
-  const Toggle = ({on,onChange}) => (
-    <span onClick={()=>onChange(!on)} style={{width:28,height:15,borderRadius:8,background:on?"var(--amber)":"var(--bd2)",
-      display:"inline-flex",alignItems:"center",cursor:"pointer",flexShrink:0,transition:"background .15s",padding:"0 2px"}}>
-      <span style={{width:11,height:11,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",
-        transform:on?"translateX(13px)":"translateX(0)",transition:"transform .15s",flexShrink:0}} />
-    </span>
-  );
-  const SegBtn = ({options,value,onChange,small}) => (
-    <div style={{display:"flex",border:"1px solid var(--bd2)",borderRadius:4,overflow:"hidden",flexShrink:0}}>
-      {options.map(o=>(
-        <span key={o.v} onClick={()=>onChange(o.v)} style={{padding:small?"2px 7px":"3px 9px",fontSize:10,cursor:"pointer",whiteSpace:"nowrap",
-          background:value===o.v?"var(--amber)":"transparent",color:value===o.v?"#fff":"var(--mut)",
-          transition:"background .12s,color .12s",fontWeight:value===o.v?500:400}}>{o.l}</span>
-      ))}
-    </div>
-  );
-  const Field = ({value,onChange,placeholder}) => (
-    <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""}
-      style={{width:"100%",background:"var(--bg)",border:"1px solid var(--bd2)",borderRadius:3,
-        padding:"3px 7px",fontSize:11,color:"var(--txt)",fontFamily:"inherit",outline:"none"}}
-      onFocus={e=>e.target.style.borderColor="var(--blue)"}
-      onBlur={e=>e.target.style.borderColor="var(--bd2)"} />
-  );
+  // Toggle / SegBtn / Field / Row hoisted to module scope (above PDFExportModal) — B3/M4.
   const SHdr = ({title,k}) => (
     <div onClick={k ? ()=>setSecOpen(s=>({...s,[k]:!(s[k]!==false)})) : undefined}
       style={{display:"flex",alignItems:"center",justifyContent:"space-between",
@@ -8954,12 +8995,6 @@ function PDFExportModal({data, activePid, onClose}) {
       {title}
       {k && <span style={{fontSize:10,color:"var(--mut)",transform:secIsOpen(k)?"rotate(180deg)":"rotate(0deg)",
         transition:"transform .2s",display:"inline-block",lineHeight:1}}>▾</span>}
-    </div>
-  );
-  const Row = ({label,children}) => (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",gap:8,minHeight:26}}>
-      <span style={{fontSize:11,color:"var(--txt)",flexShrink:0}}>{label}</span>
-      {children}
     </div>
   );
 
