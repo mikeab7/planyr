@@ -5,7 +5,7 @@
  *   • explicit fractional feet         1/2 ft | 12 1/2 ft | 3/4'
  *   • feet-and-inches                  38'-7" | 38' 7 3/4" | 38' | 7" | 7 3/4"
  *
- * REJECTS (never silently coerces — this is the whole point, B301):
+ * REJECTS (never silently coerces — this is the whole point, B304):
  *   • scale ratios                     1:240 | 1/4"=1'
  *   • bare fractions (ambiguous)       1/8        ← used to parseFloat to 1
  *   • non-numeric junk                 abc

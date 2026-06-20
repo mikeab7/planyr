@@ -99,7 +99,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
-  const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B301 — no window.prompt)
+  const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const scaleRef = useRef(scale); scaleRef.current = scale; // live scale for the once-bound wheel handler
   const pendingAnchor = useRef(null); // { pageX, pageY, viewX, viewY } pinned across a zoom (B288/B290)
   const panRef = useRef(null);        // active pan drag { sx, sy, sl, st } (B289)
@@ -128,12 +128,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   }); // { id, name } | null
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
-  const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B303)
+  const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
 
   const ftPerUnit = calByPage[page] || 0;
   const pageMarks = markups.filter((m) => m.page === page);
 
-  /* ---- undo / redo (B300) ----
+  /* ---- undo / redo (B303) ----
    * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
    * mirroring the Site Planner's pushHistory pattern. pushHistory() is called BEFORE a real
    * mutation (add/delete/move a markup, edit a text note, apply a hand calibration); undo()
@@ -177,7 +177,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
   const canUndo = pastRef.current.length > 0;
   const canRedo = futureRef.current.length > 0;
-  // Mid-draw: step back the last placed vertex of a poly/count draft (B300 "poly-vertex
+  // Mid-draw: step back the last placed vertex of a poly/count draft (B303 "poly-vertex
   // placement"). Returns true if it consumed something so Ctrl-Z / Backspace fall through to
   // full undo / delete-selection only when there's no draft to trim.
   const removeLastVertex = () => {
@@ -185,7 +185,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setDraft((d) => { if (!d) return d; const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; });
     return true;
   };
-  // Navigate sheets (Prev/Next + keyboard, B303). Keeps the current zoom (matching the sheet
+  // Navigate sheets (Prev/Next + keyboard, B306). Keeps the current zoom (matching the sheet
   // list's click behaviour) and drops any in-progress draft/selection/inline entry.
   const goToPage = (n) => {
     const t = Math.max(1, Math.min(numPages || 1, n));
@@ -235,7 +235,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       setNumPages(pdf.numPages);
       setPage(1);
       setScale(0); // 0 = fit-to-width on next render
-      setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B300)
+      setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B303)
       // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
       // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
       // of the SAME file keeps them (its saved/auto cals still apply). (B267)
@@ -298,7 +298,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   useEffect(() => { render(); }, [render, numPages]);
 
-  // Keep the current sheet scrolled into view in the (long) sheet list as you page (B303).
+  // Keep the current sheet scrolled into view in the (long) sheet list as you page (B306).
   useEffect(() => { activeSheetRef.current?.scrollIntoView({ block: "nearest" }); }, [page]);
 
   // Free PDF.js resources on unmount: cancel any in-flight render + destroy the doc (B39/B40).
@@ -513,7 +513,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const onDown = (e) => {
     if (!dims) return;
-    if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B301)
+    if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     if (panMode()) { // hand tool / hold-Space: drag the scroll viewport (B289)
       const wrap = wrapRef.current; if (!wrap) return;
       panRef.current = { sx: e.clientX, sy: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop };
@@ -570,7 +570,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B293) + one undo frame (B300)
+      if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B293) + one undo frame (B303)
         const p = toPage(e), dx = p.x - d.start.x, dy = p.y - d.start.y;
         pushHistory();
         setMarkups((a) => a.map((m) => (m.id === d.id ? { ...m, pts: d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m)));
@@ -615,7 +615,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   // Two points placed → open an INLINE entry box at the line's midpoint (no window.prompt —
-  // owner "no dialog boxes" rule). Commit/validation happens in commitCalibrate (B301).
+  // owner "no dialog boxes" rule). Commit/validation happens in commitCalibrate (B304).
   const finishCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Calibration line too short — zoom in and try again."); return; }
@@ -623,7 +623,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * scale, y: ((pts[0].y + pts[1].y) / 2) * scale, value: "" });
   };
   // Validate the typed length and set the sheet's scale. Rejects ratios / bare fractions /
-  // junk with a clear message (parseFeet) instead of silently mis-calibrating (B301).
+  // junk with a clear message (parseFeet) instead of silently mis-calibrating (B304).
   const commitCalibrate = () => {
     if (!calInput) return;
     const r = parseFeet(calInput.value);
@@ -675,17 +675,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   onKeyRef.current = (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B300)
+    if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo
     if (mod) return; // leave other modified keys (copy/paste/etc.) to the browser
     if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null); }
     else if (e.key === "Delete" || e.key === "Backspace") {
-      if (removeLastVertex()) { e.preventDefault(); return; }            // trim a draft vertex first (B300)
+      if (removeLastVertex()) { e.preventDefault(); return; }            // trim a draft vertex first (B303)
       if (sel) { e.preventDefault(); pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
     }
-    // Sheet paging (B303) — only when not mid-draft / mid-entry so arrows don't drop work.
+    // Sheet paging (B306) — only when not mid-draft / mid-entry so arrows don't drop work.
     else if (!draft && !calInput && (e.key === "ArrowLeft" || e.key === "PageUp")) { e.preventDefault(); goToPage(page - 1); }
     else if (!draft && !calInput && (e.key === "ArrowRight" || e.key === "PageDown")) { e.preventDefault(); goToPage(page + 1); }
   };
@@ -704,7 +704,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const f0 = (n) => Math.round(n).toLocaleString();
   const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
-  // + tightened padding for density on the single header row (B302).
+  // + tightened padding for density on the single header row (B305).
   const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
   const chromeBtn = (extra = {}) => ({ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, ...extra });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
@@ -733,12 +733,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const pts = m.pts.map(S);
       const closed = m.kind === "perimeter";
       const dd = (closed ? [...pts, pts[0]] : pts).map((q) => `${q.x},${q.y}`).join(" ");
-      const mid = midOfPath(pts, closed); // true arc-length midpoint, not a vertex (B304)
+      const mid = midOfPath(pts, closed); // true arc-length midpoint, not a vertex (B307)
       return <g key={m.id}><polyline points={dd} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />{pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill={stroke} />)}{lbl && labelAt(mid.x + 4, mid.y - 4, lbl, "#0e7490")}</g>;
     }
     if (m.kind === "area") {
       const pts = m.pts.map(S);
-      const c = centroidOf(pts); // area-weighted centroid, clamped inside concave shapes (B304)
+      const c = centroidOf(pts); // area-weighted centroid, clamped inside concave shapes (B307)
       return <g key={m.id}><polygon points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke={stroke} strokeWidth={selected ? 3 : 2} />{lbl && labelAt(c.x, c.y, lbl, "#0e7490")}</g>;
     }
     if (m.kind === "count") {
@@ -865,7 +865,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           {/* sheet list */}
           <div style={{ flex: "none", width: 116, background: "#fff", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            {/* Prev/Next pager (B303) — also ← / → and PageUp/PageDown on the keyboard */}
+            {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
               {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "#fff", color: on ? PAL.ink : "#cfc8ba" }); return (
                 <>
@@ -911,7 +911,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                   onBlur={() => closeEditor(true)} placeholder="Text note…"
                   style={{ position: "absolute", left: editing.pt.x * scale, top: editing.pt.y * scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color: "#b91c1c", minWidth: 90, zIndex: 5 }} />
               )}
-              {/* Inline Calibrate entry (B301) — replaces window.prompt; validates the typed length. */}
+              {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
                 <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

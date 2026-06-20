@@ -55,12 +55,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [cursor, setCursor] = useState(null);    // world cursor
   const [measures, setMeasures] = useState([]);  // {id,kind,pts:[world]}
   const [ftPerUnit, setFtPerUnit] = useState(0); // composite calibration (ft per world unit)
-  const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B301)
+  const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B304)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const drag = useRef(null);
 
-  /* ---- undo / redo (B300) — measures + the composite calibration ---- */
+  /* ---- undo / redo (B303) — measures + the composite calibration ---- */
   const editRef = useRef({ measures: [], ftPerUnit: 0 });
   useEffect(() => { editRef.current = { measures, ftPerUnit }; });
   const pastRef = useRef([]);
@@ -222,14 +222,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
 
   // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
-  // world midpoint maps to screen px via the current pan/zoom. (B301)
+  // world midpoint maps to screen px via the current pan/zoom. (B304)
   const doCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
     setErr("");
     setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.zoom + view.panX, y: ((pts[0].y + pts[1].y) / 2) * view.zoom + view.panY, value: "" });
   };
-  // Validate + apply the composite calibration; reject ratios/junk with a message (B301).
+  // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
   const commitCalibrate = () => {
     if (!calInput) return;
     const r = parseFeet(calInput.value);
@@ -425,7 +425,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {/* measures (world coords) */}
               {measures.map((m) => {
                 if (m.kind === "distance") { const a = m.pts[0], b = m.pts[1]; const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return <g key={m.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={ls(2)} /><text x={mid.x} y={mid.y - ls(4)} fontSize={ls(12)} fontWeight="700" fill="#0e7490" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f0(dist(a, b) * ftPerUnit)} ft` : "set scale"}</text></g>; }
-                const c = centroidOf(m.pts); // area-weighted centroid, clamped inside concave shapes (B304)
+                const c = centroidOf(m.pts); // area-weighted centroid, clamped inside concave shapes (B307)
                 const sf = polyArea(m.pts) * ftPerUnit * ftPerUnit;
                 return <g key={m.id}><polygon points={m.pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke="#0e7490" strokeWidth={ls(2)} /><text x={c.x} y={c.y} fontSize={ls(12)} fontWeight="700" fill="#0e7490" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f2(ftToAcres(sf))} ac` : "set scale"}</text></g>;
               })}
@@ -440,7 +440,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {align && [align.A1, align.A2].map((p, i) => p && <circle key={i} cx={p.x} cy={p.y} r={ls(5)} fill="none" stroke="#c2410c" strokeWidth={ls(2)} />)}
             </g>
           </svg>
-          {/* Inline Calibrate entry (B301) — replaces window.prompt; validates the typed length. */}
+          {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
           {calInput && (
             <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

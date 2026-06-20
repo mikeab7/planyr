@@ -49,7 +49,7 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     expect(measureLabel({ kind: "distance", pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }] }, 0)).toBe("set scale");
   });
 
-  // B304: labels used to land on a vertex (distance) / vertex-average (area).
+  // B307: labels used to land on a vertex (distance) / vertex-average (area).
   it("midOfPath: a 2-point line labels at its MIDPOINT, not pts[0]", () => {
     expect(midOfPath([{ x: 0, y: 0 }, { x: 10, y: 0 }])).toEqual({ x: 5, y: 0 });
   });

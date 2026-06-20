@@ -29,7 +29,7 @@ const avgOf = (pts) => pts.reduce((s, q) => ({ x: s.x + q.x / pts.length, y: s.y
 /* Midpoint ALONG a polyline by arc length — the true center of the drawn path,
  * not a vertex. `closed` walks the closing edge too (for a perimeter loop). Used
  * to anchor distance/perimeter labels so a 2-point line labels at its middle, not
- * its first endpoint (B304). */
+ * its first endpoint (B307). */
 export function midOfPath(pts, closed = false) {
   if (!pts || !pts.length) return { x: 0, y: 0 };
   if (pts.length === 1) return { x: pts[0].x, y: pts[0].y };
@@ -63,7 +63,7 @@ function pointInPoly(p, pts) {
 /* Label anchor for a filled polygon: the AREA-weighted centroid, clamped to lie
  * inside the shape. A concave / L-shaped region's centroid can fall outside the
  * outline; when it does we drop to the midpoint of the widest interior span on a
- * horizontal scanline through it, so the area label always sits on the shape (B304).
+ * horizontal scanline through it, so the area label always sits on the shape (B307).
  * Falls back to the vertex average for degenerate input. */
 export function centroidOf(pts) {
   if (!pts || !pts.length) return { x: 0, y: 0 };
