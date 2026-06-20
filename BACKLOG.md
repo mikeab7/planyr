@@ -22,35 +22,133 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
-     overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
-     drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
-     was in flight, so the batch was renumbered to the real next free IDs **B274–B277**. Deduped — all
-     four net-new (no existing OPEN item covers them), each REUSING prior art:
-       • B274 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
-         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold): those reconcile on
-         the CLIENT by union; B274 adds a SERVER-side version guard that REJECTS a stale write with a
-         loud "reload before saving" prompt — the gate B134 #4 ("409 conflict") + #5 only gestured at.
-         Reusable: the foundation for the DEFERRED multi-user team-workspace feature.
-       • B275 (multi-tab warning + optional single-editor lock) — pairs with B274; B127 made two
-         same-browser tabs silently CONVERGE, B275 makes it VISIBLE (BroadcastChannel banner) +
-         optionally elects one editor (Web Locks). Same-browser only; cross-device = B274.
-       • B276 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" returns on reload);
-         the per-item tombstone B126 deferred. (Distinct from B260, the overlay *scale* misread, done.)
-       • B277 (overlay visibility toggle) — B131 reserved the `visible !== false` shape; B277 implements
-         the per-overlay show/hide the print path already honours. Distinct from B276's delete.
-     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **ALL FOUR shipped this session** → moved
-     to BACKLOG-DONE.md. B276 + B277 (overlay delete persistence + visibility) merged to `main` via PR
-     #217 (live). B274 (optimistic concurrency) + B275 (multi-tab warning) built + verified after (owner
-     said go ahead): B275 is live on deploy; **B274 is merge-safe + dormant until the owner runs
-     src/workspaces/site-planner/db/optimistic_concurrency.sql** in the Supabase SQL editor (then a
-     signed-in check confirms the reject-and-reload UX). -->
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
+     interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B288–B296**
+     (renumbered from a first-filed B273–B281: by merge time concurrent `main` had consumed B273–B281
+     outright — the Infra/E2E tranche B278/B280/B281 + telemetry B279, the data-integrity B274/B275, and
+     filing/lockout B271–B273/B276/B277 — so two items would share a number, which the rules forbid; this
+     batch lands at the next clear band **B288–B296**). NOTE: a SEPARATE, earlier 2026-06-20 batch already
+     landed as B265–B269 (devicePixelRatio render, title-block sheet labels, scale-callout calibration,
+     scale cross-check, fixture cleanup); same file (DocReview.jsx), different concern.
+     Deduped before filing — none duplicate an existing Open or Done item:
+       • B288/B289/B290 (wheel/ctrl/pinch zoom · drag-pan · cursor-anchored ±) — NO open item covers the
+         single-sheet viewport nav. The Stitcher already ships exactly this (cursor-anchored `onWheel`
+         L171 + pointer-drag pan L158/L168) — PORT it, adapted to DocReview's re-rasterize/scroll model
+         (it redraws the PDF to a `<canvas>` at `scale` inside an `overflow:auto` scroller rather than
+         transforming a fixed-res image, so anchor via `scrollLeft/Top`, not a pan/zoom matrix). Distinct
+         from B265 (DONE — devicePixelRatio render fidelity, a different "blurry" bug). The pan work cross-
+         references B271 (main: frozen grab/hand cursor after an interrupted gesture) — release
+         pointer-capture + clear state on pointerup/pointercancel so we don't reintroduce it.
+       • B291 (double-click phantom points) — net-new; takeoff-correctness, HIGH. Mirror the Site Planner
+         finish path (`finishActiveDrawing()`/`removeLastVertex()` L2747/L2761; `finishMkPoly` already
+         filters consecutive-coincident vertices L2066).
+       • B293 (move + edit a placed markup) — ADJACENT to the open B155 (shared interior hit-testing) +
+         B156 (hover highlight): B155 makes a markup SELECTABLE, B293 makes a selected one MOVABLE +
+         (text) EDITABLE. B155's end-state vision already lists "interior drag moves / double-click edits";
+         B293 ships that on the Doc Review surface now (B155's cross-surface shared-`hitTest` refactor stays
+         open). B293 also moves Doc Review's text create/edit off `window.prompt` to an inline editor —
+         satisfying the KEY DECISION "no dialog-box edits" rule + the B155 note (calibrate's prompt stays,
+         tracked under B155).
+       • B292/B294/B295/B296 — net-new, no overlap.
+     Per STANDING RULE #1 filed AND fixed the same session, then SHIPPED via **PR #220 → `main`** (branch
+     `claude/amazing-fermi-e2xul4`). Headless-verified 13/13 in a real browser (VERIFICATION **V72**,
+     `ui-audit/verify-docreview-viewer.mjs`, 0 page errors) — incl. cursor-anchored wheel zoom (0.4px drift),
+     exact drag-pan, the B291 phantom-point fix (3 dots not 5), markup move, and inline text create/edit;
+     B296 has a unit test, B294 reuses the proven `openFile` path. lint 0 · 563 tests · build green. NB the
+     older sandbox Chromium-1194 can't raster pdf.js (it throws `getOrInsertComputed`); the newer
+     **chromium-1228** build runs it — Doc-Review headless checks must use 1228 (corrects the V63/V65
+     "can't run pdf.js" note). These 9 are shipped — eligible to move to BACKLOG-DONE.md on a future pass. -->
 
-<!-- B274 (optimistic concurrency / reject stale saves), B275 (multi-tab warning), B276 (overlay
-     delete persistence) + B277 (overlay visibility) were ALL fixed + shipped this session → moved to
-     BACKLOG-DONE.md. ⚠ B274 needs ONE owner step to activate: run
+### B288 — Single-sheet review can't be zoomed by wheel / pinch / Ctrl-scroll (only the ± buttons) `[Doc Review / Markup]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B288** — renumbered from B273, consumed by concurrent `main`)*
+`[x]` **Repro (confirmed live on planyr.io 2026-06-20):** open a PDF in Document Review (single-sheet, not Stitch) → wheel / pinch / Ctrl+scroll over the drawing → nothing (stuck at 31%); the only zoom is the toolbar ±. **Expected:** wheel / Ctrl-scroll / pinch zoom the drawing, anchored on the cursor. The fix already exists here — the Stitcher's `onWheel` (`Stitcher.jsx` ~L171) does cursor-anchored zoom; port it to the single-sheet view (`DocReview.jsx`). Primary "can't zoom" complaint.
+> ✅ Shipped (PR #220 → `main`). A native non-passive `wheel` listener on the scroll viewport → `zoomAround(factor, cursorX, cursorY)`: changes `scale`, stashes the page-unit point under the cursor, then a `useLayoutEffect` keyed on the re-rendered `dims` nudges `scrollLeft/Top` so that point stays under the cursor. Ctrl/Cmd+wheel and plain wheel both zoom (trackpad pinch arrives as Ctrl+wheel). Shares the anchor path with B290. Headless-verified (V72).
+
+### B289 — No drag-to-pan in single-sheet review `[Doc Review / Markup]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B289** — renumbered from B274)*
+`[x]` Zoomed in, there's no way to grab-and-drag the drawing to move around — no hand tool, no space-drag — so navigation relies entirely on the scrollbars. (Scrollbars do work and reach the whole sheet, so this is a usability gap, not a blocker.) **Expected:** drag-to-pan (a Pan/hand tool and/or hold-Space to pan), matching the Stitcher, which already pans via pointer-drag (`Stitcher.jsx` ~L158/L168).
+> ✅ Shipped (PR #220 → `main`). New **Pan** tool (hand) + **hold-Space** in any tool; pointer-drag adjusts the scroller's `scrollLeft/Top` by the negative pointer delta (pointer-capture so a fast drag doesn't drop). Cursor shows grab/grabbing. Releases capture + clears state on pointerup/pointercancel (so it can't reproduce B271's frozen-cursor lockout). Headless-verified (V72).
+
+### B290 — ± zoom isn't cursor-anchored `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-3" 2026-06-20; minted **B290** — renumbered from B275)*
+`[x]` `zoom()` only changes `scale`; it doesn't hold a focal point, so the detail you were looking at drifts and you re-scroll after each step. **Expected:** zoom toward the cursor (or hold the viewport center fixed), like the Stitcher's cursor-anchored wheel zoom. Pairs with B288.
+> ✅ Shipped (PR #220 → `main`). The ± buttons now call `zoomAround(factor)` with the viewport centre as the anchor (same scroll-anchor path as B288), so the centre of what you're looking at stays put across a zoom step. Headless-verified centre drift 0.6px (V72).
+
+### B291 — Double-click to finish a Count/Area/Perimeter adds 1–2 phantom points (inflates counts, distorts areas) `[Doc Review / Markup]` (bug) — takeoff correctness, HIGH  *(arrived as "NEW-4" 2026-06-20; minted **B291** — renumbered from B276)*
+`[x]` **Repro:** pick Count, click N items, then double-click to finish (as the tool hint instructs) → the count reads N+2 with two stray dots at the double-click spot; same root cause distorts Area/Perimeter (extra/duplicate vertices at the closing click). Cause: each pointerdown appends a point (`DocReview.jsx` onDown), and a double-click fires TWO pointerdowns before `onDoubleClick`→`finishDraft` commits. Enter finishes cleanly; only the advertised double-click path is broken. **Expected:** double-click finishes without adding the doubled vertices. The Site Planner already solved this with a shared `finishActiveDrawing()` + `removeLastVertex()` — reuse that approach.
+> ✅ Shipped (PR #220 → `main`). `onDbl(e)` strips any trailing draft points coincident (≤ ~6px screen) with the double-click location before committing the poly/count, so the two pointerdowns the browser fires for a double-click can't survive as phantom vertices. Enter path unchanged. Headless-verified: 3 clicks + double-click → exactly 3 count dots, not 5 (V72).
+
+### B292 — Zoom level resets to fit-width every time you switch sheets `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-5" 2026-06-20; minted **B292** — renumbered from B277)*
+`[x]` **Repro (confirmed live 2026-06-20):** zoom Sheet 1 to 134%, click Sheet 2 → it snaps back to 31% (fit-width); zoom is lost on every sheet change. Cause: the sheet button calls `setScale(0)`. **Expected:** keep the current zoom across sheet switches when reviewing a set.
+> ✅ Shipped (PR #220 → `main`). The sheet button no longer forces `setScale(0)`; switching sheets re-renders the new page at the current scale. The fit pass still runs on first open and on the explicit Fit / Fit-page buttons. (Merged cleanly with main's B267 per-sheet scale tooltip on the same button.) Headless-verified (V72).
+
+### B293 — Can't move or edit a markup after placing it (Select only allows delete) `[Doc Review / Markup]` (feature)  *(arrived as "NEW-6" 2026-06-20; minted **B293** — renumbered from B278)*
+`[x]` Today Select supports delete only — a misplaced redline/measurement/text note has to be deleted and redrawn, and placed text can't be re-edited. Key design points: drag a selected markup to reposition it (commit once on pointer-up, coords stay in page units); double-click a text note to edit it. The ParcelDrawing surface already implements move + edit-text (B67) — mirror it here.
+> ✅ Shipped (PR #220 → `main`). Select-mode interior drag translates a markup's page-unit points live and commits once on pointer-up (a sub-3px drag is still a plain click-select; interior drag moves, never pans — per B155's locked rule). Double-click a text note opens an **inline `<input>` overlay** at the note (Enter/blur commit, Esc cancel); text **creation** routes through the same inline editor (opening on pointer-UP so the click's own focus change can't blur+discard it), removing Doc Review's `window.prompt` for text (KEY DECISION "no dialog-box edits" + the B155 note). Calibrate's prompt is left as-is (tracked under B155). Adjacent to B155 + B156, which stay open. Headless-verified move + create + edit (V72).
+
+### B294 — Dropping a PDF only works on the empty screen, not once a document is open `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-7" 2026-06-20; minted **B294** — renumbered from B279)*
+`[x]` **Repro:** with a PDF open, drag another PDF onto the canvas → nothing (you must use "Open another…"). The drop handler is bound only to the empty-state view; the Stitcher accepts drops anywhere. **Expected:** dropping a PDF over the open document opens it (reuse the existing re-drop/source-binding path).
+> ✅ Shipped (PR #220 → `main`). The canvas/viewport now carries the same `onDragOver`/`onDrop` as the empty state, routed through the existing `openFile` (which already re-binds a re-dropped source by name so its markups stay attached). (Verified by code + the proven openFile path; a synthetic file-drop isn't in the headless harness.)
+
+### B295 — "Fit" only fits width; tall/portrait sheets can't be viewed whole `[Doc Review / Markup]` (feature, minor)  *(arrived as "NEW-8" 2026-06-20; minted **B295** — renumbered from B280)*
+`[x]` The fit logic computes width-only (`avail / base.width`), so a portrait/tall sheet overflows vertically and can't be seen in one view. Add a fit-to-page option (min of width-fit and height-fit) alongside fit-width.
+> ✅ Shipped (PR #220 → `main`). New **Fit page** button next to **Fit**; the fit pass reads a `fitMode` ('width' | 'page') and uses `min(availW/baseW, availH/baseH)` for page-fit. Headless-verified Fit-page fits the whole sheet where Fit-width overflows (V72).
+
+### B296 — Linear measurements round to whole feet, inconsistent with area's 2-decimal acres `[Doc Review / Markup]` (bug, minor)  *(arrived as "NEW-9" 2026-06-20; minted **B296** — renumbered from B281)*
+`[x]` `measureLabel` prints distance/perimeter via `f0` (whole feet) while area shows 2-dp acres (`takeoff.js`) — a 150.6 ft line reads "151 ft". For takeoff precision, show at least one decimal on linear measures.
+> ✅ Shipped (PR #220 → `main`). `measureLabel` now formats distance/perimeter with one decimal (`f1`); area (acres 2-dp / sf whole) unchanged. Covered by a unit test (`test/takeoff.test.js`).
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — an **Infra / automated-testing** tranche
+     (Playwright regression net, error telemetry, seeded test account, CI wiring). Filed at **B278–B281**.
+     ⚠ NUMBERING / COLLISION NOTE (renumbered TWICE by concurrent `main`): first filed B271–B274, then
+     B275–B278 when open PR #217 took B271–B273 — but on merge `main` had consumed **B271–B277** outright
+     (pointer-lockout B271, main-thread-stall B272, filing-practice B273, stale-save B274, multi-tab B275,
+     and PR #217's overlay B276/B277). Two items sharing a number across the two files = the one thing the
+     rules forbid, so this tranche lands at the next clear band **B278–B281**. (Owner flagged exactly this:
+     "make sure no one else is working on B271." They were — heavily.) The "NEW-#" labels are scratch.
+     **B279 (error telemetry) — BUILT + headless-verified + SHIPPED this session; full block in
+     BACKLOG-DONE.md.** B278 / B280 / B281 stay Open below.
+     Deduped before filing:
+       • B278 (Playwright @playwright/test suite) — NET-NEW. NOT the `ui-audit/*.mjs` harnesses (ad-hoc
+         single-purpose Chromium screenshot/verify scripts vs a deterministic regression suite); package.json
+         carries vitest only. REUSE the ui-audit cert-proxy launch flag (`--ignore-certificate-errors`).
+       • B279 (error telemetry) — NET-NEW; its "stale-chunk fix" reference is ALREADY SHIPPED (B221's
+         `vite:preloadError` guard in `src/app/chunkReload.js`), so it hooked telemetry onto that EXISTING
+         handler — no open stale-chunk item to wait on. (Built this session.)
+       • B280 (seeded test account) — NET-NEW. Distinct from B269's real-PDF Doc-Review build fixtures.
+       • B281 (CI + auto-file @claude issue) — NET-NEW; the "previously-parked @claude workflow" it cites was
+         never filed in either file. Extends `.github/workflows/build.yml`.
+     Inter-deps: B278 ↔ B280 (the seed values are the assertion contract); B281 depends on B278 + B280. -->
+
+### B278 — Playwright regression harness against preview deploys `[Infra / E2E]` (task)  *(arrived as "NEW-1" 2026-06-20 owner chat; filed **B278** — jumped past B271–B277, consumed by concurrent `main` + PR #217; batch B278–B281)*
+`[ ]` Stand up Playwright as the **deterministic regression net** — headless in CI, **not** via Cowork. **Why not Cowork:** its vision/screenshot tokens cost multiples more per run; reserve Cowork for exploratory discovery + live sign-off, use Playwright for the repeatable assertions.
+- **Approach:** add `@playwright/test`; config targets the Cloudflare **per-branch preview URL** (read from an env var so CI injects the branch's preview). Log in via a **dedicated test account** (B280), never the owner's real creds.
+- **First flows (highest-severity paths):** (1) login succeeds + app comes up **Cloud on** — assert the "Cloud off" state is NOT present (the silent `VITE_SUPABASE_URL`/`ANON_KEY`-missing build is a known crash-severity incident); (2) load a **Pearland** parcel → assert correct county resolution (point-in-polygon: Brazoria/Harris/Fort Bend) → guards the boundary-mismatch bug; (3) draw a measurement → save → reload → assert value persisted → directly tests silent-save-failure; (4) run **Site Analysis** on a multi-parcel selection → assert *source unavailable* renders distinct from *not present*.
+- **Gotchas:** tests must run against a **properly built preview** (env vars baked in pre-build) or flow (1) will *correctly* fail — that's the point, but document it so a red run isn't misread as a harness bug. Use stable **`data-testid`** selectors, not text/CSS that the brand refactor will churn.
+- **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
+- **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
+- **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
+> **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
+
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
+`[ ]` Create a **dedicated test user** with deterministic seeded data on a preview/staging deploy; **never** use the owner's real login in automated loops.
+- **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
+- **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
+- **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
+> Do alongside B278 — its assertions are blocked without these fixed values.
+
+### B281 — CI wiring: Playwright on preview + failure auto-files an @claude issue `[Infra / CI]` (feature) — depends on B278 + B280  *(arrived as "NEW-4" 2026-06-20 owner chat; filed **B281**; batch B278–B281)*
+`[ ]` Run B278 in **GitHub Actions** on each preview branch; on failure, **auto-open an issue tagged `@claude`** so Claude Code picks it up async — the genuinely remote/async scenario the previously-parked `@claude` workflow was reserved for.
+- **Dependency:** requires **B278** (the suite) + **B280** (the seeded account). **Defer until those land.**
+- **Edge case:** **dedupe issue creation** — don't open a fresh issue every run for the same persistent failure; update/reuse the existing one.
+- **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
+> Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
+
+<!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
+     overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
+     under concurrent `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
+     (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275 — was
+     renumbered to **B297** (optimistic concurrency / reject stale saves) + **B298** (multi-tab warning)
+     once `main`'s numbering reached B296. ⚠ B297 needs ONE owner step to activate: run
      src/workspaces/site-planner/db/optimistic_concurrency.sql in the Supabase SQL editor (merge-safe +
-     dormant until then). -->
+     dormant until then; then a signed-in two-session check — VERIFICATION V74). -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced

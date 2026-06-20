@@ -1,4 +1,4 @@
-/* Verify the multi-tab warning (B275), logged-out, on the built app. Two PAGES in ONE browser
+/* Verify the multi-tab warning (B298), logged-out, on the built app. Two PAGES in ONE browser
  * context share the same-origin BroadcastChannel (= two tabs of one browser). Opening the SAME
  * project in both must raise the "open in another tab" banner in BOTH; closing one clears it. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";

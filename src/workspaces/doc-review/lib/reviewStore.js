@@ -73,7 +73,7 @@ const storageKeyFor = (uid, projectId, discipline, srcId) =>
 
 /* ------------------------- review records (Postgres) ------------------------ */
 
-// Per-tab `version` tokens for the optimistic-concurrency guard (B274), populated by
+// Per-tab `version` tokens for the optimistic-concurrency guard (B297), populated by
 // loadReview/listReviews and advanced on every successful write. Same primitive the Site
 // Planner uses (shared casUpsert), so a review changed in another session can't be silently
 // clobbered. Until db/optimistic_concurrency.sql adds the column, every write degrades to a
@@ -101,7 +101,7 @@ export async function upsertReview(record) {
     data,
   };
   const full = { ...base, project_id: record.projectId || null, item: record.item || null, revision: record.revision || null, doc_date: record.docDate || null };
-  // Optimistic concurrency (B274), guarded by the version we last synced. TWO independent
+  // Optimistic concurrency (B297), guarded by the version we last synced. TWO independent
   // graceful degrades layer here: (a) the library index columns may be un-migrated → retry
   // with the core `base` row; (b) the `version` column may be un-migrated → fall back to a
   // plain upsert (today's full→base behaviour). Either way saving never regresses.
@@ -129,7 +129,7 @@ export async function loadReview(id) {
   if (error && isMissingVersionColumn(error)) // pre-migration → re-select without version
     ({ data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle());
   if (error || !data) return null;
-  if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B274)
+  if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B297)
   return data.data || null;
 }
 
@@ -146,7 +146,7 @@ export async function listReviews() {
 
 export async function deleteReview(id) {
   if (!supabase || !id) return { ok: false };
-  delete reviewVersions[id]; // stop tracking a removed review's version (B274)
+  delete reviewVersions[id]; // stop tracking a removed review's version (B297)
   const uid = await currentUid();
   // Remove the source files (by their stored keys, so any path scheme is covered),
   // then the row. RLS scopes both stores to the owner.
