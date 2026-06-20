@@ -9,7 +9,7 @@ import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
 import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
-import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint } from "./lib/overlayScale.js";
+import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
@@ -2742,12 +2742,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const id = uid();
       if (r.pdf) overlayDocs.current.set(id, r.pdf); // keep the doc for the in-session page picker
       const c = p2fStatic(size.w / 2, size.h / 2);   // view centre, in feet
-      // True real-world scale ONLY when the page is a recognizable plot size AND we read
-      // a scale note (B73); otherwise land it ~60% of the visible width wide to size by hand.
-      const trueScale = r.detectedScale && r.sheet && r.sheet.std;
-      const ftPerPx = trueScale
-        ? ftPerPointForScale(r.detectedScale)
-        : Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, r.imgW));
+      // Pick the initial size: trust a read scale note (B73) ONLY when it lands the sheet
+      // at a sane on-screen size, else "size to fit" (~60% of the view). A misread scale
+      // (e.g. a vicinity-map scale on the same sheet) otherwise placed the drawing 10–30×
+      // too large, blanketing the map with its title block — the reported "file name all
+      // over the map" bug. The read scale is still kept on the overlay so the panel can
+      // offer it as one-click "Apply". (chooseOverlayScale is pure + unit-tested.)
+      const pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
+      const ftPerPx = pick.ftPerPx;
       const ov = {
         id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
@@ -2758,6 +2760,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      if (pick.reason === "too-big" || pick.reason === "too-small") // honest, actionable note — never a silent mis-place
+        flashWarn(`Added “${file.name || "drawing"}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
       if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
         uploadOverlayFile(siteId, id, file).then((res) => {
           if (res) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, storageKey: res.key } : x)));
@@ -6666,7 +6670,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                           <div style={{ display: "flex", gap: 6 }}>
                             <button style={{ ...chip, flex: 1 }} onClick={() => patchOverlay(o.id, { rotation: 0 })}>Reset rotation</button>
-                            <button style={{ ...chip, flex: 1 }} onClick={requestFit}>Fit view</button>
+                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
+                                one-click rescue when a drawing came in far too big/small (then set the
+                                real scale above). Distinct from "Fit view", which zooms the canvas. */}
+                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
+                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
+                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={requestFit}>Fit view</button>
                           </div>
                         </div>
                       )}

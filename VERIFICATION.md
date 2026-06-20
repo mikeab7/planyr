@@ -60,12 +60,20 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V63 — Doc Review (Markup) sheets render crisp on HiDPI, not blurry (B261) ✅ (self-verified headless — mechanism proven; ⏳ optional live retina eyeball)
+### V64 — Doc Review (Markup) sheets render crisp on HiDPI, not blurry (B261) ✅ (self-verified headless — mechanism proven; ⏳ optional live retina eyeball)
 - **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out, generated 1-page PDF, driven at deviceScaleFactor 1 and 2) · **Next check** — optional: open a real structural/general-notes sheet on planyr.io on a Retina/HiDPI display and confirm note text is sharp at fit-to-page.
 - **Steps:** Markup tab → open/drop a PDF → read note text at fit-to-page, then zoom in.
 - **✅ Backing store honours devicePixelRatio:** at **deviceScaleFactor 2** the canvas backing store renders **2.000×** the on-screen size (1054→2108 px) — a dense, crisp bitmap instead of an upscaled 1× one; at **deviceScaleFactor 1** it's **1.000×** (never worse than before). `ui-audit/verify-new2-dpr.mjs`.
 - **✅ No overlay regression:** the on-screen (CSS) size is **identical across both densities** (1054×1364) and `renderPageToCanvas` returns the same `dims.w/h` as before, so markups/measurements land unchanged.
 - **⏳ Optional live confirm:** the crispness *gain* only manifests on real HiDPI hardware (headless DPR-forcing proves the 2× mechanism but renders on a 1×-equivalent surface); one eyeball on a Retina display on planyr.io would close it fully. Low-risk.
+
+### V63 — Dropped overlay sizes sanely + "Size to view" rescue (B260) ✅ (self-verified headless — image path; ⏳ one real-browser PDF drop)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium on the built app, `vite preview`, logged-out) · **Next check** — a real-browser drop of an actual landscape **PDF** that carries both a plan scale and a vicinity/key-map scale, to confirm the scale-read guard fires end-to-end (the sandbox Chromium can't run pdf.js — `getOrInsertComputed` — so the PDF *raster* path couldn't be exercised headless here).
+- **Harness:** `ui-audit/verify-overlay-fix.mjs` — seeds a 26.33-ac parcel + Katy origin (aerial on), logged-out.
+- **✅ Fresh drop is sane:** dropping an **image** runs the real `addOverlayFile` path → the overlay lands **535 px** wide on a 1440 px view (≈60% fit), never splattered, no error dialog (`screens/verify-A-image-drop.png`).
+- **✅ Rescue works:** a seeded **mis-scaled** overlay (simulated 1″=600′ misread, **14279×9519 px** — the reported "title block all over the map") shrinks to **535 px** with one click of the new **"Size to view"** button (`screens/verify-B-before.png` → `verify-B-after.png`).
+- **Deterministic logic** (the ≤4×/≥0.04× viewport scale guard, fit fallback, reasons) is covered by `test/overlayScale.test.js` (`chooseOverlayScale`, 7 cases) — all green.
+- **⏳ Remaining:** the one real-browser PDF drop above; everything else is fully self-verified.
 
 ### V62 — Scheduler bug-fix batch: Export-modal focus + boots clean (B247–B253) ✅ (self-verified headless — fully done, no signed-in check needed)
 Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/sequence/` in headless Chromium). Result **ALL PASS**: the board renders (so the **B247** module-scope hoist didn't break module eval and the **B251** render-nudge doesn't loop), the Export → "Header / Cover" Title field accepts "ALTA & Topo Survey — Phase 2" typed **character-by-character with focus retained and the full value intact** (B247 fixed — pre-fix it remounted per keystroke), and **0 real console/page errors** (no "Maximum update depth"). Syntax of the in-browser-Babel block also re-checked clean via `ui-audit/jsxcheck-sequence.mjs`. B248 (HTML-export escaping), B249 (status-delete guard/reassign), B250 (import normalization) are pure data-logic mirroring already-shipped patterns and ride the same clean boot; B252 (undo cap) and B253 (today already-fresh) need no UI check. No signed-in check needed — none of these touch auth.
