@@ -37,8 +37,8 @@ export function storageConfig(env = (typeof process !== "undefined" ? process.en
  * default, when Drive is selected AND creds are present, it wires the real Drive REST
  * client (refresh-token → access-token provider + driveClient). Missing creds → null →
  * the backend reports "not connected" (a visible failure, never a silent success). */
-export function buildStorageAdapter(cfg = storageConfig(), { driveClientFactory = defaultDriveClientFactory } = {}) {
-  const idMap = createIdMap(); // swap for a Supabase-Postgres-backed store in production
+export function buildStorageAdapter(cfg = storageConfig(), { driveClientFactory = defaultDriveClientFactory, idStore = null } = {}) {
+  const idMap = createIdMap(idStore || undefined); // pass a Supabase-Postgres store in production; in-memory otherwise
   let backend;
   if (cfg.backend === "drive") {
     const client = driveClientFactory ? driveClientFactory(cfg.drive) : null; // null → backend reports "not connected"
