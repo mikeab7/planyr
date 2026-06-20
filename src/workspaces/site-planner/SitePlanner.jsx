@@ -12,7 +12,8 @@ import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downl
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
@@ -1047,6 +1048,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoBaseRef = useRef(null);
   const geoBackfillRef = useRef(null); // coarse low-zoom layer for instant blurry coverage
   const overlayRefs = useRef({});
+  const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
@@ -1245,6 +1247,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const iv = setInterval(sync, 45000); // re-probe so stopped services self-heal
     return () => clearInterval(iv);
   }, [overlays, origin, basemapOn]); // eslint-disable-line
+
+  /* Coverage (NEW-1/B274): which layers' DATA reaches the planner's current view, for
+     the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
+     when the view/size/origin settle (debounced past the basemap commit) and when the
+     nearby-range pref changes. Picker-only — never alters a layer's map request. */
+  useEffect(() => {
+    if (!origin) return;
+    let t;
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles()));
+    prefetchExtents(ALL_LAYERS, probeService).then(recompute);
+    t = setTimeout(recompute, 300); // let the basemap commit (≤160ms) settle first
+    const unsub = subscribeRelevance(recompute);
+    return () => { clearTimeout(t); unsub(); };
+  }, [overlays, origin, view, size]);
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
@@ -6258,7 +6274,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <input type="checkbox" checked={basemapOn} onChange={(e) => setBasemapOn(e.target.checked)} />
                     <span style={{ flex: 1 }}>Aerial basemap</span>
                   </label>
-                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} />
+                  <LayerPanel overlays={overlays} setOverlays={setOverlays} county={restored?.county || county} layerStatus={layerStatus} coverage={coverage} />
                   {/* utility-evidence drawing tools */}
                   <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 8, paddingTop: 7 }}>
                     <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 5 }}>Evidence tools</div>
