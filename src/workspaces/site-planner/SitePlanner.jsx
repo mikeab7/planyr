@@ -33,6 +33,7 @@ import {
   feetToLatLng,
   humanizeError,
 } from "./lib/arcgis.js";
+import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -677,36 +678,9 @@ const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumF
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /* --------------- county appraisal-district attribute view --------------- */
-// Curated, human-labelled rows pulled from the raw county GIS attributes that
-// rode along with a map-imported parcel.
-const APPR_FIELDS = [
-  [/^(owner|own_?name|owner_?name|name|owner1)$/i, "Owner"],
-  [/(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i, "Situs address"],
-  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
-  [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre)/i, "Acreage"],
-  [/(land_?val|land_?mkt|land_?value)/i, "Land value"],
-  [/(imp_?val|improvement_?val|bld_?val|impr_?val)/i, "Improvement value"],
-  [/(tot_?val|market_?val|appr_?val|assessed_?val|total_?val|tot_?mkt)/i, "Total value"],
-  [/(land_?use|state_?use|use_?cd|use_?desc|^class|prop_?type)/i, "Land use"],
-  [/zoning/i, "Zoning"],
-  [/(legal_?desc|^legal|subdiv|abstract|^abst)/i, "Legal"],
-];
-const prettyKey = (k) => k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-const apprRows = (attrs) => {
-  if (!attrs) return [];
-  const used = new Set(), rows = [];
-  for (const [re, label] of APPR_FIELDS) {
-    const k = Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && attrs[key] != null && attrs[key] !== "");
-    if (k) { used.add(k); rows.push({ label, value: attrs[k] }); }
-  }
-  return rows;
-};
-const apprAll = (attrs) => Object.entries(attrs || {})
-  .filter(([k, v]) => v != null && v !== "" && !/^(shape|objectid|globalid|geometry|st_area|st_length|shape_?area|shape_?len)/i.test(k))
-  .map(([k, v]) => ({ label: prettyKey(k), value: v }));
-// Format a value, adding $ + thousands for the money fields.
-const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
-const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== ""); return k ? String(attrs[k]) : null; };
+// The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
+// now lives in ./lib/appraisal.js so the map finder's address-search info card shares
+// the exact same labelling (B233). countyAcres stays here (planner-only geometry check).
 // County stated acreage from the attributes. Prefer an explicit acres field;
 // fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
 // { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than

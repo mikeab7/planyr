@@ -22,6 +22,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-5 for the Site map finder. Renumbered twice
+     under a hot `main` (B225–B229 → B230–B234 → **B232–B236**; concurrent PRs #188–#191 + #190
+     took B225–B231). Filed AND shipped this same session on branch `claude/tender-goldberg-ax4n5w`
+     — all five moved to BACKLOG-DONE.md: B232 (address search recenters — Esri geocoder biased to
+     the map, replaces the no-bias Nominatim that returned nothing for bare street addresses), B233
+     (address search selects the parcel + shows its appraisal info, reusing the click pipeline + the
+     planner's appraisal labeller; source-unavailable ≠ no-parcel-here), B234 (one shared status-
+     token set — color + glyph per state — across chips, list markers, and map pins; module accents
+     confined to the tab row; amends B161's pins), B235 (left rail: chips-as-filters + type-to-filter
+     + collapsible status groups, Complete/Dead collapsed by default; consumes B234), and B236
+     (per-layer source-vintage stamp, distinct from refreshed-age; "vintage unknown" never
+     fabricated; the ship-now half of B96's data-age surfacing). All self-verified headless (V57). -->
+
 <!-- 2026-06-20: B230 (Bluebeam vertex editing — drop the always-on "+" midpoint handles; Shift-click /
      right-click an edge inserts a control point; right-click a vertex / Delete removes one; candidate
      dot on edge-hover; portal-mounted menu; built once in a shared layer for parcels / polygon elements /
