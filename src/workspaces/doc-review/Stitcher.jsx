@@ -169,7 +169,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   // Hard-block a measurement that lands over a sheet that hasn't been aligned yet — its scale
   // isn't set until Align runs, so the length/area would be SILENTLY WRONG. Refuse the point
-  // and tell the user to Align first. (B301 warned but still committed; B310 blocks outright —
+  // and tell the user to Align first. (B301 warned but still committed; B312 blocks outright —
   // owner call: never measure on an un-aligned / un-scaled sheet.) Calibrate is exempt: that's
   // the act of SETTING the scale, not reading one off.
   const blockedOverUnaligned = (pts) => {
@@ -206,7 +206,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
-    // B310 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
+    // B312 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
     // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
     if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
     if (tool === "calibrate" || tool === "distance") {
@@ -235,7 +235,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
   // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
-  // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B310)
+  // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B312)
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
 
   // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
