@@ -1,4 +1,37 @@
 ## ✅ Done
+
+<!-- ✅ DONE 2026-06-21 (branch claude/focused-davinci-kkytxf). Follow-up to PR #242 (which shipped the
+     drop-a-set → group/auto-stitch/crop/auto-calibrate feature in the STITCHER). #242 left the single-
+     sheet MARKUP sidebar as a flat "Sheet N" list, so B266 (real sheet labels there) was never delivered
+     on that surface. This PR brings the real sheet # + title + the logical-group collapse to the Markup
+     sidebar, REUSING #242's shared engines (sheetMeta.readSheetMeta + sheetGroups.groupSheets +
+     sheetRead.statedCalibration — no duplicate modules). Delivers the open B266 + the new B341. 7/7
+     headless (ui-audit/verify-markup-sheet-labels.mjs) + #242's viewer suite still 13/13 (no regression);
+     846 tests, lint 0, build green. VERIFICATION V88. Backstory: a parallel session had built an
+     equivalent FULL implementation (PR #243) just before #242 merged; on the owner's "compare, then
+     salvage extras" call, the duplicate engines/Stitcher work were discarded and only this genuinely-
+     missing Markup-sidebar piece was kept, rebased onto #242. -->
+
+### B266 — Sheet sidebar labels from the title block (real sheet # + name, not "Sheet N") `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20; delivered 2026-06-21 as a follow-up to #242)*
+`[x]` **Shipped.** The single-sheet Markup sidebar now shows each sheet's real **sheet # + title** read
+from its title block (e.g. "C-5 — GRADING PLAN", "COVER SHEET"), not generic "Sheet N". Built on #242's
+shared reader (`sheetMeta.readSheetMeta` — which locates the title-block band first, so a "SEE SHEET X"
+cross-ref or a detail/grid ref can't masquerade as the sheet number, the crux this item called out).
+**No-auto-guess:** a sheet with no detected title block / no readable number falls back to "Sheet N"
+(gated on `meta.titleBlock || meta.sheetNumber`, so a stray body-text line is never surfaced as the
+label). OCR for scanned sheets stays the shared remaining slice (tracked under B267 + #242's dormant OCR
+seam in `sheetRead.js`). 7/7 headless (`ui-audit/verify-markup-sheet-labels.mjs`, V88); #242's viewer
+suite still 13/13.
+
+### B341 — Collapse the Markup single-sheet sidebar into logical sheets (parity with the Stitcher) `[Doc Review / Markup]` (feature)  *(arrived 2026-06-21; minted **B341** — next free after B340)*
+`[x]` **Shipped (follow-up to #242).** #242 collapses a dropped set into logical sheets in the STITCHER
+tray; this brings the same collapse to the single-sheet **Markup** sidebar: consecutive pages sharing a
+plan type + a contiguous sheet-number run show as one expandable entry ("Grading Plan · C-5–C-7 · 3
+sheets"); cover/notes/one-offs stay standalone. Reuses #242's `sheetGroups.groupSheets` (the same engine
+the Stitcher uses, so the two surfaces agree) + surfaces the per-sheet stated-scale auto-calibrate (·≈)
+via `sheetRead.statedCalibration`. The sidebar count reads "N sheets · M pages" so the collapse is
+visible. Verified: a 4-page set → 2 logical entries, the group expands to its members (V88).
+
 <!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
      crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
      when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge

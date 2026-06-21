@@ -4,9 +4,11 @@
  * IMMUTABLE backdrop; all markups live on an SVG overlay (an editable layer over
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
-import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
+import { readSheetMeta } from "../../shared/files/sheetMeta.js";
+import { groupSheets } from "../../shared/files/sheetGroups.js";
+import { statedCalibration } from "./lib/sheetRead.js";
 import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
@@ -126,6 +128,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
+  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B341)
+  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B341)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
@@ -232,31 +236,39 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   /* ---- load ---- */
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
 
-  // Auto-detect each sheet's stated scale (B267): read the page's embedded text, parse a
-  // scale callout, and — ONLY when the page is a standard plot size — pre-fill calibration
-  // from it, flagged "from sheet scale (verify)". Never overwrites a page the user (or a
-  // loaded review) already calibrated. Runs in the background after a fresh open; a page
-  // with no embedded text (scanned/raster) is skipped — that's the seam for the OCR
-  // fallback (B267 remaining). Superseded if another file opens mid-scan.
+  // Read each sheet's metadata in the background (B341): sheet #, title, discipline, stated scale —
+  // via the SAME shared reader the Stitcher uses (sheetMeta.readSheetMeta), so the single-sheet
+  // sidebar can show real labels + collapse into logical sheets instead of "Sheet N" (B266). Also
+  // pre-fills the per-sheet stated-scale calibration (B267) via the shared statedCalibration (which
+  // gates on a standard plot size), never overwriting a user/loaded cal. A page with no text layer
+  // reads hasText:false — the OCR seam (shared with B267/B336). Superseded if another file opens.
   const scanTok = useRef(0);
-  const autoDetectScales = useCallback(async (pdf, pages) => {
+  const scanSheets = useCallback(async (pdf, pages) => {
     const tok = ++scanTok.current;
     for (let p = 1; p <= pages; p++) {
       if (tok !== scanTok.current) return;             // a newer open superseded this scan
-      const text = await extractPageText(pdf, p);
+      const page = await extractPageItems(pdf, p);
       if (tok !== scanTok.current) return;
-      if (!text) continue;                             // no embedded text → leave for OCR (future)
-      const r = parseSheetScale(text);
-      if (!r) continue;
-      if (r.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: r.label } })); continue; }
-      if (!r.ftPerInch) continue;
-      const vp = (await pdf.getPage(p)).getViewport({ scale: 1 });
-      if (tok !== scanTok.current) return;
-      if (!detectSheet(vp.width, vp.height).std) continue; // non-standard plot → don't trust the printed scale
-      setCalByPage((c) => (c[p] ? c : { ...c, [p]: ftPerPointForScale(r.ftPerInch) }));
-      setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: r.label } }));
+      const meta = { ...readSheetMeta(page), width: page.width, height: page.height };
+      setSheetMeta((m) => ({ ...m, [p]: meta }));
+      const sc = meta.scale;
+      if (sc && sc.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: sc.label } })); continue; }
+      const ft = statedCalibration(meta); // 0 unless a trustworthy stated scale on a standard plot size
+      if (ft) {
+        setCalByPage((c) => (c[p] ? c : { ...c, [p]: ft }));
+        setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: (sc && sc.label) || "" } }));
+      }
     }
   }, []);
+
+  // Logical sheets (B341): collapse the read pages into the SAME logical groups the Stitcher uses —
+  // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
+  // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
+  // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
+  const groups = useMemo(
+    () => groupSheets(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
+    [sheetMeta, numPages]
+  );
 
   const openFile = async (file) => {
     if (!file) return;
@@ -277,7 +289,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       // of the SAME file keeps them (its saved/auto cals still apply). (B267)
       const reuse = sourceRef.current && sameName(sourceRef.current.name, file.name);
       if (!reuse) { setCalByPage({}); setCalInfo({}); }
-      autoDetectScales(pdf, pdf.numPages); // B267: background stated-scale auto-calibration
+      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B341)
+      scanSheets(pdf, pdf.numPages); // background sheet-metadata read (labels + grouping) + B267 auto-calibration
       // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
       // known file (so its markups stay bound); otherwise mint one and upload once.
       const keepId = reuse ? sourceRef.current.srcId : null;
@@ -447,6 +460,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B329)
+    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B341); won't override saved cals
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -460,6 +474,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
+    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B341); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
@@ -472,7 +487,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMarkupProject(null);
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
-    setMarkups([]); setCalByPage({}); setCalInfo({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
+    setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
   };
@@ -770,6 +785,16 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const tbDiv = { width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
+  // Logical-sheet sidebar helpers (B266/B341): a calibration dot, a short sheet id, a rich tooltip.
+  const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
+  const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
+  const sheetTip = (n) => {
+    const m = sheetMeta[n]; const parts = [];
+    if (m?.sheetNumber) parts.push(m.sheetNumber);
+    if (m?.titleBlock && m.sheetTitle && m.sheetTitle !== "Document") parts.push(m.sheetTitle); // title only from a real title block
+    if (calInfo[n]?.label) parts.push(`scale ${calInfo[n].label}${calInfo[n].src !== "manual" ? " — verify" : ""}`);
+    return parts.join(" · ") || `Sheet ${n}`;
+  };
 
   // Right-side tool rail (B330): the drawing/measure tools + zoom controls, Bluebeam-style.
   const railItems = [
@@ -929,8 +954,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          {/* sheet list */}
-          <div style={{ flex: "none", width: 116, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {/* sheet list — logical sheets (B341) with real labels (B266) */}
+          <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
               {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: on ? PAL.ink : "var(--text-tertiary)" }); return (
@@ -942,15 +967,52 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               ); })()}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px", minHeight: 0 }}>
-              <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Sheets · {numPages}</div>
-              {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
-                <button key={n} ref={n === page ? activeSheetRef : null} onClick={() => goToPage(n)}
-                  title={calInfo[n]?.label ? `Scale ${calInfo[n].label}${calInfo[n].src === "auto" ? " — from sheet, verify" : ""}` : undefined}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-                    border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink }}>
-                  Sheet {n}{calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : ""}
-                </button>
-              ))}
+              {/* Logical sheets (B341): grouped plans collapse to one entry; the real sheet # + title
+                  replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
+                  uses; the count reads "logical sheets · pages" so the collapse is visible. */}
+              <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
+              {groups.map((g, gi) => {
+                const gid = `${gi}:${g.pages[0]?.pageNum}`;
+                if (g.kind === "single") {
+                  const n = g.pages[0].pageNum, active = n === page;
+                  // Use a real label only when this sheet has a confident title-block read (a detected
+                  // band or a real sheet number) — never surface a random body-text line as the label
+                  // (a textless/title-block-less page stays "Sheet N"). (B266)
+                  const m = sheetMeta[n];
+                  const hasReal = !!(m && (m.sheetNumber || m.titleBlock));
+                  const lbl = hasReal && g.label && g.label !== "Sheet" ? g.label : `Sheet ${n}`;
+                  return (
+                    <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+                        border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {lbl}{calMark(n)}
+                    </button>
+                  );
+                }
+                const pagesN = g.pages.map((p) => p.pageNum);
+                const open = openGroups[gid] ?? pagesN.includes(page);
+                const activeInGroup = pagesN.includes(page);
+                return (
+                  <div key={gid} style={{ marginBottom: 4 }}>
+                    <button onClick={() => { setOpenGroups((o) => ({ ...o, [gid]: !open })); goToPage(g.pages[0].pageNum); }} title={g.label} data-testid="sheet-group"
+                      style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700,
+                        border: `1px solid ${activeInGroup ? PAL.accent : PAL.line}`, background: activeInGroup ? "var(--hover-ghost)" : "var(--surface-page)", color: PAL.ink }}>
+                      <span style={{ flex: "none", fontSize: 9, color: PAL.muted }}>{open ? "▾" : "▸"}</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+                    </button>
+                    {open && pagesN.map((n) => {
+                      const active = n === page;
+                      return (
+                        <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
+                          style={{ display: "block", width: "calc(100% - 12px)", marginLeft: 12, textAlign: "left", padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
+                            border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sheetShort(n)}{calMark(n)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
