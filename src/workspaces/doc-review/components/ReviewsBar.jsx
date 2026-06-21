@@ -10,20 +10,52 @@ import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } fr
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
-// Badge label colors are chrome tokens (themes with the app, B341): the bright
-// dark-chrome hexes (#86efac / #fbbf24 / #9b9482) were illegible on the light bar.
-const BADGE = {
-  saving:  { text: "Saving…", color: "var(--warn-text)", dot: "#f59e0b" },
-  saved:   { text: "Saved ✓", color: "var(--save-badge)", dot: "#22c55e" },
-  unsaved: { text: "Unsaved", color: "var(--warn-text)", dot: "#f59e0b" },
-  local:   { text: "Not saved", color: "var(--chrome-muted)", dot: "var(--chrome-tab-inactive)" },
+// Truthful save chip (B356). The OLD chip cried wolf — it showed "Not saved" even on an
+// empty review with nothing to save, training the eye to ignore the one state that matters.
+// Now: nothing to save → NO chip at all (the `idle` short-circuit, handled in render); a real
+// save state → an honest little cloud. A signed-in user's work is cloud-backed, so "saved"
+// is the resting state (mirrors the Site Planner's "Synced ✓"); signed-out work is honestly
+// "On this device"; a failed/conflicting write is LOUD and never silent. Colors are theme
+// tokens (B341) so the chip stays legible when the chrome flips light/dark.
+//   variant: "cloud-check" | "cloud-up" | "cloud-x" | "device"
+function SaveIcon({ variant, size = 14 }) {
+  const cloud = "M7 17.5h9.5a3.5 3.5 0 0 0 .4-7A5 5 0 0 0 7.6 8.6 4 4 0 0 0 7 17.5Z";
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none", display: "block" }}>
+      {variant === "device" ? (
+        <><rect x="3" y="4.5" width="18" height="12" rx="2" /><path d="M8.5 20h7M12 16.5V20" /></>
+      ) : (
+        <>
+          <path d={cloud} />
+          {variant === "cloud-check" && <path d="M9.4 12.6l1.9 1.9 3.4-3.6" strokeWidth="1.8" />}
+          {variant === "cloud-up" && <path d="M12 15.5v-4.2M10.1 12.7L12 10.7l1.9 2" strokeWidth="1.8" />}
+          {variant === "cloud-x" && <path d="M10.3 11.3l3.4 3.4M13.7 11.3l-3.4 3.4" strokeWidth="1.8" />}
+        </>
+      )}
+    </svg>
+  );
+}
+// status (from useReviewPersistence) → chip, the WHOLE truth-table in one pure function so a
+// future edit can't silently bring the "Not saved" cry-wolf back (locked by reviewsBadge.test.js):
+//   • idle (nothing to save) → null → NO chip at all (the B356 fix).
+//   • saving/unsaved → amber, loud-ish; conflict → red, loudest; never silent on a problem.
+//   • saved OR signed-in (cloud-backed, like the Site Planner's "Synced ✓") → calm green "Saved".
+//   • signed-out with content → honest "On this device" (can't sync), not a false "Not saved".
+export const chipFor = (status, signedIn, idle) => {
+  if (idle) return null; // nothing to save → say nothing
+  if (status === "saving") return { variant: "cloud-up", text: "Saving…", color: "var(--warn-text)", pulse: true, tip: "Saving your changes to the cloud…" };
+  if (status === "unsaved") return { variant: "cloud-up", text: "Unsaved", color: "var(--warn-text)", tip: "You have changes that haven't reached the cloud yet — they'll retry automatically." };
+  if (status === "conflict") return { variant: "cloud-x", text: "Sync conflict", color: "var(--status-dead)", tip: "This review was changed in another session. Reload to merge in the latest before saving again." };
+  if (status === "saved" || signedIn) return { variant: "cloud-check", text: "Saved", color: "var(--save-badge)", tip: "Saved and synced to the cloud." };
+  return { variant: "device", text: "On this device", color: "var(--chrome-muted)", tip: "Saved on this device. Sign in (in the Site Planner workspace) to sync across your devices." };
 };
 
 const fmtWhen = (s) => {
   try { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (_) { return ""; }
 };
 
-export default function ReviewsBar({ status = "local", signedIn = false, meta = {}, onMeta, onOpen, onNew }) {
+export default function ReviewsBar({ status = "local", signedIn = false, meta = {}, onMeta, onOpen, onNew, idle = false }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState(null);     // saved reviews (null = not loaded)
   const [projects, setProjects] = useState([]);
@@ -50,7 +82,8 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  const badge = BADGE[status] || BADGE.local;
+  // Truthful chip: when there's nothing to save (idle), show NOTHING (B356) — no cry-wolf.
+  const chip = chipFor(status, signedIn, idle);
   const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "var(--surface-raised)" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
 
@@ -64,8 +97,11 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
 
   return (
     <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center", gap: 8 }}>
-      <span title="Save state" style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: badge.color, fontWeight: 600, minWidth: 60, justifyContent: "flex-end" }}>
-        <span style={{ width: 7, height: 7, borderRadius: 99, background: badge.dot, flex: "none" }} />{badge.text}</span>
+      {chip && (
+        <span title={chip.tip} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: chip.color, fontWeight: 600, justifyContent: "flex-end", animation: chip.pulse ? "pf-pulse 1.1s ease-in-out infinite" : "none" }}>
+          <SaveIcon variant={chip.variant} />{chip.text}
+        </span>
+      )}
       <button
         onClick={() => setOpen((o) => !o)}
         style={{ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }}

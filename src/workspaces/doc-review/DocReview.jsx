@@ -13,7 +13,6 @@ import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sa
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
@@ -155,7 +154,6 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
   // The project the header breadcrumb points at in Markup (B191). Follows the open
@@ -929,7 +927,6 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
-      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
       <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
         projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
@@ -946,26 +943,23 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         centerContent={
           // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.
-          <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
-            {meta.title && (
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--chrome-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {meta.title}
-              </span>
-            )}
-            <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
-              🗂 Files
-            </button>
-          </span>
+          // The project name itself is NOT repeated here — the Row-1 breadcrumb is its one
+          // canonical home (B355); a second copy in the centre was the "crowded centre".
+          <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+            🗂 Files
+          </button>
         }
-        saveSlot={<ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />}
         authControl={authControl}
         toolbarContent={
           <>
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
-            <button style={chromeBtn()} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+            {/* Reviews (file/save this review) now lives in the Row-2 tools row, not Row 1 (B358);
+                its truthful save chip rides with it (B356). The old 📁 Library door was removed —
+                the 🗂 Files drawer already browses by project + discipline (B357). */}
+            <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} idle={isEmpty()} />
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
