@@ -771,7 +771,7 @@ const EyeOffIcon = () => (
   </svg>
 );
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false } = {}) {
   // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
   // used). Maps the active theme's tokens onto this file's existing PAL keys, so the
   // ~70 canvas color usages below stay untouched. (B317/B319)
@@ -1303,11 +1303,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
   // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
   const applyPinch = () => {
-    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
+    // between scheduling this update and React running the updater, so reading pinchRef.current
+    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
+    const p = pinchRef.current;
+    if (!p || pointersRef.current.size < 2) return;
     const [a, b] = [...pointersRef.current.values()];
     const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / pinchRef.current.dist;
-    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, pinchRef.current.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    const factor = dist / p.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, p.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
     pinchRef.current = { mid, dist };
   };
   // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
@@ -5659,6 +5663,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         centerContent={plannerCenterContent}
         saveSlot={plannerSaveSlot}
         authControl={authControl}
+        accountActive={accountActive}
         toolbarContent={plannerToolbar}
       />
 

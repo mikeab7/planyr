@@ -5,6 +5,10 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V99 — Mobile pinch crash fix + multi-tab banner gated to signed-in (B364) ✅ (self-verified headless)
+- **Steps/expect:** (1) `ui-audit/verify-multitab.mjs` — two logged-out tabs open the SAME project in one browser → **no** "open in another tab" banner in either tab (was: both warned). 3/3 passed. (2) Pinch crash: snapshotting `pinchRef.current` before `setView` removes the null-deref path that fired the Site Planner error boundary on mobile; build green, `test/multiTab.test.js` 10/10.
+- **Result:** PASS 2026-06-21. (Signed-in banner path unchanged but not headlessly exercisable — sandbox blocks sign-in; covered by the pure `test/multiTab.test.js`.)
+
 ## Archived 2026-06-21 — passed / superseded items swept from VERIFICATION.md
 
 ### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
