@@ -2993,10 +2993,19 @@ function App() {
   // One-time migration: recompute end dates to MS Project inclusive convention
   // and normalise predecessor format. Does NOT cascade (preserves manual dates).
   const normalizeToV6 = d => {
+    // Defensive: this runs FIRST on whatever JSON.parse returns (a Supabase row or a
+    // hand-edited <script id="planar-data"> block), so it must survive corrupt shapes
+    // — a null/garbage project or non-array tasks must be skipped, not crash the whole
+    // load (the catch re-runs this on the seed, so a malformed seed would hang on the
+    // loader). Mirrors the guards the sibling normalizers already use.
+    if (!d || typeof d !== "object") d = {};
     if (d._v6) return d;
     const projects = {};
-    Object.entries(d.projects).forEach(([id, proj]) => {
-      const tasks = proj.tasks.map(t => ({
+    const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+    Object.entries(srcProjects).forEach(([id, proj]) => {
+      if (!proj || typeof proj !== "object") return;                     // skip a null/garbage project
+      const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+      const tasks = srcTasks.filter(t => t && typeof t === "object").map(t => ({   // skip a null/garbage task
         ...t,
         predecessors: normPreds(t.predecessors),
         end: calcEnd(t.start, t.duration),
@@ -3021,10 +3030,11 @@ function App() {
         if (!d?.projects) return d;
         const projects = {};
         Object.entries(d.projects).forEach(([pid, proj]) => {
+          if (!proj || typeof proj !== "object") return;   // skip a null/garbage project (defensive, like normalizeToV6)
           // Blank durations ("") become 0 on load — new tasks now start at 0d,
           // and this sweeps any legacy empty values so the grid never shows a
           // bare "d" again. Runs automatically, same as ID renumbering.
-          const tasks = (proj.tasks || []).map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+          const tasks = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
           projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
         });
         // Resync the next-task-id counters: renumbering compacts ids to 1..n,
@@ -3039,11 +3049,11 @@ function App() {
       const ensureContacts = d => {
         if (!d?.projects) return d;
         const existing = (d.settings?.contacts || []);
-        const existingNames = new Set(existing.map(c => c.name.toLowerCase()));
+        const existingNames = new Set(existing.map(c => String(c?.name || '').toLowerCase()));
         const seen = new Set();
         Object.values(d.projects).forEach(proj => {
-          (proj.tasks || []).forEach(t => {
-            const rp = (t.responsibleParty || '').trim();
+          ((proj && Array.isArray(proj.tasks)) ? proj.tasks : []).forEach(t => {
+            const rp = String((t && t.responsibleParty) || '').trim();
             if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
               existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
               existingNames.add(rp.toLowerCase());
