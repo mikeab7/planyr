@@ -44,8 +44,10 @@ export async function extractPageText(pdf, pageNum) {
  * getPage each find nothing to cancel and would both call page.render() on the one canvas
  * (PDF.js throws "Cannot use the same canvas during multiple render operations"). Checking
  * `isStale()` right before page.render() makes a superseded render bail before it touches
- * the canvas, so only the newest render draws. */
-export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, isStale) {
+ * the canvas, so only the newest render draws.
+ * `setCssSize=false` lets the caller drive the canvas display size itself (the Markup
+ * transform viewport fills a CSS-scaled page box so a zoom can rescale the bitmap). (B329) */
+export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, isStale, setCssSize = true) {
   const page = await pdf.getPage(pageNum);
   if (isStale && isStale()) return null; // a newer render superseded this during getPage — don't touch the canvas (B40)
   const base = page.getViewport({ scale: 1 });
@@ -55,8 +57,13 @@ export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, is
   canvas.width = Math.floor(viewport.width);   // dense backing store (scale × dpr, budget-capped)
   canvas.height = Math.floor(viewport.height);
   const cssW = Math.floor(base.width * scale), cssH = Math.floor(base.height * scale); // on-screen size (scale only)
-  canvas.style.width = cssW + "px";            // map the dense bitmap into the logical box → crisp
-  canvas.style.height = cssH + "px";
+  // When the caller drives display size itself (the Markup transform viewport sizes the
+  // canvas to 100% of a CSS-scaled page box so a zoom gesture can rescale the already-
+  // rendered bitmap without re-rasterising), skip setting the canvas's own CSS box. (B329)
+  if (setCssSize) {
+    canvas.style.width = cssW + "px";          // map the dense bitmap into the logical box → crisp
+    canvas.style.height = cssH + "px";
+  }
   const task = page.render({ canvasContext: ctx, viewport });
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
