@@ -1,4 +1,4 @@
-/* B356 — the Document Review save chip must be TRUTHFUL. The old badge cried wolf:
+/* B358 — the Document Review save chip must be TRUTHFUL. The old badge cried wolf:
  * it showed "Not saved" on an empty review with nothing to save, so the eye learned to
  * ignore the one state that matters. This locks the contract for `chipFor`:
  *   - idle (nothing to save) → no chip at all (null), regardless of signed-in/status;

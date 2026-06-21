@@ -1,12 +1,12 @@
-/* Verify B355–B358 — the Markup header de-clutter + truthful save "cloud" chip.
+/* Verify B357–B360 — the Markup header de-clutter + truthful save "cloud" chip.
  *
- *   B355 — AppHeader row hierarchy: Row 2 (tools) is visibly taller than Row 1 (nav);
+ *   B357 — AppHeader row hierarchy: Row 2 (tools) is visibly taller than Row 1 (nav);
  *           the project name is not duplicated (breadcrumb only, not also center zone).
- *   B356 — the save indicator is truthful: NO "Not saved" cry-wolf when there's nothing
+ *   B358 — the save indicator is truthful: NO "Not saved" cry-wolf when there's nothing
  *           to save (empty Markup, no project); a proper cloud chip otherwise.
- *   B357 — the redundant "📁 Library" entry point is gone (Files subsumes it) — in BOTH
+ *   B359 — the redundant "📁 Library" entry point is gone (Files subsumes it) — in BOTH
  *           the single-sheet viewer AND the Stitcher.
- *   B358 — "Reviews ▾" moved out of Row 1 into the Row 2 tools row.
+ *   B360 — "Reviews ▾" moved out of Row 1 into the Row 2 tools row.
  *
  * Drives the REAL built app (logged-out, browser-only). Captures before/after screenshots
  * of the header in three states: empty Markup, Markup with a PDF, and the Stitcher.
@@ -77,16 +77,16 @@ const rows = await rowHeights();
 console.log(`\n[${TAG}] Markup header (empty): "${emptyHdr}"`);
 console.log(`[${TAG}] row heights: ${JSON.stringify(rows)}`);
 
-console.log("\nB356 — no cry-wolf save state on an empty Markup:");
+console.log("\nB358 — no cry-wolf save state on an empty Markup:");
 check(!/not saved/i.test(emptyHdr), `header does not say "Not saved" when there's nothing to save`);
 
-console.log("\nB357 — the redundant Library entry point is gone:");
+console.log("\nB359 — the redundant Library entry point is gone:");
 check(!/library/i.test(emptyHdr), `no "Library" button in the Markup header`);
 
-console.log("\nB355 — Row 2 (tools) reads taller than Row 1 (nav):");
+console.log("\nB357 — Row 2 (tools) reads taller than Row 1 (nav):");
 check(rows && rows.length === 2 && rows[1] > rows[0], `Row2 (${rows?.[1]}px) > Row1 (${rows?.[0]}px)`);
 
-console.log("\nB358 — Reviews lives in the tools row (Row 2), not Row 1:");
+console.log("\nB360 — Reviews lives in the tools row (Row 2), not Row 1:");
 const reviewsRow = await page.evaluate(() => {
   const h = document.querySelector("header"); if (!h) return -1;
   const rowsEl = [...h.children].filter((c) => c.tagName === "DIV").slice(0, 2);

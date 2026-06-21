@@ -60,16 +60,31 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V95 — Markup header de-clutter + truthful save "cloud" chip (B355–B358) ✅ (self-verified headless, logged-out; one optional signed-in eyeball on the green "Saved" state)
+### V97 — Markup header de-clutter + truthful save "cloud" chip (B357–B360) ✅ (self-verified headless, logged-out; one optional signed-in eyeball on the green "Saved" state)
 - **Added** 2026-06-21 · **Cadence** once (header redesign acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out) · **Next check** — one optional signed-in eyeball (below); the sandbox proxy blocks sign-in.
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-header-redesign.mjs`, after = PASS, 0 page errors; before/after screenshots in `ui-audit/screens/header-*`):**
-  - **B356 — no cry-wolf:** the empty Markup header (nothing open) shows **no save chip at all** — the old "● Not saved" is gone; once a PDF is open (logged-out) it reads the honest **"On this device"**.
-  - **B355 — row hierarchy:** measured row heights are **`[35, 44]`** (Row 2 taller than Row 1); the duplicate project title is gone from the centre zone.
-  - **B357 — Library retired:** no "📁 Library" button in **either** the single-sheet header or the Stitcher toolbar.
-  - **B358 — Reviews relocated:** the "Reviews ▾" button now resolves inside **Row 2** (tools), not Row 1.
+  - **B358 — no cry-wolf:** the empty Markup header (nothing open) shows **no save chip at all** — the old "● Not saved" is gone; once a PDF is open (logged-out) it reads the honest **"On this device"**.
+  - **B357 — row hierarchy:** measured row heights are **`[35, 44]`** (Row 2 taller than Row 1); the duplicate project title is gone from the centre zone.
+  - **B359 — Library retired:** no "📁 Library" button in **either** the single-sheet header or the Stitcher toolbar.
+  - **B360 — Reviews relocated:** the "Reviews ▾" button now resolves inside **Row 2** (tools), not Row 1.
 - **✅ Truth-table locked (`test/reviewsBadge.test.js`, 7 tests):** the save-chip states that need a signed-in/cloud session — green cloud-✓ **"Saved"** (signed-in / explicit save), pulsing **"Saving…"**, and the loud red **"Sync conflict"** — are proven by the pure `chipFor` contract (idle → null; signed-in → Saved; conflict → its own loud state; never the dishonest "Not saved").
 - **⏳ Optional signed-in eyeball (not blocking):** on planyr.io, sign in, open a Markup review, make an edit → confirm the chip cycles **Saving… → ✓ Saved** (green cloud-check). Headless can't reach signed-in (proxy blocks auth); the logic is unit-locked, so this is a visual nicety only.
 - **NB (not a bug to fix here):** the separate **"⊘ Cloud off"** pill is the Shell's auth control when Supabase isn't configured for the build — it shows in the sandbox preview but on a cloud-configured planyr.io it's the Sign-in/account pill. If it's visible in production, the cloud env vars aren't wired into that deploy (a config item).
+### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
+- **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
+- **✅ `ui-audit/contrast-audit.mjs`:** every token pair (incl. the new `--success/danger/info-text`) clears WCAG AA in both themes.
+- **Note:** the sign-in-gated deep drawers (Project Files / Library) and SiteReviewModal weren't render-reached logged-out, but their colours are provably AA via the token audit; an optional signed-in eyeball on planyr.io in **dark** mode is a nicety, not a blocker.
+
+### V95 — New site plans default to lettered concepts (Concept A, B, … AA) (B355) ✅ (self-verified headless in the real planner — fully done)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — the logged-out localStorage store is the same plan-creation code path used signed-in) · **Next check** — none required.
+- **✅ Live-verified 2026-06-21 (`ui-audit/verify-b355-concepts.mjs`, 4/4 checks, 0 genuine page errors):** seeded a real saved site, resumed into the planner, and clicked **Plan ▾ → ＋ New plan** for three cases — the header re-labelled the new plan exactly as designed:
+  - existing **"Concept A"** → new plan **"Concept B"** (sequences to the next letter);
+  - existing **"Concept C"** (A/B deleted) → **"Concept D"** (continues PAST the highest, never reuses a deleted gap);
+  - existing legacy **"Plan 1"** → **"Concept A"** (old "Plan N" names are ignored, not renamed).
+  - (The harness filters two documented sandbox-only noise classes — basemap-less seed NaN SVG geometry + CORS-blocked external GIS probes — and asserts no *genuine* JS error.)
+- **✅ Deterministic path (`test/conceptName.test.js`, 14 tests):** A–Z, the Z→AA→AB→… spreadsheet roll-over (bijective base-26, no 27th-concept crash), round-trip stability, gap-not-reused, and legacy "Plan N" ignored.
+- Pure `conceptName.js` wired into all three creation paths (new-from-map, new-plan-same-parcel, blank-site first save) + the `createSiteModel` fallback. Name stays user-editable; no retroactive rename of existing plans. full suite 1055 · lint 0 · build green.
 ### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
 **Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
 is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose

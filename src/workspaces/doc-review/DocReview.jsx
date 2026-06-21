@@ -944,7 +944,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.
           // The project name itself is NOT repeated here — the Row-1 breadcrumb is its one
-          // canonical home (B355); a second copy in the centre was the "crowded centre".
+          // canonical home (B357); a second copy in the centre was the "crowded centre".
           <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
             style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
             🗂 Files
@@ -956,9 +956,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
-            {/* Reviews (file/save this review) now lives in the Row-2 tools row, not Row 1 (B358);
-                its truthful save chip rides with it (B356). The old 📁 Library door was removed —
-                the 🗂 Files drawer already browses by project + discipline (B357). */}
+            {/* Reviews (file/save this review) now lives in the Row-2 tools row, not Row 1 (B360);
+                its truthful save chip rides with it (B358). The old 📁 Library door was removed —
+                the 🗂 Files drawer already browses by project + discipline (B359). */}
             <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} idle={isEmpty()} />
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
@@ -975,7 +975,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "var(--warn-text)" }}>Re-open file…</button>
         </div>
       )}
 
@@ -994,7 +994,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Document Review</div>
             <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
             <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
-            {err && <div style={{ color: "#b91c1c", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
+            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
           </div>
         </div>
       ) : (
@@ -1123,10 +1123,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               {(() => {
                 const info = calInfo[page];
                 if (ftPerUnit && info?.src === "auto")
-                  return <span style={{ color: "#b45309" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
-                if (ftPerUnit) return <span style={{ color: "#15803d" }}>Sheet {page} calibrated</span>;
-                if (info?.src === "nts") return <span style={{ color: "#b45309" }}>Sheet {page} — marked NOT TO SCALE</span>;
-                return <span style={{ color: "#b45309" }}>Sheet {page} not calibrated — use Calibrate</span>;
+                  return <span style={{ color: "var(--warn-text)" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
+                if (ftPerUnit) return <span style={{ color: "var(--success-text)" }}>Sheet {page} calibrated</span>;
+                if (info?.src === "nts") return <span style={{ color: "var(--warn-text)" }}>Sheet {page} — marked NOT TO SCALE</span>;
+                return <span style={{ color: "var(--warn-text)" }}>Sheet {page} not calibrated — use Calibrate</span>;
               })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
@@ -1147,10 +1147,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                   <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span>
                 </div>
               ))}
-              {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "#b45309", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
+              {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "var(--warn-text)", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>Areas/counts use the shared coordinate module — the seam to feed the Site Planyr's yield panel (pending the shared coordinate spine).</div>
             </div>
-            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "#b3361b" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
+            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "var(--danger-text)" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
           </div>
           ) : (
             <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>

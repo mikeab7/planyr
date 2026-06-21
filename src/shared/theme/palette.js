@@ -29,6 +29,13 @@ const LIGHT = {
   /* Module accents — fills fixed both themes; -text swaps */
   accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentMarkup: "#EF9F27",
   accentSiteText: "#0F6E56", accentScheduleText: "#534AB7", accentMarkupText: "#8A5410",
+  /* Strong accent for TEXT sitting on the soft-accent fill (selected menu row /
+     "current" marker). The plain accent (#C2410C) is only 3.8:1 on canvasAccentSoft —
+     this darker value clears AA there; dark theme keeps the bright accent. */
+  accentStrong: "#9A3412",
+  /* Semantic TEXT colors (mirror of the --success/danger/info/warn-text tokens) for the
+     canvas-adjacent inline styles that read PAL instead of var(). */
+  warnText: "#8A5410", successText: "#15803D", dangerText: "#B3361B", infoText: "#1D4ED8", purpleText: "#534AB7",
 };
 
 const DARK = {
@@ -49,6 +56,11 @@ const DARK = {
   /* Module accents — fills unchanged; -text is the light-on-dark set */
   accentSite: "#1D9E75", accentSchedule: "#7F77DD", accentMarkup: "#EF9F27",
   accentSiteText: "#5DCAA5", accentScheduleText: "#AFA9EC", accentMarkupText: "#EF9F27",
+  /* On dark, the soft-accent fill is a low-alpha tint over the dark surface, so the
+     bright accent already clears AA against it — keep it. */
+  accentStrong: "#F26B3A",
+  /* Semantic TEXT colors — lightened for the dark panels. */
+  warnText: "#EFB54E", successText: "#4FBF7B", dangerText: "#F2706F", infoText: "#6FB4F0", purpleText: "#AFA9EC",
 };
 
 export const PALETTES = { light: LIGHT, dark: DARK };

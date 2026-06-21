@@ -124,6 +124,17 @@ const PAIRS = [
   ["--accent-site-text", "--surface-raised", "Site accent text · card", T],
   ["--accent-schedule-text", "--surface-raised", "Schedule accent text · card", T],
   ["--accent-markup-text", "--surface-raised", "Markup accent text · card", T],
+  // Semantic text colors (success/danger/info/warn) — used for colored labels on the
+  // themed panels (B354). A hardcoded #15803d/#b3361b/#1d4ed8/#b45309 reads on a light
+  // card but fails on a dark card, so these MUST stay tokens. Checked on both surfaces.
+  ["--success-text", "--surface-raised", "success text · card", T],
+  ["--success-text", "--surface-page", "success text · page", T],
+  ["--danger-text", "--surface-raised", "danger text · card", T],
+  ["--danger-text", "--surface-page", "danger text · page", T],
+  ["--info-text", "--surface-raised", "info text · card", T],
+  ["--info-text", "--surface-page", "info text · page", T],
+  ["--warn-text", "--surface-raised", "warn text · card", T],
+  ["--warn-text", "--surface-page", "warn text · page", T],
   // On-accent text (text/icon ON a module fill — chips, active fills)
   ["--on-accent-site", "--accent-site", "on-fill · Site", T, "fill locked + white specced (B318); fill used only as ≥3:1 underline, on-accent token currently unused for text — safe for large/bold only"],
   ["--on-accent-schedule", "--accent-schedule", "on-fill · Schedule", T, "fill locked + white specced (B318); used only as ≥3:1 underline — safe for large/bold only"],

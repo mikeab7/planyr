@@ -1106,7 +1106,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
             <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setConfirmDel(s); }}
               title="Delete this project and all its plans"
               style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                background: "transparent", color: "#b91c1c", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+                background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
               <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
               </span>

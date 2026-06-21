@@ -10,7 +10,7 @@ import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } fr
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
-// Truthful save chip (B356). The OLD chip cried wolf — it showed "Not saved" even on an
+// Truthful save chip (B358). The OLD chip cried wolf — it showed "Not saved" even on an
 // empty review with nothing to save, training the eye to ignore the one state that matters.
 // Now: nothing to save → NO chip at all (the `idle` short-circuit, handled in render); a real
 // save state → an honest little cloud. A signed-in user's work is cloud-backed, so "saved"
@@ -38,7 +38,7 @@ function SaveIcon({ variant, size = 14 }) {
 }
 // status (from useReviewPersistence) → chip, the WHOLE truth-table in one pure function so a
 // future edit can't silently bring the "Not saved" cry-wolf back (locked by reviewsBadge.test.js):
-//   • idle (nothing to save) → null → NO chip at all (the B356 fix).
+//   • idle (nothing to save) → null → NO chip at all (the B358 fix).
 //   • saving/unsaved → amber, loud-ish; conflict → red, loudest; never silent on a problem.
 //   • saved OR signed-in (cloud-backed, like the Site Planner's "Synced ✓") → calm green "Saved".
 //   • signed-out with content → honest "On this device" (can't sync), not a false "Not saved".
@@ -82,7 +82,7 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Truthful chip: when there's nothing to save (idle), show NOTHING (B356) — no cry-wolf.
+  // Truthful chip: when there's nothing to save (idle), show NOTHING (B358) — no cry-wolf.
   const chip = chipFor(status, signedIn, idle);
   const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "var(--surface-raised)" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };

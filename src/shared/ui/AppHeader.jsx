@@ -6,7 +6,7 @@
  *
  * Row 2 (44px): module tabs (Site · Schedule · Markup)
  *               || toolbar slot (workspace-specific tools) ||
- * Row 2 is intentionally TALLER than Row 1 (B355): the tools row is where the work
+ * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
  * happens, so it carries the visual weight; the nav row stays thin. Don't equalise them
  * — near-identical heights are what made "which row matters?" ambiguous.
  *
@@ -360,7 +360,7 @@ export default function AppHeader({
         </div>
       </div>
 
-      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B355) ── */}
+      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ── */}
       <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
 
         {/* Module tabs */}
