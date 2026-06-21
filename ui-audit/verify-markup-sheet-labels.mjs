@@ -1,11 +1,11 @@
-/* Verify B266 + B343 — the single-sheet "Markup" sidebar now shows REAL sheet labels (sheet # +
+/* Verify B266 + B348 — the single-sheet "Markup" sidebar now shows REAL sheet labels (sheet # +
  * title, not "Sheet N") and collapses the set into the SAME logical sheets the Stitcher uses
  * (reusing #242's shared sheetMeta/sheetGroups engines). #242 (PR #242) delivered grouping/
  * auto-stitch in the STITCHER but left the Markup single-sheet sidebar as a flat "Sheet N" list —
  * B266 (open) was never delivered there. This drives the REAL built app (logged-out; browser-only)
  * with a generated 4-sheet titled set and asserts the Markup sidebar:
  *   B266 — the cover shows its real title ("COVER SHEET"), not "Sheet 1"; no generic "Sheet N".
- *   B343 — 4 pages collapse to 2 logical entries; a "Grading Plan · C-5–C-7 · 3 sheets" group that
+ *   B348 — 4 pages collapse to 2 logical entries; a "Grading Plan · C-5–C-7 · 3 sheets" group that
  *          expands to its member sheets (C-5/C-6/C-7); auto-calibrate dot (·≈) on the grading sheets.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
@@ -81,7 +81,7 @@ await page.waitForFunction(() => document.querySelectorAll('[data-testid="sheet-
   .catch(() => console.log("  [diag] grouped sidebar never appeared"));
 await sleep(400);
 
-console.log("\nB343 — the Markup sidebar collapses the set into logical sheets:");
+console.log("\nB348 — the Markup sidebar collapses the set into logical sheets:");
 const countTxt = await page.locator('[data-testid="sheet-count"]').first().textContent();
 check(/2\s*sheets\s*·\s*4\s*pages/i.test(countTxt), `sidebar header reads "${(countTxt || "").trim()}" (2 logical · 4 pages)`);
 const groups = await groupTexts();
@@ -92,7 +92,7 @@ const singles = await entryTexts();
 check(singles.some((t) => /COVER SHEET/i.test(t)), `cover shows its real title: ${JSON.stringify(singles)}`);
 check(!singles.some((t) => /^Sheet \d/.test(t)) && !groups.some((t) => /Sheet \d/.test(t)), "no generic 'Sheet N' labels remain");
 
-console.log("\nB343 — the group expands to its member sheets + auto-calibrate dot:");
+console.log("\nB348 — the group expands to its member sheets + auto-calibrate dot:");
 await page.locator('[data-testid="sheet-group"]', { hasText: "Grading Plan" }).first().click();
 await sleep(400);
 const expanded = await entryTexts();

@@ -313,9 +313,9 @@ server/                   # placeholder README only — NOT built or deployed; b
   `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
   to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
   **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **Markup-sidebar parity (B266 + B343, follow-up).** The above shipped the grouping in the
+- **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
   **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
-  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B343), reusing the SAME
+  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME
   engines (`readSheetMeta`/`groupSheets`/`statedCalibration`) — no duplicate modules. A page with no
   title block falls back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
   (`ui-audit/verify-markup-sheet-labels.mjs` 7/7 + no-regression 13/13).

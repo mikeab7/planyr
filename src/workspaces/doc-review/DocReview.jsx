@@ -128,8 +128,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
-  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B343)
-  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B343)
+  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B348)
+  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B348)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
@@ -239,7 +239,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   /* ---- load ---- */
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
 
-  // Read each sheet's metadata in the background (B343): sheet #, title, discipline, stated scale —
+  // Read each sheet's metadata in the background (B348): sheet #, title, discipline, stated scale —
   // via the SAME shared reader the Stitcher uses (sheetMeta.readSheetMeta), so the single-sheet
   // sidebar can show real labels + collapse into logical sheets instead of "Sheet N" (B266). Also
   // pre-fills the per-sheet stated-scale calibration (B267) via the shared statedCalibration (which
@@ -264,7 +264,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     }
   }, []);
 
-  // Logical sheets (B343): collapse the read pages into the SAME logical groups the Stitcher uses —
+  // Logical sheets (B348): collapse the read pages into the SAME logical groups the Stitcher uses —
   // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
   // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
   // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
@@ -292,7 +292,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       // of the SAME file keeps them (its saved/auto cals still apply). (B267)
       const reuse = sourceRef.current && sameName(sourceRef.current.name, file.name);
       if (!reuse) { setCalByPage({}); setCalInfo({}); }
-      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B343)
+      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B348)
       scanSheets(pdf, pdf.numPages); // background sheet-metadata read (labels + grouping) + B267 auto-calibration
       // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
       // known file (so its markups stay bound); otherwise mint one and upload once.
@@ -463,7 +463,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B329)
-    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B343); won't override saved cals
+    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -477,7 +477,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
-    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B343); saved cals preserved
+    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
@@ -829,7 +829,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const tbDiv = { width: 1, height: 18, background: "var(--chrome-divider)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
-  // Logical-sheet sidebar helpers (B266/B343): a calibration dot, a short sheet id, a rich tooltip.
+  // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
   const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
   const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
   const sheetTip = (n) => {
@@ -998,7 +998,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          {/* sheet list — logical sheets (B343) with real labels (B266) */}
+          {/* sheet list — logical sheets (B348) with real labels (B266) */}
           <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
@@ -1011,7 +1011,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               ); })()}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px", minHeight: 0 }}>
-              {/* Logical sheets (B343): grouped plans collapse to one entry; the real sheet # + title
+              {/* Logical sheets (B348): grouped plans collapse to one entry; the real sheet # + title
                   replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
                   uses; the count reads "logical sheets · pages" so the collapse is visible. */}
               <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
