@@ -7,6 +7,7 @@ import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supaba
 import { onAuthChange } from "./lib/auth.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
+import { nextConceptName } from "./lib/conceptName.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -218,7 +219,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
-    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Plan 1", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
     pushSiteToCloud(id).catch(() => {}); // mirror to cloud when logged in (no-op otherwise)
     refreshSites();
     goPlan(id);
@@ -251,8 +252,9 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navIntent]);
 
-  // Next plan number for a site (so "Plan 1", "Plan 2", … never collide).
-  const nextPlanNo = (groupId) => loadPlansOfGroup(groupId).length + 1;
+  // Default name for the next plan in a site: lettered concepts (Concept A, B, …
+  // AA, AB; per-site, continues past the highest existing letter — NEW-1/NEW-2).
+  const nextConceptForGroup = (groupId) => nextConceptName(loadPlansOfGroup(groupId).map((p) => p.name));
 
   // New plan on the SAME site: keep the location (parcel, origin, aerial) but
   // start the layout fresh. This is the iteration workflow — explore another
@@ -262,7 +264,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
     if (!src) return;
     const group = groupOf(src);
     const id = newId();
-    saveSite({ id, groupId: group, site: src.site || src.name, name: `Plan ${nextPlanNo(group)}`,
+    saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
       origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
     pushSiteToCloud(id).catch(() => {});
     refreshSites();

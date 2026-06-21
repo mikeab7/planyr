@@ -4152,7 +4152,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
   };
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
-  const [planLabel, setPlanLabel] = useState(() => restored?.name || "Plan 1");
+  // A brand-new blank site is the first plan of its own group → "Concept A"
+  // (NEW-1/NEW-2 lettered-concept default; the label stays user-editable).
+  const [planLabel, setPlanLabel] = useState(() => restored?.name || "Concept A");
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
   const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header

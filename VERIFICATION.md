@@ -60,12 +60,21 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V95 — Invisible site-name fixed + whole-app low-contrast sweep (B355) ✅ (self-verified headless BOTH themes — no signed-in check needed)
+### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
 - **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
 - **✅ `ui-audit/contrast-audit.mjs`:** every token pair (incl. the new `--success/danger/info-text`) clears WCAG AA in both themes.
 - **Note:** the sign-in-gated deep drawers (Project Files / Library) and SiteReviewModal weren't render-reached logged-out, but their colours are provably AA via the token audit; an optional signed-in eyeball on planyr.io in **dark** mode is a nicety, not a blocker.
 
+### V95 — New site plans default to lettered concepts (Concept A, B, … AA) (B355) ✅ (self-verified headless in the real planner — fully done)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — the logged-out localStorage store is the same plan-creation code path used signed-in) · **Next check** — none required.
+- **✅ Live-verified 2026-06-21 (`ui-audit/verify-b355-concepts.mjs`, 4/4 checks, 0 genuine page errors):** seeded a real saved site, resumed into the planner, and clicked **Plan ▾ → ＋ New plan** for three cases — the header re-labelled the new plan exactly as designed:
+  - existing **"Concept A"** → new plan **"Concept B"** (sequences to the next letter);
+  - existing **"Concept C"** (A/B deleted) → **"Concept D"** (continues PAST the highest, never reuses a deleted gap);
+  - existing legacy **"Plan 1"** → **"Concept A"** (old "Plan N" names are ignored, not renamed).
+  - (The harness filters two documented sandbox-only noise classes — basemap-less seed NaN SVG geometry + CORS-blocked external GIS probes — and asserts no *genuine* JS error.)
+- **✅ Deterministic path (`test/conceptName.test.js`, 14 tests):** A–Z, the Z→AA→AB→… spreadsheet roll-over (bijective base-26, no 27th-concept crash), round-trip stability, gap-not-reused, and legacy "Plan N" ignored.
+- Pure `conceptName.js` wired into all three creation paths (new-from-map, new-plan-same-parcel, blank-site first save) + the `createSiteModel` fallback. Name stays user-editable; no retroactive rename of existing plans. full suite 1055 · lint 0 · build green.
 ### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
 **Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
 is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose
@@ -368,8 +377,9 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
 - **Expect:** Blue highlight on the sentinel row, Enter creates task + auto-opens name edit, up-arrow exits sentinel to last real task.
 - **Note:** Browser verification was punted in the *original* session because the Schedule app's CDN deps looked blocked. **Correction (2026-06-19, V46):** those CDNs **are reachable** in this environment — the Schedule app IS headless-verifiable by static-serving `public/` and loading `/sequence/` (it falls back to its embedded seed when logged-out). Use `ui-audit/verify-sequence.mjs` as the template; this V40 keyboard-nav case can now be driven headless on a future run rather than waiting for production.
 
-### V39 — Easement drawing tool: 3 input modes + attributes + metes import (B150–B153) ✅ (self-verified) / ⏳ (signed-in persistence)
-- **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-18 ✅ (headless Chromium on the production build) · **Next check** —
+### V39 — Easement drawing tool: 3 input modes + attributes + metes import (B150–B153) ✅ (self-verified) / ✅ (signed-in persistence)
+- **Added** 2026-06-18 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-20 ✅ (signed-in persistence, Cowork/real Chrome) · **Next check** —
+- **✅ Signed-in persistence VERIFIED 2026-06-20 (Cowork — real signed-in Chrome on planyr.io, acct mikeabmab@live.com, cloud ON; deployed bundle SitePlannerApp-BuRTao7i.js).** Drew a centerline easement ("50′ Pipeline Esmt", 50′ width, hatched + color-coded, 40,375 sf) on a signed-in throwaway site. It saved as a `markups[]` entry (kind=`easement`) and **re-rendered on the canvas after a full reload + reopen-from-finder**. The signed-in residual is cleared.
 - **Steps:** Site Planner → right rail **Easement** (▾ picks mode + default width/type). (1) **Centerline+width:** click a path, double-click/Enter → a strip of the set width appears, hatched + color-coded. (2) **Element** panel shows the easement attributes — change **Type** (the portal dropdown), edit **Width** (strip re-offsets), toggle **Status** (proposed → dashed) and **Restricts buildings/paving**; drag a centerline dot to reshape. (3) **Boundary polygon** mode: click points, close on the first dot. (4) **Offset from parcel edge** mode: with a parcel present, click its edges then **Create easement ⏎** → a one-sided inset strip. (5) **File ▾ → Title reader / metes & bounds…**, paste a legal description, **Plot as easement →**, click the POB. (6) **Yield** panel shows the **Easements** rows (gross / restrict buildings / restrict paving).
 - **Expect:** each mode draws + labels + areas; the type dropdown floats above the rail (not clipped); width edits re-offset live; proposed renders dashed; the metes import spawns an editable easement.
 - **✅ Self-verified 2026-06-18 (headless Chromium on `npm run build` + `vite preview`, logged-out):** centerline strip drawn (1 easement polygon); attributes panel auto-opened; portal **Type** dropdown opened and swapping to Sanitary Sewer relabeled it; boundary easement drawn (2 total); parcel drawn → parcel-edge hit-target was the topmost element at the click → strip created (3 total); metes-and-bounds "Plot as easement →" + POB click created an easement (panel shown, **0 page errors**); Yield shows the Easements row. Screenshots eyeballed (hatched, color-coded, label + area).
@@ -432,8 +442,9 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   mislabeled "Chambers". Hard to force on demand — opportunistic; verify when a border/FB
   lot is handy.
 
-### V4 — Site-plan overlay tool: drop → scale → align → reload (B72 / B73, main) ⏳
-- **Added** 2026-06-16 · **Cadence** once · **Last checked** — · **Next check** 2026-06-16
+### V4 — Site-plan overlay tool: drop → scale → align → reload (B72 / B73, main) ✅
+- **Added** 2026-06-16 · **Cadence** once · **Last checked** 2026-06-20 ✅ (Cowork, signed-in planyr.io) · **Next check** —
+- **✅ VERIFIED 2026-06-20 (Cowork — signed-in planyr.io).** Uploaded a multipage PDF via **Overlay → Add site plan (PDF / image)…** → it placed + rasterized (page 1 rendered, **Page 1 / 2** nav present), white paper knocked out so the map shows through, with **Opacity / Rotate / Width / Trace a length / Align to map** controls. Saved into the site model under `sheetOverlays` with a `storageKey`, and **re-rendered after a full reload + reopen-from-finder** (re-fetched/re-rasterized from its stored source). Not separately exercised: Align-to-map click capture and trace-length calibration.
 - **Steps:** Left rail → **Overlay** → drag a site-plan PDF onto the map. Move / scale /
   rotate / opacity. Try **Trace a length** and **Align to map** (click drawing points then
   the matching map points → Apply). Reload the page; on another device if possible.
@@ -487,8 +498,11 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
 - **Expect:** all 200 with a `fields` array. County/city GIS hosts move occasionally — if one
   404s/moves, re-point its row in `src/workspaces/site-planner/lib/jurisdiction.js`.
 
-### V9 — Attach & mark up a drawing on a parcel (B67) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V9 — Attach & mark up a drawing on a parcel (B67) ✅ attach + sheet-picker + cloud persistence / ⏳ markup-draw not driver-testable
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-20 ✅ (Cowork + owner did the OS file-pick) · **Next check** —
+- **✅ Mostly VERIFIED 2026-06-20 (Cowork signed-in + owner did the OS file-pick).** Selected Parcel 1 → Parcel panel → **＋ Attach a drawing** → picked a 2-page PDF: the **"Pick a sheet" dialog listed both pages**; chose p.1 and the sheet **rasterized as an immutable backdrop named "<file> — p.1"** (saved to `parcelDrawings[]` with a cloud `storageKey`). After a **full reload + reopen-from-finder** the drawing **reloaded from the cloud and the backdrop re-rasterized** in the editor (Pen / Line / Box / Text / Measure / Scale toolbar all present). So attach → multi-page sheet-pick → rasterized backdrop → save-with-parcel → cross-reload persistence are confirmed live, signed-in.
+- **⏳ Not directly driven:** drawing markups on the sheet + their persistence — the markup editor's draw interactions don't register through the browser-automation layer (drags read as clicks; text placement doesn't focus), the same input limit hit on the planner canvas (not an app bug). Markup persistence rides the same `markups[]` cloud path already proven for the easement (V39), so it's covered by analogy; a human drawing one markup + reload would fully close it.
+- **NB (tooling):** the parcel-drawing file `<input>` can't be filled programmatically (synthetic upload doesn't stick; the native file dialog is suppressed under automation), so this attach needs a real OS file-pick by a human — relevant for future verification runs.
 - **Steps:** Open a site, select a **parcel** → Parcel panel → **"＋ Attach a drawing (PDF / JPG)"**
   → pick a real **multi-page** engineering PDF (then also a JPEG). For the multi-page PDF a
   **"Pick a sheet"** dialog should list every page — choose one. Draw with **Pen / Line / Box /
@@ -566,8 +580,12 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V13 — ★ Persistence: saved work must never disappear (B124 / B125) ⏳ — HIGH PRIORITY
-- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) — durability ✅ / resume-into-planner ❌ — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** 2026-06-20 (Cowork, signed-in) · **Next check** on-change
+- **2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON; deployed bundle SitePlannerApp-BuRTao7i.js, Supabase HTTP 200 each boot, no console errors):**
+  - **✅ Data durability (the critical part):** drew 3 buildings on a signed-in throwaway site; "Synced ✓"; the site + every element survived **~6 reloads** and reopened intact from the finder. Work never disappeared on its own.
+  - **❌ Resume-into-planner (step 2):** every reload — **soft (F5) AND hard (Ctrl+Shift+R)**, on a brand-new site AND an established/reopened site — lands on the **map/finder**, NOT the open planner. Confirmed at the storage layer: `currentSite:v1` holds the open site's id going *into* the reload, and boot **nulls it** and shows the finder; even force-setting `currentSite:v1` in localStorage then reloading still nulled it → finder. No crash, no data loss — but it contradicts the written "resume straight into the planner, NOT bounced to the map" expectation. (Matches the prior "reload bounces NEW sites to finder" note, but now reproduces for established sites too.)
+  - Steps 4 (DevTools offline) & 5 (signed-out→sign-in bridge) not run: the offline toggle isn't drivable via the browser tools, and re-sign-in requires a password Cowork won't enter. Worth a manual pass.
 - **Why this matters:** this is the fix for the owner-reported data-loss scare — work vanishing on its
   own a couple minutes after a reload. Root cause: `pullCloud` rebuilt the local cache from the cloud
   list **alone** and silently dropped any not-yet-synced local site; the resume then couldn't find the
@@ -610,7 +628,11 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   unchanged — the rail still slides in as an overlay there.
 - **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
 
-### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) ⏳ — HIGH PRIORITY
+### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) — Version history ✅ / merge ⚠️ — HIGH PRIORITY
+- **2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON):**
+  - **✅ Version history (step 2/3):** Plan ▾ → Version history listed automatic backups by **timestamp · N buildings** (3 → 2 → 1). Restored the 1-building version (canvas reverted, re-saved), then restored back to 3 → **restore is reversible**. Backups live per-plan in `sites:history:v1` (each carries a `sig` like `5/0/0/0/0/0/0` + a full `model` snapshot).
+  - **✅ Two-tab merge at the divergent save (step 1 headline):** opened the same site in two tabs; tab B added Building 4, stale tab A added Building 5 → the cloud store correctly held the **union of 5** (neither erased the other), and that 5-building state was captured in Version history.
+  - **⚠️ BUT the union didn't *stick* on a later save.** The version-history `buildings` trajectory was `…4 (tab B adds) → 5 (tab A adds, union ✅) → 4 (a later save drops back) → 4 + easement`. A subsequent save from a tab that had **never visually repainted** the other tab's building thinned the *live* plan 5→4. The dropped building **survives in the 3:20 backup** (recoverable via Version history), so it's not silent permanent loss — but it's the exact scenario B127 ("open tabs converge while still open; a stale tab's save folds in, never thins") aims to prevent. Tab A's canvas never live-repainted tab B's building even though its numbering jumped to "Building 5" (data model knew; canvas didn't). **Needs a clean controlled repro** (two tabs both actually rendering all buildings, then a second save from each). Caveat: this came from a hand-driven two-tab race, but the 5→4 drop is unambiguous in the history signatures.
 - **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
 - **▶ Full step-by-step script:** **`PERSISTENCE_TEST_SCRIPT.md`** (T1–T11, with paste-in Console helpers and a results table) — run that end-to-end and record the outcome back here. The summary below is the short form.
 - **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
@@ -856,7 +878,8 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   should return **200**. **Also watch the `Test/` path** — it's USFWS staging and may be renamed when their production
   `Wetlands/MapServer` is repopulated; if this 404/500s, NWI shows the honest "service unavailable" (B129) until re-pointed.
 
-### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134) ⏳ — HIGH PRIORITY, SIGNED-IN ONLY (the "limit")
+### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134) ❌ / BLOCKED — HIGH PRIORITY, SIGNED-IN ONLY (the "limit")
+- **❌ / can't-confirm 2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON; deployed bundle SitePlannerApp-BuRTao7i.js, Supabase HTTP 200, no console errors).** The premise of this test — a signed-in reload that *resumes into the planner* — **doesn't happen**: every reload (soft + hard) lands on the **finder**, and `currentSite:v1` is nulled on boot even when force-set (see V13). So the "no stale/thin plan flash on resume" can't be exercised — there's no resume to flash. Data is intact and reopenable. This needs the underlying resume-into-planner behavior fixed first (see V13/V28 cross-ref) before the flash question is even reachable.
 - **Added** 2026-06-17 · **Cadence** once (data-display acceptance) + on-change · **Last checked** — · **Next check** 2026-06-17
 - **Why a signed-in coworker must run this — the one thing this session could NOT self-verify.** The fix lives entirely on the **signed-in boot path**: `SitePlannerApp` bumps a `loadEpoch` after `applyUser`'s `pullCloud`, folded into the planner's `key`, so the keyed planner re-reads the freshly-merged cloud copy instead of lingering on the stale pre-auth one. Per the testing policy at the top of this file, the sandbox egress proxy **CORS-blocks the Supabase auth handshake**, so the in-session headless run is **logged-out only** — it confirmed the build (lint 0 · 197 tests · build green) and that logged-out behavior is byte-identical (the fix is gated to the signed-in branch; `loadEpoch` stays 0), but the actual signed-in resume can't be exercised here.
 - **Already confirmed live (no browser):** shipped via **PR #103** → `main` and **deployed** — planyr.io serves `index-DVWCJQ1q.js` / `SitePlannerApp-BUX0faXJ.js`; cloud still ON (Supabase URL baked in); Version history + "Retry now" intact.
