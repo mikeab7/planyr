@@ -71,42 +71,58 @@ describe("autofiling.interpretResponse — skip vs read vs error (no silent fail
   });
 });
 
-describe("autofiling.autofile — posts to the proxy with auth + projects header", () => {
+describe("autofiling.autofile — local-first, AI fallback only when no text (B312)", () => {
   const decision = { matched: true, projectId: "g1", discipline: "Civil", item: "GRADING PLAN", docDate: "2026-06-20", needsFiling: false };
-  it("returns the decision on a real read; sends the bearer token + projects header", async () => {
-    let sent;
-    const fetchImpl = async (url, opts) => { sent = { url, opts }; return { status: 200, json: async () => ({ ok: true, decision, placement: placementIn, facts: { projectId: "g1" } }) }; };
-    const r = await autofile(new Uint8Array([1, 2]), [{ id: "g1", name: "Katy Grand" }], { fetchImpl, getToken: async () => "tok" });
+  const localHit = async () => ({ ok: true, hasText: true, decision, facts: { projectId: "g1" }, source: "local" });
+  const localNoText = async () => ({ ok: true, hasText: false });
+
+  it("a text PDF is read locally — no server call, no tokens", async () => {
+    let posted = false;
+    const r = await autofile(new Uint8Array([1]), [{ id: "g1", name: "Katy Grand" }], { localRead: localHit, fetchImpl: async () => { posted = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => "tok", serverEnabled: true });
     expect(r.ok).toBe(true);
+    expect(r.source).toBe("local");
     expect(r.decision.projectId).toBe("g1");
+    expect(posted).toBe(false); // the AI was never touched
+  });
+  it("a scanned PDF (no text) falls back to the AI when the backend is on", async () => {
+    let sent;
+    const fetchImpl = async (url, opts) => { sent = { url, opts }; return { status: 200, json: async () => ({ ok: true, decision, placement: placementIn, facts: {} }) }; };
+    const r = await autofile(new Uint8Array([1]), [{ id: "g1", name: "Katy Grand" }], { localRead: localNoText, fetchImpl, getToken: async () => "tok", serverEnabled: true });
+    expect(r.ok).toBe(true);
     expect(sent.opts.headers.authorization).toBe("Bearer tok");
     expect(sent.opts.headers["x-planyr-projects"]).toBeTruthy();
   });
-  it("no session token → graceful skip (never posts)", async () => {
-    let called = false;
-    const r = await autofile(new Uint8Array([1]), [], { fetchImpl: async () => { called = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => null });
-    expect(r.skipped).toBe(true);
-    expect(called).toBe(false);
-  });
-  it("a 503 from a not-yet-deployed proxy → skip", async () => {
-    const r = await autofile(new Uint8Array([1]), [], { fetchImpl: async () => ({ status: 503, json: async () => ({ error: "DOC_FILING_URL unset" }) }), getToken: async () => "tok" });
+  it("a scanned PDF with the AI fallback OFF → graceful skip (files manually), never posts", async () => {
+    let posted = false;
+    const r = await autofile(new Uint8Array([1]), [], { localRead: localNoText, fetchImpl: async () => { posted = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => "tok", serverEnabled: false });
     expect(r).toMatchObject({ ok: false, skipped: true });
+    expect(posted).toBe(false);
+  });
+  it("scanned + backend on + not signed in → skip (never posts)", async () => {
+    let posted = false;
+    const r = await autofile(new Uint8Array([1]), [], { localRead: localNoText, fetchImpl: async () => { posted = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => null, serverEnabled: true });
+    expect(r.skipped).toBe(true);
+    expect(posted).toBe(false);
   });
 });
 
-describe("autofiling provider — honest backendReady gating (B299)", () => {
-  it("disabled (default) → backendReady false, autofile skips, never calls the network", async () => {
-    let called = false;
-    const p = createAutofilingProvider({ enabled: false, fetchImpl: async () => { called = true; return { status: 200, json: async () => ({}) }; }, getToken: async () => "tok" });
-    expect(p.backendReady).toBe(false);
+describe("autofiling provider — local always on, AI gated (B312)", () => {
+  const decision = { matched: true, projectId: "g1", discipline: "Civil", item: "X", docDate: "2026-06-20", needsFiling: false };
+  it("auto-filing is ready by default (local); backendReady reflects the AI flag", async () => {
+    const localHit = async () => ({ ok: true, hasText: true, decision, facts: {}, source: "local" });
+    const p = createAutofilingProvider({ enabled: false, localRead: localHit, fetchImpl: async () => { throw new Error("AI should not be called"); } });
+    expect(p.autofileReady).toBe(true);
+    expect(p.backendReady).toBe(false); // AI fallback off
     const r = await p.autofile(new Uint8Array([1]), []);
-    expect(r.skipped).toBe(true);
-    expect(called).toBe(false);
-    // capturePlacementFacts still returns the safe empty shape via the stub path
+    expect(r.ok).toBe(true);
+    expect(r.source).toBe("local"); // filed for free, no AI
+  });
+  it("disabled → capturePlacementFacts returns the safe empty shape (placement is AI-only)", async () => {
+    const p = createAutofilingProvider({ enabled: false });
     const pf = await p.capturePlacementFacts(new Uint8Array([1]));
     expect(pf.captured).toBe(false);
   });
-  it("enabled → backendReady true; capturePlacementFacts merges the SAME read's placement", async () => {
+  it("enabled → capturePlacementFacts forces the AI read and merges its placement", async () => {
     const fetchImpl = async () => ({ status: 200, json: async () => ({ ok: true, decision: { matched: true }, placement: placementIn, facts: {} }) });
     const p = createAutofilingProvider({ enabled: true, fetchImpl, getToken: async () => "tok" });
     expect(p.backendReady).toBe(true);
