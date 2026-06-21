@@ -21,9 +21,10 @@ const WORKSPACES = [
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
-const CHROME = "#14110e";
-const LINE   = "#2e2a23";
-const MUTED  = "#9b9482";
+// Chrome colors are theme tokens so the shell themes WITH the app (B318).
+const CHROME = "var(--chrome-bg)";
+const LINE   = "var(--chrome-divider)";
+const MUTED  = "var(--chrome-muted)";
 
 // ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
 // same portal menu primitive as the project breadcrumb — so it escapes the header's
@@ -191,7 +192,7 @@ export default function Shell() {
           display: "flex", alignItems: "center", gap: 7,
           padding: "4px 10px 4px 6px", borderRadius: 99,
           cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-          border: `1px solid ${LINE}`, background: "rgba(255,255,255,0.04)",
+          border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)",
           color: MUTED,
         }}
       >
@@ -200,7 +201,7 @@ export default function Shell() {
             width: 20, height: 20, borderRadius: 99, flex: "none",
             display: "grid", placeItems: "center",
             fontSize: 12, fontWeight: 800, color: MUTED,
-            background: "rgba(255,255,255,0.08)",
+            background: "var(--chrome-divider)",
           }}
         >
           ⊘
@@ -215,14 +216,14 @@ export default function Shell() {
             style={{
               position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41,
               width: 256, padding: "11px 13px", borderRadius: 10,
-              background: "#fff", color: "#2c2a26",
-              border: "1px solid #e7e2d6",
+              background: "var(--surface-raised)", color: "var(--text-primary)",
+              border: "1px solid var(--border-default)",
               boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
               fontFamily: "system-ui, sans-serif",
             }}
           >
             <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Cloud sync is off</div>
-            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "#6b6557" }}>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
               Your work is saved on <b>this device only</b> (in this browser).
               Signing in and syncing across your devices need the cloud connection
               to be set up for this site.
@@ -237,7 +238,7 @@ export default function Shell() {
     <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
-      <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>
+      <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
         {/* Each workspace gets its own error boundary, keyed by id so switching
             modules gives a fresh boundary — a render crash in one workspace is
             contained (shell and the other workspaces keep working). */}

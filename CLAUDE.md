@@ -298,6 +298,17 @@ server/                   # placeholder README only — NOT built or deployed; b
   `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
 
 ## KEY DECISIONS (must persist)
+- **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
+  has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens
+  in `src/index.css`, mirrored to JS for the SVG canvas in `src/shared/theme/palette.js` (var()
+  can't be used in SVG attributes / canvas export — keep the two in sync). **Chrome themes WITH
+  the app** (light theme = light chrome) — never a permanently-dark bar over a light app (the
+  constant pupil readjustment is the worst case for eye strain). **Build text hierarchy through
+  weight, size, and uppercase letter-spacing — NEVER by fading text toward the background.**
+  Low-contrast gray body/label text is **disallowed** (eye strain in bright offices); subtle grays
+  are correct ONLY for borders, the drafting grid, and the semantic "Complete" status badge. New UI
+  must reference **theme tokens, never raw hex**, and clear **WCAG AA (≥ 4.5:1)** for body text on
+  its surface in **both** themes. (B316–B320)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline

@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-const PAL = { ink: "#26231e", muted: "#6b6557", line: "#ddd6c5", paper: "#f6f3ec", accent: "#e8590c" };
+const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", paper: "var(--surface-page)", accent: "var(--accent)" };
 const COLORS = ["#dc2626", "#ea580c", "#2563eb", "#16a34a", "#7c3aed", "#111827"];
 const uid = () => "k" + Math.random().toString(36).slice(2, 9);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
