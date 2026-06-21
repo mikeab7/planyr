@@ -20,7 +20,7 @@ import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
@@ -434,7 +434,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         </div>
 
         {/* world canvas */}
-        <div style={{ flex: 1, minWidth: 0, position: "relative", background: "#cfc8ba" }}>
+        <div style={{ flex: 1, minWidth: 0, position: "relative", background: "var(--canvas-mat)" }}>
           <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? "grab" : "crosshair", touchAction: "none" }}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>

@@ -25,7 +25,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 // lastConsumedNavToken. (NEW-1)
 let lastConsumedDocToken = null;
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
@@ -842,7 +842,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
         </div>
       )}
 
@@ -867,10 +867,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           {/* sheet list */}
-          <div style={{ flex: "none", width: 116, background: "#fff", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ flex: "none", width: 116, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
-              {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "#fff", color: on ? PAL.ink : "#cfc8ba" }); return (
+              {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: on ? PAL.ink : "var(--text-tertiary)" }); return (
                 <>
                   <button style={pg(page > 1)} disabled={page <= 1} onClick={() => goToPage(page - 1)} title="Previous sheet (←)">‹</button>
                   <span style={{ flex: "none", fontSize: 10.5, color: PAL.muted, fontWeight: 700, minWidth: 40, textAlign: "center" }}>{page} / {numPages}</span>
@@ -884,7 +884,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                 <button key={n} ref={n === page ? activeSheetRef : null} onClick={() => goToPage(n)}
                   title={calInfo[n]?.label ? `Scale ${calInfo[n].label}${calInfo[n].src === "auto" ? " — from sheet, verify" : ""}` : undefined}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-                    border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "#fbf3ee" : "#fff", color: PAL.ink }}>
+                    border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink }}>
                   Sheet {n}{calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : ""}
                 </button>
               ))}
@@ -893,7 +893,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
           {/* canvas + overlay */}
           <div ref={attachWrap} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
-            style={{ flex: 1, minWidth: 0, overflow: "auto", background: "#cfc8ba", display: "flex", padding: 12 }}>
+            style={{ flex: 1, minWidth: 0, overflow: "auto", background: "var(--canvas-mat)", display: "flex", padding: 12 }}>
             {/* margin:auto centres the sheet when it fits but resolves to 0 (top-left aligned,
                 fully scrollable) when it overflows — unlike place-items:center, which makes the
                 top/left overflow unreachable and breaks zoom-anchoring + pan. (B288/B289/B290) */}
@@ -936,7 +936,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           </div>
 
           {/* takeoff */}
-          <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+          <div style={{ flex: "none", width: 246, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 2 }}>Takeoff</div>
             <div style={{ fontSize: 11, marginBottom: 8 }}>
               {(() => {
