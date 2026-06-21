@@ -797,7 +797,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         currentProject={markupProject}
         onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
         onNewProject={onNewProject}
-        saveState={status === "saving" ? "saving" : status === "unsaved" ? "error" : (signedIn ? "synced" : "local")}
+        saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
         centerContent={
           // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.

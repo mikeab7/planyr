@@ -1298,7 +1298,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
-  // building wouldn't fully snap back, or undo appeared to do nothing (B313).
+  // building wouldn't fully snap back, or undo appeared to do nothing (B315).
   const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
   stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
@@ -1318,6 +1318,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // True when a cloud write was REJECTED because another session advanced this project since
+  // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
+  // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
+  // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
+  // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
+  // other session's change (mergeSiteContent), then re-pushes the combined result.
+  const [cloudConflict, setCloudConflict] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -1339,7 +1346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
       else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
@@ -1348,7 +1355,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const retryCloudSave = () => {
     if (!siteId) return;
     setSaveStatus("saving");
-    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
@@ -1405,7 +1412,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
-  // can't act on a stale baseline (B313). One stack instance, kept across renders.
+  // can't act on a stale baseline (B315). One stack instance, kept across renders.
   const histRef = useRef(null);
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
@@ -1420,7 +1427,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
   // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
   // pushHistory pushed, so an interrupted move leaves no half-recorded command
-  // on the stack (B313). No-op for any drag that didn't stash a canceler.
+  // on the stack (B315). No-op for any drag that didn't stash a canceler.
   const cancelActiveMove = () => {
     const d = drag.current;
     if (!d || !d.canceler) return false;
@@ -1607,7 +1614,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const abortGesture = (pid = capturePidRef.current) => {
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
     capturePidRef.current = null;
-    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B313); no-op otherwise
+    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
     drag.current = null;
     setPanning(false);
     setMarquee(null);
@@ -3721,7 +3728,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // LOCKED default that every county-pulled / drawn lot carries.
       setSel({ kind: "parcel", id });
       pushHistory();
-      drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B313 Esc/abort-mid-drag revert
+      drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B315 Esc/abort-mid-drag revert
       capturePidRef.current = e.pointerId;
       svgRef.current.setPointerCapture(e.pointerId);
       return;
@@ -5548,7 +5555,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cloudActive = isCloudActive();
     const connOk = cloud?.state === "connected";
     if (saveStatus === "saving") return "saving";
-    if (cloudSaveFailed) return "error";
+    if (cloudSaveFailed || cloudConflict) return "error";
     if (cloudActive && !connOk) return "offline";
     return cloudActive ? "synced" : "local";
   })();
@@ -5586,6 +5593,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
+      {cloudConflict && (
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 660, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>⟳ This project was <b>changed in another session</b>. Your edit is saved on this device — <b>reload</b> to merge in the latest before saving, so nothing gets overwritten.</span>
+          <button onClick={() => window.location.reload()} title="Reload to get the latest version, then your change merges in" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
+          <button onClick={() => setCloudConflict(false)} title="Dismiss (your edit stays on this device; reload later to reconcile)" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
       {cloudSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
