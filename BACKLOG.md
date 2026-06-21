@@ -38,25 +38,13 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
          and keeps the 2-point manual Align (Stitcher.jsx) as the safety net, not the primary path.
        • B329 (NEW-5) — the SINGLE-SHEET half already ships (B267 `autoDetectScales`); B329's net-new part
          is the STITCHER/grouped-composite half + the graphic scale-bar fallback. Reuses `overlayScale.js`.
-       • B325 (grouping) + B328 (crop + merged legend) are net-new — no existing Open/Done item covers them. -->
-
-### B325 — Drop a whole set → auto-group pages into logical sheets (collapsed list) `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-1"; minted **B325**) — depends on B326; pairs with B327*
-`[ ]` The headline UX shift. **Today:** opening a PDF lists every page in the tray and you add/align each by hand. **Wanted:** drop a multi-page set → read each page (B326) → consecutive pages sharing a sheet title with a contiguous sheet-number run auto-group; the sheet list shows **logical** entries (~13 from a 20-page set), grouped plans labeled e.g. "Grading plan · C5–C9 · 5 sheets" that open as one stitched composite; cover / general-notes stay standalone. Kills the per-page "add sheet" step as the default. Depends on B326; pairs with B327.
-
-### B326 — Sheet-metadata reader: title block, scale, match-line labels `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-2"; minted **B326**)*
-`[ ]` Shared engine for grouping (B325), stitching (B327), auto-calibrate (B329), and the roadmap's auto-filing. Per page via pdf.js `getTextContent`: extract sheet number, sheet title, discipline, stated scale, and every "MATCH LINE … SEE SHEET X" string with its x/y position and orientation. Detect the title-block band (dense text strip on the right / bottom, bounded by the long rule) to define the drawing area. If the page has no text layer (scanned), fall back to OCR (Tesseract.js in a Web Worker). Surface low-confidence reads rather than guessing, consistent with the "never auto-guess" principle.
-> **Dedup:** folds the CLAUDE.md roadmap "read its title block" (auto-filing). The shipped filing readers (B312 `titleBlockParse.js`/`localRead.js`, B299 server) read a JOINED string for filing fields — B326 adds the POSITIONAL layer (per-item x/y, title-block band, sheet title, scale, match-line labels). Reuses B312's parsers + B267's `parseSheetScale`; no second/parallel reader.
-
-### B327 — Automatic match-line stitching `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-3"; minted **B327**) — depends on B326*
-`[ ]` The core auto-stitch. From B326's labels, build the sheet adjacency, then feed each shared match line's two endpoints as the correspondence pair into the existing `solveM()` similarity fit; take scale from the per-sheet stated scale so no shared corner is needed. Fallback chain when labels are missing / unreadable: key/coverage-map parse → geometric edge-line match across the cut → drop into the existing 2-point manual Align pre-seeded with detected endpoints. Keep the current manual Align as the safety net, not the primary path. Depends on B326.
-> **Dedup:** this IS the CLAUDE.md roadmap line "automatic match-line detection later," now specified — folded, not duplicated. Builds on `solveM()`/`stitchGeom.js` (B300) and preserves the manual Align safety net.
-
-### B328 — Crop title blocks + single merged legend on stitched plans `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-4"; minted **B328**) — depends on B326*
-`[ ]` On a grouped composite, hide each sheet's title-block band (from B326) so the drawing areas butt cleanly; keep ONE legend for the group and union in any extra entries later sheets add; render the legend as a pinned panel rather than baking it into the raster so it stays readable at any zoom. Depends on B326.
-
-### B329 — Auto-calibrate from the sheet's stated scale `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-5"; minted **B329**) — depends on B326*
-`[ ]` Today calibration is a manual two-click plus a "type the real feet" prompt. When B326 finds a stated scale ("1"=40'") or a graphic scale bar, set `ftPerUnit` automatically per group, with manual override still available. Independent quick win; depends on B326.
-> **Dedup:** the SINGLE-SHEET half already ships (B267 `autoDetectScales` — reads the stated scale, gates on `detectSheet`/standard plot size, pre-fills "from sheet scale, verify"). B329's net-new part is the STITCHER/grouped half (set `ftPerUnit` per group) + the graphic scale-bar fallback. Reuses `overlayScale.js` (`parseSheetScale`/`detectSheet`/`ftPerPointForScale`).
+       • B325 (grouping) + B328 (crop + merged legend) are net-new — no existing Open/Done item covers them.
+     SHIPPED + headless-verified this session (V84, `ui-audit/verify-b325-b329.mjs`, 13/13, 0 page errors;
+     30 new unit tests; 818 tests; build green) — full [x] blocks in BACKLOG-DONE.md. The CV/heavy-dep
+     TAILS behind the seams (scanned-sheet OCR, graphic scale-bar, geometric edge-line stitch, legend
+     symbol-union) are filed together as **B330** in 🕓 Later / Roadmap (genuine can't-now: heavy deps /
+     computer-vision / not headless-verifiable — the manual-Align safety net + text-layer path cover the
+     common case today). -->
 
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
      "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across BACKLOG.md +
@@ -1495,6 +1483,14 @@ Original spec:
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B330 — Auto-assembly CV/OCR tails behind the B326–B329 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B325–B329 batch; minted **B330**)*
+`[ ]` The B325–B329 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. Four tails are deferred behind clean injectable seams because each is heavy-dependency or computer-vision work that **can't be headless-verified in the sandbox**, and the manual-Align safety net + text-layer path already cover the common case:
+  1. **Scanned-sheet OCR** — the `ocr` seam in `doc-review/lib/sheetRead.js` is wired (a no-text page calls it); fill it with **Tesseract.js in a Web Worker** so an image-only sheet still groups/stitches. Deferred: ~2 MB wasm dep + training data fetch, and no scanned fixture to verify against here.
+  2. **Graphic scale-bar reading (B329 tail)** — when there's no stated scale text, measure the drawn scale bar to set `ftPerUnit`. Needs vector-graphics/CV analysis, not text.
+  3. **Geometric edge-line match (B327 middle fallback)** — when match-line *labels* are missing, match the cut geometry across two sheets' edges. Today, label-less sheets correctly drop to the 2-point manual Align **pre-seeded** with detected seam endpoints (the spec's final safety net, already wired) — this is the CV step between labels and manual.
+  4. **Legend symbol-union (B328 tail)** — extract each sheet's graphical legend entries and union them into the pinned Composite key (today the key lists the grouped plan + auto-scale; the crop + pinned panel ship). Needs symbol/vector extraction.
+> Each is gated behind a seam exactly like the app's other not-yet-provisioned heavy compute (the AI title-block reader, the APS converter). Pick up when there's a way to verify (a scanned sample set; a CV pass we can headless-check). Coupled to the ★ north-star "map → drawings → latest set."
 
 ### B256 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B256**)*
 `[ ]` `cascadeDates`/`rollupParentDates` re-filter the task list repeatedly on each edit; `depLines` calls `tasks.indexOf` inside its loop; `rolledHealthMap`/`progressMap` recurse with `.filter`. Fine at the current ~180 tasks; will start to feel laggy past ~500. Fix: build an `id → index` map and a `parent → children[]` map once per recompute and reuse them — behaviour-preserving. **Verify** every task's start/end/duration is byte-identical before/after on the real production dataset. Gated by board size → Later until a board actually grows that large.
