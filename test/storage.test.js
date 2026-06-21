@@ -216,13 +216,13 @@ describe("saveSite — cross-tab stale-write guard (B127)", () => {
   });
 });
 
-// B329 — a site-plan overlay's "hide" (eye toggle) must persist across reload, INCLUDING the
+// B343 — a site-plan overlay's "hide" (eye toggle) must persist across reload, INCLUDING the
 // signed-in cloud round-trip. The hidden flag rides in the overlay record's `visible` field and
 // is saved / cloud-mirrored / content-merged exactly like opacity, rotation, page, and position.
 // The logged-out path already had a live-browser harness (ui-audit/verify-overlay-delete-hide.mjs);
 // these lock the DATA layer — especially the signed-in pull/merge, which had NO `visible`-specific
 // regression test, so a future merge-logic change can't silently un-hide an overlay on reload.
-describe("overlay hide persists — visible:false survives save/load + the signed-in cloud merge (B329)", () => {
+describe("overlay hide persists — visible:false survives save/load + the signed-in cloud merge (B343)", () => {
   const ov = (extra = {}) => ({ id: "ovJ", name: "ARCH IFC.pdf", imgW: 800, imgH: 600, page: 1,
     pageCount: 1, ftPerPx: 1.25, rotation: 89, opacity: 0.85, locked: false, x: -500, y: -375, ...extra });
   // A cloud-row overlay: its big PNG raster was stripped for the DB row (B72/slimForCloud), which

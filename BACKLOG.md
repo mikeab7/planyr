@@ -22,12 +22,62 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B329 — Site-plan overlay "hide" (eye toggle) reportedly doesn't persist across reload `[Site Planner / Overlay]` (bug) — re-report of the already-shipped overlay hide/show fix  *(owner-reported 2026-06-21 as "NEW-1"; minted **B329** — highest B# across both files was B328 (B325 = stitcher pan crash; B326–B328 = the Doc Review file batch), so this is the real next free ID)*
+### B343 — Site-plan overlay "hide" (eye toggle) reportedly doesn't persist across reload `[Site Planner / Overlay]` (bug) — re-report of the already-shipped overlay hide/show fix  *(owner-reported 2026-06-21 as "NEW-1"; first filed **B329**, renumbered **B343** — a very hot `main` consumed B329–B342 (markup viewport/rail, theming, auto-assembly) while this was in flight, so this is the real next free ID after B342)*
 `[x]` **Reported:** hide a placed site-plan overlay via the eye toggle in the Site-plan Overlay panel → reload → it comes back visible; the hide "isn't saved like opacity/rotation/page/position." **Investigated this session (branch `claude/beautiful-hopper-f7i8sa`) and could NOT reproduce — the hide already persists through every path.** The `visible` flag rides in the `sheetOverlays[]` record and is written by `patchOverlay` → `setSheetOverlays` → the autosave effect; normalized losslessly by `createSiteModel` (`arr()` keeps the whole object), content-merged by `mergeSiteContent`/`mergePulledSites` (newer-wins union — never resurrects a visible copy), carried in the cloud row's `data` jsonb (`slimForCloud` only nulls the raster `src`), preserved by the Storage-rehydrate spread (`{...overlay, src}`), and the map render returns `null` for `o.visible === false` **before** the src-null placeholder — so a hidden overlay shows nothing even mid-rehydrate. **This is the fix already shipped + LIVE in `main`** (commit `b66774b`, "overlay delete persistence + visibility toggle" — recorded in BACKLOG-DONE as B276/B277; the on-tree commit numbered it B272/B273 amid heavy B# churn). Most likely the report observed the live site just before/around that deploy.
 - **Proven 4 ways, all green this session:** (1) the existing logged-out live-browser harness `ui-audit/verify-overlay-delete-hide.mjs` — hide → reload → still hidden, record carries `visible:false`; (2) a NEW logged-out harness `ui-audit/verify-overlay-hide-stripped.mjs` for the **signed-in reload shape** (raster stripped, `src:null` + `storageKey`, `visible:false`) — renders nothing (no image, no "Loading…" placeholder), persists across reload, Show brings it back; (3) **8 NEW unit tests** (`test/storage.test.js`) locking the previously-untested **signed-in cloud round-trip** of `visible` (save/load, `createSiteModel` normalize, `mergeSiteContent` both directions, `mergePulledSites` local-hidden-wins + cloud-already-hidden + re-push, the rehydrate spread); (4) a static trace of every save/merge/cloud/render path. lint **0 errors** · **810 tests** · build green; lazy chunks intact.
-- **Dedup:** same scope as the shipped B276/B277 overlay delete/visibility work (BACKLOG-DONE) — NOT a new defect, and no Open item covered it. Distinct from B260 (overlay *scale* misread) and B131 (print-overlay master toggle).
-- **The one thing the sandbox can't do** is a real signed-in click-through (it CORS-blocks Supabase auth) → logged as **VERIFICATION V86**: signed in, hide a real PDF overlay, reload, confirm it stays hidden. If it ever does reappear *while signed in* after the next deploy, that's a deeper cloud-sync edge to chase with a live account — but the data layer is proven correct. Eligible to move to BACKLOG-DONE.md on a future pass.
+- **Dedup:** same scope as the shipped B276/B277 overlay delete/visibility work (BACKLOG-DONE) — NOT a new defect, and no Open item covered it. Distinct from main's B329 (markup-canvas pan/zoom parity — different workspace), B260 (overlay *scale* misread) and B131 (print-overlay master toggle).
+- **The one thing the sandbox can't do** is a real signed-in click-through (it CORS-blocks Supabase auth) → logged as **VERIFICATION V90**: signed in, hide a real PDF overlay, reload, confirm it stays hidden. If it ever does reappear *while signed in* after the next deploy, that's a deeper cloud-sync edge to chase with a live account — but the data layer is proven correct. Eligible to move to BACKLOG-DONE.md on a future pass.
 
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups,
+     stitches, crops, and calibrates itself" (the headline auto-assembly tranche). FIRST filed B325–B329,
+     but a VERY hot `main` (PR #238 viewport/rail B329–B331 + #240 file-class B326–B328 + #241 pan-crash
+     B325, all merged while this integrated) consumed B325–B334 — so to avoid two items sharing a number
+     this batch renumbered B325–B329 → **B335–B339** (+ **B340** for the deferred tails); highest B# across
+     both files was B334 at merge time. Per STANDING RULE #1: filed here AND implemented + headless-verified
+     the SAME session (branch `claude/loving-newton-t7gzpq`); the shipped [x] blocks live in BACKLOG-DONE.md.
+     DEDUP (owner flagged two CLAUDE.md roadmap lines being pulled forward — FOLD, don't duplicate):
+       • B336 (NEW-2) FOLDS the auto-filing roadmap detail "read its title block." NOT a duplicate of the
+         shipped filing reader (B312 `titleBlockParse.js`/`localRead.js` + B299 server) — those read a
+         JOINED string for filing fields. B336 is the POSITIONAL superset grouping/stitching need (per-item
+         x/y, title-block BAND, sheet TITLE, stated SCALE via B267 `parseSheetScale`, match-line labels with
+         position+orientation). EXTENDS + REUSES both, no second reader.
+       • B337 (NEW-3) IS the roadmap line "automatic match-line detection later," now specified — folded,
+         not a new parallel item. Builds on the existing `solveM()` (`stitchGeom.js`, B300); keeps the
+         2-point manual Align as the safety net.
+       • B339 (NEW-5) — the SINGLE-SHEET half already ships (B267 `autoDetectScales`); B339's net-new part
+         is the STITCHER/grouped-composite half + the graphic scale-bar fallback. Reuses `overlayScale.js`.
+       • B335 (grouping) + B338 (crop + merged legend) are net-new.
+     SHIPPED + headless-verified this session (V87, `ui-audit/verify-b335-b339.mjs`, 13/13, 0 page errors;
+     30 new unit tests; full suite green) — full [x] blocks in BACKLOG-DONE.md. The CV/heavy-dep TAILS
+     behind the seams (scanned-sheet OCR, graphic scale-bar, geometric edge-line stitch, legend symbol-
+     union) are filed together as **B340** in 🕓 Later / Roadmap (genuine can't-now: heavy deps / computer-
+     vision / not headless-verifiable — the manual-Align safety net + text-layer path cover the common
+     case today). NB: renumber touched only THIS batch's refs; main's B325 (pan-crash) / B329 (viewport)
+     / B326–B328 (file-class) left intact. -->
+
+<!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
+     navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314, but a
+     VERY hot `main` consumed the numbers repeatedly while this integrated — B313–B319 (multi-tab/
+     stale-save, undo, stitch-block, theming), B320–B324 (theming contrast pass + the Doc-Review
+     file-storage batch), then B325 (Stitcher pan-crash) — so this batch renumbered B313/B314 → B320/B321
+     → B325/B329 → finally **B329/B330**, plus **B331** for the touchscreen-pinch follow-up. (V80→**V85**;
+     main reached V84.) Built +
+     verified; merging via **PR #238 → main** (branch claude/gifted-heisenberg-a6zlvt), which folds in the
+     latest `main` (theming CSS vars + the file-storage changes). Code/tests/harnesses swept to B329/B330
+     (main's own B313/B314 + B322/B323 refs left intact); the two dedicated harnesses were renamed to
+     feature names (`verify-markup-viewport` / `verify-markup-rail`) so a future renumber can't strand
+     them. Deduped: B329 is NET-NEW vs the shipped scroll-based **B288–B290** (it swaps in the Site map's
+     TRANSFORM model + one shared engine); B330 net-new (no item moved the Markup tools off the header). -->
+
+### B329 — Markup canvas pan + zoom parity with the Site map (one shared viewport engine) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; filed B313 → B320 → renumbered **B329** as a hot `main` twice took the number)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** One shared viewport engine (`src/shared/viewport/viewportTransform.js`: `worldToScreen`/`screenToWorld`/`zoomAround`/`panBy`/`fitView`/`shouldPan`) now drives the Site map, the Markup canvas, AND the Stitcher. The Markup viewer was re-architected scroll-box → transform (`view={scale,tx,ty}`): **free pan in any direction** (the old scroll box couldn't slide past a fit-width sheet — the "only scrolls vertically" repro), cursor-anchored zoom, **Bluebeam pan/tool collision** (middle-mouse always pans; Space-hold pans; Select on empty pans, on an object selects/moves; a drawing tool draws), **view-transform-only** (markups stay page-unit, calibration untouched), and a perf path that rescales the existing bitmap during a zoom and re-rasterises crisply (debounced) on settle. The Site map + Stitcher migrated their pan/zoom math to the same engine, **byte-identical** (unit-tested) — verified unchanged. Trackpad pinch (ctrl+wheel) routes through the wheel path; touchscreen two-finger pinch is **B331** (follow-up).
+> **Verified (V84):** 43/43 headless — `verify-markup-viewport.mjs` 13/13 (free pan L/R/down, cursor-anchored zoom 0.1px drift, calibrated measurement reads identical feet through zoom+pan + stays calibrated, middle-mouse pans-without-drawing, draw+select-move, sheet-switch keeps zoom), `verify-siteplanner-viewport.mjs` 6/6 (Site map unchanged), `verify-docreview-viewer.mjs` 13/13 (B288–B296 still green) + viewportTransform unit tests. Eligible to move to BACKLOG-DONE on merge.
+
+### B330 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; filed B314 → B321 → renumbered **B330**)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** New shared, presentational rail `src/shared/ui/ToolRail.jsx`; Markup adopts it — the 10 drawing/measure tools + zoom (In/Out/Fit/Page + a % readout) moved off `AppHeader` row 2 into a right-side icon rail, flush to the canvas, active highlight on the Markup accent **#EF9F27**, Select default; the Takeoff panel is now collapsible beside it. Row 2 keeps Open/Stitch/Library/filename + Undo/Redo (never empty). Site Planner keeps its own inlined rail for now (can adopt the shared one later). **V84:** `verify-markup-rail.mjs` 11/11 headless + no regression. Eligible to move to BACKLOG-DONE on merge.
+
+### B331 — Touchscreen two-finger pinch-zoom on the Markup canvas + the Site map `[Doc Review / Markup + Site Planner]` (feature)  *(owner-requested 2026-06-21 right after B329/B330; minted **B331** — next free after B324)*
+`[x]` **Built + verified (2026-06-21), on branch `claude/gifted-heisenberg-a6zlvt` — ready to ship.** One shared pinch helper now drives both canvases: `viewportTransform.js` gains `midpoint`/`distance`/`pinchZoom(v, prevMid, currMid, factor)` — the touch counterpart of `zoomAround` (zoom by the finger-distance ratio about the gesture's previous midpoint, then translate so that anchored point follows the fingers to the new midpoint, so a pinch both zooms AND pans). The Markup canvas (`DocReview.jsx`) wires it bubble-phase (its children are `pointerEvents:none`, so the gesture reaches the host); the Site map (`SitePlanner.jsx`) wires it **capture-phase** + `stopPropagation` (touches land on the SVG `<rect>` children which carry their own handlers, so the pinch must intercept first). Both paths are **gated on `pointerType==='touch'` + exactly 2 active pointers**, so the verified mouse/trackpad/wheel (ctrl+wheel) path is byte-for-byte untouched; **view-transform only** — stored geometry/calibration never move. **Verified (V88):** `verify-pinch.mjs` 5/5 (REAL trusted multitouch via CDP `Input.dispatchTouchEvent` on a `hasTouch` context — Site map spread/pinch 1.25→4.71→1.53 px/ft, Markup canvas 603→2009→670 px, 0 errors) + all mouse-path regressions green on the same build (`verify-markup-viewport` 13/13, `verify-siteplanner-viewport` 6/6, `verify-markup-rail` 11/11, `verify-docreview-viewer` 13/13, the merged Stitcher set `verify-b335-b339` 13/13); +4 unit tests (850 total); lint 0; build green; lazy chunks intact. Eligible to move to BACKLOG-DONE on merge.
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-3 (+ a B40 amendment, folded into B40 below, NOT a new
      item) — Document Review file-classification + canvas-memory + on-map-badge bugs. Minted **B326/B327/
      B328** — FIRST filed B321/B322/B323 (B320 was the max at filing time), but a concurrent `main` batch
@@ -1495,6 +1545,14 @@ Original spec:
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B340 — Auto-assembly CV/OCR tails behind the B335–B339 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B335–B339 batch; minted **B340** — a hot `main` took B325–B334)*
+`[ ]` The B335–B339 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. Four tails are deferred behind clean injectable seams because each is heavy-dependency or computer-vision work that **can't be headless-verified in the sandbox**, and the manual-Align safety net + text-layer path already cover the common case:
+  1. **Scanned-sheet OCR** — the `ocr` seam in `doc-review/lib/sheetRead.js` is wired (a no-text page calls it); fill it with **Tesseract.js in a Web Worker** so an image-only sheet still groups/stitches. Deferred: ~2 MB wasm dep + training data fetch, and no scanned fixture to verify against here.
+  2. **Graphic scale-bar reading (B339 tail)** — when there's no stated scale text, measure the drawn scale bar to set `ftPerUnit`. Needs vector-graphics/CV analysis, not text.
+  3. **Geometric edge-line match (B337 middle fallback)** — when match-line *labels* are missing, match the cut geometry across two sheets' edges. Today, label-less sheets correctly drop to the 2-point manual Align **pre-seeded** with detected seam endpoints (the spec's final safety net, already wired) — this is the CV step between labels and manual.
+  4. **Legend symbol-union (B338 tail)** — extract each sheet's graphical legend entries and union them into the pinned Composite key (today the key lists the grouped plan + auto-scale; the crop + pinned panel ship). Needs symbol/vector extraction.
+> Each is gated behind a seam exactly like the app's other not-yet-provisioned heavy compute (the AI title-block reader, the APS converter). Pick up when there's a way to verify (a scanned sample set; a CV pass we can headless-check). Coupled to the ★ north-star "map → drawings → latest set."
 
 ### B256 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B256**)*
 `[ ]` `cascadeDates`/`rollupParentDates` re-filter the task list repeatedly on each edit; `depLines` calls `tasks.indexOf` inside its loop; `rolledHealthMap`/`progressMap` recurse with `.filter`. Fine at the current ~180 tasks; will start to feel laggy past ~500. Fix: build an `id → index` map and a `parent → children[]` map once per recompute and reuse them — behaviour-preserving. **Verify** every task's start/end/duration is byte-identical before/after on the real production dataset. Gated by board size → Later until a board actually grows that large.

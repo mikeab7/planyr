@@ -22,6 +22,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -780,7 +781,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
     panelLine: themePal.borderDefault, muted: themePal.textSecondary,
     chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
-    chromeMuted: themePal.chromeMuted, ember: themePal.accent,
+    chromeMuted: themePal.chromeMuted, ember: themePal.accent, onAccent: themePal.onAccent,
   }), [themePal]);
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
@@ -1289,6 +1290,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const pointersRef = useRef(new Map()); // live touch pointers → svg-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence (B331)
+  // Viewport-relative screen point for the pinch midpoint math (the SVG fills the canvas wrapper).
+  const vpPoint = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
+  // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, pinchRef.current.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    pinchRef.current = { mid, dist };
+  };
+  // Pinch runs on the CAPTURE phase so a touch landing on a parcel/building (which has its own
+  // pointer handler) is still caught. Gated on pointerType==='touch' — mouse/trackpad never enter.
+  // A 2nd touch starts the pinch (stopPropagation so the bg/element handlers don't also fire) and
+  // tears down the 1st finger's in-progress drag (revert a half-move, B315). (B331)
+  const onPinchDown = (e) => {
+    if (e.pointerType !== "touch") return;
+    pointersRef.current.set(e.pointerId, vpPoint(e));
+    if (pointersRef.current.size === 2) {
+      e.stopPropagation();
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      touchPinchedRef.current = true;
+      if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
+      capturePidRef.current = null; cancelActiveMove(); drag.current = null;
+      setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
+    }
+  };
+  const onPinchMove = (e) => {
+    if (!pinchRef.current || e.pointerType !== "touch") return;
+    e.stopPropagation();
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+    applyPinch();
+  };
+  const onPinchUp = (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPinchedRef.current) e.stopPropagation(); // suppress the bubble handlers for the whole pinch sequence
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+  };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
@@ -1447,10 +1493,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
 
   /* ------------ coordinate transforms ------------ */
-  const f2p = useCallback((p) => ({ x: p.x * view.ppf + view.offX, y: p.y * view.ppf + view.offY }), [view]);
+  // Feet<->screen via the shared viewport engine (B329). { ppf, offX, offY } maps to the
+  // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
+  const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
-    return { x: (cx - r.left - view.offX) / view.ppf, y: (cy - r.top - view.offY) / view.ppf };
+    return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
   }, [view]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
@@ -1592,10 +1640,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       setView((v) => {
-        const fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf;
-        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-        const ppf = Math.max(0.02, Math.min(8, v.ppf * factor));
-        return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf };
+        const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, e.deltaY < 0 ? 1.12 : 1 / 1.12, mx, my, 0.02, 8);
+        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
       });
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
@@ -1618,6 +1664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarquee(null);
     setMkRect(null);
     setDraftRect(null);
+    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // clear any two-finger pinch (B331)
   };
   // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
   // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
@@ -5038,14 +5085,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const railBtn = (on) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: 3, width: "100%",
     padding: "10px 2px", border: "none", borderLeft: `3px solid ${on ? PAL.ember : "transparent"}`,
-    background: on ? "rgba(232,89,12,0.14)" : "transparent", color: on ? "#fff" : PAL.chromeMuted,
+    background: on ? PAL.accentSoft : "transparent", color: on ? PAL.chromeInk : PAL.chromeMuted,
     cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.01em",
   });
   // primary buttons (inspector actions)
   const btn = (active) => ({
     padding: "7px 13px", fontSize: 12.5, borderRadius: 9, cursor: "pointer",
-    border: `1px solid ${active ? PAL.accent : "#ddd6c5"}`,
-    background: active ? PAL.accent : "#fff", color: active ? "#fff" : PAL.ink,
+    border: `1px solid ${active ? PAL.accent : PAL.panelLine}`,
+    background: active ? PAL.accent : PAL.panelBg, color: active ? PAL.onAccent : PAL.ink,
     fontWeight: 600, fontFamily: "inherit",
     boxShadow: active ? "0 2px 6px rgba(232,89,12,0.28)" : "0 1px 2px rgba(28,25,20,0.05)",
   });
@@ -5055,7 +5102,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     padding: "6px 10px", fontSize: 12.5, borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
     border: "1px solid transparent", fontFamily: "inherit",
     background: active ? PAL.ember : "transparent",
-    color: active ? "#fff" : PAL.chromeInk,
+    color: active ? PAL.onAccent : PAL.chromeInk,
     fontWeight: active ? 650 : 500,
     boxShadow: active ? "0 2px 8px rgba(232,89,12,0.32)" : "none",
   });
@@ -5064,7 +5111,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const dIcon = { ...dGhost, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", fontSize: 15 };
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
-  const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+  const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
@@ -5453,7 +5500,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </div>
       {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
       <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
         🗂 Files
       </button>
     </span>
@@ -5466,15 +5513,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (saveStatus === "saving") {
       label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
     } else if (saveStatus === "unsaved") {
-      color = "#fbbf24"; dot = "#f59e0b";
+      color = "var(--warn-text)"; dot = "#f59e0b";
       label = cloudActive && !connOk ? "Offline" : "Unsaved";
       tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
     } else if (cloudActive && connOk) {
       label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
     } else if (cloudActive) {
-      label = "Offline"; color = "#fbbf24"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
+      label = "Offline"; color = "var(--warn-text)"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
     } else {
-      label = "Saved ✓"; dot = "#9b9482"; tip = "Saved on this device. Sign in to sync across your devices.";
+      label = "Saved ✓"; dot = PAL.chromeMuted; tip = "Saved on this device. Sign in to sync across your devices.";
     }
     return (
       <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
@@ -5486,25 +5533,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const plannerToolbar = (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, background: "var(--hover-chrome)", borderRadius: 10, padding: 2 }}>
         <button className="dbtn" style={dIcon} onClick={undo} disabled={!histRef.current.canUndo()} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
         <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
-      <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+      <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
         onClick={() => setSnap(!settings.snap)} title="Snap only ALIGNS position to the grid & flush against neighbours — it never groups or bonds anything. Click or press S to toggle (this browser session only; off by default); hold Alt while dragging to place freely.">
-        <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+        <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
         {settings.snap ? `Snap ${settings.gridSize}′ on` : "Snap off"}
       </button>
       {parcels.length > 0 && (
-        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? PAL.chromeInk : PAL.chromeMuted, fontWeight: 600 }}
           onClick={() => {
             const turningOff = settings.parcelSelect;
             setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
             if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
           }}
           title="Select parcels — ON: click a lot to select it (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
           {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
         </button>
       )}
@@ -5633,6 +5680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
+            onPointerDownCapture={onPinchDown} onPointerMoveCapture={onPinchMove} onPointerUpCapture={onPinchUp} onPointerCancelCapture={onPinchUp}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
@@ -6465,7 +6513,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
-            const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
+            const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             return (
               <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
@@ -6600,8 +6648,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* status bar — dark chrome */}
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: "rgba(25,22,19,0.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
+          {/* status bar — chrome (themes with the app, B318/B341) */}
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: PAL.chrome, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 96 }}>{underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : `${Math.round(view.ppf * 100) / 100} px/ft`}</span>
             <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
@@ -6788,7 +6836,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           <div style={{ flex: 1 }} />
           {tool === "measure" && calibrationState === "uncalibrated" && (
-            <div style={{ fontSize: 10.5, color: "#fbbf24", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Underlay isn't calibrated — distances may be wrong.</div>
+            <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.45, padding: "8px 6px 0", fontWeight: 600 }}>⚠ Underlay isn't calibrated — distances may be wrong.</div>
           )}
           {curHint && (
             <div style={{ fontSize: 10.5, color: PAL.chromeMuted, lineHeight: 1.5, padding: "8px 6px 2px", borderTop: `1px solid ${PAL.chromeLine}` }}>
@@ -8373,7 +8421,7 @@ function Section({ title, children, collapsed, accent }) {
 function Field({ label, children }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "#8a8473" }}>{label}</span>{children}
+      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{label}</span>{children}
     </div>
   );
 }

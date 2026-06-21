@@ -1,4 +1,4 @@
-/* B329 — a HIDDEN site-plan overlay must stay hidden across reload even in the exact state a
+/* B343 — a HIDDEN site-plan overlay must stay hidden across reload even in the exact state a
  * SIGNED-IN reload produces: the big raster has been stripped from the cloud row (src=null) and
  * only the transform + a Storage key survive. This is the closest the sandbox can get to the
  * signed-in path (it CORS-blocks Supabase auth/Storage, so the raster never re-downloads here —
