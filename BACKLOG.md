@@ -22,6 +22,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
+     hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
+     Complete shouted). Minted **B362** (highest B# across both files was B361). Filed AND shipped +
+     headless-verified (15/15, V98) THIS session per STANDING RULE #1 — full [x] block in BACKLOG-DONE.md
+     (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
+     building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
+     status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
+     progress-arc encoding — a separate concern, untouched). Re-hued statusTokens.js (Pursuit→coral,
+     Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
+     MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
+     z-order by importance, fixed hit box); Dead hidden by default. -->
+
 ### B309 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B308  *(arrived as coworker-chat "NEW-2" 2026-06-20; first filed B304 then renumbered **B309** — concurrent `main`'s Doc Review batch took B303–B307)*
 `[~]` **Partly done via B308 (2026-06-21).** The same-origin proxy is now the DEFAULT path and the in-app `MLY|…` box is already reframed as an **optional power-user override** (no token entry required). **Remaining, only AFTER B308 is confirmed live on Production:** drop the now-dead `VITE_MAPILLARY_TOKEN` read in `evidenceLayers.mapillaryToken()` (a baked VITE var would re-expose a token — the audit finding), and make the final call on the override box (keep as advanced, or remove). Held until B308's live confirm so the only working path isn't removed before the proxy is proven.
 > **Dedup:** the cleanup half of B308; strictly **depends on B308 verified live**. Net-new.

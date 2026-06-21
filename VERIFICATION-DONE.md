@@ -7,6 +7,12 @@ nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 ## Archived 2026-06-21 — passed / superseded items swept from VERIFICATION.md
 
+### V98 — Project-status map markers redesigned for correct visual hierarchy (B362) ✅ (self-verified headless, logged-out — fully done, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app on `vite preview`, logged-out — the saved-site map markers render from the same code path signed-in) · **Next check** — none (a map-rendering change; no auth/cloud path).
+- **✅ Live-verified (`ui-audit/verify-b362-markers.mjs`, 15/15 checks, 0 page errors):** seeded one saved site per status, then asserted against the real Leaflet markers — **Dead hidden by default** (4 markers, not 5); correct fills (coral Pursuit `#D85A30` / blue Active `#378ADD` / amber On-hold / gray Complete); **size tiers** Pursuit > Active > On-hold > Complete (21 > 18.9 > 17.2 > 15.1); a **white halo** + the right inline-SVG glyph on each (flag / pulse / pause / check); **z-order** Pursuit above Complete (737 > 437); fixed **34×44 hit box** for every status.
+- **✅ Screenshots** (`ui-audit/screens/b362/`): the coral Pursuit pin (white flag) and blue Active pin (white pulse) read instantly over busy aerial; On-hold (amber, pause bars) and Complete (gray, check, recessive/translucent) follow the hierarchy; the white halo separates every pin from both bright (developed) and dark (forest/water) tiles.
+- **✅ `contrast-audit.mjs`** green in both themes (the re-hued `--status-*` glyph-on-card pairs all clear the 3.0 floor); **1062 unit tests** pass; lint **0 errors**; build green.
+
 ### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
 - **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
