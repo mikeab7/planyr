@@ -60,6 +60,16 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V88 — Touchscreen two-finger pinch-zoom now works on the Site map AND the Markup canvas (B331) ✅ (fully self-verified headless — mouse/trackpad path proven untouched; one optional eyeball on real glass)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out; **trusted** multitouch via CDP `Input.dispatchTouchEvent` on a `hasTouch` browser context — Chrome turns it into real `pointerType:'touch'` pointer events that hit the React handlers exactly like a phone/tablet would; a synthetic `dispatchEvent` does NOT, which is why CDP is used) · **Next check** — none required; an optional one-time pinch on a physical touchscreen is the only nicety left, and needs no sign-in.
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-pinch.mjs`, 5/5 checks, 0 page errors):**
+  - **Site map:** two fingers spreading apart zoomed **IN** 1.25 → 4.71 px/ft; pinching them together zoomed **OUT** 4.71 → 1.53 px/ft — anchored about the fingers, not a jump to the centre.
+  - **Markup canvas:** spreading zoomed **IN** (the rendered sheet grew 603 → 2009 px wide); pinching zoomed **OUT** (2009 → 670 px) — the same gesture and feel as the map, through the same shared helper.
+  - **Mouse/trackpad path proven untouched (regressions all green on the same build):** `verify-markup-viewport.mjs` 13/13, `verify-siteplanner-viewport.mjs` 6/6, `verify-markup-rail.mjs` 11/11, `verify-docreview-viewer.mjs` 13/13, plus the just-merged Stitcher set `verify-b335-b339.mjs` 13/13. The pinch path is gated on `pointerType==='touch'` + exactly 2 active pointers, so the wheel / trackpad-pinch (ctrl+wheel) path never sees it.
+  - **View-transform only:** a pinch moves the viewport (`{scale,tx,ty}` in Markup, `{ppf,offX,offY}` on the map), never the stored geometry or calibration — a calibrated measurement reads the same feet after a pinch.
+  - lint **0 errors** · **850 tests** (+4 new pinch unit tests in `test/viewportTransform.test.js`: midpoint/distance, spread zooms 2× about the fingers, two-finger pan, clamp) · build green; `DocReview` / `SitePlannerApp` / shared `viewportTransform` lazy chunks intact.
+- **Not covered (headless limit):** the literal feel on physical glass (latency, momentum) — the math, gating, and zoom direction are all proven here; a 10-second pinch on an actual phone/tablet is the only thing left, and it needs no sign-in.
+
 ### V87 — Doc Review: drop a whole set → it auto-groups, auto-stitches, crops, and auto-calibrates (B335–B339) ✅ (self-verified headless — text-layer path fully done; signed-in resume worth one eyeball)
 - **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out; a generated 4-sheet vector PDF carrying real title blocks, stated scales, and MATCH-LINE labels) · **Next check** — a **signed-in** check that a saved stitched composite reloads with its grouping/crop/scale intact (autosave is the shared Supabase path; the stitch/crop logic itself is browser-only and proven here).
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-b335-b339.mjs`, 13/13 checks, 0 page errors, screenshot `ui-audit/screens/b335-b339.png`):**
