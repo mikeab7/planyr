@@ -17,12 +17,17 @@
  * a decision (Pursuit/Active/On&nbsp;Hold) stand out. Dead is a deliberate red ✕ with
  * a struck-through label — a killed deal you can still see but that reads as closed.
  */
+// `color` is the canonical status hex (used on map pins — pins sit on the aerial map,
+// a theme-neutral surface, so they keep the canonical color in both themes). On DARK
+// app surfaces (cards/panels) the saturated values go muddy, so each carries a lighter
+// `darkColor` variant; DOM badges consume these via the --status-* CSS vars in
+// index.css (which mirror these). (B234 / B277)
 export const STATUS_TOKENS = {
-  pursuit:  { color: "#378ADD", glyph: "○", shape: "ring",  hollow: true,  dashed: true,  struck: false, dim: false },
-  active:   { color: "#639922", glyph: "●", shape: "dot",   hollow: false, dashed: false, struck: false, dim: false },
-  onhold:   { color: "#BA7517", glyph: "‖", shape: "pause", hollow: false, dashed: false, struck: false, dim: false },
-  complete: { color: "#888780", glyph: "✓", shape: "check", hollow: false, dashed: false, struck: false, dim: true  },
-  dead:     { color: "#E24B4A", glyph: "✕", shape: "x",     hollow: false, dashed: false, struck: true,  dim: true  },
+  pursuit:  { color: "#378ADD", darkColor: "#6FB4F0", glyph: "○", shape: "ring",  hollow: true,  dashed: true,  struck: false, dim: false },
+  active:   { color: "#639922", darkColor: "#8FCB4E", glyph: "●", shape: "dot",   hollow: false, dashed: false, struck: false, dim: false },
+  onhold:   { color: "#BA7517", darkColor: "#E0A23E", glyph: "‖", shape: "pause", hollow: false, dashed: false, struck: false, dim: false },
+  complete: { color: "#888780", darkColor: "#9DA3AD", glyph: "✓", shape: "check", hollow: false, dashed: false, struck: false, dim: true  },
+  dead:     { color: "#E24B4A", darkColor: "#F2706F", glyph: "✕", shape: "x",     hollow: false, dashed: false, struck: true,  dim: true  },
 };
 
 // Token for a status key, defaulting to pursuit for any unknown/missing value.

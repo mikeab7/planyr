@@ -16,7 +16,7 @@ import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDri
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
@@ -507,7 +507,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
         </div>
       )}
 
@@ -524,7 +524,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           {/* sheet list */}
-          <div style={{ flex: "none", width: 116, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
+          <div style={{ flex: "none", width: 116, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
             <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Sheets · {numPages}</div>
             {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
               <button key={n} onClick={() => { setPage(n); setScale(0); setDraft(null); setSel(null); }}
@@ -536,7 +536,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           </div>
 
           {/* canvas + overlay */}
-          <div ref={wrapRef} style={{ flex: 1, minWidth: 0, overflow: "auto", background: "#cfc8ba", display: "grid", placeItems: "center", padding: 12 }}>
+          <div ref={wrapRef} style={{ flex: 1, minWidth: 0, overflow: "auto", background: "var(--canvas-mat)", display: "grid", placeItems: "center", padding: 12 }}>
             <div style={{ position: "relative", width: dims?.w, height: dims?.h, boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
               <canvas ref={canvasRef} style={{ display: "block" }} />
               {dims && (
@@ -550,7 +550,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           </div>
 
           {/* takeoff */}
-          <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+          <div style={{ flex: "none", width: 246, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 2 }}>Takeoff</div>
             <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 8 }}>
               {ftPerUnit ? `Sheet ${page} calibrated` : `Sheet ${page} not calibrated — use Calibrate`}

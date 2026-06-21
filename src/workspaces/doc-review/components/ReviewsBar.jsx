@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
 
-const PAL = { ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chromeInk: "#ece7db", chromeMuted: "#9b9482" };
+const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
 const BADGE = {
   saving:  { text: "Saving…", color: "#fbbf24", dot: "#f59e0b" },

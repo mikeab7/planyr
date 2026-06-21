@@ -9,8 +9,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, setProjectStatus, deleteReview, DISCIPLINES, STATUSES, STATUS_META } from "../lib/reviewStore.js";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c" };
-const STATUS_COLOR = { pursuit: "#d97706", active: "#15803d", onhold: "#6366f1", complete: "#9ca3af", dead: "#9ca3af" };
+const PAL = { paper: "var(--surface-raised)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)" };
+// Canonical status palette via CSS vars (B234/B277): matches the rest of the app and
+// themes live (light↔dark). Replaces the old local drift (#d97706/#15803d/…).
+const STATUS_COLOR = { pursuit: "var(--status-pursuit)", active: "var(--status-active)", onhold: "var(--status-onhold)", complete: "var(--status-complete)", dead: "var(--status-dead)" };
 const UNFILED = "__unfiled__";
 
 const discOf = (r) => r.discipline || "Other";

@@ -37,8 +37,8 @@ import {
   makeQueueItems, splitQueue, hasPendingDemote, runPool,
 } from "../../../shared/files/uploadQueue.js";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c" };
-const MINI_BTN = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "2px 8px" };
+const PAL = { paper: "var(--surface-raised)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)" };
+const MINI_BTN = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: PAL.ink, padding: "2px 8px" };
 const CLASS_TAG = {
   [DOC_CLASS.SPATIAL]: { label: "spatial", color: "#15803d" },
   [DOC_CLASS.REFERENCE]: { label: "reference", color: "#6b6557" },

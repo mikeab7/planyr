@@ -21,6 +21,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
@@ -97,25 +98,10 @@ const DOGEAR_D = 60; // dog-ear projection out from the dock face
 const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 
-const PAL = {
-  paper: "#f4f1ea",
-  gridMinor: "#e3ddd0",
-  gridMajor: "#cfc6af",
-  ink: "#2c2a26",
-  accent: "#c2410c", // drafting red-orange (canvas selection)
-  accentSoft: "#f0d9cc",
-  setback: "#b45309",
-  parcel: "#5b6650", // parcel boundary line (drafting green)
-  panelBg: "#ffffff",
-  panelLine: "#e7e2d6",
-  muted: "#8a8473",
-  // dark chrome (top bar, tool rail, status bar)
-  chrome: "#191613",
-  chromeLine: "#2e2a23",
-  chromeInk: "#ece7db",
-  chromeMuted: "#9b9482",
-  ember: "#e8590c", // UI accent on dark chrome
-};
+// PAL (the canvas + panel palette) is now theme-derived inside the SitePlanner
+// component from usePalette() — see the adapter at the top of the component body.
+// It must be REAL HEXES, not var() tokens: the canvas is SVG and exports to PNG/PDF,
+// where CSS variables don't resolve. (B274/B276)
 
 /* Lucide-style 16×16 stroke icons for the tool rail (inherit currentColor). */
 const ICON_PATHS = {
@@ -760,6 +746,18 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, authControl } = {}) {
+  // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
+  // used). Maps the active theme's tokens onto this file's existing PAL keys, so the
+  // ~70 canvas color usages below stay untouched. (B274/B276)
+  const themePal = usePalette();
+  const PAL = useMemo(() => ({
+    paper: themePal.canvasBg, gridMinor: themePal.canvasGridMinor, gridMajor: themePal.canvasGridMajor,
+    ink: themePal.textPrimary, accent: themePal.canvasSelection, accentSoft: themePal.canvasAccentSoft,
+    setback: themePal.canvasSetback, parcel: themePal.canvasParcel, panelBg: themePal.surfaceRaised,
+    panelLine: themePal.borderDefault, muted: themePal.textSecondary,
+    chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
+    chromeMuted: themePal.chromeMuted, ember: themePal.accent,
+  }), [themePal]);
   // Restore this site's saved canvas (and advance the id counter past saved ids).
   // Keyed remount in App means this runs once per site.
   const restored = useMemo(() => {
@@ -4992,12 +4990,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Editable Site/Plan labels that sit inline in the dark top bar.
   // Site/Plan dropdown trigger buttons in the dark top bar.
   const hdrTab = (fs, color, weight) => ({ display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, color, fontSize: fs, fontWeight: weight, fontFamily: "inherit", padding: "4px 9px", cursor: "pointer", maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
-  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid #ddd6c5`, background: "#fff", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
-  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, background: "#fff" };
+  const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
+  const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
-  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid #ddd6c5`, borderRadius: 4, background: "#fff", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
+  const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   const menuItem = (on) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, borderRadius: 7, cursor: "pointer", border: "none", background: on ? PAL.accentSoft : "transparent", color: PAL.ink, fontFamily: "inherit", fontWeight: on ? 650 : 500 });
-  const menuPanel = { background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
+  const menuPanel = { background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 16px 44px rgba(28,25,20,0.22), 0 3px 10px rgba(28,25,20,0.1)", padding: 6 };
   const vSep = <span style={{ width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
@@ -5719,7 +5717,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a
                   building footprint (e.g. dock dog-ears sit ON the truck court). */}
-              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext))}
+              {[...els].sort(byZ).map((el) => renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, els, startDimMove, editDimWidth, onElContext, PAL.accent))}
               {/* markup shapes (neutral line/polyline/rect/ellipse/polygon) */}
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
@@ -6004,7 +6002,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onBlur={commitNumEdit}
                       onPointerDown={(e) => e.stopPropagation()}
                       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitNumEdit(); } else if (e.key === "Escape") { e.preventDefault(); cancelNumEdit(); } }}
-                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "#fff", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
+                      style={{ width: W, height: H, border: `2px solid ${PAL.accent}`, borderRadius: 6, padding: "2px 6px", fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600, color: PAL.ink, background: "var(--surface-raised)", outline: "none", boxSizing: "border-box", boxShadow: "0 4px 14px rgba(0,0,0,0.18)" }} />
                   </foreignObject>
                 );
               })()}
@@ -6248,7 +6246,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Layers control (located sites) — same shared layers as the map finder */}
           {origin && (
-            <div data-export="skip" data-wheelscroll="1" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "rgba(255,255,255,0.95)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
+            <div data-export="skip" data-wheelscroll="1" style={{ position: "absolute", top: 10, right: 10, zIndex: 6, width: layersOpen ? 226 : "auto", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 9, boxShadow: "0 2px 10px rgba(28,25,20,0.16)", overflow: "hidden" }}>
               <button onClick={() => setLayersOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 7, width: "100%", padding: "8px 11px", border: "none", background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>
                 <span style={{ color: PAL.accent }}>❖</span> Layers <span style={{ flex: 1 }} /> <span style={{ color: PAL.muted, fontWeight: 500 }}>{layersOpen ? "▾" : "▸"}</span>
               </button>
@@ -6275,7 +6273,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       🚰 Route water service
                     </button>
                     <button onClick={inferWaterMain} disabled={evidenceBusy} title="Connect the fire hydrants in view into a screening-only water main"
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 7, fontSize: 11.5, fontFamily: "inherit", cursor: "pointer", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, fontWeight: 600, opacity: evidenceBusy ? 0.6 : 1 }}>
                       {evidenceBusy ? "Inferring…" : "⌁ Infer water main from hydrants"}
                     </button>
                     <button onClick={() => { const on = !xsecMode; setXsecMode(on); setXsecPts([]); if (on) { setXsec(null); flashWarn("Click one bank of the ditch, then the other side.", 0); } else setOverlapWarn(""); }}
@@ -6323,7 +6321,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* empty state */}
           {parcels.length === 0 && els.length === 0 && !underlay && (
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-              <div style={{ textAlign: "left", color: PAL.muted, background: "rgba(255,255,255,0.88)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
+              <div style={{ textAlign: "left", color: PAL.muted, background: "var(--surface-overlay)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
                 {[
                   ["1", <>Pick a <b>parcel from the map</b> (the “Map” button, top-left) to start from real county data,</>],
@@ -6367,7 +6365,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
-            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "rgba(255,255,255,0.92)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
+            const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
             const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
             return (
               <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
@@ -6391,7 +6389,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {printMode && (() => {
             const seg = (on) => ({ padding: "5px 11px", fontSize: 12, fontWeight: 600, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
             return (
-              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
+              <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 12, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 11, boxShadow: "0 8px 26px rgba(0,0,0,0.22)", padding: "8px 12px", zIndex: 9 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: PAL.muted }}>Print frame</span>
                 <span style={{ display: "flex", gap: 4 }}>
                   <button style={seg(printPaper === "letter")} onClick={() => setPrintPaper("letter")}>Letter</button>
@@ -6771,7 +6769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {sheetOverlays.map((o) => {
                   const on = selOverlay === o.id, wFt = o.imgW * o.ftPerPx;
                   return (
-                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "#fff" }}>
+                    <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
                         <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
@@ -6889,7 +6887,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
                 </div>
                 <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
-                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
+                <Field label="Notes"><textarea value={e.notes || ""} onChange={(ev) => setSelEasement({ notes: ev.target.value })} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                 <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>Area: <b style={{ color: PAL.ink }}>{Math.round(area).toLocaleString()} sf</b> · {(area / SQFT_PER_ACRE).toFixed(2)} ac</div>
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); ＋ adds a point, Shift-click removes one." : "Drag a boundary dot to reshape; ＋ adds a point, Shift-click removes one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
@@ -6901,7 +6899,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           })()}
           {/* selected markup shape — geometry + style */}
           {leftPanel === "props" && selMarkup && selMarkup.kind !== "easement" && (() => {
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
@@ -6940,7 +6938,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* selected callout — text styling */}
           {leftPanel === "props" && selCallout && (() => {
             const cs = calloutStyle(selCallout);
-            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" };
+            const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
             return (
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
@@ -7087,7 +7085,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
                     // Uniform square +/− buttons so every control row lines up (B242 — the owner asked
                     // for "+ and − next to each other" at a consistent size).
-                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid #ddd6c5", background: "#fff", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
                     // One control row: label (+ sub) on the left, "＋" and (optionally) "−" on the right.
                     const ctlRow = (label, sub, { onAdd, addOn, addTitle, onRem = null, remOn = false, remTitle = "" }) => (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -7350,12 +7348,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title="Properties">
               <Field label="Fill color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Line color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Fill opacity">
@@ -7481,7 +7479,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {mine.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
                     {mine.map((d) => (
-                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "#fff" }}>
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 8, border: "1px solid #e2dccb", background: "var(--surface-raised)" }}>
                         <button onClick={() => setOpenDrawingId(d.id)} title={d.src ? "Open & mark up" : "Re-attach the file to view (markups are saved)"}
                           style={{ flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {d.src ? "🖹" : "⚠"} {d.name}{d.markups?.length ? ` · ${d.markups.length} mk` : ""}
@@ -7602,7 +7600,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                     </span>
                   </Field>
                 </>
@@ -7722,8 +7720,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                   <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </div>
               );
             })}
@@ -7740,7 +7738,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {showShortcuts && (
         <div onClick={() => setShowShortcuts(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 560, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Keyboard & gestures</h2>
               <button className="gbtn" onClick={() => setShowShortcuts(false)} style={{ ...chip }}>Close ✕</button>
@@ -7768,7 +7766,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* Version history (automatic local backups, B126) — restore an earlier saved version */}
       {versionsOpen && (
         <div onClick={() => setVersionsOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 460, maxWidth: "92vw", maxHeight: "82vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Version history</h2>
               <button className="gbtn" onClick={() => setVersionsOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -7807,17 +7805,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* Multi-page PDF sheet picker (B67 increment 2) */}
       {pagePick && (
         <div style={{ position: "fixed", inset: 0, zIndex: 3500, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }} onClick={cancelPagePick}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, padding: 18, width: 420, maxWidth: "90vw", boxShadow: "0 18px 50px rgba(0,0,0,0.35)", fontFamily: "system-ui, sans-serif" }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink }}>Pick a sheet</div>
             <div style={{ fontSize: 12, color: PAL.chromeMuted, margin: "5px 0 12px" }}>“{pagePick.name}” has {pagePick.pageCount} pages — choose which one to attach as the backdrop.</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 220, overflowY: "auto" }}>
               {Array.from({ length: pagePick.pageCount }, (_, i) => i + 1).map((n) => (
                 <button key={n} onClick={() => pickPage(n)} title={`Attach page ${n}`}
-                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>{n}</button>
+                  style={{ minWidth: 40, padding: "7px 10px", fontSize: 12.5, fontWeight: 700, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink }}>{n}</button>
               ))}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink }}>Cancel</button>
+              <button onClick={cancelPagePick} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -7829,7 +7827,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const closes = pathCloses(path);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
               <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Title reader &amp; metes-and-bounds plotter</h2>
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
@@ -7891,7 +7889,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
               <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
-                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid #ddd6c5`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
+                style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
                   {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
@@ -7929,7 +7927,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* POB / overlap banner (after plotting or while awaiting a POB click) */}
       {/* ditch cross-section result */}
       {xsec && (
-        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
+        <div style={{ position: "fixed", left: 16, bottom: 16, zIndex: 2600, width: 286, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.22)", padding: 13 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 12.5, fontWeight: 700, color: PAL.ink }}>Ditch cross-section</span>
             <button onClick={() => setXsec(null)} style={{ ...chip, padding: "3px 8px", fontSize: 11 }}>✕</button>
@@ -7974,7 +7972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           background: PAL.accent, color: "#fff", padding: "9px 16px", borderRadius: 99, fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)", display: "flex", gap: 12, alignItems: "center" }}>
           <span>{ovCalibMsg()} {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 ? <span style={{ opacity: 0.75 }}>· or add more pairs for a better fit</span> : null} <span style={{ opacity: 0.75 }}>(Esc to cancel)</span></span>
           {ovCalib.kind === "align" && Math.floor(ovCalib.pts.length / 2) >= 2 && (
-            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "#fff", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
+            <button onClick={applyOvAlign} style={{ border: "1px solid #fff", background: "var(--surface-raised)", color: PAL.accent, borderRadius: 7, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>Apply {Math.floor(ovCalib.pts.length / 2)} pts</button>
           )}
           <button onClick={() => setOvCalib(null)} style={{ border: "1px solid rgba(255,255,255,0.5)", background: "transparent", color: "#fff", borderRadius: 7, padding: "3px 9px", cursor: "pointer", fontSize: 11.5, fontWeight: 600 }}>Cancel</button>
         </div>
@@ -8080,7 +8078,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
-function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext) {
+function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, selStroke) {
   // Per-element striping config. renderElPx is a MODULE-level fn, so it can't close
   // over the component-scoped cfgOf — referencing that one here threw "cfgOf is not
   // defined" inside the els.map during render and blanked the whole page on any
@@ -8096,7 +8094,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // handles, not a colour change.
   const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
   const waterOp = st.cartoWater ? 0.8 : fillOp;
-  const elStroke = st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke);
+  const elStroke = st.cartoWater ? st.stroke : (isSel ? selStroke : st.stroke);
   // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
   // feet, drawn dashed so the user sees what the pond grew from. Same path for the
   // polygon and rect branches (the rect branch counter-rotates it back to world).
@@ -8123,7 +8121,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const parts = [];
   const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={waterFill} fillOpacity={waterOp}
-    stroke={st.cartoWater ? st.stroke : (isSel ? PAL.accent : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
+    stroke={st.cartoWater ? st.stroke : (isSel ? selStroke : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.
@@ -8262,7 +8260,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
 function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
-    <div style={{ marginBottom: 9, background: "#fff", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
         {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
         <span className="sec-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "#6b6557", flex: 1, transition: "color .12s" }}>{title}</span>
