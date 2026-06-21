@@ -22,6 +22,42 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups,
+     stitches, crops, and calibrates itself" (the headline auto-assembly tranche). Minted **B325–B329**
+     (highest B# across BACKLOG.md + BACKLOG-DONE.md was B324; the B25431/B3340 hits in BACKLOG-DONE.md
+     are CSS hex colours, not IDs). Per STANDING RULE #1: filed here AND implemented + verified the SAME
+     session (branch `claude/loving-newton-t7gzpq`); the shipped [x] blocks live in BACKLOG-DONE.md.
+     DEDUP (owner flagged two CLAUDE.md roadmap lines being pulled forward — FOLD, don't duplicate):
+       • B326 (NEW-2) FOLDS the auto-filing roadmap detail "read its title block." It is NOT a duplicate
+         of the shipped filing reader (B312 `titleBlockParse.js`/`localRead.js` + B299 server): those read
+         a JOINED text string for filing fields. B326 is the POSITIONAL superset grouping/stitching need —
+         per-item x/y, the title-block BAND, the sheet TITLE, the stated SCALE (reuses B267 `parseSheetScale`),
+         and MATCH-LINE labels with position + orientation. It EXTENDS and REUSES both, no second reader.
+       • B327 (NEW-3) IS the roadmap line "automatic match-line detection later," now specified — folded,
+         not a new parallel item. Builds on the existing `solveM()` similarity fit (`stitchGeom.js`, B300)
+         and keeps the 2-point manual Align (Stitcher.jsx) as the safety net, not the primary path.
+       • B329 (NEW-5) — the SINGLE-SHEET half already ships (B267 `autoDetectScales`); B329's net-new part
+         is the STITCHER/grouped-composite half + the graphic scale-bar fallback. Reuses `overlayScale.js`.
+       • B325 (grouping) + B328 (crop + merged legend) are net-new — no existing Open/Done item covers them. -->
+
+### B325 — Drop a whole set → auto-group pages into logical sheets (collapsed list) `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-1"; minted **B325**) — depends on B326; pairs with B327*
+`[ ]` The headline UX shift. **Today:** opening a PDF lists every page in the tray and you add/align each by hand. **Wanted:** drop a multi-page set → read each page (B326) → consecutive pages sharing a sheet title with a contiguous sheet-number run auto-group; the sheet list shows **logical** entries (~13 from a 20-page set), grouped plans labeled e.g. "Grading plan · C5–C9 · 5 sheets" that open as one stitched composite; cover / general-notes stay standalone. Kills the per-page "add sheet" step as the default. Depends on B326; pairs with B327.
+
+### B326 — Sheet-metadata reader: title block, scale, match-line labels `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-2"; minted **B326**)*
+`[ ]` Shared engine for grouping (B325), stitching (B327), auto-calibrate (B329), and the roadmap's auto-filing. Per page via pdf.js `getTextContent`: extract sheet number, sheet title, discipline, stated scale, and every "MATCH LINE … SEE SHEET X" string with its x/y position and orientation. Detect the title-block band (dense text strip on the right / bottom, bounded by the long rule) to define the drawing area. If the page has no text layer (scanned), fall back to OCR (Tesseract.js in a Web Worker). Surface low-confidence reads rather than guessing, consistent with the "never auto-guess" principle.
+> **Dedup:** folds the CLAUDE.md roadmap "read its title block" (auto-filing). The shipped filing readers (B312 `titleBlockParse.js`/`localRead.js`, B299 server) read a JOINED string for filing fields — B326 adds the POSITIONAL layer (per-item x/y, title-block band, sheet title, scale, match-line labels). Reuses B312's parsers + B267's `parseSheetScale`; no second/parallel reader.
+
+### B327 — Automatic match-line stitching `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-3"; minted **B327**) — depends on B326*
+`[ ]` The core auto-stitch. From B326's labels, build the sheet adjacency, then feed each shared match line's two endpoints as the correspondence pair into the existing `solveM()` similarity fit; take scale from the per-sheet stated scale so no shared corner is needed. Fallback chain when labels are missing / unreadable: key/coverage-map parse → geometric edge-line match across the cut → drop into the existing 2-point manual Align pre-seeded with detected endpoints. Keep the current manual Align as the safety net, not the primary path. Depends on B326.
+> **Dedup:** this IS the CLAUDE.md roadmap line "automatic match-line detection later," now specified — folded, not duplicated. Builds on `solveM()`/`stitchGeom.js` (B300) and preserves the manual Align safety net.
+
+### B328 — Crop title blocks + single merged legend on stitched plans `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-4"; minted **B328**) — depends on B326*
+`[ ]` On a grouped composite, hide each sheet's title-block band (from B326) so the drawing areas butt cleanly; keep ONE legend for the group and union in any extra entries later sheets add; render the legend as a pinned panel rather than baking it into the raster so it stays readable at any zoom. Depends on B326.
+
+### B329 — Auto-calibrate from the sheet's stated scale `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-5"; minted **B329**) — depends on B326*
+`[ ]` Today calibration is a manual two-click plus a "type the real feet" prompt. When B326 finds a stated scale ("1"=40'") or a graphic scale bar, set `ftPerUnit` automatically per group, with manual override still available. Independent quick win; depends on B326.
+> **Dedup:** the SINGLE-SHEET half already ships (B267 `autoDetectScales` — reads the stated scale, gates on `detectSheet`/standard plot size, pre-fills "from sheet scale, verify"). B329's net-new part is the STITCHER/grouped half (set `ftPerUnit` per group) + the graphic scale-bar fallback. Reuses `overlayScale.js` (`parseSheetScale`/`detectSheet`/`ftPerPointForScale`).
+
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
      "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across BACKLOG.md +
      BACKLOG-DONE.md was B315; the B25431 / B3340 hits in BACKLOG-DONE.md are CSS hex colours, not IDs).

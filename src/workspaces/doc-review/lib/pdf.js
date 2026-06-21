@@ -25,6 +25,34 @@ export async function extractPageText(pdf, pageNum) {
   }
 }
 
+/* Pull a page's embedded text WITH per-item positions (B326) — the sheet-metadata reader
+ * needs to know WHERE each string sits to find the title-block band, the sheet title, and
+ * the match-line labels (a plain joined string can't). pdf.js gives each text run a
+ * transform [a,b,c,d,e,f] (e,f = baseline x,y in PDF user space, origin BOTTOM-left) plus a
+ * width/height; we convert to a TOP-left origin so the coordinates line up with the rendered
+ * canvas / SVG (y grows downward there). Returns { items:[{ str,x,y,w,h }], width, height }
+ * in page units (scale-1 points). Empty items[] for a scanned/raster page (no text layer). */
+export async function extractPageItems(pdf, pageNum) {
+  try {
+    const page = await pdf.getPage(pageNum);
+    const vp = page.getViewport({ scale: 1 });
+    const tc = await page.getTextContent();
+    const items = [];
+    for (const it of tc.items) {
+      const str = it.str;
+      if (!str || !str.trim()) continue;
+      const t = it.transform || [1, 0, 0, 1, 0, 0];
+      const h = it.height || Math.hypot(t[2], t[3]) || 0;
+      const w = it.width || 0;
+      // f = baseline from the bottom; the glyph box top in top-left coords is height − (f + h).
+      items.push({ str, x: t[4], y: Math.max(0, vp.height - t[5] - h), w, h });
+    }
+    return { items, width: vp.width, height: vp.height };
+  } catch (_) {
+    return { items: [], width: 0, height: 0 };
+  }
+}
+
 /* Pick how dense to render the canvas backing store. We draw at the device's pixel
  * ratio (so note text is crisp on HiDPI / Retina screens instead of a blurry upscale),
  * but cap it to a pixel budget so a big E-size sheet at high zoom can't blow up canvas
