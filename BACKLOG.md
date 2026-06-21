@@ -22,8 +22,52 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: B300 (parcel click-vs-drag) + B301 (select-parcels toggle) were filed here and
-     SHIPPED the same session per STANDING RULE #1 — moved to BACKLOG-DONE.md (headless-verified V75). -->
+<!-- 2026-06-20: parcel click-vs-drag (B308) + select-parcels toggle (B309) were filed here and SHIPPED
+     the same session per STANDING RULE #1 — moved to BACKLOG-DONE.md (headless-verified V77). Renumbered
+     from a first-filed B300/B301 + V75 that concurrent `main` consumed (stitch-guard B300–B302 + Doc
+     Review editing B303–B307; V75/V76). -->
+
+<!-- 2026-06-20: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
+     ALL visitors via a server-side token proxy (Option B), instead of per-browser token entry. Minted
+     **B303–B304** (highest B# across both files was B302 after concurrent `main`'s B288–B302 batches).
+     Deduped — net-new (no existing proxy item); builds on the just-shipped B285/B286 (Mapillary rename +
+     "needs setup" gating) + the KEY DECISION "Mapillary token is a secret." NOTE: B303 is the one open
+     item that CANNOT be self-verified headless in the sandbox (a Cloudflare Pages Function doesn't run
+     under `vite preview`), so its live check is owner-secret + deploy + a coworker confirm — stated in
+     the item. -->
+
+### B303 — Server-side Mapillary token proxy so the street-level layer works for all users `[Site Planner / functions]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-20; minted **B303** — highest B# across both files was B302)*
+`[ ]` Make the Mapillary **"Poles & hydrants from street imagery"** evidence layer available to every visitor **without per-user token entry**, while keeping the token OFF the public bundle (the "secrets stay server-side; only the RLS-protected Supabase anon key reaches the browser" rule). Chosen approach = **Option B (server-side proxy)**, NOT Option A (bake `VITE_MAPILLARY_TOKEN` into the build): any `VITE_*` var is compiled into the public JS, exposing a borrowable token — the KEY DECISION "Mapillary token is a secret" + the audit's *token-in-bundle* finding forbid A.
+- Add a **Cloudflare Pages Function** (`functions/api/mapillary/[[path]].js`) that injects the token from an encrypted Cloudflare **Secret `MAPILLARY_TOKEN`** (NOT a `VITE_*` var, NOT a plaintext `wrangler.toml` var) and forwards to the Mapillary Graph API, returning JSON to the client. Same-origin → no CORS. (Mirrors the existing thin same-origin Pages-Function pattern, `functions/api/auth/google/*`.)
+- Client change: `src/workspaces/site-planner/lib/evidenceLayers.js` → `fetchMapillary` calls the same-origin proxy path instead of `graph.mapillary.com` directly, and STOPS appending `access_token=` to the client URL (resolves the audit's *token-in-URL* LOW finding; token-not-in-bundle resolves the *token-in-bundle* LOW finding).
+- **Abuse guardrails (it's now a public endpoint spending the owner's quota):** allow-list ONLY the Graph endpoint/fields the app calls (`map_features`; `id,object_value,geometry`; the pole/hydrant filter); add an **Origin/Referer check** (planyr.io + Cloudflare preview hosts) + basic **rate limiting**; consider short-TTL response caching to cut quota. Preserve UX: zoom ≥ 16 gating + the status-dot states unchanged.
+- **⛔ Verify-blocker (stated plainly):** a Pages Function runs ONLY in the Cloudflare runtime — it does **not** execute under `vite preview`/the sandbox, so the end-to-end proxy can't be self-verified headless here the way the GIS/UI work was. Unit-test the pure pieces (allow-list/param validation); the live check needs **(1) the owner to add the `MAPILLARY_TOKEN` secret in the Cloudflare dashboard** and **(2) a deploy**, then a coworker confirm (zoom-in over a covered area → dots render; **no token in any client request**). Until the secret is set the endpoint is dormant (no token → empty), so the code can ship inert ahead of configuration.
+> **Dedup:** net-new. Builds on **B285/B286** (Mapillary rename + "needs setup" gating, shipped) and the KEY DECISION "Mapillary token is a secret." Resolves the audit's two LOW findings (token-in-bundle, token-in-URL). The in-app `MLY|…` paste box stays until **B304** retires/optionalizes it.
+
+### B304 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B303  *(arrived as coworker-chat "NEW-2" 2026-06-20; minted **B304**)*
+`[ ]` After **B303** ships AND is verified live, remove/redirect the now-redundant client token mechanisms: drop the `VITE_MAPILLARY_TOKEN` build-var path, and convert the in-app Mapillary token (`MLY|…`) paste box to either **removed** or an **optional power-user override** (default path is the proxy, so no token entry is required).
+> **Dedup:** the cleanup half of B303; strictly **depends on B303 verified live** — don't remove the only working path before the proxy is proven. Net-new.
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-3 — Document Review STITCH + MARKUP safety
+     guards. Minted **B300–B302** (highest B# across both files was B299 after concurrent `main`'s
+     B288–B299 batches landed; my first-filed B288–B290 collided with main's single-sheet-viewer
+     B288–B296, then a second filing at B299–B301 collided with main's auto-filing **B299** (PR #222),
+     so renumbered to the next clear band **B300–B302** — the rules forbid two items sharing a number).
+     **Filed AND fixed + headless-verified + pushed THIS session** (branch
+     `claude/admiring-hypatia-xjv8a1`), per Standing Rule #1 — full [x] blocks live in BACKLOG-DONE.md:
+       • B300 (NEW-1) — Stitcher Align had no degenerate-baseline guard; coincident clicks flung the
+         sheet because solveM's `Math.hypot(vb)||1` masked a zero baseline → extreme transform. FIXED.
+       • B301 (NEW-2) — measuring over a not-yet-aligned sheet silently used the composite (sheet-1)
+         scale. FIXED — per-sheet `aligned` state + visual flag + a warn-on-measure banner.
+       • B302 (NEW-3) — a 2-point Area (0 sf) / 2-point Perimeter (single segment) was committable via
+         Enter AND double-click. FIXED — both finish paths now need ≥3 pts via `canCommitMeasure`.
+     Deduped — all net-new: NOT duplicates of main's single-sheet-viewer **B288–B296** (zoom/pan/markup-
+     edit on the SAME DocReview.jsx, a different concern — the stitcher + the measure-commit guards are
+     untouched there) nor its auto-filing **B299** (server-side title-block read), nor B181/B182/B183
+     (the *map* placement cascade) or B130/B131 (parking). B300/B301 added a pure `lib/stitchGeom.js`
+     (extracted from Stitcher.jsx so the transform math is unit-testable); B302 extended `lib/takeoff.js`
+     and tightened main's B291 double-click finish to the same ≥3 gate. lint 0 · build green · headless
+     `ui-audit/verify-b300-b302.mjs` 14/14 (chromium-1228, per main's V72 note). -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
      interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B288–B296**
@@ -561,7 +605,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > - **B142 + B143 (DONE) — the direct precedent.** B142 already set `pointerEvents="all"` on the **text/callout box** so its whole interior selects even with no fill (explicitly "to match Doc Review's shape-aware hit test"); B143 finished the Bluebeam-style text editing (Enter = newline, click-away/Esc to finish, via a `pointerEvents:"all"` click-out catcher). So **text-box selection + editing is already done on the Site Planner side — do NOT redo it here.** Increment 1 is the same fix applied to the shape markups B142 didn't cover. B141 likewise added measurement vertex-editing "consistent with Doc Review's shape-aware select."
 > - **B33 (DONE)** is the reference hit-test — Increment 1 brought the other two surfaces up to its rectangle behaviour; the shared-`hitTest` tranche generalizes B33 rather than replacing it.
 > - **B146 (DONE)** already introduced (a) the **transparent fat hit-stroke** for grabbing a thin line and (b) the shared inline **`numEdit`** on-canvas editor that replaced `window.prompt`. Reuse (a) for open-path markups here.
-> - **Owner "no dialog boxes" rule (KEY DECISIONS, 2026-06-17):** while threading text/measure selection, note that **Doc Review still creates text + calibration via `window.prompt`** (`DocReview.jsx`) and **ParcelDrawing calibrates via `window.prompt`** — these violate the rule and should be converted to the inline `numEdit`/`<textarea>` pattern as part of the text/measure work (fold in here, don't file separately).
+> - **Owner "no dialog boxes" rule (KEY DECISIONS, 2026-06-17):** Doc Review's **Text** tool is inline (B293) and **Calibrate** (Doc Review + Stitcher) is now inline with validation (**B304**) — no more `window.prompt` in those flows. **Only remaining:** **ParcelDrawing's calibrate** (`window.prompt`) → convert to the inline `numEdit` pattern; fold in here, don't file separately.
 > - **Distinct from B149/B121 (LOD + label collision):** those govern what's *drawn* at a given zoom; this governs what's *selectable* when clicked. Keep separate.
 
 ### B156 — Hover highlight on the markup under the cursor (pre-click affordance) `[Document Review + Site Planner / UI]` (feature)  *(arrived as "NEW-2"; minted B156 — next free ID after B155)*

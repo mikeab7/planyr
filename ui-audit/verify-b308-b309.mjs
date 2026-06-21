@@ -1,9 +1,9 @@
-/* Verification for B300 (parcel click-vs-drag) + B301 ("Select parcels" toggle).
+/* Verification for B308 (parcel click-vs-drag) + B309 ("Select parcels" toggle).
  *
- * B300: on the planner canvas, a press on a (locked) parcel that DRAGS pans the map and does
+ * B308: on the planner canvas, a press on a (locked) parcel that DRAGS pans the map and does
  *       NOT select; a press that's a real CLICK (tiny travel, brief) DOES select. Panning
  *       across parcels no longer mis-fires as a selection.
- * B301: a Row-2 toolbar toggle ("Select parcels"); default ON. When OFF, a click never selects
+ * B309: a Row-2 toolbar toggle ("Select parcels"); default ON. When OFF, a click never selects
  *       a parcel (pure browse). The setting persists per project across a reload.
  *
  * Logged-out against the built app (vite preview on :4173). Seeds a single LOCKED parcel — the
@@ -19,13 +19,13 @@ mkdirSync(OUT, { recursive: true });
 
 const parcel = { id: "pc1", locked: true, points: [{ x: -440, y: -200 }, { x: 440, y: -200 }, { x: 440, y: 320 }, { x: -440, y: 320 }] };
 const demoSite = {
-  id: "uiaudit-b300", groupId: "uiaudit-b300", site: "Parcel Gesture Demo", name: "Plan 1",
+  id: "uiaudit-b308", groupId: "uiaudit-b308", site: "Parcel Gesture Demo", name: "Plan 1",
   origin: { lat: 29.786, lon: -95.83 }, county: "harris",
   parcels: [parcel], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null,
   updatedAt: Date.now(), data: { status: "active" },
 };
 // Conditional seed: only write if absent, so a page RELOAD keeps the autosaved (toggled) state
-// instead of clobbering it — that's what lets the B301 persistence check work.
+// instead of clobbering it — that's what lets the B309 persistence check work.
 const seed = `(() => { try {
   if (!localStorage.getItem('planarfit:currentSite:v1')) {
     localStorage.setItem('planarfit:sites:v1', JSON.stringify({ '${demoSite.id}': ${JSON.stringify(demoSite)} }));
@@ -100,7 +100,7 @@ result.unselectedBeforeClick = pc && !pc.selected; // stroke #5b6650 / width 2
   const after = await parcelInfo();
   result.clickSelects = { selected: after?.selected, strokeWidth: after?.strokeWidth };
 }
-await page.screenshot({ path: OUT + "b300-click-selected.png", clip: { x: Math.max(0, (pc?.cx ?? 700) - 260), y: Math.max(0, (pc?.top ?? 250) - 40), width: 540, height: 460 } });
+await page.screenshot({ path: OUT + "b308-click-selected.png", clip: { x: Math.max(0, (pc?.cx ?? 700) - 260), y: Math.max(0, (pc?.top ?? 250) - 40), width: 540, height: 460 } });
 
 // ── Test B — a DRAG pans and does NOT select ──────────────────────────────
 await deselect();
@@ -121,9 +121,9 @@ result.deselected = pc && !pc.selected;
     panShiftPx: after ? Math.round(after.cx - cxBefore) : null, // expect ~+95 (it panned)
   };
 }
-await page.screenshot({ path: OUT + "b300-drag-panned.png", clip: { x: 0, y: 60, width: 1440, height: 700 } });
+await page.screenshot({ path: OUT + "b308-drag-panned.png", clip: { x: 0, y: 60, width: 1440, height: 700 } });
 
-// ── Test C — B301 toggle OFF → a click never selects ──────────────────────
+// ── Test C — B309 toggle OFF → a click never selects ──────────────────────
 await fit(); await deselect();
 await clickToggle();                                      // turn Select parcels OFF
 await page.waitForTimeout(200);
@@ -162,12 +162,12 @@ result.persistedAfterReload = await toggleState();        // expect text "...: o
 const realErrors = errors.filter((e) => !/CORS|Access to fetch|Failed to load resource|ERR_FAILED/.test(e));
 
 result.checks = {
-  "B300 click selects (deselected → click)": result.unselectedBeforeClick === true && result.clickSelects?.selected === true,
-  "B300 drag pans, does NOT select": result.dragPansNoSelect?.selectedAfterDrag === false && Math.abs((result.dragPansNoSelect?.panShiftPx ?? 0) - 95) <= 18,
-  "B301 toggle default ON": result.toggleDefault?.present === true && result.toggleDefault?.pressed === "true",
-  "B301 OFF → click never selects": result.toggleOff?.pressed === "false" && result.offClickDoesNotSelect?.selected === false,
-  "B301 ON again → click selects": result.toggleOnAgain?.pressed === "true" && result.onClickSelectsAgain?.selected === true,
-  "B301 OFF persists across reload": result.persistedAfterReload?.pressed === "false",
+  "B308 click selects (deselected → click)": result.unselectedBeforeClick === true && result.clickSelects?.selected === true,
+  "B308 drag pans, does NOT select": result.dragPansNoSelect?.selectedAfterDrag === false && Math.abs((result.dragPansNoSelect?.panShiftPx ?? 0) - 95) <= 18,
+  "B309 toggle default ON": result.toggleDefault?.present === true && result.toggleDefault?.pressed === "true",
+  "B309 OFF → click never selects": result.toggleOff?.pressed === "false" && result.offClickDoesNotSelect?.selected === false,
+  "B309 ON again → click selects": result.toggleOnAgain?.pressed === "true" && result.onClickSelectsAgain?.selected === true,
+  "B309 OFF persists across reload": result.persistedAfterReload?.pressed === "false",
   "no page JS errors": realErrors.length === 0,
 };
 result.PASS = Object.values(result.checks).every(Boolean);
