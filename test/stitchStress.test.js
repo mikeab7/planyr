@@ -1,4 +1,4 @@
-/* Adversarial STRESS TEST for the Document-Review drawing stitch tool (B348).
+/* Adversarial STRESS TEST for the Document-Review drawing stitch tool (B350).
  *
  * The stitcher's job — drop a multi-page PDF set, auto-group it, auto-stitch the seams, and
  * calibrate — is geometry that fails SILENTLY when it fails: a bad transform flings a sheet

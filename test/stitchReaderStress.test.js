@@ -1,4 +1,4 @@
-/* Adversarial STRESS TEST — round 2 (B348): the stitch tool's READER + CALIBRATION + TAKEOFF path.
+/* Adversarial STRESS TEST — round 2 (B350): the stitch tool's READER + CALIBRATION + TAKEOFF path.
  *
  * Round 1 (stitchStress.test.js) hardened the placement geometry. This round attacks the other
  * half of the "confident wrong number" surface: the text reads that decide HOW sheets group, and
