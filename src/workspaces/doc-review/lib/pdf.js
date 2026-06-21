@@ -117,3 +117,19 @@ export async function renderPageToImage(pdf, pageNum, scale = 2) {
   );
   return { href, baseW: base.width, baseH: base.height };
 }
+
+/* Render a page to an offscreen <canvas> at EXACTLY `scale` (no devicePixelRatio fiddling) for
+ * OCR (B340). The returned canvas's pixel coords are page-points × scale, so a word's pixel
+ * bbox ÷ scale maps straight back to scale-1 page units — the same frame `extractPageItems`
+ * uses, so an OCR'd scanned page feeds the metadata reader identically to a text page.
+ * `willReadFrequently` hints the 2D context for the pixel reads Tesseract does. */
+export async function renderPageToOcrCanvas(pdf, pageNum, scale) {
+  const page = await pdf.getPage(pageNum);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  await page.render({ canvasContext: canvas.getContext("2d", { willReadFrequently: true }), viewport }).promise;
+  return { canvas, baseW: base.width, baseH: base.height, scale };
+}
