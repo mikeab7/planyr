@@ -73,12 +73,12 @@ describe("stitcher geometry (doc-review)", () => {
     expect(measureOverUnaligned([], [{ x: 0, y: 0 }])).toBe(false);                          // no sheets → no warning
   });
 
-  // B321 — the pan crash. The setView updater used to read drag.current INSIDE the deferred
+  // B325 — the pan crash. The setView updater used to read drag.current INSIDE the deferred
   // updater; a gesture aborted (pointerup / pointercancel / blur-recovery) before React ran
   // the updater nulled the ref → "Cannot read properties of null (reading 'panX')" thrown in
   // the render phase → the whole stitcher hit the error boundary. The fix captures the origin
   // into a local and closes over it (panTo). These tests pin both the math and the contract.
-  describe("B321: panTo (pan from a captured drag origin)", () => {
+  describe("B325: panTo (pan from a captured drag origin)", () => {
     const view = { panX: 40, panY: 40, zoom: 0.4 };
     const origin = { sx: 100, sy: 100, panX: 40, panY: 40 };
 

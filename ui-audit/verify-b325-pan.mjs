@@ -1,4 +1,4 @@
-/* Verify B321 — the Stitcher pan crash ("Cannot read properties of null (reading 'panX')").
+/* Verify B325 — the Stitcher pan crash ("Cannot read properties of null (reading 'panX')").
  *
  * The pan setView updater used to read drag.current INSIDE the deferred updater; an aborted
  * gesture (pointerup / pointercancel / the blur/visibility recovery) nulled the ref before
@@ -69,7 +69,7 @@ const after = await worldTransform();
 check(before && after && before !== after, `a normal pan changes the world transform (\n      before: ${before}\n      after:  ${after})`);
 
 /* (2) abort the gesture mid-pan, many times, with blur / visibilitychange / pointercancel */
-console.log("\nB321 — mid-pan aborts must NOT crash the stitcher:");
+console.log("\nB325 — mid-pan aborts must NOT crash the stitcher:");
 for (let i = 0; i < 12; i++) {
   await page.mouse.move(cx, cy); await page.mouse.down();
   await page.mouse.move(cx + 20 + i, cy + 15, { steps: 2 });

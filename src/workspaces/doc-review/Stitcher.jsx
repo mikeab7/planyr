@@ -225,7 +225,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     // runs in React's render phase, which for a continuous event (pointermove) can be deferred a
     // tick — and a discrete event in between (pointerup, pointercancel, or the blur/visibility
     // abort below) may null drag.current first. Reading the ref *inside* the deferred updater
-    // then dereferenced null → the whole stitcher crashed (B321: "reading 'panX'"). The captured
+    // then dereferenced null → the whole stitcher crashed (B325: "reading 'panX'"). The captured
     // `d` keeps the pan correct even if the gesture is aborted mid-flight.
     const d = drag.current;
     if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));

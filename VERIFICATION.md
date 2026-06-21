@@ -60,9 +60,9 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V84 — Stitcher pan no longer crashes when a gesture is interrupted mid-pan (B321) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+### V84 — Stitcher pan no longer crashes when a gesture is interrupted mid-pan (B325) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — pan is browser-only, no auth path) · **Next check** — none (auth-independent client logic).
-- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b321-pan.mjs`, all checks pass, 0 page errors):** a normal pan moves the world transform (`translate(40 40)` → `translate(160 130)`); **12 mid-pan aborts** (window blur + visibilitychange + pointercancel, each interleaved with pointer moves) raise **no error boundary** ("hit an error and couldn't load") and **0** `panX` page errors; pan still works afterward. Backed by **4 unit tests** (`test/stitchGeom.test.js` → `panTo`): the math, that a captured origin survives the drag ref being nulled mid-gesture, and a teeth test that the OLD pattern (reading `drag.current` in the deferred updater) throws `/panX/`.
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b325-pan.mjs`, all checks pass, 0 page errors):** a normal pan moves the world transform (`translate(40 40)` → `translate(160 130)`); **12 mid-pan aborts** (window blur + visibilitychange + pointercancel, each interleaved with pointer moves) raise **no error boundary** ("hit an error and couldn't load") and **0** `panX` page errors; pan still works afterward. Backed by **4 unit tests** (`test/stitchGeom.test.js` → `panTo`): the math, that a captured origin survives the drag ref being nulled mid-gesture, and a teeth test that the OLD pattern (reading `drag.current` in the deferred updater) throws `/panX/`.
 - **Why fully done logged-out:** the pan handler + the `panTo` helper live entirely in the Stitcher client (`Stitcher.jsx` + `lib/stitchGeom.js`), no auth or cloud dependency.
 
 ### V83 — Stitch: measuring over an un-aligned sheet is now BLOCKED, not just warned (B316) ✅ (self-verified headless — fully done, no signed-in check needed)

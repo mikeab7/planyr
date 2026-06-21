@@ -50,7 +50,7 @@ export const sheetContains = (s, w) => {
 export const measureOverUnaligned = (placed, pts) =>
   (pts || []).some((w) => (placed || []).some((s) => s.aligned === false && sheetContains(s, w)));
 
-// B321 — pan the view from a CAPTURED drag origin {sx,sy,panX,panY} + the live pointer
+// B325 — pan the view from a CAPTURED drag origin {sx,sy,panX,panY} + the live pointer
 // position. Pure (and kept here) so the capture contract is unit-testable: the caller MUST
 // snapshot the drag ref into a local and pass it in — never let the deferred setView updater
 // read the ref. That updater runs in React's render phase, which for a continuous pointermove
