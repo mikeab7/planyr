@@ -54,3 +54,26 @@ on the seed, so a malformed seed hangs forever on the loader.
    and coerce `tasks` to an array (mirroring the guards the sibling normalizers already
    used); `ensureContacts` `String()`-coerces names and `responsibleParty`. Good data is
    unchanged (every project + task preserved).
+
+## Round 4 (2026-06-21) — interface boundary + extreme values
+Two more angles: the schedule↔shell postMessage bridge, and rendering with a
+valid-but-extreme date.
+8. **SECURITY/ROBUSTNESS** — both message handlers (`index.html` and `Scheduler.jsx`)
+   checked `m.source` but **not `e.origin`**, so a cross-origin embedder could drive
+   state-mutating commands (switch project, open dashboard, create a project) or spoof
+   the breadcrumb's project list. → both now require `e.origin === window.location.origin`
+   (the iframe is always same-origin, so legit messages are unaffected).
+9. **SLOW** — `buildGanttSVG`'s month-header loop was unbounded; a valid-but-extreme end
+   date (e.g. a typo'd year 9999) built ~95,700 month cells + a huge SVG. → capped at
+   12,000 months (1000 years), far beyond any real schedule.
+
+## Round 5 (2026-06-21) — tree-editing ops + custom-status settings
+- **Tree editing is robust by construction.** There is no drag-to-reparent for tasks
+  (row drag-drop only reorders columns); indent reparents to a preceding sibling,
+  outdent to the grandparent — neither can form a cycle — and paste id-remapping is
+  correct. The downstream (`sortByVisualOrder`/`renumberTasks`/`cascade`/`rollup`) is
+  cycle/orphan-hardened from earlier rounds. No fix needed.
+10. **CRASH** — `rebuildHEALTH` ran in an effect on every settings change but iterated
+    `customHealth` and `healthLabelOverrides` unguarded; a corrupt non-array, a null
+    custom-status entry, or non-object overrides threw — uncaught in the effect, breaking
+    the app. → coerce to array, skip null/garbage entries, guard the overrides object.

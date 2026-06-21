@@ -1,4 +1,4 @@
-/* OCR stress test (B351) — adversarial pass over the scanned-sheet path, mirroring the B348
+/* OCR stress test (B352) — adversarial pass over the scanned-sheet path, mirroring the B348
  * engine hardening but for the OCR layer the owner asked to stress ("stress test it").
  *
  * The worst failure here is a SILENT one: OCR emits garbage on a noisy scan, and instead of a
@@ -19,7 +19,7 @@ const allItemsSane = (res) =>
   res && Array.isArray(res.items) && finite(res.width) && finite(res.height) &&
   res.items.every((i) => finite(i.x) && finite(i.y) && finite(i.w) && finite(i.h) && i.w > 0 && i.h > 0 && typeof i.str === "string");
 
-describe("B351 stress — wordsToItems rejects every malformed box (no NaN ever leaks)", () => {
+describe("B352 stress — wordsToItems rejects every malformed box (no NaN ever leaks)", () => {
   it("drops non-finite (NaN / ±Infinity) coordinates — the B348-class poison", () => {
     const words = [
       word("good", 100, 100, 200, 140),
@@ -74,7 +74,7 @@ describe("B351 stress — wordsToItems rejects every malformed box (no NaN ever 
   });
 });
 
-describe("B351 stress — extractWords tolerates any Tesseract shape", () => {
+describe("B352 stress — extractWords tolerates any Tesseract shape", () => {
   it("returns [] for null/garbage data and partial nesting; prefers top-level words", () => {
     for (const d of [null, undefined, 42, "str", {}, { words: "nope" }, { blocks: [{}] }, { blocks: [{ paragraphs: [{}] }] }]) {
       expect(Array.isArray(extractWords(d))).toBe(true);
@@ -84,7 +84,7 @@ describe("B351 stress — extractWords tolerates any Tesseract shape", () => {
   });
 });
 
-describe("B351 stress — createOcrRunner fails soft on every engine failure", () => {
+describe("B352 stress — createOcrRunner fails soft on every engine failure", () => {
   const render = async () => ({ canvas: {}, baseW: 100, baseH: 100, scale: 2 });
   it("renderPage throws → null", async () => {
     const r = createOcrRunner({ renderPage: async () => { throw new Error("render boom"); }, recognize: async () => ({ words: [] }) });
@@ -109,7 +109,7 @@ describe("B351 stress — createOcrRunner fails soft on every engine failure", (
   });
 });
 
-describe("B351 stress — OCR → readSheetMeta → grouping integration on messy scans", () => {
+describe("B352 stress — OCR → readSheetMeta → grouping integration on messy scans", () => {
   // Build the word list Tesseract would emit for a scanned grading sheet (scale 2, 2448×1584).
   const gradingWords = (num, { rightRef, scale = '1"=40\'', corrupt = false } = {}) => {
     const W = (t, px, py, pw, ph, c = 90) => word(t, px * 2, py * 2, (px + pw) * 2, (py + ph) * 2, c);
@@ -164,9 +164,9 @@ describe("B351 stress — OCR → readSheetMeta → grouping integration on mess
 // Reproducible PRNG so a fuzz failure can be re-run.
 function mulberry32(seed) { return () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-describe("B351 stress — randomized fuzz (invariants hold for any junk OCR output)", () => {
+describe("B352 stress — randomized fuzz (invariants hold for any junk OCR output)", () => {
   it("300 random word sets never throw, never leak a non-finite item, and read a finite confidence", () => {
-    const rnd = mulberry32(0xB351);
+    const rnd = mulberry32(0xB352);
     const pick = (a) => a[Math.floor(rnd() * a.length)];
     const coord = () => pick([rnd() * 5000, -rnd() * 500, NaN, Infinity, -Infinity, 0, rnd() * 1e9]);
     const text = () => pick(["GRADING", "C-5", "1\"=40'", "MATCH LINE SEE SHEET C-6", "", "   ", " ", "✦∆", String(Math.floor(rnd() * 1e6)), null, undefined, 12]);

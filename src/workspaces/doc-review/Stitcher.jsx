@@ -54,7 +54,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
-  const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B351) — slower
+  const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B352) — slower
   const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
   const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
   const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
@@ -158,7 +158,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
   // the background after a drop — read-only, so it can't clobber the placement state; on any
   // failure the file just falls back to the raw per-page tray (never blocks adding sheets).
-  // A SCANNED / image-only page (no text layer) goes through the OCR seam (B351): the runner only
+  // A SCANNED / image-only page (no text layer) goes through the OCR seam (B352): the runner only
   // spins up the Tesseract worker if such a page is actually hit, so a normal vector set pays
   // nothing. `onOcrStart` flips the status copy so the (slower) OCR pass is visible.
   const readGroupsFor = async (srcId, doc) => {

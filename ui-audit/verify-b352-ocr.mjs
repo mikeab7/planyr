@@ -1,4 +1,4 @@
-/* Verify B351 (OCR — was B340 tail) — the REAL Tesseract engine loads (pinned jsDelivr assets) and reads a
+/* Verify B352 (OCR — was B340 tail) — the REAL Tesseract engine loads (pinned jsDelivr assets) and reads a
  * scanned drawing's text in a real browser, and our word→item conversion produces the metadata
  * the grouping/stitching pipeline needs. This is the live counterpart to test/ocr.test.js (which
  * proves the conversion + orchestration deterministically with mocked recognize).

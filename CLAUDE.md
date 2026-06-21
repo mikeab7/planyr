@@ -313,12 +313,12 @@ server/                   # placeholder README only — NOT built or deployed; b
   `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
   to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
   **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **Scanned-sheet OCR — BUILT (B351, owner-requested).** A scanned / image-only drawing (no text
+- **Scanned-sheet OCR — BUILT (B352, owner-requested).** A scanned / image-only drawing (no text
   layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
   (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
   so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
   up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
-  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b351-ocr.mjs`).
+  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b352-ocr.mjs`).
 - **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
   **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
   (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME

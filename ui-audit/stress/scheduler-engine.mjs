@@ -267,3 +267,23 @@ export const ensureContacts = d => {
 };
 // The full load pipeline as index.html composes it.
 export const loadPipeline = d => ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(d))));
+
+// Faithful logic copy of rebuildHEALTH (index.html mutates module globals; this returns
+// the maps so it's testable). Builds the status color maps from settings.customHealth +
+// healthLabelOverrides, defensively skipping corrupt entries.
+const BASE_HEALTH = { gray:{label:"Not Started"}, yellow:{label:"In Progress"}, red:{label:"Needs Attn."}, green:{label:"Complete"}, paused:{label:"Paused"} };
+const BASE_HK = ["gray","yellow","red","green","paused"];
+const BASE_HDARK = {gray:"#6b7280",yellow:"#92400e",red:"#991b1b",green:"#166534",paused:"#4b5563"};
+export const rebuildHealthMaps = (custom = [], labelOverrides = {}) => {
+  const HEALTH = {...BASE_HEALTH}, HK = [...BASE_HK], HDARK = {...BASE_HDARK};
+  if (labelOverrides && typeof labelOverrides === "object") {
+    Object.entries(labelOverrides).forEach(([k, label]) => { if (HEALTH[k]) HEALTH[k] = {...HEALTH[k], label}; });
+  }
+  (Array.isArray(custom) ? custom : []).forEach(ch => {
+    if (!ch || typeof ch !== "object" || ch.k == null) return;
+    HEALTH[ch.k] = {label:ch.label, dot:ch.dot, border:"none", bar:ch.bar, ganttBar:ch.dot, ganttStyle:"solid"};
+    HDARK[ch.k]  = ch.dark || ch.dot;
+    if (!HK.includes(ch.k)) HK.push(ch.k);
+  });
+  return { HEALTH, HK, HDARK };
+};
