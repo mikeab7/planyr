@@ -4,7 +4,7 @@
  * IMMUTABLE backdrop; all markups live on an SVG overlay (an editable layer over
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageText } from "./lib/pdf.js";
 import { parseSheetScale, detectSheet, ftPerPointForScale } from "../site-planner/lib/overlayScale.js";
 import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure } from "./lib/takeoff.js";
@@ -18,6 +18,7 @@ import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { screenToWorld, zoomAround, fitView, shouldPan } from "../../shared/viewport/viewportTransform.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -83,8 +84,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  const [scale, setScale] = useState(1);
-  const [dims, setDims] = useState(null);          // { w,h,baseW,baseH } current render
+  // Viewport transform (B313): ONE shared pan/zoom model with the Site map. `view` is
+  // { scale, tx, ty } — pixels per page-unit + the page origin's position in the viewport —
+  // so the sheet pans freely in any direction (not trapped inside a scroll box). `renderScale`
+  // is the resolution the canvas bitmap was last rasterised at; it's decoupled from view.scale
+  // so a zoom gesture rescales the already-drawn bitmap and only re-rasterises (crisp) once the
+  // gesture settles. View transform ONLY — it never touches stored markups or calibration.
+  const [view, setView] = useState(null);          // { scale, tx, ty } | null until first fit
+  const [pageBase, setPageBase] = useState(null);  // { w, h } current page at scale 1
+  const [renderScale, setRenderScale] = useState(0); // scale the bitmap is currently drawn at
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -96,13 +104,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
   const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B295)
-  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289)
+  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B313)
+  const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
-  const scaleRef = useRef(scale); scaleRef.current = scale; // live scale for the once-bound wheel handler
-  const pendingAnchor = useRef(null); // { pageX, pageY, viewX, viewY } pinned across a zoom (B288/B290)
-  const panRef = useRef(null);        // active pan drag { sx, sy, sl, st } (B289)
+  const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B313)
+  const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
+  const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B313)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
@@ -234,7 +243,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
-      setScale(0); // 0 = fit-to-width on next render
+      setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // fit the new backdrop (B313)
       setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B303)
       // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
       // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
@@ -257,44 +266,58 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     } finally { setBusy(false); }
   };
 
-  /* ---- render current page ---- */
-  // Compute the fit-to-width scale in its OWN effect when scale===0, so render() stays a
-  // pure draw at a concrete scale. render() used to call setScale internally, which
-  // re-fired the render effect → two overlapping renders / brief dims mismatch (B34).
+  /* ---- prepare page + fit (B313) ---- */
+  const VIEW_MIN = 0.05, VIEW_MAX = 6; // px-per-page-unit clamp for the viewport
+  // When the page or a load changes: refresh the page's base (scale-1) size, and — only on a
+  // fresh open/reset/load (view === null) — fit the sheet to the viewport. Switching sheets
+  // keeps the current zoom/pan (B292): view stays non-null, so we only update pageBase.
   useEffect(() => {
-    if (scale || !pdfRef.current || !canvasRef.current) return;
+    const pdf = pdfRef.current;
+    if (!pdf) return;
     let live = true;
     (async () => {
-      const p = await pdfRef.current.getPage(page);
+      const p = await pdf.getPage(page);
       const base = p.getViewport({ scale: 1 });
-      const wrap = wrapRef.current;
-      const availW = (wrap?.clientWidth || 900) - 24;
-      const availH = (wrap?.clientHeight || 600) - 24;
-      const sW = availW / base.width;
-      // 'page' fits the WHOLE sheet so a tall/portrait sheet is visible at once; 'width'
-      // (the long-standing default) fits the width only and lets height overflow. (B295)
-      const s = fitMode === "page" ? Math.min(sW, availH / base.height) : sW;
-      if (live) setScale(Math.max(0.2, Math.min(4, s)));
+      if (!live) return;
+      setPageBase({ w: base.width, h: base.height });
+      if (!viewRef.current) {
+        const wrap = wrapRef.current;
+        const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
+        const nv = fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode });
+        setView(nv); setRenderScale(nv.scale);
+      }
     })();
     return () => { live = false; };
-  }, [scale, page, numPages, fitMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, numPages, loadNonce]);
+
+  // Re-rasterise crisply once a zoom gesture settles: debounce view.scale → renderScale, so a
+  // smooth zoom rescales the already-drawn bitmap during the gesture (cheap) and only redraws
+  // the PDF at full resolution when it stops. Panning (tx/ty only) never re-rasters. (B313)
+  useEffect(() => {
+    if (!view || view.scale === renderScale) return;
+    const id = setTimeout(() => setRenderScale(view.scale), 140);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view && view.scale]);
 
   const render = useCallback(async () => {
     const pdf = pdfRef.current, canvas = canvasRef.current;
-    if (!pdf || !canvas || !scale) return; // the fit effect sets a concrete scale first; render only draws
+    if (!pdf || !canvas || !renderScale) return; // a concrete renderScale is set first; render only draws
     const tok = ++renderTok.current;
     // Cancel any in-flight render before starting a new one, so overlapping page/zoom
     // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
     try {
-      const d = await renderPageToCanvas(pdf, page, canvas, scale, (task) => { renderTaskRef.current = task; });
+      // setCssSize=false: the canvas fills its CSS-scaled page box (width/height 100%), so a
+      // zoom gesture rescales the bitmap without a re-raster; the page box carries the size.
+      await renderPageToCanvas(pdf, page, canvas, renderScale, (task) => { renderTaskRef.current = task; }, false);
       if (tok !== renderTok.current) return; // a newer render superseded this
-      setDims(d);
     } catch (e) {
       if (e && e.name === "RenderingCancelledException") return; // expected when superseded/unmounted
       // other render errors: keep the prior frame rather than crashing
     }
-  }, [page, scale]);
+  }, [page, renderScale]);
 
   useEffect(() => { render(); }, [render, numPages]);
 
@@ -307,51 +330,40 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
   }, []);
 
-  /* ---- zoom/pan viewport (B288/B289/B290) ---- */
-  const clampScale = (s) => Math.max(0.2, Math.min(6, s));
-  // Zoom by `factor`, keeping the page-point under (clientX,clientY) — or the viewport
-  // centre when no cursor is given — pinned in place. We re-rasterize at the new scale,
-  // then a layout effect (keyed on the fresh dims) nudges the scroller so the anchor lands
-  // back under the cursor. Same idea as the Stitcher's cursor-anchored wheel zoom, adapted
-  // to this view's scroll/re-raster model (it redraws the PDF at `scale`, it doesn't transform
-  // a fixed-res image, so the anchor rides the scrollbars, not a pan/zoom matrix). (B288/B290)
-  const zoomAround = (factor, clientX, clientY) => {
-    const wrap = wrapRef.current, canvas = canvasRef.current;
-    if (!wrap || !canvas) { setScale((s) => clampScale((s || 1) * factor)); return; }
-    const wrapR = wrap.getBoundingClientRect(), canR = canvas.getBoundingClientRect();
-    const cx = clientX == null ? wrapR.left + wrapR.width / 2 : clientX;
-    const cy = clientY == null ? wrapR.top + wrapR.height / 2 : clientY;
-    const s = scaleRef.current || 1;
-    pendingAnchor.current = { pageX: (cx - canR.left) / s, pageY: (cy - canR.top) / s, viewX: cx - wrapR.left, viewY: cy - wrapR.top };
-    setScale((cur) => clampScale((cur || 1) * factor));
+  /* ---- zoom/pan viewport — the shared engine (B313) ---- */
+  // Zoom about a screen anchor (the cursor for wheel/pinch; the viewport centre for ± / null).
+  // zoomAround holds the page point under the anchor fixed; the bitmap rescales now, re-rasters
+  // on settle. Reads the live view from the ref so the once-bound wheel handler isn't stale.
+  const doZoom = (factor, clientX, clientY) => {
+    const wrap = wrapRef.current, v = viewRef.current;
+    if (!wrap || !v) return;
+    const r = wrap.getBoundingClientRect();
+    const ax = clientX == null ? r.width / 2 : clientX - r.left;
+    const ay = clientY == null ? r.height / 2 : clientY - r.top;
+    setView(zoomAround(v, factor, ax, ay, VIEW_MIN, VIEW_MAX));
   };
-  useLayoutEffect(() => {
-    // Runs only when `dims` changes — i.e. after the re-raster at the new scale, when the
-    // canvas already carries its new size. Read the live scale from the ref (not a closed-over
-    // `scale`) so it's the post-render value, no stale-closure / extra dep needed.
-    const a = pendingAnchor.current; if (!a) return;
-    pendingAnchor.current = null;
-    const wrap = wrapRef.current, canvas = canvasRef.current;
-    if (!wrap || !canvas) return;
-    const s = scaleRef.current;
-    const wrapR = wrap.getBoundingClientRect(), canR = canvas.getBoundingClientRect();
-    wrap.scrollLeft += (canR.left + a.pageX * s) - (wrapR.left + a.viewX);
-    wrap.scrollTop += (canR.top + a.pageY * s) - (wrapR.top + a.viewY);
-  }, [dims]);
+  // Fit the current sheet to the viewport (Fit = width, Fit page = the whole sheet). (B295/B313)
+  const fitNow = (mode) => {
+    setFitMode(mode);
+    const base = pageBase, wrap = wrapRef.current;
+    if (!base || !wrap) { setView(null); setLoadNonce((n) => n + 1); return; } // no page yet → prepare effect fits
+    const vw = wrap.clientWidth || 900, vh = wrap.clientHeight || 600;
+    const nv = fitView(base.w, base.h, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode });
+    setView(nv); setRenderScale(nv.scale);
+  };
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
-  // and so it attaches exactly when the scroll viewport mounts (it only exists once a PDF is
-  // open). Ctrl/Cmd+wheel and trackpad pinch both arrive here as wheel events. (B288)
+  // and so it attaches exactly when the viewport mounts. Plain wheel, Ctrl/Cmd+wheel, and
+  // trackpad pinch all arrive here as wheel events and all zoom toward the cursor. (B313)
   const wheelCleanup = useRef(null);
   const attachWrap = useCallback((node) => {
     if (wheelCleanup.current) { wheelCleanup.current(); wheelCleanup.current = null; }
     wrapRef.current = node;
     if (node) {
-      const onWheel = (e) => { e.preventDefault(); zoomAround(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); };
+      const onWheel = (e) => { e.preventDefault(); doZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); };
       node.addEventListener("wheel", onWheel, { passive: false });
       wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---- cloud persistence: badge, autosave, resume, load, new ---- */
@@ -400,7 +412,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
-    setNumPages(pdf.numPages); setScale(0);
+    setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B313)
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -425,7 +437,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMeta(newMeta());
     setMarkupProject(null);
     setSource(null); setRedrop("");
-    setFileName(""); setNumPages(0); setPage(1); setScale(0);
+    setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
@@ -488,10 +500,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- pointer → page units ---- */
+  /* ---- pointer → page units (via the shared transform; relative to the viewport so it
+   * works at any pan/zoom — the sheet lives inside the viewport, offset by view.tx/ty) ---- */
   const toPage = (e) => {
-    const r = canvasRef.current.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+    const wrap = wrapRef.current, v = viewRef.current;
+    if (!wrap || !v) return { x: 0, y: 0 };
+    const r = wrap.getBoundingClientRect();
+    return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
   };
 
   const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
@@ -512,21 +527,28 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onDown = (e) => {
-    if (!dims) return;
+    if (!pageBase || !view) return;
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
-    if (panMode()) { // hand tool / hold-Space: drag the scroll viewport (B289)
-      const wrap = wrapRef.current; if (!wrap) return;
-      panRef.current = { sx: e.clientX, sy: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop };
+    const p = toPage(e);
+    // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
+    // pans instead (Bluebeam). hitTest is cheap + math-based, so probe it up front for the rule.
+    const hitId = tool === "select" ? hitTest(p) : null;
+    // Bluebeam pan/tool collision (shared rule): middle-mouse / Space / Pan tool / Select-on-
+    // empty → pan; Select-on-object → select/move; a drawing tool → draw, never pan. (B313)
+    if (shouldPan({ button: e.button, spaceHeld, tool, onObject: !!hitId })) {
+      e.preventDefault();
+      if (tool === "select") setSel(null); // a pan starting on empty canvas also clears the selection
+      panRef.current = { sx: e.clientX, sy: e.clientY, tx0: view.tx, ty0: view.ty };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      setPanning(true);
       return;
     }
-    const p = toPage(e);
+    if (e.button !== 0) return; // only the left button draws / selects past here
     if (tool === "select") {
-      const id = hitTest(p);
-      setSel(id);
-      if (id) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B293)
-        const m = pageMarks.find((mm) => mm.id === id);
-        if (m) { dragRef.current = { id, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
+      setSel(hitId);
+      if (hitId) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B293)
+        const m = pageMarks.find((mm) => mm.id === hitId);
+        if (m) { dragRef.current = { id: hitId, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
       }
       return;
     }
@@ -548,16 +570,16 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onMove = (e) => {
-    if (panRef.current) { // panning: scroll opposite the drag (B289)
-      const wrap = wrapRef.current; if (!wrap) return;
-      wrap.scrollLeft = panRef.current.sl - (e.clientX - panRef.current.sx);
-      wrap.scrollTop = panRef.current.st - (e.clientY - panRef.current.sy);
+    if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B313)
+      const d = panRef.current;
+      setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
       return;
     }
+    if (!view) return;
     const p = toPage(e);
     if (dragRef.current) { // moving a markup: translate its page-unit points live (B293)
       const dx = p.x - dragRef.current.start.x, dy = p.y - dragRef.current.start.y;
-      if (!dragRef.current.moved && Math.hypot(dx * scale, dy * scale) < 3) { setCursor(p); return; }
+      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(p); return; }
       dragRef.current.moved = true;
       setDragPreview({ id: dragRef.current.id, pts: dragRef.current.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) });
       return;
@@ -566,7 +588,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onUp = (e) => {
-    if (panRef.current) { panRef.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -581,12 +603,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // Text places on release: opening the inline editor here (not on pointer-down) means the
     // click's own focus change has already happened, so autofocus sticks and the empty editor
     // isn't immediately blurred + discarded. (B293)
-    if (tool === "text") openEditor({ id: null, page, pt: toPage(e), text: "" });
+    if (tool === "text" && e.button === 0) openEditor({ id: null, page, pt: toPage(e), text: "" });
   };
 
   // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
   // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
-  const onCancel = () => { panRef.current = null; dragRef.current = null; setDragPreview(null); };
+  const onCancel = () => { panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); };
 
   const finishDraft = () => {
     if (!draft) return;
@@ -607,7 +629,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // point at the finish spot — strip that trailing run so a Count isn't inflated and a
     // poly isn't distorted. Enter (no extra downs) keeps every point. (B291)
     if (draft.kind === "area" || draft.kind === "perimeter" || draft.kind === "count") {
-      const d = toPage(e), tol = 6 / scale;
+      const d = toPage(e), tol = 6 / view.scale;
       const pts = draft.pts.slice();
       while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
       // Same min-point gate as Enter/finishDraft so a 2-point area/perimeter can't slip in
@@ -623,7 +645,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Calibration line too short — zoom in and try again."); return; }
     setErr("");
-    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * scale, y: ((pts[0].y + pts[1].y) / 2) * scale, value: "" });
+    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.scale, y: ((pts[0].y + pts[1].y) / 2) * view.scale, value: "" });
   };
   // Validate the typed length and set the sheet's scale. Rejects ratios / bare fractions /
   // junk with a clear message (parseFeet) instead of silently mis-calibrating (B304).
@@ -640,7 +662,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const hitTest = (p) => {
-    const tol = 10 / scale; // page-unit click tolerance
+    const Z = view ? view.scale : 1;
+    const tol = 10 / Z; // page-unit click tolerance
     const segDist = (a, b) => { // distance from p to segment a–b (page units)
       const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
       if (!L2) return dist(p, a);
@@ -659,8 +682,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       } else if (m.kind === "text") {
         // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
         const q = pts[0]; if (!q) continue;
-        const w = ((m.text || "").length * 6.5 + 6) / scale, h = 16 / scale;
-        if (p.x >= q.x - 2 / scale && p.x <= q.x - 2 / scale + w && p.y >= q.y - 12 / scale && p.y <= q.y - 12 / scale + h) d = 0;
+        const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
+        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) d = 0;
       } else {
         // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
         for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
@@ -700,7 +723,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, []);
 
-  const zoom = (f) => zoomAround(f, null, null); // ± buttons hold the viewport centre fixed (B290)
+  const zoom = (f) => doZoom(f, null, null); // ± buttons zoom about the viewport centre (B290/B313)
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
@@ -726,7 +749,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   // SVG element for one markup (coords ×scale)
   const draw = (m, selected) => {
-    const S = (q) => ({ x: q.x * scale, y: q.y * scale });
+    const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const stroke = selected ? PAL.accent : (MEASURE.has(m.kind) ? "#0e7490" : "#b91c1c");
     const lbl = MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : null;
     const labelAt = (x, y, text, color) => (
@@ -764,7 +787,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const drawDraft = () => {
     if (!draft) return null;
-    const S = (q) => ({ x: q.x * scale, y: q.y * scale });
+    const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const pts = draft.pts.map(S);
     const cur = cursor ? S(cursor) : null;
     const col = draft.kind === "calibrate" ? PAL.accent : MEASURE.has(draft.kind) ? "#0e7490" : "#b91c1c";
@@ -830,10 +853,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
               <span style={tbDiv} />
               <button style={btn(false)} onClick={() => zoom(1 / 1.2)} title="Zoom out">−</button>
-              <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(scale * 100)}%</span>
+              <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round((view?.scale || 0) * 100)}%</span>
               <button style={btn(false)} onClick={() => zoom(1.2)} title="Zoom in">+</button>
-              <button style={btn(false)} onClick={() => { setFitMode("width"); setScale(0); }} title="Fit to width">Fit</button>
-              <button style={btn(false)} onClick={() => { setFitMode("page"); setScale(0); }} title="Fit the whole sheet">Fit page</button>
+              <button style={btn(false)} onClick={() => fitNow("width")} title="Fit to width">Fit</button>
+              <button style={btn(false)} onClick={() => fitNow("page")} title="Fit the whole sheet">Fit page</button>
             </>}
           </>
         }
@@ -891,28 +914,31 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             </div>
           </div>
 
-          {/* canvas + overlay */}
-          <div ref={attachWrap} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
-            style={{ flex: 1, minWidth: 0, overflow: "auto", background: "#cfc8ba", display: "flex", padding: 12 }}>
-            {/* margin:auto centres the sheet when it fits but resolves to 0 (top-left aligned,
-                fully scrollable) when it overflows — unlike place-items:center, which makes the
-                top/left overflow unreachable and breaks zoom-anchoring + pan. (B288/B289/B290) */}
-            <div style={{ position: "relative", width: dims?.w, height: dims?.h, margin: "auto", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
-              <canvas ref={canvasRef} style={{ display: "block" }} />
-              {dims && (
-                <svg data-testid="markup-overlay" width={dims.w} height={dims.h} style={{ position: "absolute", inset: 0, touchAction: "none", cursor: panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}
-                  onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}>
-                  {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
-                  {drawDraft()}
-                </svg>
-              )}
+          {/* canvas + overlay — a transform viewport (B313). The sheet is a page-sized box
+              positioned by translate(tx,ty) and sized by view.scale, so it pans freely in any
+              direction and zooms toward the cursor (no scroll box). The wheel + pointer handlers
+              live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
+          <div ref={attachWrap}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}
+            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
+            style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "#cfc8ba", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
+              cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
+            {pageBase && view && (
+              <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
+              {/* canvas fills the CSS-scaled box; its bitmap is rastered at renderScale and rescaled
+                  by the browser between re-rasters. pointerEvents:none so the viewport gets the gesture. */}
+              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} />
+              <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
+                {drawDraft()}
+              </svg>
               {editing && (
                 <input autoFocus value={editing.text}
                   onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
                   onPointerDown={(ev) => ev.stopPropagation()}
                   onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); closeEditor(true); } else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(false); } }}
                   onBlur={() => closeEditor(true)} placeholder="Text note…"
-                  style={{ position: "absolute", left: editing.pt.x * scale, top: editing.pt.y * scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color: "#b91c1c", minWidth: 90, zIndex: 5 }} />
+                  style={{ position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color: "#b91c1c", minWidth: 90, zIndex: 5 }} />
               )}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
@@ -932,7 +958,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* takeoff */}

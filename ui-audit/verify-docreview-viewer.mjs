@@ -6,7 +6,7 @@
  *          canvas (zoom in), and the page-point under the cursor stays put.
  *   B290 — the + button is cursor/centre-anchored: scale grows AND the content point at the
  *          viewport centre stays at the centre (no drift).
- *   B289 — Pan tool drag scrolls the viewport by the (negated) drag delta.
+ *   B289 — Pan tool drag moves the sheet by the drag delta (transform pan; free any direction, B313).
  *   B292 — switching sheets keeps the current zoom (no snap back to fit-width).
  *   B295 — "Fit page" fits the WHOLE sheet in view (cssH ≤ available height) where plain
  *          "Fit" (width) overflows vertically.
@@ -57,10 +57,10 @@ function buildPdf() {
 const results = [];
 const ok = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`${pass ? "PASS ✅" : "FAIL ❌"}  ${name}  —  ${detail}`); };
 
-// geometry of the scroll viewport (canvas → content div → scroll wrap) + the canvas
+// geometry: canvas → page box (translated) → viewport. canL/canT track pan; cssW/cssH track zoom (B313)
 const geom = (page) => page.evaluate(() => {
   const c = document.querySelector("canvas");
-  const wrap = c.parentElement.parentElement; // content div → scroll viewport
+  const wrap = c.parentElement.parentElement; // page box → viewport
   const cr = c.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
   return {
     canL: cr.left, canT: cr.top, cssW: cr.width, cssH: cr.height,
@@ -118,11 +118,9 @@ try {
     ok("B290 + holds the viewport centre", drift < 14, `centre drifted ${drift.toFixed(1)}px`);
   }
 
-  // ---- B289: Pan tool drag scrolls the viewport ----
+  // ---- B289: Pan tool drag moves the sheet (now a transform pan — free in any direction, B313) ----
   {
     await page.getByRole("button", { name: "Pan", exact: true }).click();
-    // seed a mid scroll position so a drag has room to move in both directions
-    await page.evaluate(() => { const w = document.querySelector("canvas").parentElement.parentElement; w.scrollLeft = Math.min(300, w.scrollWidth - w.clientWidth); w.scrollTop = Math.min(200, w.scrollHeight - w.clientHeight); });
     await page.waitForTimeout(120);
     const g0 = await geom(page);
     const sx = g0.wrapL + g0.wrapW / 2, sy = g0.wrapT + g0.wrapH / 2;
@@ -130,8 +128,8 @@ try {
     await page.mouse.move(sx + 110, sy + 70, { steps: 6 }); await page.mouse.up();
     await page.waitForTimeout(150);
     const g1 = await geom(page);
-    const dL = g0.scrollLeft - g1.scrollLeft, dT = g0.scrollTop - g1.scrollTop; // dragging right/down reveals left/up → scroll decreases
-    ok("B289 drag-to-pan scrolls the viewport", dL > 60 && dT > 35, `scroll Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
+    const dL = g1.canL - g0.canL, dT = g1.canT - g0.canT; // the sheet follows the drag (transform translate, B313)
+    ok("B289 drag-to-pan moves the sheet", dL > 80 && dT > 50, `sheet Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
   }
 
   // ---- B292: switching sheets keeps the current zoom ----

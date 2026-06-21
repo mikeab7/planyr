@@ -22,6 +22,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
@@ -1443,10 +1444,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
 
   /* ------------ coordinate transforms ------------ */
-  const f2p = useCallback((p) => ({ x: p.x * view.ppf + view.offX, y: p.y * view.ppf + view.offY }), [view]);
+  // Feet<->screen via the shared viewport engine (B313). { ppf, offX, offY } maps to the
+  // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
+  const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
-    return { x: (cx - r.left - view.offX) / view.ppf, y: (cy - r.top - view.offY) / view.ppf };
+    return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
   }, [view]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
@@ -1588,10 +1591,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       setView((v) => {
-        const fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf;
-        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-        const ppf = Math.max(0.02, Math.min(8, v.ppf * factor));
-        return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf };
+        const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, e.deltaY < 0 ? 1.12 : 1 / 1.12, mx, my, 0.02, 8);
+        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
       });
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
@@ -6453,7 +6454,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "rgba(255,255,255,0.92)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
-            const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
+            const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             return (
               <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>

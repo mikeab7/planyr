@@ -44,7 +44,7 @@ function backingScale(baseW, baseH, scale) {
  * the browser, so text stays sharp at the same on-screen size. The returned w/h (and the
  * canvas's CSS size) stay at the logical scale× size, so the markup SVG overlay — which
  * positions in page-units × scale — lines up exactly as before. (B247) */
-export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask) {
+export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, setCssSize = true) {
   const page = await pdf.getPage(pageNum);
   const base = page.getViewport({ scale: 1 });
   const dpr = backingScale(base.width, base.height, scale);
@@ -53,8 +53,13 @@ export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask) {
   canvas.width = Math.floor(viewport.width);   // dense backing store (scale × dpr)
   canvas.height = Math.floor(viewport.height);
   const cssW = Math.floor(base.width * scale), cssH = Math.floor(base.height * scale); // on-screen size (scale only)
-  canvas.style.width = cssW + "px";            // map the dense bitmap into the logical box → crisp
-  canvas.style.height = cssH + "px";
+  // When the caller drives display size itself (the Markup transform viewport sizes the
+  // canvas to 100% of a CSS-scaled page box so a zoom gesture can rescale the already-
+  // rendered bitmap without re-rasterising), skip setting the canvas's own CSS box. (B313)
+  if (setCssSize) {
+    canvas.style.width = cssW + "px";          // map the dense bitmap into the logical box → crisp
+    canvas.style.height = cssH + "px";
+  }
   const task = page.render({ canvasContext: ctx, viewport });
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;

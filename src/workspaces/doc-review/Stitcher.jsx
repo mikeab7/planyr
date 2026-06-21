@@ -15,6 +15,7 @@ import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
+import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
@@ -163,7 +164,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left - view.panX) / view.zoom, y: (e.clientY - r.top - view.panY) / view.zoom }; };
+  // Screen<->world via the shared viewport engine (B313); { zoom, panX, panY } == { scale, tx, ty }.
+  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
 
@@ -223,7 +225,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
-  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
+  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); warnIfOverUnaligned(draft.pts); } setDraft(null); };
 
   // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
@@ -232,7 +234,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
     setErr("");
-    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.zoom + view.panX, y: ((pts[0].y + pts[1].y) / 2) * view.zoom + view.panY, value: "" });
+    const mid = worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+    setCalInput({ pts, x: mid.x, y: mid.y, value: "" });
   };
   // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
   const commitCalibrate = () => {
