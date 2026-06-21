@@ -16,6 +16,7 @@ import { parseFeet } from "./lib/parseLength.js";
 import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
+import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -49,6 +50,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
+  const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B343) — slower
   const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
   const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
   const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
@@ -152,13 +154,17 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
   // the background after a drop — read-only, so it can't clobber the placement state; on any
   // failure the file just falls back to the raw per-page tray (never blocks adding sheets).
+  // A SCANNED / image-only page (no text layer) goes through the OCR seam (B343): the runner only
+  // spins up the Tesseract worker if such a page is actually hit, so a normal vector set pays
+  // nothing. `onOcrStart` flips the status copy so the (slower) OCR pass is visible.
   const readGroupsFor = async (srcId, doc) => {
-    setReading(true);
+    setReading(true); setOcrRunning(false);
+    const ocr = createOcrRunner({ onOcrStart: () => setOcrRunning(true) });
     try {
-      const { groups } = await readAndGroup(doc);
+      const { groups } = await readAndGroup(doc, { ocr: ocr.run });
       setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups } : x)));
     } catch (_) { setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups: [] } : x))); }
-    finally { setReading(false); }
+    finally { ocr.dispose(); setReading(false); setOcrRunning(false); }
   };
 
   // Fill in a source's bytes after a re-drop, and re-render any sheets placed from it.
@@ -548,7 +554,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{showAllPages || !anyGroups ? "Sheets" : "Logical sheets"}</div>
             {anyGroups && <button onClick={() => setShowAllPages((v) => !v)} style={{ fontSize: 10, color: PAL.accent, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>{showAllPages ? "grouped" : "all pages"}</button>}
           </div>
-          {reading && <div style={{ fontSize: 10.5, color: PAL.accent, marginBottom: 6 }}>Reading sheets…</div>}
+          {reading && <div style={{ fontSize: 10.5, color: PAL.accent, marginBottom: 6 }}>{ocrRunning ? "Reading scanned sheet (OCR)…" : "Reading sheets…"}</div>}
           {trayItems.length === 0 && !reading && <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>Open or drop a PDF set — it’ll group the pages into logical sheets here.</div>}
           {trayItems.map((t) => t.group ? (
             <button key={t.key} onClick={() => addGroup(t.pdf, t.group)} title={`${t.group.label} — ${t.pdf.name}`}
