@@ -18,7 +18,12 @@
  */
 import { ok, fail } from "../storage/result.js";
 
-export const DISCIPLINES = ["Survey", "Civil", "Architectural", "Landscape", "Environmental", "CAD", "Geotech", "Other"];
+// Keep in lockstep with the client canonical list (src/shared/files/titleBlockParse.js DISCIPLINES);
+// /server is walled off from the bundle so it can't import it — update both together. (B360)
+export const DISCIPLINES = [
+  "Architectural", "Structural", "Civil", "Mechanical", "Electrical", "Plumbing",
+  "Landscape", "Fire Alarm", "Fire Sprinkler", "Survey", "Environmental", "Geotech", "CAD", "Other",
+];
 
 // Structured-output schema: filing fields + placement-readiness facts in one object. Every
 // "present" flag lets "looked, found none" stay distinct from "couldn't read" (the
@@ -32,7 +37,7 @@ const SCHEMA = {
     projectNumber: { type: "string", description: "The firm's project/job number for this sheet, exactly as printed. Empty if none." },
     address: { type: "string", description: "The site street address or location description from the title block. Empty if none." },
     parcel: { type: "string", description: "Any parcel / appraisal account / tract identifier printed on the sheet. Empty if none." },
-    discipline: { type: "string", enum: DISCIPLINES, description: "Best-fit discipline for this sheet from its content and sheet number (Survey/Civil/Architectural/Landscape/Environmental/CAD/Geotech/Other)." },
+    discipline: { type: "string", enum: DISCIPLINES, description: "Best-fit discipline for this sheet from its content and sheet number. Fire is split: Fire Alarm vs. Fire Sprinkler. Structural/Mechanical/Electrical/Plumbing are their own disciplines (not lumped 'MEP'). Use Other only when none fit." },
     sheetNumber: { type: "string", description: "The sheet identifier exactly as printed (e.g. 'C-2.01', 'A7.10', 'V1'). Empty if none." },
     sheetTitle: { type: "string", description: "The sheet's title/name (e.g. 'GRADING PLAN', 'BOUNDARY SURVEY'). Empty if none." },
     revision: { type: "string", description: "The current revision label / issue (e.g. 'Rev 3', 'IFC', 'IFP'). Empty if none." },

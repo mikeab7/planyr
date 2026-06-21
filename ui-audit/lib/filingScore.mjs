@@ -35,12 +35,11 @@ export const KNOWN_PROJECTS = [
   { id: "katy-grand", name: "Katy Grand", aliases: { names: ["KG Building 1", "KG B1", "Katy Grand Building 1"], parcels: [], jobNumbers: [], addresses: [] } },
 ];
 
-/* GROUND-TRUTH discipline vocabulary read off a filename — RICHER than the reader's fixed
- * DISCIPLINES set on purpose, so Structural / Plumbing / Electrical / Mechanical / Fire Protection
- * are named as what the file truly is. `DISC_EQUIV` then says which reader output counts as correct
- * TODAY: the ones with no dedicated bucket can only resolve to "Other", and `gap:true` flags that
- * — the exact signal for the owner's open question (does Fire Protection / Structural / MEP deserve
- * its own bucket?). Order = most specific first. */
+/* GROUND-TRUTH discipline vocabulary read off a filename. As of 2026-06-21 the owner added dedicated
+ * buckets (Architectural, Structural, Civil, Mechanical, Electrical, Plumbing, Landscape, Fire Alarm,
+ * Fire Sprinkler, + Survey/Environmental/Geotech/Other), so these now map 1:1 to a real reader output
+ * (no more "resolves only to Other" taxonomy gap). A combined "MEP" set has no single bucket — it's
+ * the one inherent ambiguity (accepts any of M/E/P). Order = most specific first. */
 const FILENAME_DISC = [
   [/\balta\b/i, "Survey"],
   [/\bboundary\b/i, "Survey"],
@@ -51,11 +50,12 @@ const FILENAME_DISC = [
   [/\bgrading\b/i, "Civil"],
   [/\bpaving\b/i, "Civil"],
   [/\bstructural\b|\bstruct\b/i, "Structural"],
-  [/\bfire\s*(protection|sprinkler)?\b/i, "Fire Protection"],
+  [/\bfire\s*alarm\b/i, "Fire Alarm"],
+  [/\bfire\s*(protection|sprinkler|suppression)\b|\bsprinkler\b/i, "Fire Sprinkler"],
+  [/\bm\.?e\.?p\.?\b/i, "MEP"],
   [/\bplumbing\b|\bplumb\b/i, "Plumbing"],
   [/\belectrical\b|\belec\b/i, "Electrical"],
   [/\bmechanical\b|\bmech\b|\bhvac\b/i, "Mechanical"],
-  [/\bm\.?e\.?p\.?\b/i, "MEP"],
   [/\barch(itectural)?\b/i, "Architectural"],
   [/\bfloor\s*plan\b/i, "Architectural"],
   [/\bland\s*scape\b/i, "Landscape"],
@@ -63,15 +63,18 @@ const FILENAME_DISC = [
   [/\bgeotech(nical)?\b/i, "Geotech"],
 ];
 
-// Which reader (DISCIPLINES-set) outputs count as correct for each ground-truth label. Where the
-// reader has NO dedicated bucket, "Other" is the only honest answer → that pair is a taxonomy gap.
+// Which reader output counts as correct for each ground-truth label. Each discipline now has a real
+// bucket, so these map to themselves; a combined "MEP" set legitimately reads as any of its parts.
 const DISC_EQUIV = {
   Survey: ["Survey"], Civil: ["Civil"], Architectural: ["Architectural"],
   Landscape: ["Landscape"], Environmental: ["Environmental"], Geotech: ["Geotech"],
-  Structural: ["Other"], Plumbing: ["Other"], Electrical: ["Other"],
-  Mechanical: ["Other"], MEP: ["Other"], "Fire Protection": ["Other"],
+  Structural: ["Structural"], Plumbing: ["Plumbing"], Electrical: ["Electrical"], Mechanical: ["Mechanical"],
+  "Fire Alarm": ["Fire Alarm"], "Fire Sprinkler": ["Fire Sprinkler"],
+  MEP: ["Mechanical", "Electrical", "Plumbing", "Other"],
 };
-const GAP_DISCIPLINES = new Set(["Structural", "Plumbing", "Electrical", "Mechanical", "MEP", "Fire Protection"]);
+// Taxonomy gaps are closed now that every discipline has a bucket — kept as a (now-empty) hook so a
+// future "no bucket" discipline can be flagged again without re-plumbing the scorer.
+const GAP_DISCIPLINES = new Set();
 
 const baseName = (name) => (name || "").replace(/\.[a-z0-9]+$/i, "");
 

@@ -29,9 +29,10 @@ describe("expectedFromFilename — ground truth from the owner's descriptive nam
     expect(e.discipline).toBe(""); // "Plans" names no discipline → not graded
     expect(e.date).toBe("");
   });
-  it("reads the owner's per-discipline tokens (Plumbing / Fire Protection / Structural)", () => {
+  it("reads the owner's per-discipline tokens (Plumbing / Fire / Structural)", () => {
     expect(disciplineFromFilename("2023.05.30 Mesa - Plumbing.pdf")).toBe("Plumbing");
-    expect(disciplineFromFilename("2023.05.10 Mesa - Fire Protection systems.pdf")).toBe("Fire Protection");
+    expect(disciplineFromFilename("2023.05.10 Mesa - Fire Protection & Alarm.pdf")).toBe("Fire Sprinkler"); // "fire protection" → Sprinkler bucket
+    expect(disciplineFromFilename("Mesa - Fire Alarm.pdf")).toBe("Fire Alarm");
     expect(disciplineFromFilename("2023.05.19 Mesa - Structural.pdf")).toBe("Structural");
     expect(disciplineFromFilename("Mesa - Civil Site Plan.pdf")).toBe("Civil");
   });
@@ -54,15 +55,15 @@ describe("scoreFile — compares the REAL readers to the filename ground truth",
     expect(r.fields.revision.ok).toBe(true);
     expect(r.fields.scale.got).toBe("1/8\"=1'-0\""); // the just-fixed embedded-date arch read
   });
-  it("flags a taxonomy GAP when a real discipline only resolves to Other (owner's open question)", () => {
+  it("routes the now-bucketed disciplines (Structural → Structural, not Other)", () => {
     const r = scoreFile({
       name: "2024-10-22 - JACINTOPORT - STRUCTURAL - IFC.pdf",
       text: "JACINTOPORT  FOUNDATION PLAN  STRUCTURAL  SHEET S-101  ISSUED FOR CONSTRUCTION IFC  10/22/2024",
     });
-    // Structural has no dedicated bucket today → reader says "Other"; ok-but-gap, not a clean pass.
-    expect(r.fields.discipline.got).toBe("Other");
+    // Structural now has a dedicated bucket (owner taxonomy 2026-06-21) → a clean pass, no gap.
+    expect(r.fields.discipline.got).toBe("Structural");
     expect(r.fields.discipline.ok).toBe(true);
-    expect(r.fields.discipline.gap).toBe(true);
+    expect(r.fields.discipline.gap).toBe(false);
   });
   it("does not grade a field the filename does not state (ok:null)", () => {
     const r = scoreFile({ name: "Mesa - Architectural Record Drawings.pdf", text: "MESA RECORD DRAWINGS ARCHITECTURAL FLOOR PLAN SHEET A-101" });
@@ -79,7 +80,7 @@ describe("scoreCorpus — aggregate over the synthetic fixtures", () => {
     for (const k of ["project", "discipline", "date", "revision"]) {
       if (res.totals[k].scored) expect(res.totals[k].pass).toBe(res.totals[k].scored);
     }
-    // Structural + Plumbing fixtures resolve only to "Other" → 2 flagged gaps
-    expect(res.totals.discipline.gaps).toBe(2);
+    // every discipline now has a real bucket (owner taxonomy 2026-06-21) → no taxonomy gaps
+    expect(res.totals.discipline.gaps).toBe(0);
   });
 });
