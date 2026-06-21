@@ -1,6 +1,13 @@
 ## ✅ Done
-<!-- 2026-06-21: bug sweep of the drawing STITCH tool (owner: "find all the bugs you can on the drawing
-     stitch tool"). Branch `claude/drawing-stitch-bugs-g5h119`. FIRST minted B341–B345, but two concurrent
+<!-- 2026-06-21: SECOND pass of the stitch-tool bug sweep (owner: "merge and then look for more"), after
+     B343–B347 merged via #246. Minted **B348/B349** (next free after B347). Both in the Stitcher COMPONENT,
+     fixed + headless-verified (`ui-audit/verify-stitch-bugs.mjs` now 14/14, incl. these two). -->
+
+### B348 — Inline Calibrate box detaches from its line on wheel-zoom `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21 "look for more"; minted **B348**)*
+`[x]` **Fixed + verified 2026-06-21.** The Calibrate entry box stored its screen position **once** (computed at open time). `onDown` blocks pan while it's open, but `onWheel` is NOT blocked — so zooming to read the drawing while typing the known length left the box stranded away from its two-point line. The box now derives its screen position from the stored **world** points via the live pan/zoom each render (`calPos`), so it tracks the line under any zoom. `Stitcher.jsx` (`doCalibrate` stores points only; render computes `calPos`). Headless confirmed the box follows a wheel-zoom.
+
+### B349 — Composite key shows a meaningless "N units/ft" instead of the drawing scale `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21 "look for more"; minted **B349**)*
+`[x]` **Fixed + verified 2026-06-21.** The pinned composite key read `Scale set · {round(1/ftPerUnit)} units/ft` — i.e. **page-points per foot** (~2 for a 1"=40' sheet), which reads as nonsense to a reviewer. Since the world frame is always identity-scale (world unit = page point), `ftPerUnit × 72` is the real **feet per paper inch**, so the key now reads `Scale set · 1" ≈ 40'` — the engineer's scale the reviewer recognises. `Stitcher.jsx` composite-key readout. Headless confirmed `1" ≈ 40'` for the auto-calibrated set and that `units/ft` is gone.
      `main` landings consumed those numbers (PR #244 theming-contrast took B341/B342; a sibling stitch
      STRESS-TEST session — below — also took B341) — so renumbered to **B343–B347**. These five are all in
      the Stitcher COMPONENT (tray, remove, zoom-anchor, foot formatting, seeded-align markers) and DO NOT
