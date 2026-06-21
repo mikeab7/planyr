@@ -122,7 +122,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       // before. fileNewReview stores the bytes (Drive-first, Supabase fallback — the B207
       // cutover) and captures placement facts; a Drive failure never blocks filing.
       let route = null;
-      if (indexProvider && indexProvider.backendReady && indexProvider.autofile) {
+      if (indexProvider && indexProvider.autofileReady && indexProvider.autofile) {
         try { const a = await indexProvider.autofile(item.file, projects); if (a && a.ok) route = a; } catch (_) { route = null; }
       }
       const decision = route ? route.decision : null;
@@ -240,9 +240,9 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
               onDragOver={(e) => { e.preventDefault(); setDropTarget(true); }} onDragLeave={() => setDropTarget(false)} onDrop={drop}
               style={{ flex: "none", margin: "8px 12px", padding: "10px", borderRadius: 8, textAlign: "center", fontSize: 11.5, lineHeight: 1.4, cursor: "pointer",
                 border: `2px dashed ${dropTarget ? PAL.accent : PAL.line}`, background: dropTarget ? "#fbf3ee" : "#faf8f3", color: PAL.muted }}>
-              {indexProvider && indexProvider.backendReady
+              {indexProvider && indexProvider.autofileReady
                 ? <>Drop, paste, or click — each PDF&apos;s title block is read and it files itself into the right project &amp; discipline.<div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine. Anything it can&apos;t confidently match goes to the holding area for a one-click confirm.</div></>
-                : <>Drop, paste, or click to add PDFs {activeProject ? `to "${projName(activeProject)}"` : "(they’ll go to the holding area)"}.<div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine. Auto-file by title block arrives with the filing backend.</div></>}
+                : <>Drop, paste, or click to add PDFs {activeProject ? `to "${projName(activeProject)}"` : "(they’ll go to the holding area)"}.<div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine.</div></>}
             </div>
 
             {/* processing tray (B260): persistent — filed rows stay accountable, never vanish */}
