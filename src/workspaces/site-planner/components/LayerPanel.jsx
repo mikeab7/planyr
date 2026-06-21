@@ -19,14 +19,16 @@ import {
   getRelevanceMode, setRelevanceMode, getNearbyRadiusMiles, setNearbyRadiusMiles, subscribeRelevance,
 } from "../lib/coverage.js";
 
-const MUTED = "#8a8473", LINE = "#e7e2d6", INK = "#2c2a26";
+// This panel rides on the themed var(--surface-overlay) container, so its text must
+// be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B321).
+const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
 const STATUS = {
   loading: { color: "#f59e0b", label: "loading…" },
-  loaded: { color: "#15803d", label: "loaded" },
-  empty: { color: "#9b9482", label: "no data" },
-  failed: { color: "#b91c1c", label: "failed" },
-  unconfigured: { color: "#9b9482", label: "needs setup" }, // NEW-4: not a failure, just not set up
+  loaded: { color: "var(--status-active)", label: "loaded" },
+  empty: { color: "var(--text-tertiary)", label: "no data" },
+  failed: { color: "var(--status-dead)", label: "failed" },
+  unconfigured: { color: "var(--text-tertiary)", label: "needs setup" }, // NEW-4: not a failure, just not set up
 };
 const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
 

@@ -308,7 +308,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   Low-contrast gray body/label text is **disallowed** (eye strain in bright offices); subtle grays
   are correct ONLY for borders, the drafting grid, and the semantic "Complete" status badge. New UI
   must reference **theme tokens, never raw hex**, and clear **WCAG AA (≥ 4.5:1)** for body text on
-  its surface in **both** themes. (B316–B320)
+  its surface in **both** themes. This is now **machine-enforced**: `ui-audit/contrast-audit.mjs`
+  (parses the real `index.css`) + `test/contrast.test.js` fail CI if any defined token pair drops
+  below its floor — so a palette edit can't silently re-introduce a low-contrast pair. Text/icon ON
+  the global accent fill uses **`--on-accent`** (white in light, near-black in dark — the dark accent
+  is too light for white); saving/unsaved/offline labels use **`--warn-text`** (AA amber). The common
+  trap (the B321 regression): a chrome-region component that **hardcodes a color instead of a token**
+  reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
+  lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
+  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B322)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline

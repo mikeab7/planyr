@@ -25,9 +25,11 @@ import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import { listProjects, filterProjects, relTime } from "../projects/projects.js";
 
-const MUTED = "#9b9482";
-const LINE = "#2e2a23";
-const INK = "#ece7db";
+// Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
+// chrome tokens, not the retired warm-dark hexes (white-on-light was the B321 bug).
+const MUTED = "var(--chrome-muted)";
+const LINE = "var(--chrome-divider)";
+const INK = "var(--chrome-text)";
 
 // A cloud write that may not have reached the server. "saving" is in-flight (the
 // flush will complete it) so it's not surfaced as at-risk; offline/error are.
@@ -53,8 +55,8 @@ const crumbBtn = (extra) => ({
 });
 
 const panel = {
-  padding: 8, borderRadius: 10, background: "#fff", color: "#2c2a26",
-  border: "1px solid #e7e2d6", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  padding: 8, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 
@@ -62,14 +64,14 @@ const row = (extra) => ({
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
   width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: 7,
   border: "none", background: "transparent", cursor: "pointer",
-  fontFamily: "inherit", fontSize: 12.5, color: "#2c2a26", ...extra,
+  fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
 });
 
-const divider = { height: 1, background: "#ece7db", margin: "6px 4px" };
+const divider = { height: 1, background: "var(--border-default)", margin: "6px 4px" };
 
 export default function ProjectBreadcrumb({
   currentProject,
-  accent = "#1D9E75",
+  accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B321)
   onDashboard,
   onSelectProject,
   onNewProject,
@@ -133,7 +135,7 @@ export default function ProjectBreadcrumb({
         onClick={goDashboard}
         title={`All projects — ${homeLabel}`}
         aria-current={onDash ? "page" : undefined}
-        style={crumbBtn({ color: onDash ? "#fff" : MUTED })}
+        style={crumbBtn({ color: onDash ? INK : MUTED })}
         onMouseEnter={(e) => { if (!onDash) e.currentTarget.style.color = INK; }}
         onMouseLeave={(e) => { if (!onDash) e.currentTarget.style.color = MUTED; }}
       >
@@ -150,7 +152,7 @@ export default function ProjectBreadcrumb({
         title={currentProject ? "Switch project" : "Choose a project"}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={crumbBtn({ color: currentProject ? "#fff" : MUTED, maxWidth: 240, minWidth: 0 })}
+        style={crumbBtn({ color: currentProject ? INK : MUTED, maxWidth: 240, minWidth: 0 })}
       >
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {currentProject?.name || "Select a project"}
@@ -172,8 +174,8 @@ export default function ProjectBreadcrumb({
           placeholder="Search projects…"
           style={{
             width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: 6,
-            border: "1px solid #e0dacc", borderRadius: 7, outline: "none",
-            fontFamily: "inherit", fontSize: 12.5, color: "#2c2a26", background: "#faf8f3",
+            border: "1px solid var(--border-default)", borderRadius: 7, outline: "none",
+            fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
           }}
         />
 
@@ -190,9 +192,9 @@ export default function ProjectBreadcrumb({
           onClick={goDashboard}
           onMouseEnter={() => setHoverRow("__dash")}
           onMouseLeave={() => setHoverRow(null)}
-          style={row({ background: hoverRow === "__dash" ? "#f1eee6" : (onDash ? "#f6f4ee" : "transparent"), fontWeight: 600 })}
+          style={row({ background: hoverRow === "__dash" ? "var(--hover-ghost)" : (onDash ? "var(--hover-menu)" : "transparent"), fontWeight: 600 })}
         >
-          <span style={{ display: "flex", alignItems: "center", gap: 8, color: "#4a463d" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-secondary)" }}>
             <DashboardIcon size={14} />
             All projects ({homeLabel})
           </span>
@@ -204,7 +206,7 @@ export default function ProjectBreadcrumb({
         {/* Recent projects — newest-edited first, relative timestamps */}
         <div style={{ maxHeight: 280, overflowY: "auto", margin: "0 -2px", padding: "0 2px" }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: "10px 9px", fontSize: 12, color: "#8a8475" }}>
+            <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-tertiary)" }}>
               {q ? "No matching projects." : "No projects yet — start one below."}
             </div>
           ) : (
@@ -216,14 +218,14 @@ export default function ProjectBreadcrumb({
                   onClick={() => pickProject(p.id, p.name)}
                   onMouseEnter={() => setHoverRow(p.id)}
                   onMouseLeave={() => setHoverRow(null)}
-                  style={row({ background: hoverRow === p.id ? "#f1eee6" : (cur ? "#f6f4ee" : "transparent") })}
+                  style={row({ background: hoverRow === p.id ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
                 >
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                     {p.name}
                   </span>
                   {cur
                     ? <span style={{ color: accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>
-                    : <span style={{ color: "#a39c8b", fontSize: 11, flex: "none" }}>{relTime(p.updatedAt)}</span>}
+                    : <span style={{ color: "var(--text-tertiary)", fontSize: 11, flex: "none" }}>{relTime(p.updatedAt)}</span>}
                 </button>
               );
             })
@@ -237,7 +239,7 @@ export default function ProjectBreadcrumb({
           onClick={newProject}
           onMouseEnter={() => setHoverRow("__new")}
           onMouseLeave={() => setHoverRow(null)}
-          style={row({ background: hoverRow === "__new" ? "#f1eee6" : "transparent", color: accent, fontWeight: 700 })}
+          style={row({ background: hoverRow === "__new" ? "var(--hover-ghost)" : "transparent", color: accent, fontWeight: 700 })}
         >
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span>
