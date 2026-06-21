@@ -167,7 +167,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  // Screen<->world via the shared viewport engine (B326); { zoom, panX, panY } == { scale, tx, ty }.
+  // Screen<->world via the shared viewport engine (B329); { zoom, panX, panY } == { scale, tx, ty }.
   const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };

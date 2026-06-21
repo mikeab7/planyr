@@ -26,8 +26,9 @@ import { emptyPlacementFacts, mergePlacementFacts } from "../placement/placement
  */
 export const DOC_CLASS = { SPATIAL: "spatial", REFERENCE: "reference", BOTH: "both" };
 
-// Disciplines that produce map-placeable geometry by default.
-const SPATIAL_DISCIPLINES = new Set(["Survey", "Civil", "Architectural", "Landscape"]);
+// Disciplines that produce map-placeable geometry by default. CAD is the most placeable
+// class of all — it IS the drawings — so it classifies spatial, not reference (NEW-1).
+const SPATIAL_DISCIPLINES = new Set(["Survey", "Civil", "Architectural", "Landscape", "CAD"]);
 // Disciplines that are read, not placed.
 const REFERENCE_DISCIPLINES = new Set(["Geotech", "Environmental"]);
 
@@ -82,7 +83,10 @@ export function toFileFact(row = {}) {
     // NEW-2 placement-readiness flags (captured at filing time by the backend; until
     // then this is the empty shape merged with whatever the row already carries).
     placement: mergePlacementFacts(emptyPlacementFacts(), row.placement),
-    placed: !!row.placed,           // has it been put on the map at least once?
+    // Has it been put on the map at least once? `listReviews` surfaces this from the
+    // review's data (`placed:data->placed`), which can arrive as a JSON boolean or text
+    // depending on the accessor — accept both so the on-map badge isn't dead (NEW-3).
+    placed: row.placed === true || row.placed === "true",
     hasFile: !!(row.storageKey || row.hasFile) || row.oversize === false,
     unfiled: !(row.projectId || row.project_id),
   };

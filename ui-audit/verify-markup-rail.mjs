@@ -1,4 +1,4 @@
-/* Verify B327 — the Markup drawing/measure tools + zoom controls now live in a right-side
+/* Verify B330 — the Markup drawing/measure tools + zoom controls now live in a right-side
  * vertical rail (Bluebeam-style), not AppHeader row 2. Against the REAL built viewer.
  *
  *   1. The tools moved OFF the header INTO the rail: the rail holds Select…Text + zoom, and
@@ -21,7 +21,7 @@ const PDF_PATH = "/tmp/markup-rail-test.pdf";
 const ACCENT = "rgb(239, 159, 39)"; // #EF9F27
 
 function buildPdf() {
-  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B327 tool rail test) Tj ET";
+  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B330 tool rail test) Tj ET";
   const objs = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
