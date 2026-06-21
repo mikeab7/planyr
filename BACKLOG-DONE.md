@@ -1,12 +1,13 @@
 ## ✅ Done
 <!-- 2026-06-21: bug sweep of the drawing STITCH tool (owner: "find all the bugs you can on the drawing
-     stitch tool"). Branch `claude/drawing-stitch-bugs-g5h119`. FIRST minted B341–B345, but a concurrent
-     `main` (PR #244, the theming-contrast batch) landed **B341/B342** while this was in flight — so
-     renumbered to **B343–B347** (highest real B# across both files after that merge was B342; the
-     2038/2543/3340/5263 hits are CSS hex colours, not IDs). All five filed AND fixed + headless-verified
-     the same session per STANDING RULE #1. Build green, 850 unit tests green, lazy chunks intact; new
-     harness `ui-audit/verify-stitch-bugs.mjs` (9/9) + the existing `verify-b335-b339.mjs` (13/13, no
-     regression). -->
+     stitch tool"). Branch `claude/drawing-stitch-bugs-g5h119`. FIRST minted B341–B345, but two concurrent
+     `main` landings consumed those numbers (PR #244 theming-contrast took B341/B342; a sibling stitch
+     STRESS-TEST session — below — also took B341) — so renumbered to **B343–B347**. These five are all in
+     the Stitcher COMPONENT (tray, remove, zoom-anchor, foot formatting, seeded-align markers) and DO NOT
+     overlap the sibling's ENGINE hardening (`stitchGeom`/`autoStitch`/`sheetGroups` non-finite/contradiction/
+     scale-band/rollover guards) — complementary, not duplicate. All five filed AND fixed + headless-verified
+     the same session per STANDING RULE #1. Build green, lazy chunks intact; new harness
+     `ui-audit/verify-stitch-bugs.mjs` (9/9) + the existing `verify-b335-b339.mjs` (13/13, no regression). -->
 
 ### B343 — Stitcher tray hides a file whose grouping failed (its pages become unreachable) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B341, renumbered **B343** — main #244 took B341/B342)*
 `[x]` **Fixed + verified 2026-06-21.** The background read→group (B335) sets a file's `groups` to `[]` on any read exception. The tray's grouped view rendered `p.groups.map(...)` → **zero entries**, so a file that failed to group showed nothing and the user had no way to add its pages (the "all pages" toggle was their only escape, with no hint it was needed). Now a file is shown in grouped mode only when its read produced **≥1 logical sheet** (`hasGroups`); an empty/failed group result falls back to the raw per-page list for that file (groupSheets always yields ≥1 run for a readable page, so empty == failure). `Stitcher.jsx` `trayItems`/`anyGroups`.
@@ -22,6 +23,16 @@
 
 ### B347 — Seeded auto-stitch fallback gives no endpoint-order cue (reverse clicks flip the sheet 180°) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B345, renumbered **B347**)*
 `[x]` **Fixed + verified 2026-06-21.** When auto-stitch (B337) can't place a sheet but knows its seam side, manual Align is **pre-seeded** with the moving sheet's two seam endpoints (`detectedEndpointsFor`) and the user clicks the two matching points on a placed sheet. Nothing showed WHICH seed was "first" vs "second", so clicking the matching points in reverse order silently rotated the sheet 180° via `solveM`. The seeded flow now draws **numbered markers (1, 2)** at the moving sheet's seed endpoints (its current position), so the click order is unambiguous. Additive render only; no geometry change.
+
+### B341 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; minted **B341** — next free after B340)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/stitch-tool-stress-test-1tvw5b`).** Adversarial pass over the stitch core (`stitchGeom.js`, `autoStitch.js`, `sheetGroups.js`, `sheetMeta.js`) — drove each engine with the inputs a messy real-world PDF set throws at it and fixed four ways it could **fail silently** (the worst kind here: a bad transform flings a sheet off-canvas, or — worse — butts two drawings together at the wrong size/place and the takeoff reads a confident wrong number). All four follow the owner rule **"a wrong stitch is worse than an un-stitched one"**: when a signal is unreliable the sheet is left **unplaced → manual-Align safety net**, never auto-guessed.
+- **Non-finite endpoints (NaN/Infinity) used to slip past the degenerate-baseline guard** — `Math.hypot(NaN) < 1` is `NaN < 1` → `false`, so a NaN coordinate (bad read / mis-built drawing area) reached `solveM`, produced a NaN matrix, and poisoned the sheet transform **and** the whole composite's bbox (every `Math.min/max` over it → NaN). `alignBaselinesDegenerate` now rejects any non-finite point. (`stitchGeom.js`)
+- **Contradictory match-line labels produced a wrong (overlapping/mirrored) stitch** — if both sheets claimed the seam on their "right", `buildAdjacency` trusted it. It now treats the **geometric opposite** as the source of truth and **drops the edge** when a sheet's own label contradicts it (→ manual Align). (`autoStitch.js`)
+- **Mismatched page sizes were silently rescaled** — a similarity fit from two endpoints will shrink/blow up a half-size detail page to make the seam meet. `autoPlaceGroup` now rejects a placement whose implied scale strays past **`MAX_STITCH_SCALE` (±25%)** and leaves the sheet for manual Align. (`autoStitch.js`)
+- **Grouping chained across a major rollover** — the packed `ordinal` (major·100+minor) made `C-1.99 → C-2.00` look consecutive (and could collide two codes onto one ordinal). `consecutiveCodes` now compares the parsed major/minor by numbering level, so a rollover starts a new logical sheet. (`sheetGroups.js`)
+- **New `test/stitchStress.test.js` — 29 adversarial tests** across 8 break-strategy groups (non-finite/degenerate coords, contradictory seams, size mismatch, cycles/duplicates/self-refs/missing targets, sheet-code edge cases, reader junk/empty/huge input, a **300-iteration randomized fuzz** asserting the partition + finiteness + scale-band invariants, and the measure-over-unaligned guard). Full suite green (**879 tests**, lint 0 errors, build clean). Pure-engine + DI hardening, so no live-browser verification needed; the manual-Align safety net and text-layer path are unchanged.
+
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
      crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
      when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge
      time; B25431/B3340 here are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND implemented +
