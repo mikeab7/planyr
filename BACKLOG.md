@@ -22,6 +22,45 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
+     navigation + tool placement, brought to parity with the Site Planner. Minted **B313–B314** (highest
+     B# across BOTH files was B312 — the plain-code-first auto-filing item, merged via PR #234; the three
+     higher "B#"-looking strings in the files are false positives — `SB2038` a bill number, `#2B3340` and
+     `#B25431` hex colors, not IDs).
+     Deduped before filing:
+       • B313 (pan/zoom parity) — RELATED to the shipped single-sheet-viewer batch **B288–B290**
+         (wheel/pinch zoom · drag-pan · cursor-anchored ±, PR #220) but NET-NEW, a re-architecture not a
+         dup. B288–B290 pan/zoom the Markup canvas through the SCROLL container (scrollLeft/Top on an
+         overflow:auto wrapper); by construction that can only pan where the sheet OVERFLOWS, so at
+         fit-width there's no horizontal scroll extent and the viewport "only scrolls vertically" — the
+         exact repro. B313 swaps in the Site map's TRANSFORM model (pan offset + zoom scale, free pan in
+         all directions regardless of fit) + Bluebeam pan/tool collision + cursor-anchored zoom, and
+         explicitly asks for ONE shared implementation with the Site map. NB the Site map's pan/zoom is
+         INLINED in SitePlanner.jsx (view={ppf,offX,offY} ~L883; f2p/p2f ~L1446; wheel-anchor ~L1578;
+         pan ~L1840), not yet a shared hook — so "share one" means extracting it first. ARCHITECTURALLY
+         SIGNIFICANT: touches the mature ~8.5k-line Site Planner core + re-architects the Markup canvas
+         render/projection. See the owner-steer note on the item.
+       • B314 (right-side tool rail) — NET-NEW; no open/done item moves the Markup tools off AppHeader
+         row 2. The Site Planner's vertical rail it should match is ALSO inlined in SitePlanner.jsx
+         (~L6610–6752) + coupled to its tool/menu state, not a standalone component — so "reuse the rail"
+         means extracting a shared rail component first. Distinct from B117/B118/B127 (Site-rail
+         scroll/clipping fixes, a different surface). -->
+
+### B313 — Markup canvas pan + zoom parity with the Site map (one shared viewport controller) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B313**)*
+`[ ]` **Repro:** in Markup the document viewport only scrolls vertically; there's no click-drag panning in any direction, and zoom doesn't behave like the Site Planner map. **Expected:** the Markup canvas adopts the SAME viewport navigation model as the Site map — free pan in all directions and cursor-anchored zoom (zoom toward the pointer, not the canvas centre).
+> **Approach — reuse, don't reimplement.** The Site map already has the viewport transform (the pan-offset + zoom-scale math that maps real-world coords → screen px). Extract it into a shared hook/controller if it isn't already (today it's inlined in `SitePlanner.jsx`: `view={ppf,offX,offY}`, `f2p`/`p2f`, the wheel-anchor block, the pan handler) and mount it on the Markup canvas. Do NOT write a second pan/zoom implementation — the two modules share one.
+> **Pan/tool collision (the main design call) — Bluebeam conventions:** middle-mouse drag → always pans (any tool); Space-hold → temporary hand-pan; left-drag on empty canvas with Select → pans; left-drag on an object → selects/moves it; left-drag with a drawing tool active (Distance/Area/Rect/Cloud/…) → draws, never pans.
+> **Gotchas:** (1) REPLACE the existing vertical-scroll container — don't layer pan on top of it or they'll fight; this supersedes the scroll-based B288–B290 pan/zoom. (2) View transform ONLY — must not touch stored geometry or calibration; measurements (page-unit coords on the editable layers) stay registered to the immutable PDF backdrop through every transform; Sheet 1's "not calibrated" state and the calibration scale must be untouched by zoom. (3) Performance — don't re-rasterize the PDF on every zoom tick; scale the already-rendered canvas during the gesture, then re-render crisply at full devicePixelRatio once zoom settles (debounced), mirroring the map's tile redraw; keep heavy work in the existing Web Worker. (4) Trackpad pinch + touch pinch route into the same zoom path as the wheel.
+> **Files likely touched:** the Markup viewer/canvas (`DocReview.jsx`), a shared viewport hook (extracted from the Site map), pointer/wheel/keyboard handlers.
+> **Dedup / scope:** RELATED to shipped **B288–B290** (scroll-based wheel-zoom + drag-pan + cursor-anchored ±, PR #220) but net-new — those pan via the scroll container, which can't slide past a fit-width sheet (hence "only scrolls vertically"); B313 swaps in the Site map's transform model and shares one controller. ⚠ **Owner-steer:** doing it the prescribed "one shared engine" way first extracts pan/zoom out of the mature ~8.5k-line `SitePlanner.jsx` AND re-architects the Markup canvas (scroll→transform) — architecturally significant, real regression risk to the Site Planner core. Confirm scope/sequencing before the core extraction (contained Markup-side upgrade first vs. full shared-engine refactor).
+
+### B314 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B314**)*
+`[ ]` **Change:** move the Markup drawing/measure tools and zoom controls out of `AppHeader` row 2 into a vertical tool rail on the right, matching Bluebeam and the Site Planner's tool placement.
+> **Moves to the rail:** Select, Calibrate, Distance, Perimeter, Area, Count, Rect, Cloud, Text + the zoom controls (−, %, +, Fit). **Stays put (row 2 or a top-of-canvas strip):** the document-level controls (Open another, Stitch sheets, Library, active-sheet name) — sheet management, not drawing tools; don't pull those into the rail.
+> **Layout (needs a decision — see owner-steer):** the right side already holds the Takeoff panel, so this creates two right-side regions. Match the Site Planner: reuse its rail rather than building a one-off — narrow icon rail flush to the canvas with the (collapsible) Takeoff panel beside/right of it. NB the Site rail is inlined in `SitePlanner.jsx` (~L6610–6752) and coupled to its tool/menu state, so "reuse" means extracting a shared rail component first.
+> **Detail:** vertical rails want icons + tooltip (or icon + small label), not stacked text labels; keep the active-tool highlight on the Markup accent (`#EF9F27`); Select is the default active tool. Removing the tools may leave row 2 holding only the doc controls — confirm row 2 doesn't collapse to an empty strip; collapse or repurpose it if so.
+> **Files likely touched:** `AppHeader.jsx` (strip the row-2 Markup tools), the Markup module layout (`DocReview.jsx`), a shared tool-rail component.
+
 <!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
      gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
      BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
