@@ -13,6 +13,7 @@
  */
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
+import { mapillaryRequestUrl, pickDetections } from "./mapillaryClient.js";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const MIN_ZOOM = 14;            // OSM power/hydrant data is dense — don't fetch zoomed out
@@ -132,12 +133,19 @@ export const setMapillaryToken = (t) => {
 };
 
 async function fetchMapillary(bounds, token) {
-  const bbox = `${bounds.w},${bounds.s},${bounds.e},${bounds.n}`;
-  const url = `https://graph.mapillary.com/map_features?access_token=${encodeURIComponent(token)}&fields=id,object_value,geometry&bbox=${bbox}&limit=500`;
-  const r = await fetch(url);
+  // Default → same-origin proxy (server injects the token); optional → user's own token
+  // direct to Mapillary. The proxy 503s (no server token, e.g. a preview deploy) and a
+  // static/preview build has no /api route (404) — both mean "not available here", a
+  // graceful state, not a hard failure (B308).
+  const r = await fetch(mapillaryRequestUrl(bounds, token));
+  if (r.status === 503 || r.status === 404) { const e = new Error("Street imagery isn't available in this environment."); e.unconfigured = true; throw e; }
   if (!r.ok) throw new Error(`Mapillary HTTP ${r.status}`);
-  const j = await r.json();
-  return (j.data || []).filter((d) => /pole|fire.?hydrant/i.test(d.object_value || ""));
+  let j;
+  // A non-JSON body means the proxy isn't actually there (a preview/static build serves
+  // the SPA index.html for an unknown /api path) → graceful "not available", not a failure.
+  try { j = await r.json(); }
+  catch (_) { const e = new Error("Street imagery isn't available in this environment."); e.unconfigured = true; throw e; }
+  return pickDetections(j.data);
 }
 
 export function mapillaryLayer(onStatus) {
@@ -147,10 +155,7 @@ export function mapillaryLayer(onStatus) {
   const refresh = async () => {
     if (!map) return;
     if (busy) { pending = true; return; } // a moveend arrived mid-fetch — serve the latest view after (B56d)
-    const token = mapillaryToken();
-    // No token isn't a failure — it's just unconfigured (NEW-4/B286). Report a quiet
-    // "unconfigured" status, not the red "failed", if the token is cleared while on.
-    if (!token) { group.clearLayers(); lastKey = "no-token"; onStatus && onStatus("unconfigured", "Not configured — add a free access token to enable this layer."); return; }
+    const token = mapillaryToken(); // empty = use the server-side proxy (B308); set = optional override
     if (map.getZoom() < MLY_MIN_ZOOM) { group.clearLayers(); lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${MLY_MIN_ZOOM} to load`); return; }
     const b = map.getBounds();
     // clamp to < 0.01° per side (Mapillary bbox limit) around the view centre
@@ -161,7 +166,12 @@ export function mapillaryLayer(onStatus) {
     lastKey = key;
     let feats = null; busy = true; onStatus && onStatus("loading");
     try { feats = await fetchMapillary(bb, token); }
-    catch (e) { lastKey = null; onStatus && onStatus("failed", `Mapillary: ${e.message || "request failed"}`); feats = null; }
+    catch (e) {
+      lastKey = null; feats = null;
+      // Missing server token (preview / not yet deployed) → quiet "unconfigured", never red "failed".
+      if (e && e.unconfigured) onStatus && onStatus("unconfigured", e.message);
+      else onStatus && onStatus("failed", `Mapillary: ${(e && e.message) || "request failed"}`);
+    }
     finally { busy = false; }
     if (feats === null) { if (pending) { pending = false; refresh(); } return; }
     group.clearLayers();
