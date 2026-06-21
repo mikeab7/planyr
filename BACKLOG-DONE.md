@@ -24,6 +24,38 @@
 ### B347 — Seeded auto-stitch fallback gives no endpoint-order cue (reverse clicks flip the sheet 180°) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B345, renumbered **B347**)*
 `[x]` **Fixed + verified 2026-06-21.** When auto-stitch (B337) can't place a sheet but knows its seam side, manual Align is **pre-seeded** with the moving sheet's two seam endpoints (`detectedEndpointsFor`) and the user clicks the two matching points on a placed sheet. Nothing showed WHICH seed was "first" vs "second", so clicking the matching points in reverse order silently rotated the sheet 180° via `solveM`. The seeded flow now draws **numbered markers (1, 2)** at the moving sheet's seed endpoints (its current position), so the click order is unambiguous. Additive render only; no geometry change.
 
+<!-- ✅ DONE 2026-06-21 (branch claude/focused-davinci-kkytxf). Follow-up to PR #242 (which shipped the
+     drop-a-set → group/auto-stitch/crop/auto-calibrate feature in the STITCHER). #242 left the single-
+     sheet MARKUP sidebar as a flat "Sheet N" list, so B266 (real sheet labels there) was never delivered
+     on that surface. This PR brings the real sheet # + title + the logical-group collapse to the Markup
+     sidebar, REUSING #242's shared engines (sheetMeta.readSheetMeta + sheetGroups.groupSheets +
+     sheetRead.statedCalibration — no duplicate modules). Delivers the open B266 + the new B348. 7/7
+     headless (ui-audit/verify-markup-sheet-labels.mjs) + #242's viewer suite still 13/13 (no regression);
+     846 tests, lint 0, build green. VERIFICATION V91. Backstory: a parallel session had built an
+     equivalent FULL implementation (PR #243) just before #242 merged; on the owner's "compare, then
+     salvage extras" call, the duplicate engines/Stitcher work were discarded and only this genuinely-
+     missing Markup-sidebar piece was kept, rebased onto #242. -->
+
+### B266 — Sheet sidebar labels from the title block (real sheet # + name, not "Sheet N") `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20; delivered 2026-06-21 as a follow-up to #242)*
+`[x]` **Shipped.** The single-sheet Markup sidebar now shows each sheet's real **sheet # + title** read
+from its title block (e.g. "C-5 — GRADING PLAN", "COVER SHEET"), not generic "Sheet N". Built on #242's
+shared reader (`sheetMeta.readSheetMeta` — which locates the title-block band first, so a "SEE SHEET X"
+cross-ref or a detail/grid ref can't masquerade as the sheet number, the crux this item called out).
+**No-auto-guess:** a sheet with no detected title block / no readable number falls back to "Sheet N"
+(gated on `meta.titleBlock || meta.sheetNumber`, so a stray body-text line is never surfaced as the
+label). OCR for scanned sheets stays the shared remaining slice (tracked under B267 + #242's dormant OCR
+seam in `sheetRead.js`). 7/7 headless (`ui-audit/verify-markup-sheet-labels.mjs`, V91); #242's viewer
+suite still 13/13.
+
+### B348 — Collapse the Markup single-sheet sidebar into logical sheets (parity with the Stitcher) `[Doc Review / Markup]` (feature)  *(arrived 2026-06-21; minted **B348** — next free after B347)*
+`[x]` **Shipped (follow-up to #242).** #242 collapses a dropped set into logical sheets in the STITCHER
+tray; this brings the same collapse to the single-sheet **Markup** sidebar: consecutive pages sharing a
+plan type + a contiguous sheet-number run show as one expandable entry ("Grading Plan · C-5–C-7 · 3
+sheets"); cover/notes/one-offs stay standalone. Reuses #242's `sheetGroups.groupSheets` (the same engine
+the Stitcher uses, so the two surfaces agree) + surfaces the per-sheet stated-scale auto-calibrate (·≈)
+via `sheetRead.statedCalibration`. The sidebar count reads "N sheets · M pages" so the collapse is
+visible. Verified: a 4-page set → 2 logical entries, the group expands to its members (V91).
+### B341 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; minted **B341** — next free after B340)*
 ### B348 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; first shipped as B341 via PR #248, **renumbered B348** to resolve a duplicate — a concurrent `main` also kept B341 (theming-contrast, PR #244) while the sibling stitch-bug session deferred to B343–B347, leaving two live B341 entries. This (the stress-test pair) moved to the next free number after B347; the round-1 code comments were updated B341→B348 to match.)*
 `[x]` **Shipped + verified 2026-06-21 (branch `claude/stitch-tool-stress-test-1tvw5b`).** Adversarial pass over the stitch core (`stitchGeom.js`, `autoStitch.js`, `sheetGroups.js`, `sheetMeta.js`) — drove each engine with the inputs a messy real-world PDF set throws at it and fixed four ways it could **fail silently** (the worst kind here: a bad transform flings a sheet off-canvas, or — worse — butts two drawings together at the wrong size/place and the takeoff reads a confident wrong number). All four follow the owner rule **"a wrong stitch is worse than an un-stitched one"**: when a signal is unreliable the sheet is left **unplaced → manual-Align safety net**, never auto-guessed.
 - **Non-finite endpoints (NaN/Infinity) used to slip past the degenerate-baseline guard** — `Math.hypot(NaN) < 1` is `NaN < 1` → `false`, so a NaN coordinate (bad read / mis-built drawing area) reached `solveM`, produced a NaN matrix, and poisoned the sheet transform **and** the whole composite's bbox (every `Math.min/max` over it → NaN). `alignBaselinesDegenerate` now rejects any non-finite point. (`stitchGeom.js`)

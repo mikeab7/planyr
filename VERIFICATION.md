@@ -60,6 +60,22 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V91 — Doc Review: the single-sheet Markup sidebar shows real sheet labels + logical groups (B266 + B348) ✅ (self-verified headless — browser-only, no signed-in check needed)
+**Self-verified 2026-06-21** (branch `claude/focused-davinci-kkytxf`) against the real built app on
+`vite preview`. A **follow-up to #242**: #242 shipped the drop-a-set grouping/auto-stitch in the
+**Stitcher** but left the single-sheet **Markup** sidebar as a flat "Sheet N" list. This wires #242's
+**existing** shared engines (`sheetMeta.readSheetMeta` / `sheetGroups.groupSheets` /
+`sheetRead.statedCalibration`) into the Markup sidebar — no duplicate modules.
+- **`ui-audit/verify-markup-sheet-labels.mjs` (7/7, 0 page errors)** — a 4-page titled set in **Markup**
+  collapses to **2 logical sheets**; a **"Grading Plan · C-5–C-7 · 3 sheets"** group that expands to its
+  members (C-5/C-6/C-7); the cover shows its real **"COVER SHEET"** title (not "Sheet 1"); **no generic
+  "Sheet N"** labels remain on readable sheets; grading sheets auto-calibrate (·≈).
+- **No regression:** #242's single-sheet viewer suite (`ui-audit/verify-docreview-viewer.mjs`) still
+  **13/13** — incl. the sheet-switch test, which keeps working because a sheet with **no** title block
+  correctly falls back to "Sheet N" (the label is gated on `meta.titleBlock || meta.sheetNumber`, so a
+  body-text line is never surfaced as a sheet label). Full suite **910+ green**, lint **0**, build green.
+- **Remaining slice:** OCR for scanned/textless sheets — the shared dormant seam (#242's `sheetRead.js`
+  `ocr` hook + B267 `[~]`), pending a scanned sample.
 ### V90 — Site-plan overlay "hide" (eye toggle) persists across reload (B343) ✅ logged-out + signed-in-reload-shape self-verified headless; ⏳ one signed-in confirm
 - **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium**, built app, `vite preview`, logged-out — two harnesses, all checks pass) · **Next check** — a **signed-in** confirm on planyr.io (cloud sync is sign-in-gated; the sandbox CORS-blocks Supabase auth logged-out).
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-overlay-delete-hide.mjs` + `ui-audit/verify-overlay-hide-stripped.mjs`):** hiding a placed overlay removes it from the map but keeps it LISTED (recoverable); the hidden state PERSISTS across reload (`visible:false` in the record); Show brings it back. The second harness uses the exact **signed-in reload shape** — raster stripped (`src:null`) + `storageKey` + `visible:false` — and confirms it renders NOTHING (no image, no "Loading…" placeholder) and stays hidden, so it can't "reappear". Backed by **8 unit tests** in `test/storage.test.js` locking the signed-in cloud round-trip of `visible` (save/load · `createSiteModel` normalize · `mergeSiteContent` both directions · `mergePulledSites` local-hidden-wins / cloud-already-hidden / re-push · rehydrate spread). lint 0 · 810 tests · build green.
