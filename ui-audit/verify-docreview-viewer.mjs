@@ -107,7 +107,7 @@ try {
     const g0 = await geom(page);
     const cx = g0.wrapL + g0.wrapW / 2, cy = g0.wrapT + g0.wrapH / 2;
     const fx = (cx - g0.canL) / g0.cssW, fy = (cy - g0.canT) / g0.cssH;
-    await page.getByRole("button", { name: "+", exact: true }).click();
+    await page.getByRole("button", { name: "In", exact: true }).click();
     await page.waitForFunction((w0) => document.querySelector("canvas").getBoundingClientRect().width > w0 + 2, g0.cssW, { timeout: 4000 }).catch(() => {});
     await page.waitForTimeout(250);
     const g1 = await geom(page);
@@ -146,7 +146,7 @@ try {
     await page.getByRole("button", { name: "Fit", exact: true }).click();
     await page.waitForTimeout(500);
     const gw = await geom(page);
-    await page.getByRole("button", { name: "Fit page", exact: true }).click();
+    await page.getByRole("button", { name: "Page", exact: true }).click();
     await page.waitForTimeout(500);
     const gp = await geom(page);
     const widthFitOverflows = gw.cssH > gw.wrapH + 2;          // portrait Letter, fit-width is taller than the viewport
@@ -157,7 +157,7 @@ try {
 
   // ---- B291: Count finishes with N points on double-click, not N+2 (HIGH) ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet on-screen so every click lands
+    await page.getByRole("button", { name: "Page", exact: true }).click(); // whole sheet on-screen so every click lands
     await page.waitForTimeout(500);
     await page.getByRole("button", { name: "Count", exact: true }).click();
     const g = await geom(page);
@@ -173,7 +173,7 @@ try {
 
   // ---- B293: move a placed Rect; create + edit a Text note inline ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet visible
+    await page.getByRole("button", { name: "Page", exact: true }).click(); // whole sheet visible
     await page.waitForTimeout(500);
     // draw a rect
     await page.getByRole("button", { name: "Rect", exact: true }).click();

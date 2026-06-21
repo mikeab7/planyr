@@ -105,7 +105,7 @@ try {
 
   // ---- 2. cursor-anchored wheel zoom ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click();
+    await page.getByRole("button", { name: "Page", exact: true }).click();
     await page.waitForTimeout(400);
     const g0 = await geom(page);
     const cx = g0.canL + g0.cssW * 0.4, cy = g0.canT + g0.cssH * 0.4;
@@ -124,7 +124,7 @@ try {
 
   // ---- 3. geometry + calibration SURVIVE zoom + pan ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click();
+    await page.getByRole("button", { name: "Page", exact: true }).click();
     await page.waitForTimeout(400);
     // calibrate: two points a horizontal distance apart, then enter 100 ft
     await page.getByRole("button", { name: "Calibrate", exact: true }).click();
@@ -159,7 +159,7 @@ try {
 
   // ---- 4. Bluebeam: middle-mouse pans even with a draw tool active, and draws nothing ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click();
+    await page.getByRole("button", { name: "Page", exact: true }).click();
     await page.waitForTimeout(400);
     await page.getByRole("button", { name: "Rect", exact: true }).click(); // a DRAWING tool is active
     const rects0 = await page.evaluate(() => document.querySelectorAll("canvas + svg rect").length);

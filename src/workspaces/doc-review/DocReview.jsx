@@ -18,6 +18,8 @@ import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import ToolRail from "../../shared/ui/ToolRail.jsx";
+import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan } from "../../shared/viewport/viewportTransform.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
@@ -44,6 +46,30 @@ const TOOLS = [
   { id: "text", label: "Text", hint: "Click to place a text note." },
 ];
 const MEASURE = new Set(["distance", "perimeter", "area", "count"]);
+
+// Rail icons for the Markup tools + zoom controls (B314). 16×16, stroke = currentColor so a
+// button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
+const MK_ICONS = {
+  select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
+  pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
+  calibrate: <><path d="M2.3 10.5 L10.5 2.3 L13.7 5.5 L5.5 13.7 Z" /><path d="M4.9 7.7 l1.5 1.5 M7.3 5.3 l1.5 1.5" /></>,
+  distance: <><path d="M3 12.6 L13 3.4" /><circle cx="3" cy="12.6" r="1.5" fill="currentColor" stroke="none" /><circle cx="13" cy="3.4" r="1.5" fill="currentColor" stroke="none" /></>,
+  perimeter: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" strokeDasharray="2.4 1.6" />,
+  area: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" fill="currentColor" fillOpacity="0.3" />,
+  count: <><circle cx="4.7" cy="5.2" r="1.7" fill="currentColor" stroke="none" /><circle cx="10.9" cy="6.1" r="1.7" fill="currentColor" stroke="none" /><circle cx="6.7" cy="11.2" r="1.7" fill="currentColor" stroke="none" /></>,
+  rect: <rect x="2.5" y="3.5" width="11" height="9" rx="0.5" />,
+  cloud: <path d="M5.2 11.6 a2.3 2.3 0 0 1-.5-4.5 a2.7 2.7 0 0 1 5.1-1 a2.2 2.2 0 0 1 2.6 3.2 a2.1 2.1 0 0 1-1.5 2.9 a2.3 2.3 0 0 1-2.2.9 a2.4 2.4 0 0 1-3-.4 Z" />,
+  text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
+  zoomIn: <path d="M8 3.4 V12.6 M3.4 8 H12.6" strokeWidth="1.7" />,
+  zoomOut: <path d="M3.4 8 H12.6" strokeWidth="1.7" />,
+  fitW: <><path d="M2.6 8 H13.4" /><path d="M2.6 8 l2.3 -2.3 M2.6 8 l2.3 2.3 M13.4 8 l-2.3 -2.3 M13.4 8 l-2.3 2.3" /></>,
+  fitP: <><rect x="2.6" y="3.4" width="10.8" height="9.2" rx="1" /><rect x="5.4" y="5.8" width="5.2" height="4.4" rx="0.5" opacity="0.55" /></>,
+};
+const MkIcon = ({ id, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {MK_ICONS[id] || <circle cx="8" cy="8" r="5.5" />}
+  </svg>
+);
 
 function cloudPath(x, y, w, h, r = 9) {
   const edge = (x1, y1, x2, y2) => {
@@ -124,6 +150,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B314)
   // The project the header breadcrumb points at in Markup (B191). Follows the open
   // review's project; picking another project here browses its files in place (it does
   // NOT re-file the open review — browsing ≠ filing).
@@ -737,6 +764,18 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const tbDiv = { width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
 
+  // Right-side tool rail (B314): the drawing/measure tools + zoom controls, Bluebeam-style.
+  const railItems = [
+    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
+    { kind: "spacer" },
+    { kind: "header", label: "Zoom" },
+    { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "#9b9482", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
+    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) },
+    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) },
+    { kind: "tool", id: "fitW", label: "Fit", title: "Fit to width", icon: <MkIcon id="fitW" />, onClick: () => fitNow("width") },
+    { kind: "tool", id: "fitP", label: "Page", title: "Fit the whole sheet", icon: <MkIcon id="fitP" />, onClick: () => fitNow("page") },
+  ];
+
   if (mode === "stitch") return (
     <Stitcher
       onReview={() => setMode("review")}
@@ -845,18 +884,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             <button style={chromeBtn()} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
-            {pdfRef.current && <span style={tbDiv} />}
-            {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} title={t.hint} onClick={() => { setTool(t.id); setDraft(null); setCalInput(null); }}>{t.label}</button>)}
+            {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B314).
+                Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
             {pdfRef.current && <>
               <span style={tbDiv} />
               <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
               <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
-              <span style={tbDiv} />
-              <button style={btn(false)} onClick={() => zoom(1 / 1.2)} title="Zoom out">−</button>
-              <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round((view?.scale || 0) * 100)}%</span>
-              <button style={btn(false)} onClick={() => zoom(1.2)} title="Zoom in">+</button>
-              <button style={btn(false)} onClick={() => fitNow("width")} title="Fit to width">Fit</button>
-              <button style={btn(false)} onClick={() => fitNow("page")} title="Fit the whole sheet">Fit page</button>
             </>}
           </>
         }
@@ -962,9 +995,16 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             )}
           </div>
 
-          {/* takeoff */}
+          {/* tool rail (B314) — drawing/measure tools + zoom, flush to the canvas */}
+          <ToolRail items={railItems} accent={MODULE_ACCENT["doc-review"]} data-testid="markup-rail" />
+
+          {/* takeoff — collapsible (B314); a thin re-open tab when hidden */}
+          {takeoffOpen ? (
           <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 2 }}>Takeoff</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>Takeoff</div>
+              <button onClick={() => setTakeoffOpen(false)} title="Hide the takeoff panel" style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: PAL.muted, fontSize: 14, fontWeight: 700, lineHeight: 1, padding: "2px 4px", fontFamily: "inherit" }}>▸</button>
+            </div>
             <div style={{ fontSize: 11, marginBottom: 8 }}>
               {(() => {
                 const info = calInfo[page];
@@ -998,6 +1038,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             </div>
             {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "#b3361b" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
           </div>
+          ) : (
+            <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>
+              <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap" }}>◂ Takeoff</span>
+            </button>
+          )}
         </div>
       )}
 
