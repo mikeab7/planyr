@@ -49,3 +49,14 @@ export const sheetContains = (s, w) => {
 // sheets' real scales differ. Only sheets explicitly flagged aligned:false count.
 export const measureOverUnaligned = (placed, pts) =>
   (pts || []).some((w) => (placed || []).some((s) => s.aligned === false && sheetContains(s, w)));
+
+// B325 — pan the view from a CAPTURED drag origin {sx,sy,panX,panY} + the live pointer
+// position. Pure (and kept here) so the capture contract is unit-testable: the caller MUST
+// snapshot the drag ref into a local and pass it in — never let the deferred setView updater
+// read the ref. That updater runs in React's render phase, which for a continuous pointermove
+// can be deferred a tick, and the gesture may be aborted first (pointerup / pointercancel /
+// the blur-abort recovery), nulling the ref. Reading the ref inside the updater then
+// dereferenced null and crashed the whole stitcher ("Cannot read properties of null (reading
+// 'panX')"). Closing over the captured origin survives an aborted gesture untouched.
+export const panTo = (view, origin, clientX, clientY) =>
+  ({ ...view, panX: origin.panX + (clientX - origin.sx), panY: origin.panY + (clientY - origin.sy) });

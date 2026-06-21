@@ -1,4 +1,4 @@
-/* Verify B325 — the Markup canvas now uses the shared viewport TRANSFORM engine (parity with
+/* Verify B326 — the Markup canvas now uses the shared viewport TRANSFORM engine (parity with
  * the Site map), against the REAL built viewer (vite preview on :4173). Generates a 2-page
  * Letter PDF, opens it in Markup, then drives + asserts the DOM:
  *
@@ -26,7 +26,7 @@ const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-lin
 const PDF_PATH = "/tmp/markup-viewport-test.pdf";
 
 function buildPdf() {
-  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B325 transform viewport test) Tj ET";
+  const s1 = "BT /F1 20 Tf 60 700 Td (SHEET ONE - B326 transform viewport test) Tj ET";
   const s2 = "BT /F1 20 Tf 60 700 Td (SHEET TWO - second page) Tj ET";
   const objs = [
     "<< /Type /Catalog /Pages 2 0 R >>",

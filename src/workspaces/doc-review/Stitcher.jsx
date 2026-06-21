@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
-import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
+import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -167,7 +167,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  // Screen<->world via the shared viewport engine (B325); { zoom, panX, panY } == { scale, tx, ty }.
+  // Screen<->world via the shared viewport engine (B326); { zoom, panX, panY } == { scale, tx, ty }.
   const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
@@ -223,7 +223,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
   const onMove = (e) => {
     setCursor(toWorld(e));
-    if (drag.current) { setView((v) => ({ ...v, panX: drag.current.panX + (e.clientX - drag.current.sx), panY: drag.current.panY + (e.clientY - drag.current.sy) })); }
+    // Capture the drag origin into a local NOW, then close over it (panTo). This setView updater
+    // runs in React's render phase, which for a continuous event (pointermove) can be deferred a
+    // tick — and a discrete event in between (pointerup, pointercancel, or the blur/visibility
+    // abort below) may null drag.current first. Reading the ref *inside* the deferred updater
+    // then dereferenced null → the whole stitcher crashed (B325: "reading 'panX'"). The captured
+    // `d` keeps the pan correct even if the gesture is aborted mid-flight.
+    const d = drag.current;
+    if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));
   };
   const onUp = (e) => { if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
   // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window

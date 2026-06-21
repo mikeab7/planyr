@@ -1,4 +1,4 @@
-/* B325 regression guard — the Site Planner map/planner must behave EXACTLY as before after its
+/* B326 regression guard — the Site Planner map/planner must behave EXACTLY as before after its
  * pan/zoom math was migrated to the shared viewport engine. Seeds a site into localStorage so the
  * app boots straight into the planner (no auth, no tiles), then asserts:
  *
@@ -68,7 +68,7 @@ try {
   ok("3 wheel-down zooms the map out", p1 != null && p2 != null && p2 < p1, `px/ft ${p1} → ${p2}`);
 
   // ---- 4. Pan drags the canvas without zooming. Drive it via hold-Space (the most reliable
-  // path; the Pan rail button needs the rail open). The pan-drag code is untouched by B325 —
+  // path; the Pan rail button needs the rail open). The pan-drag code is untouched by B326 —
   // this just confirms the migrated module still pans + that pan never changes zoom. ----
   const b0 = await contentBox(page); const pp0 = await ppf(page);
   await page.mouse.move(cx, cy);

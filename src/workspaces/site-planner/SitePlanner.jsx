@@ -1448,7 +1448,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
 
   /* ------------ coordinate transforms ------------ */
-  // Feet<->screen via the shared viewport engine (B325). { ppf, offX, offY } maps to the
+  // Feet<->screen via the shared viewport engine (B326). { ppf, offX, offY } maps to the
   // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
   const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   const p2f = useCallback((cx, cy) => {
