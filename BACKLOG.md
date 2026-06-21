@@ -28,6 +28,23 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
      B303–B307, then the Mapillary proxy B308/B309). -->
 
+<!-- 2026-06-21: coworker-chat item "NEW-1" — Undo (Ctrl+Z) unreliable after moving a building.
+     Minted **B315** — a VERY hot `main` ate my number twice: first filing was B310 (taken by main's parcel
+     click-vs-drag B310/B311 + auto-filing B312), renumbered to B313, then a second `main` merge (multi-tab
+     B313 + optimistic-concurrency B314, PR #223) took B313/B314 too, so it landed at the next free B#
+     **B315** (the rules forbid sharing a number; V78→V80→V82 chased the same way). Deduped: related to but
+     NOT a duplicate of the done B32 (no-op-edit stack pollution) — B315 is the stale-baseline race, a
+     different cause; no Open item covered undo-after-move. Per STANDING RULE #1 filed AND fixed + headless-
+     verified this session (branch `claude/ecstatic-ritchie-ihzkym`); full [x] block is in BACKLOG-DONE.md.
+     Root cause (confirmed, not guessed): the move transaction boundary was already correct (one push at
+     drag-start); the bug was `stateRef` (snapshot source + undo's dedup baseline) being updated in a
+     passive effect, so it lagged a paint and undo could act on a stale state → revert nothing / partially.
+     Fix: assign stateRef during render + extract a pure, unit-tested `lib/history.js` (live state passed in
+     explicitly) + Esc/abort-mid-drag now cancels the move cleanly. Kept as ONE item (the race affects all
+     undo; redo + multi-select already work as separate transactions, so no split). lint 0 · full suite
+     green (11 new in test/history.test.js) · build green · `ui-audit/verify-b315.mjs` 9/9 (one Ctrl+Z fully
+     reverts, Δ=0.0px). -->
+
 <!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
      ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
      batch (Doc Review markup editing) had ALSO taken B303–B307 while this was in flight (both saw B302 as
