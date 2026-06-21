@@ -9,7 +9,7 @@ import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { groupSheets } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -476,7 +476,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
-    setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
+    setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
@@ -720,7 +720,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const onDbl = (e) => {
     if (tool === "select") { // double-click a text note → edit it inline (B293)
       const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
-      if (m && m.kind === "text") openEditor({ id: m.id, page, pt: m.pts[0], text: m.text });
+      if (m && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
       return;
     }
     if (!draft) return;
@@ -900,8 +900,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         : <rect key={m.id} x={x} y={y} width={w} height={h} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />;
     }
     if (m.kind === "text") {
-      const q = S(m.pts[0]);
-      return <g key={m.id}><rect x={q.x - 2} y={q.y - 12} width={(m.text.length * 6.5) + 6} height={16} fill="#fff" stroke={stroke} strokeWidth={1} rx={3} /><text x={q.x + 2} y={q.y} fontSize="11" fill="#b91c1c" fontWeight="600" pointerEvents="none">{m.text}</text></g>;
+      const q = S((m.pts && m.pts[0]) || { x: 0, y: 0 });
+      const text = m.text || ""; // guard a missing text (mirrors hitTest) so one bad note can't crash the overlay
+      return <g key={m.id}><rect x={q.x - 2} y={q.y - 12} width={(text.length * 6.5) + 6} height={16} fill="#fff" stroke={stroke} strokeWidth={1} rx={3} /><text x={q.x + 2} y={q.y} fontSize="11" fill="#b91c1c" fontWeight="600" pointerEvents="none">{text}</text></g>;
     }
     return null;
   };

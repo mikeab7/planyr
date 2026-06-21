@@ -96,6 +96,28 @@ export function centroidOf(pts) {
 export const MIN_MEASURE_PTS = { distance: 2, perimeter: 3, area: 3, count: 1 };
 export const canCommitMeasure = (kind, n) => (n || 0) >= (MIN_MEASURE_PTS[kind] ?? 1);
 
+/* Normalize ONE markup loaded from storage into a render-safe shape. A persisted review
+ * is just JSON — it can arrive partial or corrupted (a hand-edited row, an older/newer
+ * schema, or — pre-fix — a coordinate that a degenerate gesture turned non-finite, which
+ * JSON.stringify silently rewrote to `null`). The render/hit-test/takeoff code assumes
+ * each markup has a string `kind`, an array of finite-coordinate `pts`, and (for text) a
+ * string `text`; one violation used to crash the WHOLE overlay (e.g. m.text.length on a
+ * note with no text), taking down a reviewer's entire markup view over a single bad item.
+ * This is the validation boundary the load path was missing: it drops junk points and
+ * fills the required fields, losslessly preserving everything else. Returns null for an
+ * unsalvageable entry (no kind) so the caller can filter it out. */
+export function sanitizeMarkup(m) {
+  if (!m || typeof m.kind !== "string") return null;
+  const pts = Array.isArray(m.pts)
+    ? m.pts.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => ({ x: p.x, y: p.y }))
+    : [];
+  const out = { ...m, pts };
+  if (m.kind === "text") out.text = typeof m.text === "string" ? m.text : "";
+  return out;
+}
+// Sanitize a loaded markups array (drops unsalvageable entries). Safe on non-arrays.
+export const sanitizeMarkups = (arr) => (Array.isArray(arr) ? arr.map(sanitizeMarkup).filter(Boolean) : []);
+
 /* Real-world value of one measurement markup, given the sheet's calibration
  * (`ftPerUnit`, feet per page unit; 0/undefined = uncalibrated). Returns
  * { kind, calibrated, ...values }. Area in sf + acres; lengths in ft; count int. */

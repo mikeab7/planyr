@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import {
   dist, pathLength, polyArea, measureValue, measureLabel, rollup,
   midOfPath, centroidOf, canCommitMeasure, MIN_MEASURE_PTS,
+  sanitizeMarkup, sanitizeMarkups,
 } from "../src/workspaces/doc-review/lib/takeoff.js";
 
 // Deterministic LCG so the fuzz corpus is identical every run.
@@ -249,6 +250,75 @@ describe("markup commit gating — degenerate shapes can't be saved", () => {
         expect(() => measureLabel(m, 2)).not.toThrow();
         expect(() => measureValue(m, 0)).not.toThrow();
       }
+    }
+  });
+});
+
+describe("sanitizeMarkups — the load-boundary guard against corrupted/partial saved reviews", () => {
+  it("gives a text markup a string `text` and an array `pts` (the m.text.length crash)", () => {
+    // Exactly the shape that used to crash draw() at `m.text.length`.
+    const out = sanitizeMarkup({ id: "m", kind: "text", pts: [{ x: 1, y: 2 }] }); // no `text`
+    expect(out.text).toBe("");
+    expect(typeof out.text).toBe("string");
+    expect(out.pts).toEqual([{ x: 1, y: 2 }]);
+    expect(() => `${out.text.length}`).not.toThrow();
+  });
+
+  it("drops non-finite (JSON-null) coordinates that a degenerate gesture could have saved", () => {
+    // JSON.stringify turns NaN/Infinity into null → readDraft returns {x:null,y:null}.
+    const out = sanitizeMarkup({ id: "m", kind: "area", pts: [
+      { x: 0, y: 0 }, { x: null, y: null }, { x: 10, y: 0 }, { x: NaN, y: 5 }, { x: 10, y: 10 },
+    ] });
+    expect(out.pts).toEqual([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }]);
+    // and the cleaned shape feeds the takeoff without NaN.
+    expect(Number.isFinite(measureValue(out, 2).areaSf)).toBe(true);
+  });
+
+  it("preserves every other field losslessly and keeps valid markups intact", () => {
+    const m = { id: "m7", page: 3, kind: "distance", pts: [{ x: 1, y: 2 }, { x: 3, y: 4 }], note: "keep me", revision: 2 };
+    expect(sanitizeMarkup(m)).toEqual(m);
+  });
+
+  it("returns null for unsalvageable entries; the array form filters them out", () => {
+    expect(sanitizeMarkup(null)).toBeNull();
+    expect(sanitizeMarkup({})).toBeNull();              // no kind
+    expect(sanitizeMarkup({ kind: 42 })).toBeNull();    // kind not a string
+    const cleaned = sanitizeMarkups([
+      null,
+      { kind: "text", pts: [{ x: 0, y: 0 }] },          // valid (text filled)
+      "garbage",
+      { kind: "distance", pts: "not-an-array" },        // pts coerced to []
+      undefined,
+    ]);
+    expect(cleaned).toHaveLength(2);
+    expect(cleaned[0].text).toBe("");
+    expect(cleaned[1].pts).toEqual([]);
+  });
+
+  it("is safe on non-array / missing input (a brand-new or schemaless review)", () => {
+    expect(sanitizeMarkups(undefined)).toEqual([]);
+    expect(sanitizeMarkups(null)).toEqual([]);
+    expect(sanitizeMarkups("nope")).toEqual([]);
+  });
+
+  it("fuzz: never throws and always yields render-safe markups", () => {
+    const rand = makeRng(0x5A117A);
+    const kinds = ["distance", "perimeter", "area", "count", "rect", "cloud", "text", "bogus", 7, null];
+    for (let i = 0; i < 5000; i++) {
+      const raw = {
+        id: rand() < 0.9 ? `m${i}` : undefined,
+        kind: kinds[Math.floor(rand() * kinds.length)],
+        pts: rand() < 0.8 ? Array.from({ length: Math.floor(rand() * 6) }, () => ({
+          x: [0, 1.5, NaN, Infinity, null, "x"][Math.floor(rand() * 6)],
+          y: [0, 2.5, -Infinity, NaN, undefined][Math.floor(rand() * 5)],
+        })) : (rand() < 0.5 ? null : "junk"),
+        text: rand() < 0.5 ? undefined : "note",
+      };
+      const out = sanitizeMarkup(raw);
+      if (out === null) continue;
+      expect(Array.isArray(out.pts)).toBe(true);
+      for (const p of out.pts) expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true);
+      if (out.kind === "text") expect(typeof out.text).toBe("string");
     }
   });
 });
