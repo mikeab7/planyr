@@ -10,14 +10,13 @@
  * needs the sheet TITLE; stitching needs each match line's ENDPOINTS; cropping (B338) needs the
  * title-block BAND. None of that survives `items.map(i=>i.str).join(" ")`. So this REUSES the
  * deterministic field parsers (titleBlockParse: discipline/item/sheet#/revision/date) and the
- * scale parser (overlayScale.parseSheetScale, B267) over the joined text, and adds the spatial
+ * scale parser (sheetScale.parseSheetScale, B267) over the joined text, and adds the spatial
  * layer on top. Honest: a field it can't read is left empty / null and `confidence` is lowered —
  * never a guess ("never auto-guess").
  *
  * Unit-tested with hand-built item lists (no pdf.js), mirroring the project's DI test style.
  */
 import { readTitleBlockText, classifyDiscipline } from "./titleBlockParse.js";
-import { parseSheetScale } from "../../workspaces/site-planner/lib/overlayScale.js";
 import { parseDetailRefs, parseDetailAnchors } from "./detailRefs.js";
 import { parseNotes } from "./sheetNotes.js";
 
@@ -197,7 +196,7 @@ export function readSheetMeta(page = {}) {
   }
   const lines = reconstructLines(items);
   const band = detectTitleBlock(items, dims);
-  const scale = parseSheetScale(joined);
+  const scale = fields.scale; // one parse pass — readTitleBlockText already read the stated scale (B356)
   const matchLines = parseMatchLines(lines, dims);
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   const sheetTitle = readSheetTitle(lines, band, item);

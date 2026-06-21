@@ -5,13 +5,19 @@
  * filing fields straight off the text — FREE and instant, no Claude API call. The AI reader
  * (server/filing/) stays as a FALLBACK only for scanned/image-only sheets that have no text.
  *
- * This module is the pure heart: text string in → { date, discipline, item, sheetNumber, … }
+ * This module is the pure heart: text string in → { date, discipline, item, sheetNumber, scale, … }
  * out. It does NOT touch pdf.js (that's localRead.js) so it's trivially unit-testable. Project
  * identification is matchProject.js's job (it searches the same text for the known projects).
  *
- * Honesty: it only reports what it can actually read. A field it can't find is left empty (the
+ * ONE reader (B356): the stated `scale` is now read in the SAME pass (shared/files/sheetScale.js),
+ * so filing and Markup auto-calibration consume a single field bundle instead of two parallel
+ * reads. The POSITIONAL superset (sheetMeta.readSheetMeta) layers sheet-title + match-line geometry
+ * on top of this for grouping/stitching — it calls readTitleBlockText, never re-parses.
+ *
+ * Honesty: it only reports what it can actually read. A field it can't find is left empty/null (the
  * matcher then routes the file to the "needs filing" tray rather than guess).
  */
+import { parseSheetScale } from "./sheetScale.js";
 
 // Disciplines are the fixed library set (mirrors reviewStore.DISCIPLINES). We never invent a
 // new one; an unrecognized doc type gets a descriptive `item` under the best-fit discipline.
@@ -124,8 +130,10 @@ export function parseRevision(text) {
 }
 
 /* Read the deterministic filing fields off the sheet text. `hasText` is false for an empty/
- * scanned page (the caller's cue to fall back to the AI reader). Project identification is NOT
- * here — matchProject.js searches the same text for the named projects. */
+ * scanned page (the caller's cue to fall back to the AI reader). `scale` is the stated-scale
+ * read (B267, shared/files/sheetScale.js): { ftPerInch, form, label } | { explicit:'nts' } |
+ * null — null when the page has no parseable scale. Project identification is NOT here —
+ * matchProject.js searches the same text for the named projects. */
 export function readTitleBlockText(text) {
   const hasText = !!(text && text.replace(/\s+/g, "").length > 30);
   const sheetNumber = hasText ? parseSheetNumber(text) : "";
@@ -136,5 +144,6 @@ export function readTitleBlockText(text) {
     discipline, item,
     sheetNumber,
     revision: hasText ? parseRevision(text) : "",
+    scale: hasText ? parseSheetScale(text) : null,
   };
 }

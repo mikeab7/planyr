@@ -63,4 +63,13 @@ describe("readTitleBlockText — the deterministic field bundle", () => {
     expect(readTitleBlockText("").hasText).toBe(false);
     expect(readTitleBlockText("   ").hasText).toBe(false);
   });
+  it("surfaces the stated scale in the same pass (one reader — B356)", () => {
+    // ONE reader: filing fields + the Markup auto-calibration scale come from a single read.
+    const civil = readTitleBlockText("OVERALL GRADING PLAN  SHEET C-3  06/30/2025  SCALE: 1\"=40'");
+    expect(civil.scale).toMatchObject({ ftPerInch: 40, form: "engineer" });
+    const arch = readTitleBlockText("FLOOR PLAN  SHEET A-2  10/24/2025  1/8\"=1'-0\"");
+    expect(arch.scale).toMatchObject({ ftPerInch: 8, form: "arch" });
+    // a sheet with no stated scale → null (never fabricated)
+    expect(readTitleBlockText("BOUNDARY SURVEY  SHEET V-1  06/30/2025").scale).toBeNull();
+  });
 });
