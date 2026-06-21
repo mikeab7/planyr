@@ -26,10 +26,18 @@ export function parseSheetCode(s) {
   return { prefix, major, minor, ordinal, raw: (s || "").toString().trim() };
 }
 
-// Two codes are consecutive when they share a prefix and the ordinal steps by exactly 1
-// (C-5→C-6, or C-2.01→C-2.02). Different prefixes / a gap start a new logical sheet.
+// Two codes are consecutive when they share a prefix and step by exactly 1 IN THE SAME NUMBERING
+// LEVEL: plain majors (C-5→C-6) or sub-sheets within one major (C-2.01→C-2.02). Different prefixes,
+// a gap, or a level/major change start a new logical sheet.
+// B341 — base this on the parsed major/minor, NOT the packed `ordinal` (major*100+minor). The
+// ordinal hack made codes consecutive ACROSS a major boundary (C-1.99 ordinal 199 → C-2.00 ordinal
+// 200) and could even collide two different codes onto the same ordinal — both wrong merges. Plan
+// sets don't run sub-sheet numbers past a major rollover, so compare the levels explicitly.
 export function consecutiveCodes(a, b) {
-  return !!a && !!b && a.prefix === b.prefix && b.ordinal === a.ordinal + 1;
+  if (!a || !b || a.prefix !== b.prefix) return false;
+  if (a.minor == null && b.minor == null) return b.major === a.major + 1;          // C-5 → C-6
+  if (a.minor != null && b.minor != null && a.major === b.major) return b.minor === a.minor + 1; // C-2.01 → C-2.02
+  return false; // mixed levels or a major rollover — don't chain
 }
 
 /* The grouping key — what makes two consecutive sheets "the same plan." Prefer the

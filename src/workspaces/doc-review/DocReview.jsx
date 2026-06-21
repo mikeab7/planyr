@@ -22,7 +22,7 @@ import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
-import { screenToWorld, zoomAround, fitView, shouldPan } from "../../shared/viewport/viewportTransform.js";
+import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -128,8 +128,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
-  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B341)
-  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B341)
+  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B343)
+  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B343)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
@@ -142,6 +142,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
+  const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
@@ -236,7 +239,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   /* ---- load ---- */
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
 
-  // Read each sheet's metadata in the background (B341): sheet #, title, discipline, stated scale —
+  // Read each sheet's metadata in the background (B343): sheet #, title, discipline, stated scale —
   // via the SAME shared reader the Stitcher uses (sheetMeta.readSheetMeta), so the single-sheet
   // sidebar can show real labels + collapse into logical sheets instead of "Sheet N" (B266). Also
   // pre-fills the per-sheet stated-scale calibration (B267) via the shared statedCalibration (which
@@ -261,7 +264,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     }
   }, []);
 
-  // Logical sheets (B341): collapse the read pages into the SAME logical groups the Stitcher uses —
+  // Logical sheets (B343): collapse the read pages into the SAME logical groups the Stitcher uses —
   // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
   // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
   // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
@@ -289,7 +292,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       // of the SAME file keeps them (its saved/auto cals still apply). (B267)
       const reuse = sourceRef.current && sameName(sourceRef.current.name, file.name);
       if (!reuse) { setCalByPage({}); setCalInfo({}); }
-      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B341)
+      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B343)
       scanSheets(pdf, pdf.numPages); // background sheet-metadata read (labels + grouping) + B267 auto-calibration
       // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
       // known file (so its markups stay bound); otherwise mint one and upload once.
@@ -460,7 +463,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
     setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B329)
-    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B341); won't override saved cals
+    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B343); won't override saved cals
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -474,7 +477,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
-    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B341); saved cals preserved
+    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B343); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
@@ -557,6 +560,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const r = wrap.getBoundingClientRect();
     return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
   };
+  // Viewport-relative screen point (for two-finger pinch midpoint math). (B331)
+  const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => (v ? pinchZoom(v, pinchRef.current.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
+    pinchRef.current = { mid, dist };
+  };
 
   const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
 
@@ -577,6 +591,19 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const onDown = (e) => {
     if (!pageBase || !view) return;
+    // Two-finger touch pinch (B331): track touch pointers; a 2nd touch starts a pinch and takes
+    // over from any pan/draw in progress. Gated on pointerType==='touch' → mouse/trackpad untouched.
+    if (e.pointerType === "touch") {
+      pointersRef.current.set(e.pointerId, vpPoint(e));
+      if (pointersRef.current.size === 2) {
+        const [a, b] = [...pointersRef.current.values()];
+        pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+        touchPinchedRef.current = true;
+        panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
+        e.preventDefault();
+        return;
+      }
+    }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
     // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
@@ -619,6 +646,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onMove = (e) => {
+    if (pinchRef.current && e.pointerType === "touch") { // two-finger pinch in progress (B331)
+      if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+      applyPinch();
+      return;
+    }
     if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B329)
       const d = panRef.current;
       setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
@@ -637,6 +669,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onUp = (e) => {
+    if (e.pointerType === "touch") { // wind down a touch pointer / pinch (B331)
+      pointersRef.current.delete(e.pointerId);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (pointersRef.current.size > 0) return;            // fingers remain — wait for full lift
+      if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
+    }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
@@ -657,7 +696,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
   // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
-  const onCancel = () => { panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); };
+  const onCancel = (e) => {
+    if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
+  };
 
   const finishDraft = () => {
     if (!draft) return;
@@ -780,12 +824,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
   // + tightened padding for density on the single header row (B305).
-  const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
-  const chromeBtn = (extra = {}) => ({ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, ...extra });
+  const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
+  const chromeBtn = (extra = {}) => ({ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk, ...extra });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
-  const tbDiv = { width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 2px", flex: "none" };
+  const tbDiv = { width: 1, height: 18, background: "var(--chrome-divider)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
-  // Logical-sheet sidebar helpers (B266/B341): a calibration dot, a short sheet id, a rich tooltip.
+  // Logical-sheet sidebar helpers (B266/B343): a calibration dot, a short sheet id, a rich tooltip.
   const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
   const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
   const sheetTip = (n) => {
@@ -801,7 +845,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
     { kind: "spacer" },
     { kind: "header", label: "Zoom" },
-    { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "#9b9482", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
+    { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
     { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) },
     { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) },
     { kind: "tool", id: "fitW", label: "Fit", title: "Fit to width", icon: <MkIcon id="fitW" />, onClick: () => fitNow("width") },
@@ -897,12 +941,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           // a shelf every workspace reaches into, so it lives next to the project name.
           <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
             {meta.title && (
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#ece7db", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--chrome-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {meta.title}
               </span>
             )}
             <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: "#ece7db" }}>
+              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
               🗂 Files
             </button>
           </span>
@@ -954,7 +998,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          {/* sheet list — logical sheets (B341) with real labels (B266) */}
+          {/* sheet list — logical sheets (B343) with real labels (B266) */}
           <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
@@ -967,7 +1011,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               ); })()}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px", minHeight: 0 }}>
-              {/* Logical sheets (B341): grouped plans collapse to one entry; the real sheet # + title
+              {/* Logical sheets (B343): grouped plans collapse to one entry; the real sheet # + title
                   replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
                   uses; the count reads "logical sheets · pages" so the collapse is visible. */}
               <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
@@ -1117,8 +1161,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
       {/* tool hint */}
       {pdfRef.current && curTool && (
-        <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid #2e2a23`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "#fbbf24", marginLeft: 10 }}>{err}</span>}
+        <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
+          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
     </div>

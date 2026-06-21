@@ -5,9 +5,9 @@
      sheet MARKUP sidebar as a flat "Sheet N" list, so B266 (real sheet labels there) was never delivered
      on that surface. This PR brings the real sheet # + title + the logical-group collapse to the Markup
      sidebar, REUSING #242's shared engines (sheetMeta.readSheetMeta + sheetGroups.groupSheets +
-     sheetRead.statedCalibration — no duplicate modules). Delivers the open B266 + the new B341. 7/7
+     sheetRead.statedCalibration — no duplicate modules). Delivers the open B266 + the new B343. 7/7
      headless (ui-audit/verify-markup-sheet-labels.mjs) + #242's viewer suite still 13/13 (no regression);
-     846 tests, lint 0, build green. VERIFICATION V88. Backstory: a parallel session had built an
+     846 tests, lint 0, build green. VERIFICATION V90. Backstory: a parallel session had built an
      equivalent FULL implementation (PR #243) just before #242 merged; on the owner's "compare, then
      salvage extras" call, the duplicate engines/Stitcher work were discarded and only this genuinely-
      missing Markup-sidebar piece was kept, rebased onto #242. -->
@@ -20,17 +20,24 @@ cross-ref or a detail/grid ref can't masquerade as the sheet number, the crux th
 **No-auto-guess:** a sheet with no detected title block / no readable number falls back to "Sheet N"
 (gated on `meta.titleBlock || meta.sheetNumber`, so a stray body-text line is never surfaced as the
 label). OCR for scanned sheets stays the shared remaining slice (tracked under B267 + #242's dormant OCR
-seam in `sheetRead.js`). 7/7 headless (`ui-audit/verify-markup-sheet-labels.mjs`, V88); #242's viewer
+seam in `sheetRead.js`). 7/7 headless (`ui-audit/verify-markup-sheet-labels.mjs`, V90); #242's viewer
 suite still 13/13.
 
-### B341 — Collapse the Markup single-sheet sidebar into logical sheets (parity with the Stitcher) `[Doc Review / Markup]` (feature)  *(arrived 2026-06-21; minted **B341** — next free after B340)*
+### B343 — Collapse the Markup single-sheet sidebar into logical sheets (parity with the Stitcher) `[Doc Review / Markup]` (feature)  *(arrived 2026-06-21; minted **B343** — next free after B342)*
 `[x]` **Shipped (follow-up to #242).** #242 collapses a dropped set into logical sheets in the STITCHER
 tray; this brings the same collapse to the single-sheet **Markup** sidebar: consecutive pages sharing a
 plan type + a contiguous sheet-number run show as one expandable entry ("Grading Plan · C-5–C-7 · 3
 sheets"); cover/notes/one-offs stay standalone. Reuses #242's `sheetGroups.groupSheets` (the same engine
 the Stitcher uses, so the two surfaces agree) + surfaces the per-sheet stated-scale auto-calibrate (·≈)
 via `sheetRead.statedCalibration`. The sidebar count reads "N sheets · M pages" so the collapse is
-visible. Verified: a 4-page set → 2 logical entries, the group expands to its members (V88).
+visible. Verified: a 4-page set → 2 logical entries, the group expands to its members (V90).
+### B341 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; minted **B341** — next free after B340)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/stitch-tool-stress-test-1tvw5b`).** Adversarial pass over the stitch core (`stitchGeom.js`, `autoStitch.js`, `sheetGroups.js`, `sheetMeta.js`) — drove each engine with the inputs a messy real-world PDF set throws at it and fixed four ways it could **fail silently** (the worst kind here: a bad transform flings a sheet off-canvas, or — worse — butts two drawings together at the wrong size/place and the takeoff reads a confident wrong number). All four follow the owner rule **"a wrong stitch is worse than an un-stitched one"**: when a signal is unreliable the sheet is left **unplaced → manual-Align safety net**, never auto-guessed.
+- **Non-finite endpoints (NaN/Infinity) used to slip past the degenerate-baseline guard** — `Math.hypot(NaN) < 1` is `NaN < 1` → `false`, so a NaN coordinate (bad read / mis-built drawing area) reached `solveM`, produced a NaN matrix, and poisoned the sheet transform **and** the whole composite's bbox (every `Math.min/max` over it → NaN). `alignBaselinesDegenerate` now rejects any non-finite point. (`stitchGeom.js`)
+- **Contradictory match-line labels produced a wrong (overlapping/mirrored) stitch** — if both sheets claimed the seam on their "right", `buildAdjacency` trusted it. It now treats the **geometric opposite** as the source of truth and **drops the edge** when a sheet's own label contradicts it (→ manual Align). (`autoStitch.js`)
+- **Mismatched page sizes were silently rescaled** — a similarity fit from two endpoints will shrink/blow up a half-size detail page to make the seam meet. `autoPlaceGroup` now rejects a placement whose implied scale strays past **`MAX_STITCH_SCALE` (±25%)** and leaves the sheet for manual Align. (`autoStitch.js`)
+- **Grouping chained across a major rollover** — the packed `ordinal` (major·100+minor) made `C-1.99 → C-2.00` look consecutive (and could collide two codes onto one ordinal). `consecutiveCodes` now compares the parsed major/minor by numbering level, so a rollover starts a new logical sheet. (`sheetGroups.js`)
+- **New `test/stitchStress.test.js` — 29 adversarial tests** across 8 break-strategy groups (non-finite/degenerate coords, contradictory seams, size mismatch, cycles/duplicates/self-refs/missing targets, sheet-code edge cases, reader junk/empty/huge input, a **300-iteration randomized fuzz** asserting the partition + finiteness + scale-band invariants, and the measure-over-unaligned guard). Full suite green (**879 tests**, lint 0 errors, build clean). Pure-engine + DI hardening, so no live-browser verification needed; the manual-Align safety net and text-layer path are unchanged.
 
 <!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
      crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
@@ -102,6 +109,88 @@ visible. Verified: a 4-page set → 2 logical entries, the group expands to its 
 
 ### B325 — Stitcher pan crash: "Cannot read properties of null (reading 'panX')" when a pan is interrupted `[Doc Review / Stitch]` (bug)  *(owner-reported 2026-06-21: "its broken, i was on the stitcher and it broke"; minted **B325** — a hot `main` had reached B324)*
 `[x]` **Fixed + shipped 2026-06-21 (branch `claude/awesome-feynman-i7wypf`).** The pan handler's `setView` updater read `drag.current` **inside** the deferred updater. That updater runs in React's render phase, which for a continuous `pointermove` can be deferred a tick; a discrete event in between — `pointerup`, `pointercancel`, or the **B270** blur/visibility gesture-abort — nulls `drag.current` first. Reading the ref then dereferenced null and threw in the render phase → the Document Review **error boundary** caught it ("hit an error and couldn't load") and the whole stitcher went down. A real user hits this by tab-switching / losing focus / a pointer-cancel mid-pan. **Fix:** capture the drag origin into a local and close over it via a pure `panTo()` helper in `lib/stitchGeom.js`, so an aborted gesture can't crash the deferred updater. **Verified:** 4 unit tests (`test/stitchGeom.test.js` — math, null-ref-survival, + a teeth test that the OLD ref-reading pattern throws `/panX/`) and a headless harness (`ui-audit/verify-b325-pan.mjs`: a normal pan moves the world; 12 mid-pan aborts → no error boundary, 0 `panX` errors; pan still works after). lint 0 · build green. VERIFICATION **V84**.
+
+<!-- 2026-06-21: owner-dropped (coworker chat, "Backlog mode") a pair — NEW-1 contrast regression
+     + full-app audit, NEW-2 move the theme picker into Settings. First filed B321/B322, **renumbered
+     to B341 / B342 on merge** — a concurrent `main` landed a Doc-Review Drive batch B321–B324 + the
+     B325–B340 stitcher/file/pinch work while this was in flight, so the real next-free was B341.
+     Filed AND fixed AND verified the SAME session per STANDING RULE #1; recorded straight here (done),
+     not left in Open. Sequence honored: B341 first
+     (legible in both themes) THEN B342 (relocate). DEDUPE: net-new. B341 is the *follow-up* to B320
+     (which shipped the dark text ramp) — B320 migrated index.css + AppHeader + palette.js + the PAL
+     objects but MISSED the inline hardcoded colors in the chrome-region components, which is the
+     regression B341 closes; not a duplicate. B342 supersedes the B316/B317 note "theme control lives
+     in the account dropdown or Settings" by landing it in a row-1 Settings gear (reachable signed-out,
+     which the account dropdown is not). No other open item touches contrast or the theme control. -->
+
+### B341 — Contrast regression from the scheme change; full-app audit `[Site / shared / theming]` (bug)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-1"; first filed B321, renumbered **B341** — concurrent `main` consumed B321–B340)*
+`[x]` **Fixed + audited + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** After the
+B316–B320 scheme change, several chrome elements rendered too light to read. **Root cause:** B318 flipped
+the chrome from always-dark to **themes-with-the-app** (light theme → light chrome), and migrated
+`index.css` + `AppHeader` + `palette.js` + the per-file `PAL` *objects* to tokens — but a set of
+**chrome-region components kept inline hardcoded old-dark-chrome hexes** (`#ece7db` cream text,
+`#fff` active text, `#9b9482`/`#8a8473` warm grays, `#2e2a23` borders, `rgba(255,255,255,0.0x)` fills,
+a hardcoded-dark status-bar bg, and pale dark-chrome badge colors `#86efac`/`#fbbf24`). On the new
+**light** chrome those became cream/white-on-white; one (the planner status bar) was dark-text-on-a-
+still-hardcoded-dark-bg. The two reported cases — the **user-name pill** and the **Dashboard/Map
+toggle** — were exactly this class, so the fix audited the **whole tree**, not just the three reported spots.
+- **Audit method (as briefed):** diffed the scheme commit (`32a1b8a`) to see which tokens changed,
+  then grepped every consumer of the retired hexes; built a **programmatic WCAG checker over every
+  defined token pair** in both themes (`ui-audit/contrast-audit.mjs`, parses the real `index.css`) +
+  a **live headless probe** that reads the computed text/bg of the actual chrome elements
+  (`ui-audit/verify-b341-contrast.mjs`).
+- **Token system itself was sound** — every actionable pair clears AA in both themes; the only WARNs
+  are documented exceptions (locked Site/Schedule brand fills, only ever used as ≥3:1 underline +
+  unused `--on-accent-*` text tokens; the amber Markup underline whose state is also carried by its
+  passing text; owner-exempt subtle borders). So the regression was purely the unmigrated components.
+- **Fixes (repointed to tokens):** `Shell.jsx` (account pill + dropdown), `ProjectBreadcrumb.jsx`
+  (crumbs + dropdown; **AppHeader now passes the `-text` accent token**, never the fill, for the
+  "current"/"New project" labels — fill-as-text was 3.4:1), `SitePlanner.jsx` (status bar bg, Files
+  button, left-rail + tool-rail + snap/parcel active text, hdrTab chips, save-slot warn color),
+  `DocReview.jsx` (header title + Files + chrome buttons), `Stitcher.jsx` (toolbar dividers/buttons),
+  `ReviewsBar.jsx` (badge colors + dropdown), `LayerPanel.jsx` (warm grays → tokens; it rides the
+  themed surface-overlay so it was dark-on-dark in dark mode), and the reusable `Field` label.
+- **Two new tokens** (both themes, AA-checked): **`--on-accent`** (text ON the global accent fill —
+  white in light, near-black in dark because the B319 dark accent `#F26B3A` is too light for white at
+  only 3.0:1) and **`--warn-text`** (legible amber for saving/unsaved/offline badges, replacing the
+  dark-chrome `#fbbf24`).
+- **Before → after (reported + key siblings), contrast on the light chrome:**
+
+  | Element | before | after (light / dark) |
+  |---|---|---|
+  | User-name / Sign-in pill text | `#ece7db` on `#FFF` ≈ **1.2:1** | **16.66 / 15.11** |
+  | Dashboard·Map crumb (active) | `#fff` on `#FFF` = **1.0:1** | **16.66 / 15.11** |
+  | Dashboard·Map crumb (idle) | `#9b9482` ≈ **3.0:1** | **11.2 / 10.4** |
+  | Planner status bar text | dark-on-dark ≈ **1.3:1** | **9.6–14.3 / 8.2–16** |
+  | Markup "Saved ✓" badge | `#86efac` ≈ **1.4:1** | **5.3 / 11** |
+  | Active module tab + inactive tabs | (ok) | 5.3–6.9 / 8–10.3 |
+
+- **Deliverables:** `ui-audit/contrast-audit.mjs` (token-pair report, exits non-zero on any actionable
+  fail) + **`test/contrast.test.js`** (3 tests — both themes pass their floor; the WARN set stays
+  locked) so a future palette edit that drops a pair below AA fails CI instead of the eye. Module
+  accents stayed confined to the tab row (no accent bled into body areas).
+- **Verified:** lint 0 errors · **783 tests** (3 new) · build green · doc-review + SitePlannerApp lazy
+  chunks intact · headless **both themes** all chrome elements clear WCAG AA (**V84**); screenshots
+  `ui-audit/screens/b341-chrome-{light,dark}.png` + `theme-markup-{light,dark}.png`.
+
+### B342 — Move the display-theme picker (Light / Dark / System) out of the open header into Settings `[shared / theming]` (task)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-2"; first filed B322, renumbered **B342** — concurrent `main` consumed B321–B340)*
+`[x]` **Done + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** The Light / Dark / System
+control used to sit open in `AppHeader` row 1 as a 3-button segmented control. It now lives behind a
+**Settings gear (⚙) in row 1** that opens an `AnchoredMenu` popover ("DISPLAY THEME" → Light "Always
+light" / Dark "Always dark" / System "Match your computer", active row checked).
+- **Theme state/store untouched** — the gear popover renders the same `useTheme()`-wired options; only
+  the control's *placement* changed. Persistence stays per-user in `localStorage['planyr.theme']` as
+  before.
+- **Edge case handled:** the "System" live OS-preference listener (`matchMedia('(prefers-color-scheme:
+  dark)')`) lives in **`ThemeProvider`** (app-root context), NOT in the relocated control — so it keeps
+  updating mid-session after the move, verified by inspection + the existing theme tests.
+- **Kept reachable signed-OUT** (deliberate): the gear is always present, so the theme switch never
+  depends on the signed-in account dropdown (and the sandbox self-tests run logged-out). The only
+  header consumer of the old control was AppHeader itself — confirmed nothing else depended on it.
+- **Verified:** lint 0 · 783 tests · build green · headless logged-out (**V84**,
+  `ui-audit/verify-b342-settings.mjs`): segmented control gone, gear opens the popover, choosing Dark →
+  `data-theme="dark"` + persisted, back to Light → `data-theme="light"`; screenshot
+  `ui-audit/screens/b342-settings-popover.png`.
 
 <!-- ✅ DONE 2026-06-21 (branch claude/ecstatic-faraday-qoc8vf, commit 32a1b8a). The B316 umbrella +
      B317–B320 shipped together as one chain: light / dark / system theming. Token system (data-theme
