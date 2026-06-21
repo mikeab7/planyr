@@ -60,6 +60,16 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V97 — Markup header de-clutter + truthful save "cloud" chip (B357–B360) ✅ (self-verified headless, logged-out; one optional signed-in eyeball on the green "Saved" state)
+- **Added** 2026-06-21 · **Cadence** once (header redesign acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out) · **Next check** — one optional signed-in eyeball (below); the sandbox proxy blocks sign-in.
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-header-redesign.mjs`, after = PASS, 0 page errors; before/after screenshots in `ui-audit/screens/header-*`):**
+  - **B358 — no cry-wolf:** the empty Markup header (nothing open) shows **no save chip at all** — the old "● Not saved" is gone; once a PDF is open (logged-out) it reads the honest **"On this device"**.
+  - **B357 — row hierarchy:** measured row heights are **`[35, 44]`** (Row 2 taller than Row 1); the duplicate project title is gone from the centre zone.
+  - **B359 — Library retired:** no "📁 Library" button in **either** the single-sheet header or the Stitcher toolbar.
+  - **B360 — Reviews relocated:** the "Reviews ▾" button now resolves inside **Row 2** (tools), not Row 1.
+- **✅ Truth-table locked (`test/reviewsBadge.test.js`, 7 tests):** the save-chip states that need a signed-in/cloud session — green cloud-✓ **"Saved"** (signed-in / explicit save), pulsing **"Saving…"**, and the loud red **"Sync conflict"** — are proven by the pure `chipFor` contract (idle → null; signed-in → Saved; conflict → its own loud state; never the dishonest "Not saved").
+- **⏳ Optional signed-in eyeball (not blocking):** on planyr.io, sign in, open a Markup review, make an edit → confirm the chip cycles **Saving… → ✓ Saved** (green cloud-check). Headless can't reach signed-in (proxy blocks auth); the logic is unit-locked, so this is a visual nicety only.
+- **NB (not a bug to fix here):** the separate **"⊘ Cloud off"** pill is the Shell's auth control when Supabase isn't configured for the build — it shows in the sandbox preview but on a cloud-configured planyr.io it's the Sign-in/account pill. If it's visible in production, the cloud env vars aren't wired into that deploy (a config item).
 ### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
 - **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.

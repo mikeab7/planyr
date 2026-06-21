@@ -87,6 +87,7 @@ const ppfToZoom = (ppf, lat) =>
 
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
+const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — a lighter tint of the cartographic teal pond, distinct from the existing basin
 const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
 const DOGEAR_D = 60; // dog-ear projection out from the dock face
 // B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
@@ -4657,6 +4658,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // so ink it dark with a white halo to read over any background (B121 round 2b).
     // B231 — a water-body (pond) label is the app's proportional sans (Inter), dark slate
     // `#0E2E36` with a white casing/halo so it stays legible over busy aerial at any fill.
+    // (The white halo means the existing/added two-tone fills below need no per-zone ink.)
     const carto = d.carto;
     const fam = carto ? "Inter, system-ui, sans-serif" : "ui-monospace, Menlo, monospace";
     const halo = carto || leader;
@@ -7496,6 +7498,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           {warns.map((w, i) => (
                             <div key={i} style={{ fontSize: 10.5, color: PAL.warn, lineHeight: 1.4, marginTop: 5 }}>⚠ {w}</div>
                           ))}
+                          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 7 }}>
+                            <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 5 }}>Fill colors</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
+                              <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
+                                onChange={(e) => setDet({ existFill: e.target.value })}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
+                              <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
+                                onChange={(e) => setDet({ addFill: e.target.value })}
+                                style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
+                            </div>
+                          </div>
                           <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                             <button style={{ ...chip, flex: 1 }} onClick={resetExisting}>Reset to existing</button>
                             <button style={{ ...chip, flex: 1, borderColor: PAL.accent, color: PAL.accent, fontWeight: 700 }} onClick={doneExpand}>Done</button>
@@ -8269,11 +8286,18 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const ghostEl = (k) => <path key={k} d={ghostPath} fill="none" stroke="#2C5D6B" strokeWidth={1.25} strokeDasharray="7 5" opacity={0.8} pointerEvents="none" />;
   if (el.points) { // polygon element (irregular area drawn by clicking points)
     const dPath = el.points.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+    // B157: in expansion mode paint the two zones with distinct fills — the whole (expanded)
+    // shape in the "added" tint, then the existing basin painted on top. The existing basin
+    // keeps the cartographic water gradient by default (a normal pond looks unchanged); the
+    // added ring reads as a lighter solid tint. Either zone is user-overridable.
+    const existF = el.det?.existFill ?? waterFill;
+    const addF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
     return (
       <g key={el.id} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: tool === "select" ? "move" : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
-        <path d={dPath} fill={waterFill} fillOpacity={waterOp} stroke="none" />
+        <path d={dPath} fill={ghostPath ? addF : waterFill} fillOpacity={waterOp} stroke="none" />
+        {ghostPath && <path d={ghostPath} fill={existF} fillOpacity={waterOp} stroke="none" pointerEvents="none" />}
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
@@ -8286,8 +8310,14 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   const w = el.w * ppf, h = el.h * ppf;
   const parts = [];
   const rx = el.type === "pond" ? Math.min(w, h) * 0.12 : 0;
-  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={waterFill} fillOpacity={waterOp}
+  // B157: in expansion mode, split the rect pond into two fill zones — existing basin keeps
+  // the cartographic gradient by default; the added ring gets the lighter solid tint.
+  const rectExistF = el.det?.existFill ?? waterFill;
+  const rectAddF = el.det?.addFill ?? POND_ADD_FILL_DEFAULT;
+  parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
     stroke={st.cartoWater ? st.stroke : (isSel ? selStroke : st.stroke)} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 0.75 : st.weight)} rx={rx} />);
+  // Baseline ghost fill (existing basin) sits on top of the added-tint rect; stroke layer added below.
+  if (ghostPath) parts.push(<g key="ghostfill" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}><path d={ghostPath} fill={rectExistF} fillOpacity={waterOp} stroke="none" pointerEvents="none" /></g>);
   if (texFill) parts.push(<rect key="tex" x={tl.x} y={tl.y} width={w} height={h} fill={texFill} rx={rx} pointerEvents="none" />);
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.
