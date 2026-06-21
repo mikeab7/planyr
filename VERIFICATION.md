@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
+- **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
+- **✅ `ui-audit/contrast-audit.mjs`:** every token pair (incl. the new `--success/danger/info-text`) clears WCAG AA in both themes.
+- **Note:** the sign-in-gated deep drawers (Project Files / Library) and SiteReviewModal weren't render-reached logged-out, but their colours are provably AA via the token audit; an optional signed-in eyeball on planyr.io in **dark** mode is a nicety, not a blocker.
+
 ### V95 — New site plans default to lettered concepts (Concept A, B, … AA) (B355) ✅ (self-verified headless in the real planner — fully done)
 - **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — the logged-out localStorage store is the same plan-creation code path used signed-in) · **Next check** — none required.
 - **✅ Live-verified 2026-06-21 (`ui-audit/verify-b355-concepts.mjs`, 4/4 checks, 0 genuine page errors):** seeded a real saved site, resumed into the planner, and clicked **Plan ▾ → ＋ New plan** for three cases — the header re-labelled the new plan exactly as designed:

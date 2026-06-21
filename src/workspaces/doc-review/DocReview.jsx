@@ -981,7 +981,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "var(--warn-text)" }}>Re-open file…</button>
         </div>
       )}
 
@@ -1000,7 +1000,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Document Review</div>
             <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
             <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
-            {err && <div style={{ color: "#b91c1c", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
+            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
           </div>
         </div>
       ) : (
@@ -1129,10 +1129,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
               {(() => {
                 const info = calInfo[page];
                 if (ftPerUnit && info?.src === "auto")
-                  return <span style={{ color: "#b45309" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
-                if (ftPerUnit) return <span style={{ color: "#15803d" }}>Sheet {page} calibrated</span>;
-                if (info?.src === "nts") return <span style={{ color: "#b45309" }}>Sheet {page} — marked NOT TO SCALE</span>;
-                return <span style={{ color: "#b45309" }}>Sheet {page} not calibrated — use Calibrate</span>;
+                  return <span style={{ color: "var(--warn-text)" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
+                if (ftPerUnit) return <span style={{ color: "var(--success-text)" }}>Sheet {page} calibrated</span>;
+                if (info?.src === "nts") return <span style={{ color: "var(--warn-text)" }}>Sheet {page} — marked NOT TO SCALE</span>;
+                return <span style={{ color: "var(--warn-text)" }}>Sheet {page} not calibrated — use Calibrate</span>;
               })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
@@ -1153,10 +1153,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                   <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span>
                 </div>
               ))}
-              {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "#b45309", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
+              {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "var(--warn-text)", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>Areas/counts use the shared coordinate module — the seam to feed the Site Planyr's yield panel (pending the shared coordinate spine).</div>
             </div>
-            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "#b3361b" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
+            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "var(--danger-text)" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
           </div>
           ) : (
             <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>

@@ -42,6 +42,14 @@
   --accent-schedule-text: #534AB7;
   --accent-markup-text:   #8A5410;
 
+  /* Semantic TEXT colors (success / danger / info) — theme-aware so a colored label
+     stays AA on a themed panel in BOTH themes. A hardcoded #15803d / #b3361b / #1d4ed8
+     reads fine on a light card but drops to ~2.5–3.2:1 on a dark card (B354 sweep).
+     (--warn-text above is the amber member of this set.) */
+  --success-text: #15803D;
+  --danger-text:  #B3361B;
+  --info-text:    #1D4ED8;
+
   /* Project-status palette (B234) as tokens so DOM badges theme live. The canonical
      hexes mirror src/shared/ui/statusTokens.js (map pins read those directly — pins
      sit on the aerial map, a theme-neutral surface). Dark = lighter variants (B320). */
@@ -128,6 +136,11 @@
   --accent-site-text:     #5DCAA5;
   --accent-schedule-text: #AFA9EC;
   --accent-markup-text:   #EF9F27;
+
+  /* Semantic TEXT colors — lightened for legibility on the dark panels (B354). */
+  --success-text: #4FBF7B;
+  --danger-text:  #F2706F;
+  --info-text:    #6FB4F0;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320) */
   --status-pursuit:  #6FB4F0;

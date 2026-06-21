@@ -149,8 +149,8 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                       {f.ageMs != null && f.summary && <span style={{ color: muted }}> · {formatAge(f.ageMs)}</span>}
                     </span>
                   )}
-                  {f.straddle && <span style={{ display: "block", marginTop: 2, color: "#9a3412", fontWeight: 600 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</span>}
-                  {mapFailed && <span style={{ display: "block", marginTop: 3, color: "#b45309", fontSize: 10.5, lineHeight: 1.4 }}>⚠ This layer's map service isn't responding right now — the screen result above still stands; try the map again shortly.</span>}
+                  {f.straddle && <span style={{ display: "block", marginTop: 2, color: "var(--warn-text)", fontWeight: 600 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</span>}
+                  {mapFailed && <span style={{ display: "block", marginTop: 3, color: "var(--warn-text)", fontSize: 10.5, lineHeight: 1.4 }}>⚠ This layer's map service isn't responding right now — the screen result above still stands; try the map again shortly.</span>}
                 </span>
                 {hasDetail && <span style={{ color: muted, flex: "none", fontSize: 10 }}>{isOpen ? "▾" : "▸"}</span>}
               </div>
@@ -163,7 +163,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                     </ul>
                   )}
                   {f.sourceName && <div style={{ color: muted, marginTop: 2 }}>Source: {f.sourceName}{f.ageMs != null && ` · updated ${formatAge(f.ageMs)} ago`}</div>}
-                  {f.caveat && <div style={{ color: "#92400e", marginTop: 4, fontStyle: "italic", lineHeight: 1.45 }}>{f.caveat}</div>}
+                  {f.caveat && <div style={{ color: "var(--warn-text)", marginTop: 4, fontStyle: "italic", lineHeight: 1.45 }}>{f.caveat}</div>}
                 </div>
               )}
             </div>
@@ -172,7 +172,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "#1d4ed8" }}>◍ Map</b> on a finding to see that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Map</b> on a finding to see that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
       </div>
     </div>
   );
