@@ -1,4 +1,4 @@
-/* Auto-group pages into logical sheets (B325) — the collapsed sheet list.
+/* Auto-group pages into logical sheets (B335) — the collapsed sheet list.
  *
  * PURE. Input: per-page metadata records (from sheetMeta.readSheetMeta, in page order).
  * Output: the LOGICAL sheet list — consecutive pages that share a plan type AND form a

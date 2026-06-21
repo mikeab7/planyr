@@ -13,10 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
-import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
+import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
+import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
@@ -47,10 +48,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B304)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B325/B326)
+  const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
   const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
-  const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B328)
-  const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B328)
+  const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
+  const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
   const [notice, setNotice] = useState("");                // transient auto-stitch result line
   const drag = useRef(null);
 
@@ -136,7 +137,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         if (miss) { await bindSource(miss.srcId, doc, f); continue; }
         const srcId = newSourceId();
         setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, driveKey: null, oversize: false, missing: false, groups: null }]);
-        readGroupsFor(srcId, doc); // B325/B326: read each page + collapse into logical sheets (background)
+        readGroupsFor(srcId, doc); // B335/B336: read each page + collapse into logical sheets (background)
         // Store Drive-first, Supabase-fallback (B322) — the same path filing uses, so stitched
         // sheets live in Drive and aren't bound by Supabase's 50 MB cap. A sheet stays keyless
         // in state until this resolves; buildSnapshot won't persist a keyless source (B323).
@@ -148,7 +149,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     finally { setBusy(false); }
   };
 
-  // Read every page's metadata and collapse the file into logical sheets (B325/B326). Runs in
+  // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
   // the background after a drop — read-only, so it can't clobber the placement state; on any
   // failure the file just falls back to the raw per-page tray (never blocks adding sheets).
   const readGroupsFor = async (srcId, doc) => {
@@ -186,9 +187,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  /* Add a whole LOGICAL sheet at once (B325): render every page in the group, AUTO-STITCH them
-   * from their match-line seams (B327), AUTO-CALIBRATE from the stated scale (B329), and tag the
-   * title-block band so the composite can crop it (B328). A single-page logical sheet just drops
+  /* Add a whole LOGICAL sheet at once (B335): render every page in the group, AUTO-STITCH them
+   * from their match-line seams (B337), AUTO-CALIBRATE from the stated scale (B339), and tag the
+   * title-block band so the composite can crop it (B338). A single-page logical sheet just drops
    * one page. Sheets the seam graph can't reach stay aligned:false → the manual-Align safety net,
    * pre-seeded with their detected seam endpoints. The drawing-area edge is the seam reference. */
   const addGroup = async (pdf, group) => {
@@ -229,7 +230,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         off += s.baseW + GAP;
       }
       setPlaced((arr) => [...arr, ...newSheets]);
-      // Auto-calibrate the composite from the group's stated scale, once (B329).
+      // Auto-calibrate the composite from the group's stated scale, once (B339).
       let calMsg = "";
       if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
       setNotice(unplaced.length
@@ -238,11 +239,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left - view.panX) / view.zoom, y: (e.clientY - r.top - view.panY) / view.zoom }; };
+  // Screen<->world via the shared viewport engine (B329); { zoom, panX, panY } == { scale, tx, ty }.
+  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
 
-  // Start a manual Align. When the sheet's own match-line seam was detected (B326) but it
+  // Start a manual Align. When the sheet's own match-line seam was detected (B336) but it
   // couldn't be auto-placed, PRE-SEED the moving sheet's two seam endpoints so the user only
-  // clicks the two matching points on a placed sheet — half the clicks (B327 fallback chain).
+  // clicks the two matching points on a placed sheet — half the clicks (B337 fallback chain).
   const startAlign = (sheetId) => {
     setTool("pan"); setDraft(null); setErr("");
     const s = placed.find((x) => x.id === sheetId);
@@ -317,7 +319,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
   const onMove = (e) => {
     setCursor(toWorld(e));
-    if (drag.current) { setView((v) => ({ ...v, panX: drag.current.panX + (e.clientX - drag.current.sx), panY: drag.current.panY + (e.clientY - drag.current.sy) })); }
+    // Capture the drag origin into a local NOW, then close over it (panTo). This setView updater
+    // runs in React's render phase, which for a continuous event (pointermove) can be deferred a
+    // tick — and a discrete event in between (pointerup, pointercancel, or the blur/visibility
+    // abort below) may null drag.current first. Reading the ref *inside* the deferred updater
+    // then dereferenced null → the whole stitcher crashed (B325: "reading 'panX'"). The captured
+    // `d` keeps the pan correct even if the gesture is aborted mid-flight.
+    const d = drag.current;
+    if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));
   };
   const onUp = (e) => { if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
   // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window
@@ -332,7 +341,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
-  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
+  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
   // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
   // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
@@ -343,7 +352,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
     setErr("");
-    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.zoom + view.panX, y: ((pts[0].y + pts[1].y) / 2) * view.zoom + view.panY, value: "" });
+    const mid = worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+    setCalInput({ pts, x: mid.x, y: mid.y, value: "" });
   };
   // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
   const commitCalibrate = () => {
@@ -482,12 +492,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return t;
   }, { distFt: 0, areaSf: 0 });
 
-  // The composite "key" (B328): the distinct grouped plans currently on the canvas (one merged
+  // The composite "key" (B338): the distinct grouped plans currently on the canvas (one merged
   // entry per group, not one title block per sheet). Pinned as a panel so it stays readable at
   // any zoom instead of being baked into the raster.
   const composite = [...new Map(placed.filter((s) => s.groupLabel).map((s) => [s.groupLabel, s])).values()];
 
-  // The tray shows LOGICAL sheets (B325) once a file has been read+grouped: one entry per
+  // The tray shows LOGICAL sheets (B335) once a file has been read+grouped: one entry per
   // group/single, click to add the whole thing auto-stitched. "Show all pages" (or a file still
   // being read) falls back to the raw per-page list — the safety net that never went away.
   const trayItems = pdfs.flatMap((p) => {
@@ -526,7 +536,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
-        <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B328)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
+        <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
         <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
@@ -573,7 +583,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
                   </g>;
                 }
-                // B328 — on a grouped composite, clip each sheet to its drawing area so the
+                // B338 — on a grouped composite, clip each sheet to its drawing area so the
                 // title-block band is hidden and the drawing areas butt cleanly. Fail open: only
                 // when a band was actually detected (drawingArea smaller than the full page).
                 const da = s.drawingArea;
@@ -631,7 +641,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {align && " · Esc to cancel"}
             </div>
           )}
-          {/* Pinned composite KEY (B328): one merged entry per grouped plan + the auto-set scale,
+          {/* Pinned composite KEY (B338): one merged entry per grouped plan + the auto-set scale,
               floated over the canvas so it stays readable at any zoom (not baked into the raster). */}
           {composite.length > 0 && legendOpen && (
             <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 210, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
@@ -650,7 +660,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           {composite.length > 0 && !legendOpen && (
             <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key</button>
           )}
-          {/* Auto-stitch result line (B327) — what just happened, dismissable. */}
+          {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
           {notice && (
             <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: 8, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
           )}

@@ -1,9 +1,9 @@
-/* Automatic match-line stitching (B327) — the roadmap's "automatic match-line detection,"
+/* Automatic match-line stitching (B337) — the roadmap's "automatic match-line detection,"
  * now specified. PURE geometry layered on the EXISTING similarity fit (`solveM`, stitchGeom.js,
- * B300): from each sheet's match-line labels (read by sheetMeta, B326) it builds the sheet
+ * B300): from each sheet's match-line labels (read by sheetMeta, B336) it builds the sheet
  * adjacency, then places each sheet by feeding the two endpoints of a shared match line as the
  * correspondence pair into `solveM` — no shared property corner needed. Per-sheet stated scale
- * (B329) handles calibration; the transform itself comes straight from the seam endpoints.
+ * (B339) handles calibration; the transform itself comes straight from the seam endpoints.
  *
  * Safety net (owner rule): when labels are missing/unreadable a sheet is left UNPLACED and the
  * caller drops back to the proven 2-point manual Align — pre-seeded with `detectedEndpointsFor`
@@ -18,7 +18,7 @@ export const oppositeSide = (side) => OPP[side] || null;
 /* The two endpoints of a sheet's match-line seam, in page units, in a CONSISTENT order so two
  * sheets that share the seam correspond endpoint-for-endpoint (vertical cut → [top, bottom];
  * horizontal cut → [left, right]). The seam is taken as the drawing-area edge on that side
- * (B326's drawingArea = page minus the title block), which is reproducible on both sheets. */
+ * (B336's drawingArea = page minus the title block), which is reproducible on both sheets. */
 export function detectedEndpointsFor(drawingArea, side) {
   if (!drawingArea || !side) return null;
   const x0 = drawingArea.x, x1 = drawingArea.x + drawingArea.w;

@@ -21,7 +21,7 @@ const PAGES = {
 const doc = { numPages: 5 };
 const extractItems = async (_doc, p) => PAGES[p];
 
-describe("readSheets — per-page metadata from positioned text (B326)", () => {
+describe("readSheets — per-page metadata from positioned text (B336)", () => {
   it("reads number, title, and scale for each page via the injected extractor", async () => {
     const sheets = await readSheets(doc, { extractItems });
     expect(sheets).toHaveLength(5);
@@ -38,7 +38,7 @@ describe("readSheets — per-page metadata from positioned text (B326)", () => {
   });
 });
 
-describe("readAndGroup — collapse the set into logical sheets (B325)", () => {
+describe("readAndGroup — collapse the set into logical sheets (B335)", () => {
   it("yields cover (single) + grading (group of 3) + utility (single)", async () => {
     const { groups } = await readAndGroup(doc, { extractItems });
     expect(groups).toHaveLength(3);
@@ -49,7 +49,7 @@ describe("readAndGroup — collapse the set into logical sheets (B325)", () => {
   });
 });
 
-describe("statedCalibration / groupCalibration — auto-calibrate per group (B329)", () => {
+describe("statedCalibration / groupCalibration — auto-calibrate per group (B339)", () => {
   it("turns a trusted stated scale into ft-per-point on a standard plot", async () => {
     const sheets = await readSheets(doc, { extractItems });
     expect(statedCalibration(sheets[1])).toBeCloseTo(40 / 72, 6); // 1"=40' on ANSI D

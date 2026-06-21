@@ -1,9 +1,9 @@
-/* Sheet reading + grouping glue (B325/B326/B329) — the thin browser-only bridge between
+/* Sheet reading + grouping glue (B335/B336/B339) — the thin browser-only bridge between
  * pdf.js and the pure engines. Pulls each page's POSITIONED text (extractPageItems), runs the
- * pure sheet-metadata reader (sheetMeta, B326), and collapses the set into logical sheets
- * (sheetGroups, B325). Also derives a per-group calibration from the stated scale (B329).
+ * pure sheet-metadata reader (sheetMeta, B336), and collapses the set into logical sheets
+ * (sheetGroups, B335). Also derives a per-group calibration from the stated scale (B339).
  *
- * OCR seam (B326): a scanned/image-only page comes back with hasText:false. `ocr` is an
+ * OCR seam (B336): a scanned/image-only page comes back with hasText:false. `ocr` is an
  * injectable hook that, when provided, fills in positioned items for such a page (the intended
  * fill-in is a Tesseract.js Web Worker). It's left as a dormant seam — exactly like the app's
  * other not-yet-provisioned heavy compute (the AI title-block reader, the APS converter): the
@@ -45,14 +45,14 @@ export async function readSheets(doc, { extractItems = defaultExtractItems, ocr 
   return out;
 }
 
-/* Read a PDF and collapse it into the logical sheet list (B325). Each logical entry's `pages`
+/* Read a PDF and collapse it into the logical sheet list (B335). Each logical entry's `pages`
  * carry { pageNum, ...meta } so the caller maps a group back to real PDF pages. */
 export async function readAndGroup(doc, opts = {}) {
   const pages = await readSheets(doc, opts);
   return { pages, groups: groupSheets(pages) };
 }
 
-/* Feet per page-POINT implied by a page's STATED scale (B329) — the value the Stitcher uses as
+/* Feet per page-POINT implied by a page's STATED scale (B339) — the value the Stitcher uses as
  * `ftPerUnit` (its world units are page points). Trust the printed scale ONLY when the page is a
  * standard plot size (a misread/half-size sheet would mis-scale the whole group); else 0. */
 export function statedCalibration(meta = {}) {

@@ -3,7 +3,7 @@ import { parseSheetCode, consecutiveCodes, groupKey, groupSheets } from "../src/
 
 const sheet = (sheetNumber, item, discipline = "Civil", sheetTitle = "") => ({ sheetNumber, item, discipline, sheetTitle });
 
-describe("parseSheetCode + consecutiveCodes — sheet-number contiguity (B325)", () => {
+describe("parseSheetCode + consecutiveCodes — sheet-number contiguity (B335)", () => {
   it("parses prefix/major/minor into a comparable ordinal", () => {
     expect(parseSheetCode("C5")).toMatchObject({ prefix: "C", major: 5, minor: null, ordinal: 5 });
     expect(parseSheetCode("C-2.01")).toMatchObject({ prefix: "C", major: 2, minor: 1, ordinal: 201 });
@@ -25,7 +25,7 @@ describe("groupKey — same plan type chains, generic does not", () => {
   });
 });
 
-describe("groupSheets — collapse a real set into logical sheets (B325)", () => {
+describe("groupSheets — collapse a real set into logical sheets (B335)", () => {
   it("groups a contiguous grading run and leaves the cover + a lone detail standalone", () => {
     const pages = [
       sheet("", "Document", "Other", "COVER SHEET"),          // cover — no number → standalone

@@ -6,7 +6,7 @@ const DA = { x: 0, y: 0, w: 1900, h: 1584 }; // drawing area (page minus right-e
 
 const sheet = (id, sheetNumber, matchLines, drawingArea = DA) => ({ id, sheetNumber, matchLines, drawingArea });
 
-describe("detectedEndpointsFor — seam endpoints in a consistent order (B327)", () => {
+describe("detectedEndpointsFor — seam endpoints in a consistent order (B337)", () => {
   it("returns the drawing-area edge endpoints per side", () => {
     expect(detectedEndpointsFor(DA, "right")).toEqual([{ x: 1900, y: 0 }, { x: 1900, y: 1584 }]);
     expect(detectedEndpointsFor(DA, "left")).toEqual([{ x: 0, y: 0 }, { x: 0, y: 1584 }]);
@@ -25,7 +25,7 @@ describe("buildAdjacency — seam graph from match-line targets", () => {
   });
 });
 
-describe("autoPlaceGroup — place sheets from their seams via solveM (B327)", () => {
+describe("autoPlaceGroup — place sheets from their seams via solveM (B337)", () => {
   it("places C-6 immediately right of C-5, seam coincident", () => {
     const a = sheet("a", "C-5", [{ target: "C-6", side: "right" }]);
     const b = sheet("b", "C-6", [{ target: "C-5", side: "left" }]);

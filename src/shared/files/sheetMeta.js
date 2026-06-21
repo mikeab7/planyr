@@ -1,5 +1,5 @@
-/* Sheet-metadata reader (B326) — the shared engine behind auto-grouping (B325), automatic
- * match-line stitching (B327), per-group auto-calibration (B329), and (the roadmap's)
+/* Sheet-metadata reader (B336) — the shared engine behind auto-grouping (B335), automatic
+ * match-line stitching (B337), per-group auto-calibration (B339), and (the roadmap's)
  * auto-filing. PURE + browser-free: it takes the POSITIONED text of one page —
  * { items:[{ str,x,y,w,h }], width, height } in top-left page units (from
  * doc-review/lib/pdf.js `extractPageItems`) — and returns what a human reads off the sheet:
@@ -7,7 +7,7 @@
  * "MATCH LINE … SEE SHEET X" label with its position + orientation.
  *
  * Why positional (vs. the existing JOINED-string filing reader, titleBlockParse.js): grouping
- * needs the sheet TITLE; stitching needs each match line's ENDPOINTS; cropping (B328) needs the
+ * needs the sheet TITLE; stitching needs each match line's ENDPOINTS; cropping (B338) needs the
  * title-block BAND. None of that survives `items.map(i=>i.str).join(" ")`. So this REUSES the
  * deterministic field parsers (titleBlockParse: discipline/item/sheet#/revision/date) and the
  * scale parser (overlayScale.parseSheetScale, B267) over the joined text, and adds the spatial
@@ -113,7 +113,7 @@ export function parseMatchLines(lines, dims = {}) {
 /* The title block is a dense strip of text against the RIGHT edge (vertical title block) or
  * the BOTTOM edge (horizontal). Find it by text density: compare how much text mass sits in a
  * right-edge band vs. a bottom-edge band vs. the rest. Return the winning band rect (the strip
- * to crop, B328) — or null when neither edge is clearly denser (fail open: don't crop). */
+ * to crop, B338) — or null when neither edge is clearly denser (fail open: don't crop). */
 export function detectTitleBlock(items, dims = {}) {
   const width = dims.width || 0, height = dims.height || 0;
   if (!width || !height || !(items || []).length) return null;
@@ -139,7 +139,7 @@ export function detectTitleBlock(items, dims = {}) {
   return { side: "bottom", x: 0, y: bottomY, w: width, h: height - bottomY };
 }
 
-// The drawing area = the page minus the title-block band (what B328 keeps when it crops).
+// The drawing area = the page minus the title-block band (what B338 keeps when it crops).
 export function drawingAreaOf(dims, band) {
   const width = dims.width || 0, height = dims.height || 0;
   if (!band) return { x: 0, y: 0, w: width, h: height };

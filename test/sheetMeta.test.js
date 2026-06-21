@@ -27,7 +27,7 @@ function gradingSheet() {
   return { items, width: W, height: H };
 }
 
-describe("reconstructLines — rebuild human lines from fragmented runs (B326)", () => {
+describe("reconstructLines — rebuild human lines from fragmented runs (B336)", () => {
   it("joins runs that share a baseline, left-to-right", () => {
     const items = [
       { str: "SHEET", x: 1810, y: 700, w: 40, h: 14 }, { str: "C-6", x: 1860, y: 700, w: 30, h: 14 },
@@ -56,7 +56,7 @@ describe("edgeOf — which page edge a label sits against → cut orientation", 
   });
 });
 
-describe("parseMatchLines — labels + target sheet + side (B326/B327)", () => {
+describe("parseMatchLines — labels + target sheet + side (B336/B337)", () => {
   it("reads 'MATCH LINE - SEE SHEET C-6' as a right-edge vertical seam to C-6", () => {
     const lines = reconstructLines(gradingSheet().items);
     const ml = parseMatchLines(lines, { width: W, height: H });
@@ -78,7 +78,7 @@ describe("parseMatchLines — labels + target sheet + side (B326/B327)", () => {
   });
 });
 
-describe("detectTitleBlock / drawingArea — the band to crop (B326/B328)", () => {
+describe("detectTitleBlock / drawingArea — the band to crop (B336/B338)", () => {
   it("finds a dense right-edge title block and yields the drawing area to its left", () => {
     const { items } = gradingSheet();
     const band = detectTitleBlock(items, { width: W, height: H });

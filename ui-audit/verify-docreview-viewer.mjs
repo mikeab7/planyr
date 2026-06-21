@@ -6,7 +6,7 @@
  *          canvas (zoom in), and the page-point under the cursor stays put.
  *   B290 — the + button is cursor/centre-anchored: scale grows AND the content point at the
  *          viewport centre stays at the centre (no drift).
- *   B289 — Pan tool drag scrolls the viewport by the (negated) drag delta.
+ *   B289 — Pan tool drag moves the sheet by the drag delta (transform pan; free any direction, B329).
  *   B292 — switching sheets keeps the current zoom (no snap back to fit-width).
  *   B295 — "Fit page" fits the WHOLE sheet in view (cssH ≤ available height) where plain
  *          "Fit" (width) overflows vertically.
@@ -57,10 +57,10 @@ function buildPdf() {
 const results = [];
 const ok = (name, pass, detail) => { results.push({ name, pass, detail }); console.log(`${pass ? "PASS ✅" : "FAIL ❌"}  ${name}  —  ${detail}`); };
 
-// geometry of the scroll viewport (canvas → content div → scroll wrap) + the canvas
+// geometry: canvas → page box (translated) → viewport. canL/canT track pan; cssW/cssH track zoom (B329)
 const geom = (page) => page.evaluate(() => {
   const c = document.querySelector("canvas");
-  const wrap = c.parentElement.parentElement; // content div → scroll viewport
+  const wrap = c.parentElement.parentElement; // page box → viewport
   const cr = c.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
   return {
     canL: cr.left, canT: cr.top, cssW: cr.width, cssH: cr.height,
@@ -107,7 +107,7 @@ try {
     const g0 = await geom(page);
     const cx = g0.wrapL + g0.wrapW / 2, cy = g0.wrapT + g0.wrapH / 2;
     const fx = (cx - g0.canL) / g0.cssW, fy = (cy - g0.canT) / g0.cssH;
-    await page.getByRole("button", { name: "+", exact: true }).click();
+    await page.getByRole("button", { name: "In", exact: true }).click();
     await page.waitForFunction((w0) => document.querySelector("canvas").getBoundingClientRect().width > w0 + 2, g0.cssW, { timeout: 4000 }).catch(() => {});
     await page.waitForTimeout(250);
     const g1 = await geom(page);
@@ -118,11 +118,9 @@ try {
     ok("B290 + holds the viewport centre", drift < 14, `centre drifted ${drift.toFixed(1)}px`);
   }
 
-  // ---- B289: Pan tool drag scrolls the viewport ----
+  // ---- B289: Pan tool drag moves the sheet (now a transform pan — free in any direction, B329) ----
   {
     await page.getByRole("button", { name: "Pan", exact: true }).click();
-    // seed a mid scroll position so a drag has room to move in both directions
-    await page.evaluate(() => { const w = document.querySelector("canvas").parentElement.parentElement; w.scrollLeft = Math.min(300, w.scrollWidth - w.clientWidth); w.scrollTop = Math.min(200, w.scrollHeight - w.clientHeight); });
     await page.waitForTimeout(120);
     const g0 = await geom(page);
     const sx = g0.wrapL + g0.wrapW / 2, sy = g0.wrapT + g0.wrapH / 2;
@@ -130,8 +128,8 @@ try {
     await page.mouse.move(sx + 110, sy + 70, { steps: 6 }); await page.mouse.up();
     await page.waitForTimeout(150);
     const g1 = await geom(page);
-    const dL = g0.scrollLeft - g1.scrollLeft, dT = g0.scrollTop - g1.scrollTop; // dragging right/down reveals left/up → scroll decreases
-    ok("B289 drag-to-pan scrolls the viewport", dL > 60 && dT > 35, `scroll Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
+    const dL = g1.canL - g0.canL, dT = g1.canT - g0.canT; // the sheet follows the drag (transform translate, B329)
+    ok("B289 drag-to-pan moves the sheet", dL > 80 && dT > 50, `sheet Δ = (${Math.round(dL)}, ${Math.round(dT)})px for a (110,70) drag`);
   }
 
   // ---- B292: switching sheets keeps the current zoom ----
@@ -148,7 +146,7 @@ try {
     await page.getByRole("button", { name: "Fit", exact: true }).click();
     await page.waitForTimeout(500);
     const gw = await geom(page);
-    await page.getByRole("button", { name: "Fit page", exact: true }).click();
+    await page.getByRole("button", { name: "Page", exact: true }).click();
     await page.waitForTimeout(500);
     const gp = await geom(page);
     const widthFitOverflows = gw.cssH > gw.wrapH + 2;          // portrait Letter, fit-width is taller than the viewport
@@ -159,7 +157,7 @@ try {
 
   // ---- B291: Count finishes with N points on double-click, not N+2 (HIGH) ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet on-screen so every click lands
+    await page.getByRole("button", { name: "Page", exact: true }).click(); // whole sheet on-screen so every click lands
     await page.waitForTimeout(500);
     await page.getByRole("button", { name: "Count", exact: true }).click();
     const g = await geom(page);
@@ -175,7 +173,7 @@ try {
 
   // ---- B293: move a placed Rect; create + edit a Text note inline ----
   {
-    await page.getByRole("button", { name: "Fit page", exact: true }).click(); // whole sheet visible
+    await page.getByRole("button", { name: "Page", exact: true }).click(); // whole sheet visible
     await page.waitForTimeout(500);
     // draw a rect
     await page.getByRole("button", { name: "Rect", exact: true }).click();

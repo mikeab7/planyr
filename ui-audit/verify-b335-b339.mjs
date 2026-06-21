@@ -1,15 +1,15 @@
-/* Verify B325–B329 — Document Review "drop a whole set → it stitches itself."
+/* Verify B335–B339 — Document Review "drop a whole set → it stitches itself."
  *
  * Drives the REAL built app (logged-out; the stitch core is browser-only) with a generated
  * 4-sheet vector PDF that carries real title blocks, stated scales, and MATCH-LINE labels —
  * so the whole pipeline (read → group → auto-stitch → auto-calibrate → crop) runs for real.
  * Asserts:
- *   B325 — the tray collapses 4 pages into 2 LOGICAL sheets: a COVER single + a 3-sheet
+ *   B335 — the tray collapses 4 pages into 2 LOGICAL sheets: a COVER single + a 3-sheet
  *          "Grading Plan" group labelled with its sheet range + "auto-stitch".
- *   B327 — clicking the group AUTO-PLACES all 3 sheets, seams coincident (overlapping at the
+ *   B337 — clicking the group AUTO-PLACES all 3 sheets, seams coincident (overlapping at the
  *          cut, not dropped at the old +40 gap), left-to-right.
- *   B329 — the composite auto-calibrates from the sheet's stated scale (no manual Calibrate).
- *   B328 — each grouped sheet's title-block band is cropped (clipPath per sheet); the toggle
+ *   B339 — the composite auto-calibrates from the sheet's stated scale (no manual Calibrate).
+ *   B338 — each grouped sheet's title-block band is cropped (clipPath per sheet); the toggle
  *          turns it off; a pinned composite "key" lists the group once.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
@@ -97,7 +97,7 @@ await sleep(700);
 await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
 await sleep(700);
 
-console.log("\nB325 — a dropped set collapses into logical sheets:");
+console.log("\nB335 — a dropped set collapses into logical sheets:");
 await page.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
 // wait for the background read+group to surface the grouped tray
 await page.waitForFunction(() => /auto-stitch/.test(document.body.innerText), {}, { timeout: 30000 })
@@ -108,7 +108,7 @@ check(/Grading Plan/.test(txt), "tray shows a 'Grading Plan' logical sheet");
 check(/C-5–C-7 · 3 sheets/.test(txt), "the group is labelled with its sheet range (C-5–C-7 · 3 sheets)");
 check(/COVER SHEET/.test(txt), "the cover stays a standalone single");
 
-console.log("\nB327 — clicking the group auto-stitches all 3 sheets:");
+console.log("\nB337 — clicking the group auto-stitches all 3 sheets:");
 await page.locator('button:has-text("Grading Plan")').first().click({ timeout: 8000 });
 await page.waitForFunction(() => { const s = [...document.querySelectorAll("svg")].find((x) => x.querySelector("image")); return s && s.querySelectorAll("image").length >= 3; }, {}, { timeout: 20000 }).catch(() => {});
 await sleep(800);
@@ -124,11 +124,11 @@ if (imgs.length === 3) {
 txt = await bodyTxt();
 check(/Auto-stitched 3 sheets/.test(txt), "the auto-stitch notice reports 3 sheets");
 
-console.log("\nB329 — the composite auto-calibrates from the stated scale:");
+console.log("\nB339 — the composite auto-calibrates from the stated scale:");
 check(/Scale set/.test(txt), "the composite key shows the scale was set automatically (no manual Calibrate)");
 check(/Calibrated/.test(txt), "the takeoff panel reads 'Calibrated'");
 
-console.log("\nB328 — title blocks cropped + one pinned composite key:");
+console.log("\nB338 — title blocks cropped + one pinned composite key:");
 const clipsOn = await clipCount();
 check(clipsOn >= 3, `each grouped sheet's title block is clipped (clipPaths = ${clipsOn}, want ≥3)`);
 check((await page.evaluate(() => (document.body.innerText.match(/Grading Plan · C-5–C-7 · 3 sheets/g) || []).length)) >= 1, "the pinned 'Composite key' lists the group once (merged, not 3 title blocks)");
