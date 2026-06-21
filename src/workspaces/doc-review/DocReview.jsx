@@ -15,7 +15,7 @@ import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 
@@ -248,10 +248,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const srcId = keepId || newSourceId();
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
-      setSource({ ...base, storageKey: null, oversize: false });
-      uploadSource(srcId, file, meta.projectId, meta.discipline).then((r) => {
-        setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
-      }).catch(() => {}); // best-effort upload; a rejection mustn't become an unhandled rejection
+      setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+      // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
+      // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
+      // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
+      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
+        setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+      }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
       setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
     } finally { setBusy(false); }
@@ -372,7 +375,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
-    sources: source ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, oversize: !!source.oversize }] : [],
+    sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
   }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
@@ -415,7 +418,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
     setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
-    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
+    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();

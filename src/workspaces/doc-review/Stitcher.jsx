@@ -18,7 +18,7 @@ import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -128,10 +128,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         const miss = pdfsRef.current.find((p) => p.missing && sameName(p.name, f.name));
         if (miss) { await bindSource(miss.srcId, doc, f); continue; }
         const srcId = newSourceId();
-        setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, oversize: false, missing: false }]);
-        uploadSource(srcId, f, meta.projectId, meta.discipline).then((r) =>
-          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, oversize: !!r.oversize } : x)))
-        ).catch(() => {}); // best-effort upload; don't leak an unhandled rejection
+        setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, driveKey: null, oversize: false, missing: false }]);
+        // Store Drive-first, Supabase-fallback (B322) — the same path filing uses, so stitched
+        // sheets live in Drive and aren't bound by Supabase's 50 MB cap. A sheet stays keyless
+        // in state until this resolves; buildSnapshot won't persist a keyless source (B323).
+        storeSource(srcId, f, { projectId: meta.projectId, discipline: meta.discipline, fileName: f.name }).then((r) =>
+          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
+        ).catch(() => {}); // best-effort store; don't leak an unhandled rejection
       }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
     finally { setBusy(false); }
@@ -284,7 +287,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
-    sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
+    sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
     stitch: {
       placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false })),
       view, measures, ftPerUnit,
@@ -323,11 +326,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       const srcEntries = [];
       for (const src of rec.sources || []) {
         let doc = null, missing = true;
-        if (!src.oversize && src.storageKey) {
-          const buf = await downloadSource(src.storageKey);
+        if (!src.oversize) {
+          // Read-back prefers Google Drive (the file's home), falls back to Supabase Storage
+          // so a pre-Drive sheet — or any Drive miss — still opens (B322, fallback-safe).
+          let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+          if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
           if (buf) { doc = await loadPdf(buf); missing = false; }
         }
-        srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, oversize: !!src.oversize, missing });
+        srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize, missing });
       }
       if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
       suspendSave(); // re-park across this load's async commits (B19)
