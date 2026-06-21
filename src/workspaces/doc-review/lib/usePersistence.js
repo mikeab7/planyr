@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { upsertReview, writeDraft, currentUid, cloudReady } from "./reviewStore.js";
+import { planAutosave } from "./autosavePlan.js";
 import { onAuthChange } from "../../site-planner/lib/auth.js";
 
 const DEBOUNCE_MS = 600;
@@ -29,6 +30,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   const uidRef = useRef(null);
   const firstRun = useRef(true);
   const suspendUntilRef = useRef(0); // a programmatic load parks this in the future so the autosave won't re-save what it just loaded (B19)
+  const loadEchoRef = useRef(false); // the next autosave tick is a programmatic load echoing its own deps, not a user edit — skip it without suppressing real edits in the same window (B324)
   const dirtyRef = useRef(false); // an unsaved edit since the last successful write — gates the unmount/hide flush so a single↔stitch toggle doesn't re-upsert unchanged data (B44)
 
   // Track cloud readiness up front and on auth changes. The badge stays "local"
@@ -59,7 +61,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   // the suspend window in the future makes the next autosave tick(s) skip, so a just-
   // loaded snapshot isn't re-stamped with a fresh updatedAt (which could clobber a newer
   // cloud edit). Re-armed before each async commit so a slow load stays covered (B19).
-  const suspendSave = useCallback((ms = 1500) => { suspendUntilRef.current = Date.now() + ms; }, []);
+  const suspendSave = useCallback((ms = 1500) => { suspendUntilRef.current = Date.now() + ms; loadEchoRef.current = true; }, []);
 
   const writeNow = useCallback(async () => {
     if (!enabledRef.current || emptyRef.current()) return;
@@ -67,18 +69,28 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     if (!snap) return;
     if (!readyRef.current) { setStatus("local"); return; }
     setStatus("saving");
-    const { ok } = await upsertReview({ ...snap, updatedAt: Date.now() });
+    const { ok, conflict } = await upsertReview({ ...snap, updatedAt: Date.now() });
     if (ok) dirtyRef.current = false; // cloud has the latest; a later edit re-flags dirty (B44)
-    setStatus(ok ? "saved" : "unsaved");
+    // A conflict (B314) — this review was changed in another session — is its own state, not a
+    // plain "unsaved": retrying won't help, the user must reload to merge in the latest first.
+    setStatus(conflict ? "conflict" : (ok ? "saved" : "unsaved"));
   }, [flushLocal]);
 
   // Debounced autosave on edits; skips only the initial mount.
   useEffect(() => {
     if (firstRun.current) { firstRun.current = false; return; }
-    if (Date.now() < suspendUntilRef.current) return; // deps set by a programmatic load — don't autosave them back (B19)
-    if (!enabledRef.current || emptyRef.current()) return;
-    dirtyRef.current = true;                  // a real edit — the flush may need to write it (B44)
-    flushLocal();                            // local mirror is immediate
+    // A programmatic load (resume/open) re-emits the deps it just set; that echo must not mark
+    // dirty or re-save. A GENUINE edit — even one made inside the short post-load window — must
+    // still be mirrored + flagged dirty so it's recoverable and reaches the cloud on flush; only
+    // its debounced cloud write is suppressed while suspended (B19/B44/B324).
+    const plan = planAutosave({
+      enabled: enabledRef.current, empty: emptyRef.current(),
+      loadEcho: loadEchoRef.current, suspended: Date.now() < suspendUntilRef.current,
+    });
+    if (plan.consumeEcho) loadEchoRef.current = false;
+    if (plan.markDirty) dirtyRef.current = true;
+    if (plan.mirror) flushLocal();            // local mirror is immediate
+    if (!plan.scheduleSave) return;
     if (readyRef.current) setStatus("saving");
     const t = setTimeout(writeNow, DEBOUNCE_MS);
     return () => clearTimeout(t);

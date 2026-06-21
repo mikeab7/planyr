@@ -1,32 +1,100 @@
-/* App shell — the top-level surface that hosts each workspace. A workspace
- * registry maps an id to a LAZY-LOADED workspace component (its code is only
- * fetched when that workspace is first opened). The header has the brand + a
- * workspace switcher (left) and the global account control (right).
- * Auth lives here so the account control is global across workspaces; each
- * workspace still subscribes to Supabase auth independently for its own needs
- * (e.g. the planner's cloud storage switching).
+/* App shell — the top-level surface that hosts each workspace. The shared
+ * two-row AppHeader is now rendered by each workspace (so it has access to
+ * workspace-specific toolbar content). The shell's job is auth, module
+ * switching state, and building the auth-control slot that AppHeader needs.
  */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
-import { onAuthChange } from "../workspaces/site-planner/lib/auth.js";
+import { onAuthChange, signOut } from "../workspaces/site-planner/lib/auth.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
+import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
+import { useProfile } from "../shared/profile/useProfile.js";
+import { prefetchOnIdle } from "./modulePrefetch.js";
+import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
 
-// Workspace registry. Each `load` is a dynamic import → its own lazy chunk.
+// Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
-  { id: "site-planner", label: "Site Planyr", Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
-  { id: "doc-review", label: "Document Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
+  { id: "site-planner", label: "Site Planyr",     Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
+  { id: "doc-review",   label: "Document Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
+  { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
-const PAL = { chrome: "#14110e", line: "#2e2a23", ink: "#ece7db", muted: "#9b9482", ember: "#e8590c" };
+// Chrome colors are theme tokens so the shell themes WITH the app (B318).
+const CHROME = "var(--chrome-bg)";
+const LINE   = "var(--chrome-divider)";
+const MUTED  = "var(--chrome-muted)";
+
+// ── Account pill + dropdown styling (B298). The dropdown reuses AnchoredMenu — the
+// same portal menu primitive as the project breadcrumb — so it escapes the header's
+// stacking/clipping context and lines up under the pill, consistent with that menu.
+const pill = {
+  display: "flex", alignItems: "center", gap: 7,
+  maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99,
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+  border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
+};
+const avatar = (signedIn, size = 20) => ({
+  width: size, height: size, borderRadius: 99, flex: "none",
+  display: "grid", placeItems: "center",
+  fontSize: size >= 28 ? 12.5 : 10.5, fontWeight: 800, color: "#fff",
+  background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)",
+});
+const acctPanel = {
+  padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  fontFamily: "system-ui, sans-serif",
+};
+const acctRow = {
+  display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
+  padding: "8px 9px", borderRadius: 7, border: "none", background: "transparent",
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
+};
+const acctDivider = { height: 1, background: "var(--border-default)", margin: "4px 4px" };
+const hoverOn  = (e) => { e.currentTarget.style.background = "var(--hover-ghost)"; };
+const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
+
+// Tiny 14px line icons for the dropdown rows.
+const RowIcon = ({ d, size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", color: "var(--text-tertiary)" }}>
+    {d}
+  </svg>
+);
+const ICON = {
+  profile:  (<><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-6 8-6s8 2 8 6" /></>),
+  settings: (<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>),
+  signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
+};
 
 export default function Shell() {
-  const [active, setActive] = useState("site-planner");
-  const [switcher, setSwitcher] = useState(false);   // product-switcher dropdown open
-  const [user, setUser] = useState(null);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [recovery, setRecovery] = useState(false);
-  const [cloudNote, setCloudNote] = useState(false); // B111: "cloud off" explainer popover (unconfigured builds)
+  const [active,    setActive]    = useState("site-planner");
+  const [user,      setUser]      = useState(null);
+  const [authOpen,  setAuthOpen]  = useState(false);
+  const [recovery,  setRecovery]  = useState(false);
+  const [cloudNote, setCloudNote] = useState(false); // "Cloud off" explainer popover
+  const [acctOpen,  setAcctOpen]  = useState(false); // account dropdown (signed-in pill, B298)
+  const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
+  const acctAnchor = useRef(null);
+  // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
+  // workspace's header; "Dashboard" and "open/new project" from Schedule or Markup
+  // must route into the Site Planner (where projects open). The Shell switches the
+  // active module and hands the Site Planner a one-shot `navIntent` (token-stamped so
+  // each click re-fires even if the kind repeats); the Site Planner consumes it.
+  const [navIntent, setNavIntent] = useState(null);
+  const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
+  const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
+  const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
+  // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
+  // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
+  // from the Site side can't be handed to a component that doesn't exist yet. We stash the
+  // requested review (token-stamped so a repeat click re-fires), switch to Document Review,
+  // and DR consumes the pending intent once it mounts. Without this the open is dropped and
+  // DR boots to its empty placeholder until a second click.
+  const [docIntent, setDocIntent] = useState(null);
+  const openReviewInDocReview = (row) => { setDocIntent({ kind: "open-review", row, token: Date.now() }); setActive("doc-review"); };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -36,97 +104,169 @@ export default function Shell() {
     });
   }, []);
 
+  // B223 — once boot is idle, quietly warm the non-active workspaces (chunk +,
+  // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
+  // instant. Lazy-loading still gates the first paint; this only runs after.
+  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
+
+  // B279 — tag telemetry rows with the workspace the user is in, so a reported error
+  // says WHERE it happened (site-planner / doc-review / scheduler).
+  useEffect(() => { setTelemetryModule(active); }, [active]);
+
   const current = WORKSPACES.find((w) => w.id === active) || WORKSPACES[0];
-  const Active = current.Comp;
-  const pick = (id) => { setActive(id); setSwitcher(false); }; // switch workspace from the menu
-  const meta = (user && user.user_metadata) || {};
-  const who = [meta.first_name, meta.last_name].filter(Boolean).join(" ") || (user && user.email) || "";
+  const Active  = current.Comp;
+
+  // Profile (name/org) for the signed-in user — sourced from the profiles table via
+  // the useProfile hook, with a never-blank display name (B297/B298).
+  const profileApi = useProfile(user);
+  const who = profileApi.displayName;
+
+  const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
+  const openAccount = (tab) => { setAcctOpen(false); setRecovery(false); setAuthTab(tab); setAuthOpen(true); };
+
+  // Build the auth-control slot once per render; passed to every workspace so
+  // AppHeader always has the current user state without needing its own auth hook.
+  const authControl = supabaseConfigured() ? (
+    user ? (
+      // Signed in — the pill shows the user's name and opens an account dropdown (B298).
+      <>
+        <button
+          ref={acctAnchor}
+          onClick={() => setAcctOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={acctOpen}
+          title={`Signed in as ${user.email}`}
+          style={pill}
+        >
+          <span style={avatar(true)}>{profileApi.initial}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</span>
+          <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+        </button>
+        <AnchoredMenu
+          open={acctOpen}
+          onClose={() => setAcctOpen(false)}
+          anchorRef={acctAnchor}
+          placement="below-right"
+          width={236}
+          gap={8}
+          panelStyle={acctPanel}
+        >
+          {/* Identity header — avatar + name + email */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 9px 10px" }}>
+            <span style={avatar(true, 30)}>{profileApi.initial}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
+              {profileApi.org && <div style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
+              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+            </div>
+          </div>
+          <div style={acctDivider} />
+          <button style={acctRow} onClick={() => openAccount("profile")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.profile} /> Profile
+          </button>
+          <button style={acctRow} onClick={() => openAccount("settings")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.settings} /> Settings
+          </button>
+          <div style={acctDivider} />
+          <button style={acctRow} onClick={async () => { setAcctOpen(false); await signOut(); }} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.signout} /> Sign out
+          </button>
+        </AnchoredMenu>
+      </>
+    ) : (
+      // Logged out — a "Sign in" pill that opens the auth modal directly.
+      <button onClick={openAuth} title="Sign in or create an account" style={pill}>
+        <span style={avatar(false)}>›</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sign in</span>
+      </button>
+    )
+  ) : (
+    // Cloud not configured — show a "Cloud off" pill with an explanatory popover.
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setCloudNote((o) => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={cloudNote}
+        title="Cloud sync isn't set up — your work is saved on this device only"
+        style={{
+          display: "flex", alignItems: "center", gap: 7,
+          padding: "4px 10px 4px 6px", borderRadius: 99,
+          cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+          border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)",
+          color: MUTED,
+        }}
+      >
+        <span
+          style={{
+            width: 20, height: 20, borderRadius: 99, flex: "none",
+            display: "grid", placeItems: "center",
+            fontSize: 12, fontWeight: 800, color: MUTED,
+            background: "var(--chrome-divider)",
+          }}
+        >
+          ⊘
+        </span>
+        <span style={{ whiteSpace: "nowrap" }}>Cloud off</span>
+      </button>
+      {cloudNote && (
+        <>
+          <div onClick={() => setCloudNote(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          <div
+            role="dialog"
+            style={{
+              position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41,
+              width: 256, padding: "11px 13px", borderRadius: 10,
+              background: "var(--surface-raised)", color: "var(--text-primary)",
+              border: "1px solid var(--border-default)",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+              fontFamily: "system-ui, sans-serif",
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Cloud sync is off</div>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+              Your work is saved on <b>this device only</b> (in this browser).
+              Signing in and syncing across your devices need the cloud connection
+              to be set up for this site.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.chrome }}>
-      <header style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, height: 38, padding: "0 12px", background: PAL.chrome, borderBottom: `1px solid ${PAL.line}`, position: "relative", zIndex: 1 }}>
-        {/* product switcher — brand + current module + chevron; the menu switches modules */}
-        <div style={{ position: "relative" }}>
-          <button onClick={() => setSwitcher((o) => !o)} aria-haspopup="menu" aria-expanded={switcher} title="Switch module"
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 8px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
-              border: `1px solid ${switcher ? PAL.line : "transparent"}`, background: switcher ? "rgba(255,255,255,0.06)" : "transparent" }}>
-            <span style={{ width: 16, height: 16, borderRadius: 4, background: `linear-gradient(150deg, ${PAL.ember}, #c2410c)`, display: "grid", placeItems: "center", flex: "none" }}>
-              <svg width="9" height="9" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="7" height="12" rx="1" fill="#fff" opacity="0.95" /><rect x="10.5" y="2" width="3.5" height="6.5" rx="0.8" fill="#fff" opacity="0.6" /></svg>
-            </span>
-            <span style={{ fontWeight: 800, fontSize: 13, color: "#fff", letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>{current.label}</span>
-            <span style={{ color: PAL.muted, fontSize: 11, marginLeft: -1 }}>▾</span>
-          </button>
-          {switcher && (
-            <>
-              <div onClick={() => setSwitcher(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-              <div role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 220, padding: 6, borderRadius: 10,
-                background: PAL.chrome, border: `1px solid ${PAL.line}`, boxShadow: "0 10px 30px rgba(0,0,0,0.45)" }}>
-                <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Planyr modules</div>
-                {WORKSPACES.map((w) => {
-                  const on = w.id === active;
-                  return (
-                    <button key={w.id} role="menuitem" onClick={() => pick(w.id)}
-                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 8px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit",
-                        fontSize: 12.5, fontWeight: 600, textAlign: "left", border: "1px solid " + (on ? PAL.ember : "transparent"),
-                        background: on ? "rgba(232,89,12,0.16)" : "transparent", color: on ? "#fff" : PAL.ink }}>
-                      <span style={{ flex: 1, whiteSpace: "nowrap" }}>{w.label}</span>
-                      {on && <span style={{ color: PAL.ember, fontSize: 10.5, fontWeight: 700 }}>current</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-        <div style={{ flex: 1 }} />
-        {/* global account control (top-right) */}
-        {supabaseConfigured() ? (
-          <button onClick={() => { setRecovery(false); setAuthOpen(true); }} title={user ? `Signed in as ${user.email}` : "Sign in or create an account"}
-            style={{ display: "flex", alignItems: "center", gap: 7, maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-              border: `1px solid ${PAL.line}`, background: "rgba(255,255,255,0.06)", color: PAL.ink }}>
-            <span style={{ width: 20, height: 20, borderRadius: 99, flex: "none", display: "grid", placeItems: "center", fontSize: 10.5, fontWeight: 800, color: "#fff",
-              background: user ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)" }}>
-              {user ? (who.trim()[0] || "•").toUpperCase() : "›"}
-            </span>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user ? who : "Sign in"}</span>
-          </button>
-        ) : (
-          // B111: cloud not configured for this build. Never leave the account corner empty —
-          // show a "Cloud off" pill that, on click, explains work is saved on this device only
-          // (signing in / cross-device sync need the cloud connection configured).
-          <div style={{ position: "relative" }}>
-            <button onClick={() => setCloudNote((o) => !o)} aria-haspopup="dialog" aria-expanded={cloudNote}
-              title="Cloud sync isn't set up — your work is saved on this device only"
-              style={{ display: "flex", alignItems: "center", gap: 7, padding: "4px 10px 4px 6px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-                border: `1px solid ${PAL.line}`, background: "rgba(255,255,255,0.04)", color: PAL.muted }}>
-              <span style={{ width: 20, height: 20, borderRadius: 99, flex: "none", display: "grid", placeItems: "center", fontSize: 12, fontWeight: 800, color: PAL.muted, background: "rgba(255,255,255,0.08)" }}>⊘</span>
-              <span style={{ whiteSpace: "nowrap" }}>Cloud off</span>
-            </button>
-            {cloudNote && (
-              <>
-                <div onClick={() => setCloudNote(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-                <div role="dialog" style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 41, width: 256, padding: "11px 13px", borderRadius: 10, background: "#fff", color: "#2c2a26", border: "1px solid #e7e2d6", boxShadow: "0 12px 30px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>Cloud sync is off</div>
-                  <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: "#6b6557" }}>Your work is saved on <b>this device only</b> (in this browser). Signing in and syncing across your devices need the cloud connection to be set up for this site.</p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </header>
-      <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "#efeadf" }}>
+    <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
+      {/* No shell-level header — each workspace renders AppHeader internally
+          so it can own its toolbar-slot content without prop-drilling through here. */}
+      <main style={{ flex: 1, minHeight: 0, position: "relative", zIndex: 0, background: "var(--surface-page)" }}>
         {/* Each workspace gets its own error boundary, keyed by id so switching
             modules gives a fresh boundary — a render crash in one workspace is
-            contained (shell, switcher, and the other workspace keep working)
-            instead of blanking the whole page. It wraps Suspense so a failed
-            lazy-chunk load is caught too. */}
+            contained (shell and the other workspaces keep working). */}
         <ErrorBoundary key={active} label={current.label}>
-          <Suspense fallback={<div style={{ height: "100%", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 13 }}>Loading workspace…</div>}>
-            <Active />
+          <Suspense fallback={<ModuleLoader module={active} />}>
+            <Active
+              shellModule={active}
+              onShellSwitch={setActive}
+              authControl={authControl}
+              navIntent={navIntent}
+              docIntent={docIntent}
+              onGoDashboard={goDashboard}
+              onOpenProject={openProjectInPlanner}
+              onNewProject={newProjectInPlanner}
+              onOpenReviewInDocReview={openReviewInDocReview}
+            />
           </Suspense>
         </ErrorBoundary>
       </main>
-      {authOpen && <AuthPanel user={user} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />}
+      {authOpen && (
+        <AuthPanel
+          user={user}
+          recovery={recovery}
+          profileApi={profileApi}
+          initialTab={authTab}
+          onClose={() => { setAuthOpen(false); setRecovery(false); }}
+        />
+      )}
     </div>
   );
 }

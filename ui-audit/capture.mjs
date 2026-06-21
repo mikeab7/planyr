@@ -125,7 +125,7 @@ async function shot(browser, s) {
 }
 
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 console.log("Capturing →", OUT);
 for (const s of SHOTS) await shot(browser, s);
 await browser.close();

@@ -47,21 +47,23 @@ export function pickScaleBar({ frameW, ftPerUnit, targetFrac = 0.22, maxFrac = 0
 }
 
 // Sizes derived from a reference dimension. Pure → unit-testable.
+// Tuned cartographic/surveyor weights: a THIN segmented bar and a SLIM needle drawn
+// with hairline strokes — not the old chunky filled bar/triangle that read cartoonish.
 export function furnitureMetrics(refS) {
   const fs = clamp(refS * 0.02, 6, refS * 0.06); // label text
   const arrowH = refS * 0.06; // ≈ 0.5 in on a letter sheet
   return {
     fs,
-    unitFs: fs * 0.82, // "FEET"
-    barTh: refS * 0.018,
-    tickLen: refS * 0.012,
+    unitFs: fs * 0.78, // "FEET"
+    barTh: refS * 0.0105, // thin cartographic bar (was a heavy 0.018)
+    tickLen: refS * 0.0085,
     pad: fs * 0.7,
-    plateStroke: Math.max(0.5, refS * 0.0016),
-    segStroke: Math.max(0.5, refS * 0.002),
-    rx: fs * 0.45,
+    plateStroke: Math.max(0.5, refS * 0.0013), // hairline plate border
+    segStroke: Math.max(0.4, refS * 0.0013), // hairline segment / needle outline
+    rx: fs * 0.5,
     arrowH,
-    arrowW: arrowH * 0.46,
-    nFs: fs * 1.05,
+    arrowW: arrowH * 0.34, // slim needle (was a stubby 0.46)
+    nFs: fs * 1.0,
   };
 }
 
@@ -69,7 +71,9 @@ export function furnitureMetrics(refS) {
 // 25 / 250 / 2500… steps halve to x.5) keeps its decimal so the bar reads true.
 const fmtTick = (n, fmt) => (Number.isInteger(n) ? fmt(n) : String(n));
 
-const PLATE_FILL = "rgba(255,255,255,0.82)"; // translucent legibility plate
+// Subtle, warm semi-opaque backing — keeps labels legible over busy aerial imagery
+// without reading as a hard white box.
+const PLATE_FILL = "rgba(249,248,244,0.84)";
 
 // Graphic scale bar drawn with its plate top-left at the local origin. Alternating
 // black/white segments, tick marks at 0 / midpoint / max with numbers centered
@@ -96,32 +100,44 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
     s += `<line x1="${r2(padX + t)}" y1="${r2(barBot)}" x2="${r2(padX + t)}" y2="${r2(tickBot)}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
   });
   ticks.forEach((t, i) => {
-    s += `<text x="${r2(padX + t)}" y="${r2(numBase)}" text-anchor="middle" font-size="${r2(m.fs)}" fill="${ink}">${esc(fmtTick(labels[i], fmtFeet))}</text>`;
+    s += `<text x="${r2(padX + t)}" y="${r2(numBase)}" text-anchor="middle" font-size="${r2(m.fs)}" font-weight="500" fill="${ink}">${esc(fmtTick(labels[i], fmtFeet))}</text>`;
   });
-  s += `<text x="${r2(padX + lengthU / 2)}" y="${r2(unitBase)}" text-anchor="middle" font-size="${r2(m.unitFs)}" letter-spacing="${r2(m.unitFs * 0.18)}" fill="${muted}">FEET</text>`;
+  s += `<text x="${r2(padX + lengthU / 2)}" y="${r2(unitBase)}" text-anchor="middle" font-size="${r2(m.unitFs)}" letter-spacing="${r2(m.unitFs * 0.2)}" fill="${muted}">FEET</text>`;
   return { markup: s, plateW, plateH };
 }
 
-// North arrow (simple filled arrow + "N", no compass rose) on the same legibility
-// plate, top-left at the local origin. `bearingDeg` rotates the arrow to true north;
-// 0° points it straight up. Returns { markup, plateW, plateH }.
+// North arrow as a classic two-tone surveyor's needle (NOT a chunky filled triangle
+// or a compass rose): a slim elongated kite split down its spine — the west half a
+// thin hairline outline, the east half filled with one neutral ink colour — with a
+// small "N" above, all on the same legibility plate, top-left at the local origin.
+// `bearingDeg` rotates the needle to true north; 0° points it straight up. Single
+// low-saturation colour, hairline strokes, no bright fills, no compass rose.
+// Returns { markup, plateW, plateH }.
 export function northArrowPlate({ m, pal = {}, bearingDeg = 0 }) {
   const ink = pal.ink || "#2c2a26";
   const line = pal.panelLine || "#cfc6af";
   const contentW = Math.max(m.arrowW, m.nFs * 0.8);
   const plateW = contentW + 2 * m.pad;
   const nBase = m.pad + m.nFs; // "N" baseline
-  const arrowTop = nBase + m.nFs * 0.3;
+  const arrowTop = nBase + m.nFs * 0.32;
   const arrowBot = arrowTop + m.arrowH;
   const plateH = arrowBot + m.pad;
   const cx = plateW / 2;
-  const notch = m.arrowH * 0.32;
+  const halfW = m.arrowW / 2;
+  const shoulderY = arrowTop + m.arrowH * 0.62; // shoulders below centre → slim, elongated needle
   const aCy = (arrowTop + arrowBot) / 2;
-  const path = `M${r2(cx)},${r2(arrowTop)} L${r2(cx + m.arrowW / 2)},${r2(arrowBot)} L${r2(cx)},${r2(arrowBot - notch)} L${r2(cx - m.arrowW / 2)},${r2(arrowBot)} Z`;
-  const rot = bearingDeg ? ` transform="rotate(${r2(-bearingDeg)} ${r2(cx)} ${r2(aCy)})"` : "";
+  const sw = r2(m.segStroke);
+  // Two half-kites sharing the vertical spine (top tip → shoulder → tail). West half
+  // hollow (hairline), east half filled — the conventional two-tone north needle.
+  const west = `M${r2(cx)},${r2(arrowTop)} L${r2(cx - halfW)},${r2(shoulderY)} L${r2(cx)},${r2(arrowBot)} Z`;
+  const east = `M${r2(cx)},${r2(arrowTop)} L${r2(cx + halfW)},${r2(shoulderY)} L${r2(cx)},${r2(arrowBot)} Z`;
+  let needle =
+    `<path d="${west}" fill="none" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>` +
+    `<path d="${east}" fill="${ink}" stroke="${ink}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+  if (bearingDeg) needle = `<g transform="rotate(${r2(-bearingDeg)} ${r2(cx)} ${r2(aCy)})">${needle}</g>`;
   let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${PLATE_FILL}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
-  s += `<text x="${r2(cx)}" y="${r2(nBase)}" text-anchor="middle" font-size="${r2(m.nFs)}" font-weight="700" fill="${ink}">N</text>`;
-  s += `<path d="${path}" fill="${ink}"${rot}/>`;
+  s += `<text x="${r2(cx)}" y="${r2(nBase)}" text-anchor="middle" font-size="${r2(m.nFs)}" font-weight="600" fill="${ink}">N</text>`;
+  s += needle;
   return { markup: s, plateW, plateH };
 }
 
@@ -169,4 +185,21 @@ export function buildScreenFurnitureSvg({
   const baseY = vh - bottomGap;
   return translate(vw - margin - sb.plateW, baseY - sb.plateH, sb.markup) +
     translate(margin, baseY - na.plateH, na.markup);
+}
+
+// ON-SCREEN furniture as TWO standalone plates for DOM overlays (each rendered in
+// its own absolutely-positioned <svg> anchored to a visible canvas corner, instead
+// of inside the canvas SVG's coordinate space). This keeps the scale bar + north
+// arrow ALWAYS fully on screen — immune to canvas-taller-than-viewport / status-bar
+// overlap — and lets CSS place each precisely. Returns each plate's inner SVG markup
+// plus its width/height so the caller can size its wrapping <svg>. `targetU`/`maxU`
+// are absolute screen-pixel widths for the bar (the canvas user unit == screen px).
+export function screenFurniturePlates({
+  ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, refS = 540, targetU = 130, maxU = 240,
+}) {
+  const m = furnitureMetrics(refS);
+  const { feet, lengthU } = pickScaleBar({ ftPerUnit, targetU, maxU });
+  const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
+  const na = northArrowPlate({ m, pal, bearingDeg });
+  return { scaleBar: sb, north: na }; // each: { markup, plateW, plateH }
 }

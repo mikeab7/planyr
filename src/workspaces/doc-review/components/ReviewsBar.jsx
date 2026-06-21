@@ -8,13 +8,15 @@
 import { useEffect, useRef, useState } from "react";
 import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
 
-const PAL = { ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chromeInk: "#ece7db", chromeMuted: "#9b9482" };
+const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
+// Badge label colors are chrome tokens (themes with the app, B341): the bright
+// dark-chrome hexes (#86efac / #fbbf24 / #9b9482) were illegible on the light bar.
 const BADGE = {
-  saving:  { text: "Saving…", color: "#fbbf24", dot: "#f59e0b" },
-  saved:   { text: "Saved ✓", color: "#86efac", dot: "#22c55e" },
-  unsaved: { text: "Unsaved", color: "#fbbf24", dot: "#f59e0b" },
-  local:   { text: "Not saved", color: "#9b9482", dot: "#9b9482" },
+  saving:  { text: "Saving…", color: "var(--warn-text)", dot: "#f59e0b" },
+  saved:   { text: "Saved ✓", color: "var(--save-badge)", dot: "#22c55e" },
+  unsaved: { text: "Unsaved", color: "var(--warn-text)", dot: "#f59e0b" },
+  local:   { text: "Not saved", color: "var(--chrome-muted)", dot: "var(--chrome-tab-inactive)" },
 };
 
 const fmtWhen = (s) => {
@@ -49,7 +51,7 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
   }, [open]);
 
   const badge = BADGE[status] || BADGE.local;
-  const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "#fff" };
+  const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "var(--surface-raised)" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
 
   const onProject = (id) => { const p = projects.find((x) => x.id === id); onMeta?.("projectId", id || null); onMeta?.("project", p ? p.name : ""); };
@@ -66,13 +68,13 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
         <span style={{ width: 7, height: 7, borderRadius: 99, background: badge.dot, flex: "none" }} />{badge.text}</span>
       <button
         onClick={() => setOpen((o) => !o)}
-        style={{ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }}
+        style={{ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }}
       >Reviews ▾</button>
 
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, maxHeight: 460, overflowY: "auto", background: "#fff", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", zIndex: 50, padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, maxHeight: 460, overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", zIndex: 50, padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
           {!signedIn && (
-            <div style={{ fontSize: 11.5, color: "#b45309", lineHeight: 1.5, marginBottom: 10 }}>
+            <div style={{ fontSize: 11.5, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 10 }}>
               Sign in (in the Site Planner workspace) to save & file reviews to the cloud. Your work stays in memory until then.
             </div>
           )}
@@ -94,7 +96,7 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
           <div style={{ ...lbl, marginTop: 8 }}>Name</div>
           <input value={meta.title || ""} placeholder={composeTitle(meta)} onChange={(e) => onMeta?.("title", e.target.value)} style={fld} />
 
-          <button onClick={() => { onNew?.(); setOpen(false); }} style={{ marginTop: 10, width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 7, border: `1px solid ${PAL.accent}`, background: "#fff", color: PAL.accent }}>＋ New review</button>
+          <button onClick={() => { onNew?.(); setOpen(false); }} style={{ marginTop: 10, width: "100%", padding: "7px 10px", fontSize: 12, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 7, border: `1px solid ${PAL.accent}`, background: "var(--surface-raised)", color: PAL.accent }}>＋ New review</button>
 
           <div style={{ borderTop: `1px solid ${PAL.line}`, margin: "12px -12px 0", padding: "10px 12px 0" }}>
             <div style={lbl}>Saved reviews</div>
@@ -103,7 +105,7 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
             {!busy && rows && rows.map((r) => (
               <div key={r.id} onClick={() => { onOpen?.(r); setOpen(false); }}
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 6px", borderRadius: 7, cursor: "pointer" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#fbf3ee")}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title || "Untitled review"}</div>
@@ -111,7 +113,7 @@ export default function ReviewsBar({ status = "local", signedIn = false, meta = 
                     {r.kind === "stitch" ? "Stitched set" : "Single sheet"}{r.project ? ` · ${r.project}` : ""}{r.discipline ? ` · ${r.discipline}` : ""} · {fmtWhen(r.updated_at)}
                   </div>
                 </div>
-                <button onClick={(e) => del(e, r.id)} title="Delete review" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
+                <button onClick={(e) => del(e, r.id)} title="Delete review" style={{ flex: "none", border: "none", background: "transparent", color: "var(--status-dead)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
               </div>
             ))}
           </div>

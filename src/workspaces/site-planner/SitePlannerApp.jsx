@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
+import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
+import { nextConceptName } from "./lib/conceptName.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -12,10 +15,15 @@ migrateScenarios();   // fold legacy named scenarios into Plans
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
+// Last cross-workspace nav intent (B191–B193) already acted on. Module-scoped (not a
+// ref) so it survives this workspace unmounting/remounting — otherwise switching back
+// in via the module tab would re-fire the previous Dashboard/open/new intent on mount.
+let lastConsumedNavToken = null;
+
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
-export default function App() {
+export default function App({ shellModule, onShellSwitch, authControl, navIntent, onOpenReviewInDocReview } = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
@@ -62,6 +70,12 @@ export default function App() {
   const [migrating, setMigrating] = useState(false);
   const [migrateMsg, setMigrateMsg] = useState("");
   const [hideMigrate, setHideMigrate] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  // When the user clicks "Open" on a migration site, we stage it locally and open it in
+  // the planner. migrationPendingSiteId tracks that a decision (Save / Discard) is still
+  // outstanding so we can show the in-planner banner.
+  const [migrationPendingSiteId, setMigrationPendingSiteId] = useState(null);
+  const [migrationSaveMsg, setMigrationSaveMsg] = useState("");
   // Re-read epoch for the keyed planner (B133 — stale plan flashes on boot then "comes back").
   // The planner snapshots its plan from storage ONCE at mount (`key={activeSiteId}`). At boot the
   // first synchronous render reads the store BEFORE auth resolves (activeUser still null → the
@@ -147,6 +161,44 @@ export default function App() {
       setMigrateMsg(parts.length ? parts.join("; ") + "." : "Nothing new to bring in — your account is already up to date.");
     } finally { setMigrating(false); }
   };
+  // "Open →" in the migration modal: stage the legacy site into the cloud cache so the
+  // planner can load it, then navigate into it. The planner banner lets the user Save or
+  // Discard once they've seen the site. Non-destructive: the original legacy copy remains
+  // until the user explicitly acts (Save keeps it in Supabase; Discard removes both copies).
+  const handleOpenLegacySite = (siteId) => {
+    if (!signedInUid) return;
+    const staged = stageLegacySite(signedInUid, siteId);
+    if (!staged) return;
+    refreshSites();
+    setMigrationPendingSiteId(siteId);
+    setMigrationSaveMsg("");
+    goPlan(siteId);
+  };
+
+  // "Save to account" from the in-planner migration banner.
+  const handleMigrateSave = async () => {
+    if (!migrationPendingSiteId || !signedInUid) return;
+    const r = await pushSiteToCloud(migrationPendingSiteId).catch(() => ({ ok: false }));
+    if (r && r.ok) {
+      setMigrationSaveMsg("Saved to your account.");
+      setMigrationPendingSiteId(null);
+    } else {
+      setMigrationSaveMsg("Couldn't reach the cloud — try again when reconnected.");
+    }
+  };
+
+  // "Discard" from the in-planner migration banner: remove from both stores and go back.
+  const handleMigrateDiscard = () => {
+    if (!migrationPendingSiteId || !signedInUid) return;
+    const siteId = migrationPendingSiteId;
+    setMigrationPendingSiteId(null);
+    setMigrationSaveMsg("");
+    discardLegacySite(signedInUid, siteId);
+    setActiveSiteId(null);
+    setMode("map");
+    refreshSites();
+  };
+
   const pendingLegacy = signedInUid ? pendingLegacyCount(signedInUid) : 0;
   // Cross-tab freshness: when ANOTHER tab changes the site store, refresh this tab's finder list
   // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
@@ -167,7 +219,7 @@ export default function App() {
     const parcels = (payload.parcels || [])
       .filter((p) => p.points?.length >= 3)
       .map((p, i) => ({ id: `p${id}_${i}`, points: p.points, locked: true, addr: p.addr || null, acct: p.acct || null, attrs: p.attrs || null }));
-    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Plan 1", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
+    saveSite({ id, groupId: id, site: payload.name || "Untitled site", name: "Concept A", origin: payload.origin || null, county: payload.county || null, parcels, els: [], measures: [], settings: {}, underlay: payload.underlay || null });
     pushSiteToCloud(id).catch(() => {}); // mirror to cloud when logged in (no-op otherwise)
     refreshSites();
     goPlan(id);
@@ -178,8 +230,31 @@ export default function App() {
   // a fully-formed record the moment you add anything.
   const newBlankSite = () => { goPlan(newId()); };
 
-  // Next plan number for a site (so "Plan 1", "Plan 2", … never collide).
-  const nextPlanNo = (groupId) => loadPlansOfGroup(groupId).length + 1;
+  // Open a whole project (site group) from the header breadcrumb switcher (B191):
+  // resume its active plan if one's open, else its newest. Switching plans changes
+  // `activeSiteId`, which remounts/flushes the previous planner (B193 persist-on-switch).
+  const openProjectGroup = (groupId) => {
+    if (!groupId) return;
+    const plans = loadPlansOfGroup(groupId); // newest first
+    const target = plans.find((p) => p.id === activeSiteId) || plans[0];
+    if (target) goPlan(target.id);
+  };
+
+  // Consume the Shell's one-shot cross-workspace nav intent (B191–B193) — fired when
+  // Dashboard / a project / New project is chosen from Schedule or Markup, which then
+  // switches into this workspace. Token-stamped so a repeat of the same kind re-fires.
+  useEffect(() => {
+    if (!navIntent || navIntent.token === lastConsumedNavToken) return;
+    lastConsumedNavToken = navIntent.token;
+    if (navIntent.kind === "dashboard") setMode("map");
+    else if (navIntent.kind === "new-project") newBlankSite();
+    else if (navIntent.kind === "open-project") openProjectGroup(navIntent.projectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navIntent]);
+
+  // Default name for the next plan in a site: lettered concepts (Concept A, B, …
+  // AA, AB; per-site, continues past the highest existing letter — NEW-1/NEW-2).
+  const nextConceptForGroup = (groupId) => nextConceptName(loadPlansOfGroup(groupId).map((p) => p.name));
 
   // New plan on the SAME site: keep the location (parcel, origin, aerial) but
   // start the layout fresh. This is the iteration workflow — explore another
@@ -189,7 +264,7 @@ export default function App() {
     if (!src) return;
     const group = groupOf(src);
     const id = newId();
-    saveSite({ id, groupId: group, site: src.site || src.name, name: `Plan ${nextPlanNo(group)}`,
+    saveSite({ id, groupId: group, site: src.site || src.name, name: nextConceptForGroup(group),
       origin: src.origin || null, county: src.county || null, parcels: src.parcels || [], els: [], measures: [], settings: src.settings || {}, underlay: src.underlay || null });
     pushSiteToCloud(id).catch(() => {});
     refreshSites();
@@ -206,6 +281,22 @@ export default function App() {
     pushSiteToCloud(id).catch(() => {});
     refreshSites();
     goPlan(id);
+  };
+
+  // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
+  // Never removes the last plan in a group (that's the map's whole-site delete). If the
+  // deleted plan was the one open, switch to a sibling so the planner lands somewhere valid.
+  const deletePlan = (id) => {
+    const rec = loadSite(id);
+    if (!rec) return;
+    const siblings = loadPlansOfGroup(groupOf(rec));
+    if (siblings.length <= 1) return; // keep at least one plan per site
+    const wasActive = id === activeSiteId;
+    const next = siblings.find((s) => s.id !== id);
+    deleteSite(id);
+    refreshSites();
+    if (wasActive && next) goPlan(next.id);
+    else if (wasActive) { setActiveSiteId(null); setMode("map"); }
   };
 
   const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
@@ -252,22 +343,54 @@ export default function App() {
 
   return (
     <>
-      <div style={{ display: mode === "map" ? "block" : "none", height: "100%" }}>
-        <MapFinder
-          visible={mode === "map"}
-          overlays={overlays}
-          setOverlays={setOverlays}
-          layerStatus={layerStatus}
-          setLayerStatus={setLayerStatus}
-          sites={siteGroups}
-          activeSiteId={activeSiteId}
-          onOpenSite={openSite}
-          onDeleteSite={deleteSiteGroup}
-          onSetStatus={setSiteStatus}
-          onUseParcels={newSiteFromMap}
-          onSkip={newBlankSite}
+      {/* Map mode — AppHeader sits above MapFinder's own toolbar */}
+      <div style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+        <AppHeader
+          module={shellModule || "site-planner"}
+          onSwitch={onShellSwitch}
+          authControl={authControl}
+          // In the Site module the home crumb is "Map" (B204). Map IS the all-projects
+          // view, so no "current project" here — the Map crumb reads as current and the
+          // project crumb invites a pick.
+          homeLabel="Map"
+          onDashboard={() => setMode("map")}
+          currentProject={null}
+          onSelectProject={openProjectGroup}
+          onNewProject={newBlankSite}
+          centerContent={null}
+          saveSlot={null}
+          toolbarContent={
+            <button
+              onClick={newBlankSite}
+              style={{
+                padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6,
+                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                color: "var(--chrome-text)", cursor: "pointer", fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Start blank
+            </button>
+          }
         />
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <MapFinder
+            visible={mode === "map"}
+            overlays={overlays}
+            setOverlays={setOverlays}
+            layerStatus={layerStatus}
+            setLayerStatus={setLayerStatus}
+            sites={siteGroups}
+            activeSiteId={activeSiteId}
+            onOpenSite={openSite}
+            onDeleteSite={deleteSiteGroup}
+            onSetStatus={setSiteStatus}
+            onUseParcels={newSiteFromMap}
+            onSkip={newBlankSite}
+          />
+        </div>
       </div>
+      {/* Plan mode — SitePlanner renders its own AppHeader */}
       <div style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
         {activeSiteId && (
           <SitePlanner
@@ -285,21 +408,25 @@ export default function App() {
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}
             onDuplicateSite={duplicatePlan}
+            onDeletePlan={deletePlan}
             onRenameSite={renameSite}
             onRenamePlan={renamePlan}
             onSiteDropped={handleSiteDropped}
             onSiteSaved={refreshSites}
+            shellModule={shellModule}
+            onShellSwitch={onShellSwitch}
+            onOpenReviewInDocReview={onOpenReviewInDocReview}
+            authControl={authControl}
           />
         )}
       </div>
-      {/* account control is global in the shell header (top-right) */}
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
         </div>
       )}
       {cloudError && (
-        <div role="alert" style={{ position: "fixed", top: 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
@@ -309,7 +436,7 @@ export default function App() {
           are logged-out (legacy) sites not yet in the cloud account. The copy-up is
           non-destructive (originals kept); this is the bridge between the two stores. */}
       {mode === "map" && signedInUid && !hideMigrate && (pendingLegacy > 0 || migrateMsg) && (
-        <div role="status" style={{ position: "fixed", top: cloudError ? 92 : 46, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+        <div role="status" style={{ position: "fixed", top: cloudError ? 136 : 88, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           {migrateMsg ? (
             <span style={{ flex: 1 }}>{migrateMsg}</span>
           ) : (
@@ -318,9 +445,9 @@ export default function App() {
             </span>
           )}
           {!migrateMsg && (
-            <button onClick={bringLocalSitesIn} disabled={migrating} title="Copy your on-device sites into your cloud account — keeps the originals, nothing is deleted"
-              style={{ flex: "none", cursor: migrating ? "default" : "pointer", background: migrating ? "#3b5bbf" : "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-              {migrating ? "Bringing them in…" : "Bring them into my account"}
+            <button onClick={() => setShowReviewModal(true)} title="Review each on-device site and choose which ones to save to your account"
+              style={{ flex: "none", cursor: "pointer", background: "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+              Review each site
             </button>
           )}
           <button onClick={() => { setHideMigrate(true); setMigrateMsg(""); }} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
@@ -330,6 +457,42 @@ export default function App() {
       {/* The cloud/connection state is now folded into the planner header's single
           save/sync badge (synced / syncing / offline / error) — see SitePlanner.
           On the map, signed-in state is shown by the shell account control. */}
+
+      {showReviewModal && signedInUid && (
+        <SiteReviewModal
+          uid={signedInUid}
+          onOpen={(siteId) => {
+            setShowReviewModal(false);
+            handleOpenLegacySite(siteId);
+          }}
+          onClose={async (savedCount) => {
+            setShowReviewModal(false);
+            if (savedCount > 0) {
+              await pullCloud(signedInUid).catch(() => {});
+              refreshSites();
+            }
+          }}
+        />
+      )}
+
+      {/* In-planner migration decision banner — shown when the user opened a legacy site
+          via "Open →" in the migration modal. Stays until they Save or Discard. */}
+      {mode === "plan" && (migrationPendingSiteId || migrationSaveMsg) && (
+        <div role="status" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#1f2a44", color: "#eaf0ff", border: "1px solid #3b5bbf", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          {migrationSaveMsg ? (
+            <>
+              <span style={{ flex: 1 }}>{migrationSaveMsg}</span>
+              <button onClick={() => setMigrationSaveMsg("")} style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+            </>
+          ) : (
+            <>
+              <span style={{ flex: 1 }}>This site is saved on <b>this device only</b> — not yet in your account.</span>
+              <button onClick={handleMigrateSave} style={{ flex: "none", cursor: "pointer", background: "#4f7df0", color: "#fff", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Save to account</button>
+              <button onClick={handleMigrateDiscard} style={{ flex: "none", cursor: "pointer", background: "rgba(220,38,38,0.15)", color: "#f87171", border: "1px solid rgba(220,38,38,0.35)", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>Discard</button>
+            </>
+          )}
+        </div>
+      )}
     </>
   );
 }

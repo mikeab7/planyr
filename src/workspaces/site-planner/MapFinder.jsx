@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
-import { COUNTIES_MAP, candidateCountiesForPoint } from "./lib/counties.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
+import { recordSourceResult, filterHealthyCandidates } from "./lib/sourceHealth.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelAcross,
+  identifyParcelDetailed,
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -17,15 +19,26 @@ import {
 import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
+import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
+import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
+// Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
+// and the panel themes live with no re-render. (B318)
 const PAL = {
-  panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
-  accent: "#c2410c", muted: "#8a8473",
-  chrome: "#191613", chromeLine: "#2e2a23", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c",
+  panelBg: "var(--surface-raised)", panelLine: "var(--border-default)", ink: "var(--text-primary)",
+  accent: "var(--accent)", muted: "var(--text-secondary)",
+  chrome: "var(--chrome-bg)", chromeLine: "var(--chrome-divider)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)",
 };
 
 // Free aerial sources (no API key). Both are ArcGIS MapServers that support
 // both XYZ tiles (for the map) and `export` (for the planner underlay capture).
+// `maxNative` = each provider's native imagery ceiling (Esri z19 ≈ 0.3 m/px; USGS
+// z16). This is REQUIRED per source and must not be dropped in a refactor: past its
+// ceiling a provider returns the gray "Map data not yet available" placeholder as an
+// HTTP 200 (not an error), so Leaflet's error-tile fallback never fires and the whole
+// view goes blank. The imagery layer below clamps fetches to this ceiling (minus the
+// retina offset) and lets maxZoom upscale the deepest real tile beyond it. Any new
+// source MUST carry its own `maxNative`. (B220 — recurrence of B182)
 const BASEMAPS = {
   esri: {
     label: "Esri",
@@ -71,60 +84,52 @@ const ADD_CURSOR =
 const REMOVE_CURSOR =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M5 14 L23 14' stroke='%23b91c1c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
 
-/* Project-status visual language (B8). TWO redundant cues per state — color AND
- * shape/glyph — so it reads for colorblind users and over a busy aerial:
- *   pursuit  amber,  dashed ring, no glyph (tentative/uncommitted)
- *   active   green,  solid, bold — grabs the eye (the live work)
- *   onhold   slate/indigo (NOT sky-blue, so it survives over blue water), pause ‖
- *   complete gray,   muted, small check ✓ — recedes
- *   dead     hollow gray, dimmest, faint ✕, NO fill — recedes (deliberately not red)
- * `dot` is the swatch color for the legend / list / counts. `dim` recedes a marker. */
-const STATUS_STYLE = {
-  pursuit:  { dot: "#d97706", fill: "#f59e0b", stroke: "#b45309", glyph: "", dashed: true,  dim: false },
-  active:   { dot: "#16a34a", fill: "#16a34a", stroke: "#14532d", glyph: "", dashed: false, dim: false },
-  onhold:   { dot: "#475569", fill: "#475569", stroke: "#1e293b", glyph: "pause", dashed: false, dim: false },
-  complete: { dot: "#94a3b8", fill: "#94a3b8", stroke: "#64748b", glyph: "check", dashed: false, dim: true },
-  dead:     { dot: "#9ca3af", fill: "none",    stroke: "#9ca3af", glyph: "x",     dashed: false, dim: true, hollow: true },
-};
-const statusStyle = (st) => STATUS_STYLE[st] || STATUS_STYLE.pursuit;
-// Compact text glyph per status for the legend / list / menu (the second cue
-// alongside color). Pursuit = hollow ring (uncommitted), active = filled dot.
-const STATUS_GLYPH = { pursuit: "○", active: "●", onhold: "‖", complete: "✓", dead: "✕" };
+/* Project-status visual language — color + glyph + shape per state now come from
+ * the ONE shared token set (src/shared/ui/statusTokens.js), consumed identically
+ * by the filter chips, the list-item markers, and the map pins below (B234). Two
+ * redundant cues per state (color AND glyph/shape) so it still reads for
+ * colorblind users and over a busy aerial. The module accent colors (Site/
+ * Schedule/Markup) are deliberately NOT used here — they belong to the tab row. */
 
-// Glyph drawn inside the pin head (white), per status. Empty for pursuit/active.
-function pinGlyphSvg(kind) {
-  if (kind === "pause") return `<rect x="11" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/><rect x="16.6" y="9.5" width="2.4" height="8" rx="0.8" fill="#fff"/>`;
-  if (kind === "check") return `<path d="M10.5 13.4 L13.2 16 L19 9.8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`;
-  if (kind === "x") return `<path d="M11 9.5 L19 17.5 M19 9.5 L11 17.5" stroke="${statusStyle('dead').stroke}" stroke-width="2.2" stroke-linecap="round"/>`;
-  return "";
-}
-
-/* Build a saved-site map pin reflecting its project status + active state.
- * The pin ALWAYS carries its status color + glyph (so changing a site's status
- * is reflected even while it's open), and recedes when completed/dead. The
- * currently-open site is emphasized additively — an ember outline ring + a
- * slightly larger size + full opacity — rather than by recoloring it, so the
- * status cue is never lost (previously `active` overrode the fill to ember,
- * which made e.g. a Complete open site still read as a hot ember pursuit pin). */
-function statusPinIcon(status, active) {
-  const s = statusStyle(status);
-  const fill = s.hollow ? "#ffffff" : s.fill;
-  const stroke = active ? "#e8590c" : s.stroke;
-  const op = s.dim && !active ? 0.78 : 1;
-  const scale = active ? 1.12 : 1;
-  const w = Math.round(30 * scale), h = Math.round(40 * scale);
-  const glyph = pinGlyphSvg(s.glyph);
-  // pursuit = dashed outline ring (its distinguishing shape cue); others solid.
-  const ringDash = s.dashed ? ` stroke-dasharray="3.4 2.8"` : "";
-  const ringW = active ? 3 : (s.dashed ? 2.4 : 2);
+/* Building marker (B161): gabled industrial-building silhouette whose BODY is
+ * filled with the project's status color (pursuit = hollow, dashed outline). The
+ * glyph (✓ / ‖ / ✕) is the second, color-independent cue. A progress arc
+ * (B161/B163) is a SEPARATE encoding and is intentionally not drawn here. */
+function buildingPinIcon(status, active) {
+  const t = statusToken(status);
+  const fill = t.hollow ? "none" : t.color;
+  const stroke = t.hollow ? t.color : darken(t.color, 0.3);
+  const scale = active ? 1.15 : 1;
+  const w = Math.round(28 * scale), h = Math.round(36 * scale);
+  const op = t.dim && !active ? 0.78 : 1;
+  let glyph = "";
+  if (t.shape === "check") {
+    glyph = `<polyline points="9,18 13,22 20,13" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else if (t.shape === "pause") {
+    glyph = `<rect x="11" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.85)"/><rect x="14.5" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.85)"/>`;
+  } else if (t.shape === "x") {
+    glyph = `<path d="M10.5,15 L17.5,22 M17.5,15 L10.5,22" stroke="rgba(255,255,255,.92)" stroke-width="2" stroke-linecap="round"/>`;
+  }
+  const bStroke = t.dashed
+    ? `stroke="${stroke}" stroke-width="1.6" stroke-dasharray="4 2.5"`
+    : `stroke="${stroke}" stroke-width="1"`;
+  const hasDoors = fill !== "none";
+  const shadow = active
+    ? "filter:drop-shadow(0 0 6px rgba(232,89,12,.65)) drop-shadow(0 2px 4px rgba(0,0,0,.4));"
+    : "filter:drop-shadow(0 2px 6px rgba(0,0,0,.45));";
+  const html =
+    `<div style="${shadow}opacity:${op}">` +
+    `<svg width="${w}" height="${h}" viewBox="0 0 28 36">` +
+    `<path d="M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z" fill="${fill}" ${bStroke}/>` +
+    (hasDoors ? `<rect x="7.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/><rect x="16.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/>` : "") +
+    glyph +
+    `</svg></div>`;
   return L.divIcon({
     className: "",
-    html: `<div style="filter: drop-shadow(0 3px 7px rgba(0,0,0,.4)); opacity:${op};">
-      <svg width="${w}" height="${h}" viewBox="0 0 30 40">
-        <path d="M15 39 C15 39 3 22.5 3 13.5 a12 12 0 1 1 24 0 C27 22.5 15 39 15 39Z" fill="${fill}" stroke="${stroke}" stroke-width="${ringW}"${ringDash}/>
-        ${glyph || `<circle cx="15" cy="13.5" r="4.4" fill="${s.hollow ? s.stroke : '#fff'}" opacity="${s.hollow ? 0.9 : 0.95}"/>`}
-      </svg></div>`,
-    iconSize: [w, h], iconAnchor: [Math.round(w / 2), h - 2], tooltipAnchor: [0, -(h - 6)],
+    html,
+    iconSize: [w, h],
+    iconAnchor: [Math.round(w / 2), h],
+    tooltipAnchor: [0, -(h - 4)],
   });
 }
 
@@ -140,10 +145,8 @@ function pointInPoly(lat, lng, ring) {
 
 const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|location|^addr|str_?name|full_?addr|address)/i;
 const ID_RE = /(hcad_?num|^acct|account|parcel_?id|prop_?id|^pid$|quick_?ref|geo_?id|^pin$|^gid$|objectid)/i;
-const findVal = (attrs, re) => {
-  const k = Object.keys(attrs || {}).find((key) => re.test(key) && attrs[key] != null && attrs[key] !== "");
-  return k ? String(attrs[k]) : null;
-};
+// findAttr (imported from lib/appraisal.js) is the shared "first non-empty attr
+// matching this regex, as a string" helper — formerly a local findVal duplicate.
 const shoelace = (pts) => {
   let a = 0;
   for (let i = 0; i < pts.length; i++) { const j = (i + 1) % pts.length; a += pts[i].x * pts[j].y - pts[j].x * pts[i].y; }
@@ -178,6 +181,56 @@ function siteAcres(site) {
   return site.parcels.reduce((s, p) => s + shoelace(p.points), 0) / 43560;
 }
 
+// Total acreage across every outer ring of a lon/lat parcel feature (multipart-safe).
+function ringsAcres(rings) {
+  if (!rings || !rings.length) return null;
+  try {
+    const lon0 = rings[0][0][0], lat0 = rings[0][0][1];
+    return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / 43560;
+  } catch (_) { return null; }
+}
+
+/* Geocode a free-text address/place to { lat, lon, label }, biased to the current
+ * map area so a bare local street address ("19630 Crossbranch") lands near where
+ * you're looking instead of in another state. Tries Esri's World geocoder FIRST —
+ * it's far better at exact US street addresses and is the same keyless ArcGIS
+ * family the app already uses for imagery + parcels — then falls back to OSM
+ * Nominatim (also biased to a box around the map). Returns null if neither
+ * resolves. The old code only used Nominatim with no biasing, which routinely
+ * returned nothing for house-number addresses, so the map never moved (B232). */
+async function geocodeAddress(q, center) {
+  const near = center ? `&location=${center.lng},${center.lat}` : "";
+  // 1) Esri World Geocoding Service — single, non-stored lookup (keyless).
+  try {
+    const u = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
+      `?f=json&singleLine=${encodeURIComponent(q)}&maxLocations=1&outFields=Match_addr&countryCode=USA${near}`;
+    const r = await fetch(u);
+    if (r.ok) {
+      const j = await r.json();
+      const c = j && j.candidates && j.candidates[0];
+      if (c && c.location && isFinite(c.location.y) && isFinite(c.location.x)) {
+        return { lat: c.location.y, lon: c.location.x, label: c.address || q };
+      }
+    }
+  } catch (_) { /* fall through to Nominatim */ }
+  // 2) Nominatim fallback — bias to a ~0.6° viewbox around the map centre.
+  try {
+    let vb = "";
+    if (center) { const d = 0.6; vb = `&viewbox=${center.lng - d},${center.lat + d},${center.lng + d},${center.lat - d}&bounded=0`; }
+    const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}${vb}`;
+    const r = await fetch(u);
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.length) return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name || q };
+    }
+  } catch (_) { /* both failed */ }
+  return null;
+}
+
+// Curated "key appraisal attributes" matchers for the search info card (B233) —
+// the headline facts beyond address/account that help identify a tract at a glance.
+const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
+
 export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
@@ -203,29 +256,47 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [labels, setLabels] = useState(true);
   const [selectMode, setSelectMode] = useState(false); // off = pan only; on = add/remove parcels
   const [zoom, setZoom] = useState(null);
-  // First-run-only map hint (B105): the old persistent "Drag to move" card is now a one-time,
-  // dismissible bubble. Remembered in localStorage so it never returns once dismissed.
-  const [showMapHint, setShowMapHint] = useState(() => { try { return !localStorage.getItem("planarfit:mapHintDismissed:v1"); } catch (_) { return true; } });
-  const dismissMapHint = () => { setShowMapHint(false); try { localStorage.setItem("planarfit:mapHintDismissed:v1", "1"); } catch (_) {} };
+  // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
+  // request — the map loads with no instructional overlay. Only the contextual selection
+  // guidance and the error toast remain in the bottom-left slot (see B21/B105).
   // Sites panel: collapsible (persisted) + per-row hover-reveal of the crosshair/delete actions (B106).
   const [sitesPanelOpen, setSitesPanelOpen] = useState(() => { try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; } });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
   const [hoverRow, setHoverRow] = useState(null);
   const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
-  const [hidden, setHidden] = useState(() => new Set()); // statuses filtered out of the map
+  // (B235) The chips are now POSITIVE filters: a status in this set is SHOWN; an
+  // empty set shows everything. The filter drives BOTH the list and the map pins,
+  // so "show only Active" focuses both at once. (Replaces the old hide-on-map set.)
+  const [statusFilter, setStatusFilter] = useState(() => new Set());
+  const [nameFilter, setNameFilter] = useState(""); // type-to-filter the list by site name (B235)
+  // Per-status section collapse in the list (B235). Settled stages start collapsed so
+  // the handful that need a decision stay visible; persisted per device.
+  const [groupCollapsed, setGroupCollapsed] = useState(() => {
+    try { const v = JSON.parse(localStorage.getItem("planarfit:sitesGroups:v1") || "null"); if (v) return v; } catch (_) {}
+    return { complete: true, dead: true };
+  });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
+  const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
+  const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
+  const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
-  const toggleHidden = (st) => setHidden((h) => { const n = new Set(h); n.has(st) ? n.delete(st) : n.add(st); return n; });
+  const toggleStatusFilter = (st) => setStatusFilter((h) => { const n = new Set(h); n.has(st) ? n.delete(st) : n.add(st); return n; });
+  const toggleGroup = (st) => setGroupCollapsed((c) => { const n = { ...c, [st]: !c[st] }; try { localStorage.setItem("planarfit:sitesGroups:v1", JSON.stringify(n)); } catch (_) {} return n; });
   // Apply a status to a site (group), then refresh — closes the right-click menu.
   const setStatus = (siteId, st) => { onSetStatusRef.current && onSetStatusRef.current(siteId, st); setStatusMenu(null); };
-  // Pipeline counts by status across all sites (for the legend / counts strip).
+  // Pipeline counts by status across all sites (for the chips / counts strip).
   const statusCounts = STATUSES.reduce((m, st) => { m[st] = 0; return m; }, {});
   sites.forEach((s) => { statusCounts[statusOf(s)] = (statusCounts[statusOf(s)] || 0) + 1; });
+  // A site passes the chip filter if no chips are selected, or its status is selected.
+  const passStatus = (s) => statusFilter.size === 0 || statusFilter.has(statusOf(s));
+  // …and the name filter (case-insensitive substring on the site/plan name).
+  const nf = nameFilter.trim().toLowerCase();
+  const passName = (s) => !nf || (s.site || s.name || "").toLowerCase().includes(nf);
 
   const clearHilites = () => {
     const map = mapRef.current;
@@ -283,7 +354,23 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const map = mapRef.current;
     if (!map) return;
     const bm = BASEMAPS[basemap] || BASEMAPS.esri;
-    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: bm.maxNative, attribution: bm.attr }));
+    // detectRetina: request 2x-density (one-zoom-higher) tiles on HiDPI displays
+    // so imagery is crisp instead of upscaled-and-soft. Keeps the Esri source. (B170)
+    //
+    // maxNativeZoom must DROP BY 1 on a retina/HiDPI display: detectRetina fetches one
+    // zoom level HIGHER than the display zoom (it adds zoomOffset +1), so a plain
+    // `maxNativeZoom: bm.maxNative` would, at deep zoom, ask the provider for a tile one
+    // level past its native ceiling (Esri z20, USGS z17) — which arcgisonline/USGS
+    // answer with the gray "Map data not yet available" PLACEHOLDER served as HTTP 200,
+    // so the error-tile fallback never fires and the canvas fills with gray. Clamping
+    // native to ceiling−1 on retina makes the highest fetch land on a REAL tile and lets
+    // maxZoom:21 upscale it past that (slightly soft, never blank). Applies to EVERY
+    // source in the dropdown via bm.maxNative. This is the same retina-offset fix B182
+    // shipped for the planner-canvas backdrop (SitePlanner.jsx GEO_BASEMAP's
+    // detailMaxNative); B220 brings it to the map-finder layer B182 missed. Do NOT drop
+    // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B220)
+    const srcMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
+    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: srcMaxNative, detectRetina: true, attribution: bm.attr }));
     layer.setZIndex(1);
     layer.addTo(map);
     imageryRef.current = layer;
@@ -291,17 +378,31 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basemap]);
 
-  /* faint labels overlay (toggle) */
+  /* faint labels overlay (toggle) — initial opacity set from live zoom (B162) */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return;
-    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, opacity: 0.4 });
+    const initOpacity = (map.getZoom() >= 14) ? 0.4 : 0;
+    // Cap the reference/labels overlay at the imagery's native ceiling (z19) so the two
+    // layers don't DIVERGE at deep zoom. World_Transportation serves tiles past z19, so
+    // without this cap the labels kept rendering crisp while the imagery (clamped to its
+    // native ceiling) had nothing there — the exact "labels float over gray" diagnostic
+    // tell. No detectRetina on this overlay, so there's no retina offset to subtract.
+    // Keep this aligned with the imagery layer's native ceiling above. (B220)
+    const layer = L.tileLayer(LABELS_TILES, { maxZoom: 21, maxNativeZoom: 19, opacity: initOpacity });
     layer.setZIndex(2);
     layer.addTo(map);
     labelsRef.current = layer;
-    return () => { try { map.removeLayer(layer); } catch (_) {} };
+    return () => { try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels]);
+
+  /* zoom-driven label opacity (B162): hide street labels below zoom 14 */
+  useEffect(() => {
+    const layer = labelsRef.current;
+    if (!layer) return;
+    layer.setOpacity(zoom != null && zoom >= 14 ? 0.4 : 0);
+  }, [zoom]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
@@ -318,6 +419,22 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return () => clearInterval(iv);
   }, [overlays]); // eslint-disable-line
 
+  /* Coverage (NEW-1/B283): which layers' DATA reaches the current view, for the
+     Layers panel's relevance picker. Recompute on map move (debounced) and when the
+     nearby-range pref changes. Picker-only — never touches the map's requests. */
+  useEffect(() => {
+    let t;
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlays, getNearbyRadiusMiles()));
+    const debounced = () => { clearTimeout(t); t = setTimeout(recompute, 250); };
+    // Read each regional service's extent from its health probe (no extra request), then compute.
+    prefetchExtents(ALL_LAYERS, probeService).then(recompute);
+    recompute();
+    const map = mapRef.current;
+    if (map) map.on("moveend", debounced);
+    const unsub = subscribeRelevance(recompute);
+    return () => { clearTimeout(t); if (map) map.off("moveend", debounced); unsub(); };
+  }, [overlays]);
+
   /* keep the map sized correctly when shown after being hidden */
   useEffect(() => {
     if (visible && mapRef.current) {
@@ -329,7 +446,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   /* Returning to the map (e.g. after committing parcels and planning) clears any
      committed selection and exits select-parcels mode back to the normal map. */
   useEffect(() => {
-    if (visible) { clearHilites(); setSelected([]); setSelectMode(false); }
+    if (visible) { clearHilites(); setSelected([]); setSelectMode(false); setParcelInfo(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -354,7 +471,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     sites.forEach((site) => {
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
-      if (hidden.has(status)) return; // filtered out by the status toggles
+      if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
       const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · ${STATUS_META[status]?.label || status} · click to open`;
@@ -364,16 +481,16 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const onCtx = (e) => { if (selectModeRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
 
       if (showPlans && site.parcels?.length) {
-        const sty = statusStyle(status);
+        const t = statusToken(status);
         // Boundary ALWAYS carries the project status color; the open site is
         // emphasized with a heavier line (not by recoloring it to ember), so its
         // status stays visible — consistent with the status pin.
-        const lineColor = sty.dot;
+        const lineColor = t.color;
         const lineWeight = active ? 3.25 : 2.25;
         site.parcels.forEach((p) => {
           if (!p.points?.length) return;
           const poly = L.polygon(p.points.map((pt) => feetToLatLng(pt, lat, lon)), {
-            color: lineColor, weight: lineWeight, dashArray: sty.dashed ? "5 4" : "6 5",
+            color: lineColor, weight: lineWeight, dashArray: t.dashed ? "5 4" : "6 5",
             fillColor: lineColor, fillOpacity: 0.05, interactive: !selectMode,
           });
           if (!selectMode) poly.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top", sticky: true });
@@ -395,7 +512,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         });
       } else {
         // zoomed out: a status-aware map pin at the site origin
-        const marker = L.marker([lat, lon], { icon: statusPinIcon(status, active), interactive: !selectMode, keyboard: false });
+        const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
       }
@@ -407,7 +524,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, activeSiteId, selectMode, showPlans, hidden]);
+  }, [sites, activeSiteId, selectMode, showPlans, statusFilter]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
@@ -462,53 +579,96 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectMode]);
 
+  /* Stable per-parcel key (county-namespaced — OBJECTIDs are only unique within one
+     CAD layer, so a multi-county assembly could otherwise collide). */
+  const parcelKey = (county, rings, attrs) => {
+    const oid = attrs.OBJECTID ?? attrs.objectid ?? `${rings[0][0][0].toFixed(6)},${rings[0][0][1].toFixed(6)}`;
+    return `${county}:${oid}`;
+  };
+
+  /* Highlight + add ONE identified parcel to the selection (idempotent — never
+     toggles off). The SINGLE parcel-pipeline both click-to-select and
+     address-search-select use, so they behave identically (B233). `at` is the
+     query point used only for the Chambers→true-county relabel. Returns
+     { key, attrs, rings } or null if the record has no polygon. */
+  const addParcelHit = (hit, at) => {
+    const { county, feature: feat } = hit;
+    // ALL outer parts: a multipart parcel ("TRS 3 & 5" = two tracts) must highlight +
+    // plan every piece, not just the largest (B36c).
+    const rings = outerRingsLngLat(feat);
+    if (!rings.length) return null;
+    const attrs = feat.attributes || {};
+    const key = parcelKey(county, rings, attrs);
+    const map = mapRef.current;
+    if (!hilitesRef.current[key]) {
+      const latlngsList = rings.map((r) => r.map(([lon, lat]) => [lat, lon])); // every part — highlight + cursor hit-test
+      // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
+      // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
+      hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
+      setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: findAttr(attrs, ADDR_RE), acct: findAttr(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
+      // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
+      // for a Harris/FB lot — relabel via a true point-in-county lookup (non-blocking).
+      if (county === "chambers" && at) {
+        countyAtPoint(at.lng, at.lat)
+          .then(({ key: ckey }) => { if (ckey && ckey !== "chambers") setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
+          .catch(() => {});
+      }
+    }
+    return { key, attrs, rings };
+  };
+
+  /* Build the parcel-query candidates for a point. Drops any primary whose circuit
+     breaker is OPEN — we just saw it fail, so don't re-hammer it on every click and
+     re-incur the (now time-boxed) failure (B244) — but ALWAYS keeps the statewide
+     source so coverage holds. Also returns the real (non-statewide) CAD candidates so
+     a statewide answer can be honestly flagged as a "backup". */
+  const resolveCandidates = (latlng) => {
+    const all = candidateCountiesForPoint(latlng.lat, latlng.lng)
+      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
+      .filter((c) => c.url);
+    const realPrimaries = all.filter((c) => !STATEWIDE_KEYS.includes(c.county));
+    return { candidates: filterHealthyCandidates(all, STATEWIDE_KEYS), realPrimaries };
+  };
+  // A statewide-backup answer reports the parcel's true county in its `county` attr
+  // ("FORT BEND"); title-case it for the badge, or fall back to a generic phrase.
+  const titleCase = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  const backupCountyLabel = (attrs) => { const c = findAttr(attrs, /^county$/i); return c ? titleCase(c) : "This county"; };
+
   const handleClick = async (latlng) => {
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
     // No county pre-selection required; a border straddle queries both and we take
     // the first hit. Candidates with an unresolved URL (service still loading or
-    // down) are skipped this click.
-    const candidates = candidateCountiesForPoint(latlng.lat, latlng.lng)
-      .map((county) => ({ county, url: layerUrlsRef.current[county] }))
-      .filter((c) => c.url);
+    // down), or a primary whose breaker is open, are skipped this click.
+    const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setBackupNotice(null);
     try {
-      const hits = await identifyParcelAcross(candidates, latlng.lng, latlng.lat);
-      if (!hits.length) { setErr("No parcel right there — zoom in and click directly on a lot."); return; }
-      const { county, feature: feat } = hits[0]; // first county that answered owns the lot
-      // ALL outer parts: a multipart parcel ("TRS 3 & 5" = two separate tracts) used to
-      // highlight only its largest piece, so clicking the smaller tract registered the
-      // account but lit up the neighbour instead (B36c). Highlight + plan every part.
-      const rings = outerRingsLngLat(feat);
+      const res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
+      res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
+      if (!res.hits.length) {
+        // "Couldn't reach any parcel server" reads differently from "reached one, but
+        // there's no parcel at this exact point" (B245).
+        setErr(res.responded === 0
+          ? "The county parcel server isn't responding right now — try again in a moment, or trace the lot from the Aerial underlay."
+          : "No parcel right there — zoom in and click directly on a lot.");
+        return;
+      }
+      const hit = res.hits[0]; // first county that answered owns the lot
+      // A hit FROM the statewide layer while a real CAD existed for this spot means
+      // TxGIO stood in for a county whose own server was down/skipped — flag it.
+      const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+      const rings = outerRingsLngLat(hit.feature);
       if (!rings.length) { setErr("That record has no polygon shape — try an adjacent lot."); return; }
-      const attrs = feat.attributes || {};
-      // Namespace by county: OBJECTIDs are only unique within one CAD layer, so a multi-county
-      // assembly could otherwise collide (two lots sharing an id would toggle each other off).
-      const oid = attrs.OBJECTID ?? attrs.objectid ?? `${rings[0][0][0].toFixed(6)},${rings[0][0][1].toFixed(6)}`;
-      const key = `${county}:${oid}`;
-      const map = mapRef.current;
+      const key = parcelKey(hit.county, rings, hit.feature.attributes || {});
       if (hilitesRef.current[key]) {
         // toggle off
-        map.removeLayer(hilitesRef.current[key]);
+        mapRef.current.removeLayer(hilitesRef.current[key]);
         delete hilitesRef.current[key];
         setSelected((s) => s.filter((x) => x.key !== key));
       } else {
-        const latlngsList = rings.map((r) => r.map(([lon, lat]) => [lat, lon])); // every part — for the highlight + cursor hit-test
-        if (hilitesRef.current[key]) { try { map.removeLayer(hilitesRef.current[key]); } catch (_) {} } // drop a stale hilite before overwriting → no orphaned polygon if two clicks race (B22)
-        // Multipolygon nesting ([[part],[part]]) so each separate tract draws as its own
-        // filled shape — not as a hole punched out of the first (Leaflet's 2-level form).
-        hilitesRef.current[key] = L.polygon(latlngsList.map((ll) => [ll]), { color: PAL.accent, weight: 2.5, fillColor: PAL.accent, fillOpacity: 0.14, interactive: false }).addTo(map);
-        setSelected((s) => (s.some((x) => x.key === key) ? s : [...s, { key, rings, latlngsList, addr: findVal(attrs, ADDR_RE), acct: findVal(attrs, ID_RE), attrs, county }])); // dedupe by key (B22)
-        // B36(a): the statewide TxGIO layer (configured under `chambers`) can answer
-        // for a Harris/FB lot when that county's own CAD didn't — relabel via a true
-        // point-in-county lookup. Non-blocking + additive: only patches the saved
-        // entry's county, never the select/hilite flow.
-        if (county === "chambers") {
-          countyAtPoint(latlng.lng, latlng.lat)
-            .then(({ key: ckey }) => { if (ckey && ckey !== "chambers") setSelected((s) => s.map((x) => (x.key === key ? { ...x, county: ckey } : x))); })
-            .catch(() => {});
-        }
+        addParcelHit(hit, latlng);
+        if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
       setErr(humanizeError(e));
@@ -517,16 +677,49 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
   };
 
+  /* NEW-2 (B233): identify + select the parcel at a geocoded point and surface its
+     info card. Reuses the SAME identify/select pipeline as a click. Distinguishes
+     "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
+     (none) — they mean different things and must read differently. */
+  const selectParcelAt = async (latlng, label) => {
+    const { candidates, realPrimaries } = resolveCandidates(latlng);
+    if (!candidates.length) { setParcelInfo({ status: "unavailable", label }); return; }
+    let res;
+    try {
+      res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
+    } catch (_) {
+      setParcelInfo({ status: "unavailable", label }); return;
+    }
+    res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
+    if (!res.hits.length) {
+      // Nothing matched: if NO service even responded, the source is unavailable;
+      // if one answered with no parcel, the point is genuinely empty (a road/ROW).
+      setParcelInfo({ status: res.responded === 0 ? "unavailable" : "none", label }); return;
+    }
+    const hit = res.hits[0];
+    const viaBackup = STATEWIDE_KEYS.includes(hit.county) && realPrimaries.length > 0;
+    const added = addParcelHit(hit, latlng);
+    if (!added) { setParcelInfo({ status: "none", label }); return; }
+    setParcelInfo({
+      status: "found", label, key: added.key, county: hit.county, attrs: added.attrs,
+      addr: findAttr(added.attrs, ADDR_RE), acct: findAttr(added.attrs, ID_RE), acres: ringsAcres(added.rings),
+      backup: viaBackup ? backupCountyLabel(hit.feature.attributes || {}) : null,
+    });
+  };
+
+  // NEW-1 (B232) + NEW-2 (B233): geocode → recenter at parcel zoom → select the
+  // parcel there + show its info. (The old version only flew to a Nominatim hit and
+  // often got none for a bare street address, so the map never moved.)
   const goAddress = async () => {
     const q = addr.trim();
     if (!q) return;
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setParcelInfo(null);
     try {
-      const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`;
-      const r = await fetch(u);
-      const j = await r.json();
-      if (!j.length) { setErr("Couldn't find that address — add the city or ZIP, or just pan the map to it."); return; }
-      mapRef.current.flyTo([+j[0].lat, +j[0].lon], 18, { duration: 0.75 });
+      const center = mapRef.current ? mapRef.current.getCenter() : null;
+      const hit = await geocodeAddress(q, center);
+      if (!hit) { setErr("Couldn't find that address — add the city or ZIP, or just pan the map to it."); return; }
+      mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
+      await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label); // NEW-2: select + surface parcel info
     } catch (_) {
       setErr("Address search is unavailable right now — pan/zoom the map to your site instead.");
     } finally {
@@ -534,7 +727,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     }
   };
 
-  const clearSel = () => { clearHilites(); setSelected([]); };
+  const clearSel = () => { clearHilites(); setSelected([]); setParcelInfo(null); setBackupNotice(null); };
   // Always capture the planner underlay from Esri: it supports image `export`
   // (USGS tiles render on the map but its export op returns no image). The
   // boundary aligns to either source, so the planner aerial stays reliable.
@@ -554,102 +747,288 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     color: primary ? "#fff" : PAL.ink, fontWeight: primary ? 600 : 500,
     boxShadow: primary ? "0 2px 8px rgba(232,89,12,0.3)" : "none",
   });
-  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
+  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit" };
+
+  // One left-rail site row — shared by every status section (B235). Status marker,
+  // name (struck through when Dead), status + acreage, and the hover "show on map" ⊕.
+  const siteRow = (s) => {
+    const isActive = s.id === activeSiteId;
+    const st = statusOf(s); const t = statusToken(st);
+    const showActions = hoverRow === s.id || isActive;
+    return (
+      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / delete)" : "Open site (right-click for status / delete)"}
+        onClick={() => onOpenSite && onOpenSite(s.id)}
+        onDoubleClick={() => flyToSite(s)}
+        onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+        <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
+          onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+          style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
+            border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
+          {t.glyph}
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
+          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
+        </div>
+        {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
+            only the non-destructive locate (⊕) stays here. */}
+        <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
+          {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
+            className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
+          </button>}
+        </div>
+      </div>
+    );
+  };
+  // Sites matching the active chip + name filters (for the panel header count).
+  const shownCount = sites.filter((s) => passStatus(s) && passName(s)).length;
+
+  // One label/value row for the address-search parcel info card (B233).
+  const infoRow = (label, value) => (
+    <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", padding: "4px 0", borderBottom: "1px solid #f3efe5" }}>
+      <span style={{ fontSize: 11, color: PAL.muted, flex: "none" }}>{label}</span>
+      <span style={{ fontSize: 11.5, color: PAL.ink, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}>{value}</span>
+    </div>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#efeadf" }}>
-      {/* top bar — dark graphite chrome */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 14px", height: 52, background: PAL.chrome, borderBottom: `1px solid ${PAL.chromeLine}`, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", flexWrap: "nowrap", zIndex: 1000 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          {/* B104: the brand lockup is dropped here — the shell header already shows "Planyr · Site
-              Planyr", so this bar keeps only its context label and no longer duplicates the brand
-              (mirrors B10's planner-header dedup; a single physical row stays a later polish). */}
-          <span style={{ color: PAL.chromeInk, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>Find a site</span>
-        </div>
-        <div style={{ display: "flex", gap: 0, flex: 1, minWidth: 220, maxWidth: 460 }}>
-          <input style={{ ...field, flex: 1, borderRadius: "7px 0 0 7px" }} placeholder="Go to an address or place…" value={addr}
-            onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }} />
-          <button style={{ ...btn(true), borderRadius: "0 7px 7px 0", borderLeft: "none" }} disabled={busy} onClick={goAddress}>{busy ? "…" : "Go"}</button>
-        </div>
-        <div style={{ flex: 1 }} />
-        <button className="dbtn" title="Start a new blank plan without selecting parcels." style={{ padding: "7px 13px", fontSize: 13, borderRadius: 8, border: `1px solid ${PAL.chromeLine}`, background: "rgba(255,255,255,0.06)", color: PAL.chromeInk, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, whiteSpace: "nowrap" }} onClick={onSkip}>Start blank</button>
-      </div>
-
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
 
+        {/* ── Combined site bar — floating pill at top-center ── */}
+        <div style={{
+          position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 1000,
+          display: "flex", alignItems: "center",
+          background: PAL.chrome,
+          borderRadius: 99,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
+          padding: "0 6px",
+          height: 42,
+          maxWidth: "calc(100% - 540px)",
+          minWidth: 300,
+        }}>
+          {/* Address search */}
+          <input
+            style={{
+              flex: 1, minWidth: 140, maxWidth: 300, height: "100%",
+              padding: "0 10px", background: "transparent", border: "none", outline: "none",
+              color: PAL.chromeInk, fontSize: 13, fontFamily: "inherit",
+            }}
+            placeholder="Find a site — address or place…"
+            value={addr}
+            onChange={(e) => setAddr(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
+          />
+          <button
+            style={{
+              flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+              border: "none", background: PAL.accent, color: "#fff",
+              fontSize: 12, fontWeight: 700, cursor: busy ? "default" : "pointer",
+              fontFamily: "inherit", opacity: busy && !selectMode ? 0.6 : 1,
+              whiteSpace: "nowrap",
+            }}
+            disabled={busy && !selectMode}
+            onClick={goAddress}
+          >
+            {busy && !selectMode ? "…" : "Go"}
+          </button>
+
+          {/* Divider */}
+          <span style={{ width: 1, height: 22, background: PAL.chromeLine, flex: "none", margin: "0 8px" }} />
+
+          {/* Right section — state-dependent */}
+          {!selectMode && selected.length === 0 && (
+            <button
+              onClick={() => setSelectMode(true)}
+              style={{
+                flex: "none", display: "flex", alignItems: "center", gap: 5,
+                height: 30, padding: "0 11px", borderRadius: 6,
+                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+              }}
+            >
+              ＋ Select parcels
+            </button>
+          )}
+          {selectMode && selected.length === 0 && (
+            <>
+              <span style={{
+                flex: "none", color: PAL.chromeMuted, fontSize: 12.5,
+                padding: "0 6px", whiteSpace: "nowrap",
+              }}>
+                {busy ? "Looking up lot…" : "Selecting…"}
+              </span>
+              <button
+                onClick={() => setSelectMode(false)}
+                style={{
+                  flex: "none", height: 30, padding: "0 10px", borderRadius: 6,
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                  color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {selected.length > 0 && (
+            <>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: PAL.accent, flex: "none" }} />
+              <span style={{
+                flex: "none", color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
+                padding: "0 8px", whiteSpace: "nowrap",
+              }}>
+                {selected.length} parcel{selected.length > 1 ? "s" : ""} · {asm ? `${asm.totalAc.toFixed(2)} ac` : "…"}
+              </span>
+              <button
+                onClick={clearSel}
+                title="Clear selection"
+                style={{
+                  flex: "none", width: 26, height: 26, borderRadius: 5,
+                  border: "none", background: "transparent",
+                  color: PAL.chromeMuted, fontSize: 13, lineHeight: 1,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+              <button
+                onClick={planSelected}
+                style={{
+                  flex: "none", height: 30, padding: "0 11px", borderRadius: 6,
+                  border: "none", background: PAL.accent, color: "#fff",
+                  fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "inherit", whiteSpace: "nowrap",
+                }}
+              >
+                Plan {selected.length > 1 ? `${selected.length} parcels` : "site"} →
+              </button>
+            </>
+          )}
+          <span style={{ width: 4 }} />
+        </div>
+
+        {/* NEW-2 (B233): address-search parcel info card — drops in under the search
+            pill after a "Go". Three distinct states: found (parcel ID + key appraisal
+            facts), none (centered, but no parcel at that point), and unavailable
+            (couldn't reach the parcel service) — the last two read differently. */}
+        {parcelInfo && (
+          <div style={{ position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)", zIndex: 1001, width: 348, maxWidth: "calc(100% - 540px)", background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 22px rgba(28,25,20,0.22)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: parcelInfo.status === "found" ? `1px solid ${PAL.panelLine}` : "none" }}>
+              <span style={{ flex: "none", fontSize: 13 }}>{parcelInfo.status === "found" ? "📍" : parcelInfo.status === "none" ? "○" : "⚠"}</span>
+              <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: parcelInfo.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {parcelInfo.status === "found" ? (parcelInfo.addr || parcelInfo.label || "Parcel")
+                  : parcelInfo.status === "none" ? "No parcel at this point"
+                  : "Parcel info unavailable"}
+              </span>
+              <button onClick={() => setParcelInfo(null)} title="Dismiss" aria-label="Dismiss parcel info"
+                style={{ flex: "none", width: 22, height: 22, borderRadius: 5, border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1 }}>✕</button>
+            </div>
+            {parcelInfo.status === "found" ? (
+              <div style={{ padding: "8px 11px 10px" }}>
+                {parcelInfo.backup && (
+                  <div style={{ marginBottom: 8, padding: "6px 8px", background: "#fdf6e7", border: "1px solid #e6c478", borderRadius: 6, fontSize: 11, color: "#8a5a00", lineHeight: 1.4 }}>
+                    Statewide backup — {parcelInfo.backup} county’s server is unavailable; shown from TxGIO and may lag county updates.
+                  </div>
+                )}
+                {parcelInfo.acct && infoRow("Account / ID", parcelInfo.acct)}
+                {parcelInfo.acres != null && infoRow("Acreage (measured)", `${parcelInfo.acres.toFixed(2)} ac`)}
+                {apprRows(parcelInfo.attrs)
+                  .filter((r) => !/^(situs address|account \/ id|acreage)$/i.test(r.label))
+                  .map((r) => infoRow(r.label, apprVal(r.label, r.value)))}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                  <button onClick={planSelected}
+                    style={{ height: 30, padding: "0 12px", borderRadius: 6, border: "none", background: PAL.accent, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    Plan this site →
+                  </button>
+                </div>
+              </div>
+            ) : parcelInfo.status === "none" ? (
+              <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>
+                The map centered on the address, but no parcel covers that exact point — it may sit on a road or right-of-way. Click the lot directly, or zoom in and use <b>Select parcels</b>.
+              </div>
+            ) : (
+              <div style={{ padding: "9px 11px", fontSize: 11.5, color: PAL.accent, lineHeight: 1.5 }}>
+                The map centered on the address, but the county parcel service couldn’t be reached for this area right now. Give it a moment, then click the lot or use <b>Select parcels</b>.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* saved sites */}
         {sites.length > 0 && (
-          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
             {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
             <button onClick={toggleSitesPanel} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
                 fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px" }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
               <span style={{ flex: 1, textAlign: "left" }}>Your sites</span>
-              <span style={{ color: PAL.ink, fontWeight: 700 }}>{sites.length}</span>
+              <span style={{ color: PAL.ink, fontWeight: 700 }}>{(statusFilter.size || nf) ? `${shownCount}/${sites.length}` : sites.length}</span>
             </button>
             {sitesPanelOpen && (<>
-            {/* Pipeline by status — legend + filter + counts. Each chip toggles that status on the
-                map; zero-count statuses are hidden to keep it tidy (B106). */}
+            {/* Type-to-filter the list by name (B235). */}
+            <div style={{ padding: "0 8px 6px" }}>
+              <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
+                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: 7, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
+            </div>
+            {/* Status chips = POSITIVE multi-select filters (B235): tap to show only those
+                statuses (list + map pins both). None selected = show everything. Colors +
+                glyphs come from the shared status tokens (B234). */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, padding: "0 8px 8px" }}>
               {STATUSES.filter((st) => (statusCounts[st] || 0) > 0).map((st) => {
-                const sty = statusStyle(st); const off = hidden.has(st); const n = statusCounts[st] || 0;
+                const t = statusToken(st); const on = statusFilter.has(st); const anySel = statusFilter.size > 0; const n = statusCounts[st] || 0;
                 return (
-                  <button key={st} onClick={() => toggleHidden(st)}
-                    title={`${STATUS_META[st]?.label || st}: ${n} — click to ${off ? "show" : "hide"} on map`}
-                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
-                      fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${off ? PAL.panelLine : sty.dot}`,
-                      background: off ? "#f4f1ea" : "#fff", color: off ? PAL.muted : PAL.ink, opacity: off ? 0.7 : 1, textDecoration: off ? "line-through" : "none" }}>
-                    <span style={{ color: sty.dot, fontSize: 11 }}>{STATUS_GLYPH[st]}</span>
-                    {STATUS_META[st]?.label || st}<span style={{ color: PAL.muted, fontWeight: 700 }}>{n}</span>
+                  <button key={st} onClick={() => toggleStatusFilter(st)}
+                    title={`${STATUS_META[st]?.label || st}: ${n} — ${on ? "click to remove from the filter" : "click to show only this status"}`}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
+                      fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
+                      background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
+                    <span style={{ color: on ? "#fff" : t.color, fontSize: 11 }}>{t.glyph}</span>
+                    {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
                   </button>
                 );
               })}
             </div>
-            <div style={{ maxHeight: 280, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
-              {sites.map((s) => {
-                const isActive = s.id === activeSiteId;
-                const st = statusOf(s); const sty = statusStyle(st);
-                const showActions = hoverRow === s.id || isActive; // crosshair + delete reveal on hover (B106)
-                return (
-                  <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status)" : "Open site"}
-                    onClick={() => onOpenSite && onOpenSite(s.id)}
-                    onDoubleClick={() => flyToSite(s)}
-                    onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
-                    <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
-                      onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
-                      style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
-                        border: `1.5px solid ${sty.dot}`, background: sty.hollow ? "#fff" : sty.dot, color: sty.hollow ? sty.dot : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
-                      {STATUS_GLYPH[st]}
-                    </button>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.site || s.name || "Untitled site"}</div>
-                      <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
-                    </div>
-                    <div style={{ display: "flex", gap: 2, flex: "none", alignItems: "center", opacity: showActions ? 1 : 0, transition: "opacity .12s", pointerEvents: showActions ? "auto" : "none" }}>
-                      {s.origin && <button title="Show on map (zoom to the plan)" aria-label="Show on map" onClick={(e) => { e.stopPropagation(); flyToSite(s); }}
-                        className="gbtn" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="5.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2" /></svg>
-                      </button>}
-                      <button title="Delete site and all its plans" aria-label="Delete site" onClick={(e) => { e.stopPropagation(); setConfirmDel(s); }}
-                        className="gbtn-danger" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", lineHeight: 0, padding: 3, borderRadius: 5 }}>
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            {/* Collapsible status sections (B235). Active/Pursuit/On Hold expanded by
+                default; Complete/Dead collapsed so settled projects go quiet. Headers
+                use the shared status tokens (B234). */}
+            <div style={{ maxHeight: 340, overflowY: "auto", paddingBottom: 4, borderTop: `1px solid ${PAL.panelLine}` }}>
+              {(() => {
+                if (shownCount === 0) return <div style={{ fontSize: 11.5, color: PAL.muted, padding: "10px 12px" }}>No sites match{nf ? ` “${nameFilter.trim()}”` : ""}.</div>;
+                return STATUSES.filter((st) => statusFilter.size === 0 || statusFilter.has(st)).map((st) => {
+                  const rows = sites.filter((s) => statusOf(s) === st && passName(s));
+                  if (!rows.length) return null;
+                  // While a name filter is active, force matching sections open so a
+                  // match in a settled (collapsed) group isn't hidden (B235).
+                  const t = statusToken(st); const collapsed = !!groupCollapsed[st] && !nf;
+                  return (
+                    <div key={st}>
+                      <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
+                        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
+                        <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
+                        <span style={{ color: t.color, fontSize: 11 }}>{t.glyph}</span>
+                        <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
+                        <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
                       </button>
+                      {!collapsed && rows.map(siteRow)}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
             </>)}
           </div>
         )}
 
         {/* imagery + labels + overlay layers control */}
-        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
+        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <span style={{ color: PAL.muted }}>Imagery</span>
             <select style={{ ...field, padding: "4px 6px", fontSize: 12, flex: 1 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
@@ -667,91 +1046,82 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 resolved from the view centre on every moveend — so the right utility
                 overlays are offered outside Houston too; per-site jurisdiction still
                 follows the site's own county once one is opened in the planner. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} />
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} coverage={coverage} />
           </div>
         </div>
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}
         {err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
             {err}
+          </div>
+        )}
+        {/* statewide-backup notice (bottom-left) — the clicked lot was answered by the
+            all-Texas TxGIO layer because the county's own server was down; be honest
+            about provenance so a possibly-staler source is never mistaken for the
+            county's own record (B244). */}
+        {backupNotice && !err && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: 8, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45 }}>
+            <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
           </div>
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
         {!err && selectMode && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
             {zoom != null && zoom < PARCEL_MINZOOM
               ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
               : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
           </div>
         )}
-        {/* first-run-only, dismissible hint — replaces the old persistent "Drag to move" card (B105) */}
-        {!err && !selectMode && showMapHint && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 360, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span>Drag to move the map. Hit “＋ Select parcels” to start adding lots.</span>
-            <button onClick={dismissMapHint} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
-          </div>
-        )}
+        {/* (B167) The idle "Drag to move the map" first-run bubble was removed entirely. */}
 
-        {/* selection card */}
-        {selected.length > 0 && (
-          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 20, zIndex: 1000, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 14, boxShadow: "0 14px 40px rgba(0,0,0,0.26), 0 2px 8px rgba(0,0,0,0.12)", padding: "14px 16px", minWidth: 320, maxWidth: 480 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 4 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 99, background: PAL.accent }} />
-              {selected.length} parcel{selected.length > 1 ? "s" : ""} · <span style={{ color: PAL.ink, fontWeight: 700 }}>{asm ? asm.totalAc.toFixed(2) : "—"} ac</span>
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {selected[selected.length - 1].addr || "Parcel"}{selected.length > 1 ? ` +${selected.length - 1} more` : ""}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button style={{ ...btn(true), flex: 1, padding: "9px 14px" }} onClick={planSelected}>Plan {selected.length > 1 ? `${selected.length} parcels` : "this site"} →</button>
-              <button style={btn(false)} onClick={clearSel}>Clear</button>
-            </div>
-          </div>
-        )}
-        {selected.length === 0 && (
-          <button onClick={() => setSelectMode((m) => !m)} style={{
-            position: "absolute", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 1000,
-            padding: "12px 22px", fontSize: 14, fontWeight: 700, borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
-            border: `1px solid ${PAL.accent}`, background: selectMode ? "#fff" : PAL.accent, color: selectMode ? PAL.accent : "#fff",
-            boxShadow: "0 6px 22px rgba(194,65,12,0.35)",
-          }}>{selectMode ? "✓ Selecting — click lots" : "＋ Select parcels"}</button>
-        )}
       </div>
-      {/* Right-click status picker — set the project's lifecycle stage. Current
-          state is checked; picking another persists it (via onSetStatus) and the
-          markers/legend re-render. Positioned at the cursor, clamped to viewport. */}
+      {/* Right-click context menu for a project — set its lifecycle stage (B7) or delete
+          it (B168). One menu, not two: the status picker now also carries Delete, which
+          routes through the existing confirmation modal (no single-click destruction).
+          Opened from a card row OR a map marker/boundary. Positioned at the cursor,
+          clamped to the viewport; the full-screen backdrop keeps it above all map layers. */}
       {statusMenu && (
         <div onClick={() => setStatusMenu(null)} onContextMenu={(e) => { e.preventDefault(); setStatusMenu(null); }}
           style={{ position: "fixed", inset: 0, zIndex: 4200 }}>
           <div onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
-              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 224),
-              width: 180, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
+              top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
+              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
-              const sty = statusStyle(st); const cur = statusOf(statusMenu.site) === st;
+              const t = statusToken(st); const cur = statusOf(statusMenu.site) === st;
               return (
                 <button key={st} onClick={() => setStatus(statusMenu.site.id, st)}
                   style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                    background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500 }}>
+                    background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
                   <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: 99,
-                    border: `1.5px solid ${sty.dot}`, background: sty.hollow ? "#fff" : sty.dot, color: sty.hollow ? sty.dot : "#fff", fontSize: 9, lineHeight: 1 }}>{STATUS_GLYPH[st]}</span>
+                    border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
                   <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
                   {cur && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
                 </button>
               );
             })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setConfirmDel(s); }}
+              title="Delete this project and all its plans"
+              style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                background: "transparent", color: "#b91c1c", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+              <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              </span>
+              <span style={{ flex: 1 }}>Delete project…</span>
+            </button>
           </div>
         </div>
       )}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink, marginBottom: 6 }}>Delete this site?</div>
             <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 16 }}>“{confirmDel.site || confirmDel.name || "this site"}” and all of its plans will be removed. This can't be undone.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
+              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
               <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
             </div>
           </div>

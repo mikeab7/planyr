@@ -5,11 +5,27 @@ two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
 backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
+> **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT. Do not log-and-defer.**
+> If Michael reports a bug or asks for a change, the job is to **fix it, verify it, and merge it to
+> live this session** — not to file it in `BACKLOG.md` and leave it for "a future session." That
+> turns his one request into homework he has to chase later, wastes a round-trip, and is exactly the
+> opposite of what he wants. **The backlog is for things that genuinely cannot be done now** (blocked
+> on a decision, an external dependency, or too large to finish this run) — NOT a parking lot for his
+> requests. Even if he literally says "add this to the backlog," read the intent: he wants it
+> **handled**. So: file it (for the record) **and then go fix it the same session**, moving it
+> straight to `BACKLOG-DONE.md` when it ships. Default to action. The only acceptable reason to leave
+> something merely filed is a hard blocker — and then you say so plainly, you don't go quiet. If
+> several items arrive at once, fix them all; if one is genuinely too big, fix the rest and flag that
+> one with the specific blocker. (Owner rule, 2026-06-19, after a session filed three fixable items
+> instead of fixing them.)
+>
 > **📋 `BACKLOG.md` is the single source of truth for open bugs & feature requests.**
-> On every run, check `BACKLOG.md`: work the items under **🔲 Open**, skip those under
-> **✅ Done**. (This is the product bug/feature backlog — distinct from the
-> "Deferred / maintenance backlog" section near the end of this file, which tracks
-> ops/infra cleanup.)
+> On every run, check `BACKLOG.md` **🔲 Open** section and work those items.
+> Completed items are archived in `BACKLOG-DONE.md` — **do not read that file** unless
+> looking up a specific past item; it is historical record only. When finishing an item,
+> move its block to `BACKLOG-DONE.md` (not to the Done stub in `BACKLOG.md`). The next
+> B# = highest `B#` across **both** files + 1. (This is the product backlog — distinct
+> from the "Deferred / maintenance backlog" section near the end of this file.)
 >
 > **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
 > green but still need a click-through on planyr.io. On every run, scan it and **verify any
@@ -52,6 +68,28 @@ doesn't write code. This is a standing rule, not a one-off.
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
 
+## Finish the job — IMPORTANT, standing rule (added 2026-06-19 after a miss)
+**When I ask you to fix a problem, fix it ALL the way through in the same session — do
+not stop at a diagnosis, a band-aid, or part of what I asked and defer the rest.** This
+is a hard rule, born from a real miss: I picked "both: quick fix now, then real fix" and
+the session shipped only the quick fix plus a writeup of the real one. That is exactly
+what NOT to do.
+- **"Fix it" means implement every part of the fix**, including the harder/real one —
+  go through all the relevant code, make the actual change, and verify it (build green +
+  the appropriate self-test/headless check). A diagnosis or a backlog note is **never**
+  a substitute for doing the work.
+- **If I pick a multi-part option (e.g. "do both"), do every part** before you report
+  back. Don't deliver part 1 and describe part 2.
+- **Default to taking it live.** I almost always want the fix merged (that's why "commit"
+  = ship the whole chain incl. merge — see Workflow & deploy). If you genuinely can't
+  merge (hard blocker), say so; otherwise carry it through to merged.
+- **Only stop early for a true blocker** — a hard technical blocker, a destructive/
+  irreversible action needing confirmation, or a genuine either/or product decision only
+  I can make. "This part is bigger/riskier" is NOT a reason to defer it; it's a reason to
+  do it carefully (own branch, verify, then merge), not to hand it back to me.
+- If a fix is genuinely too large to finish in one session, that itself is a blocker to
+  raise explicitly with a plan — not a silent stop after the easy half.
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
@@ -72,8 +110,13 @@ planner's map; an engineer's drawing overlays the planner's layout).
 - **Shared coordinate spine.** One real-world coordinate system underpins everything:
   **EPSG:2278 — NAD83 / Texas State Plane, South Central zone, US survey feet**
   (correct for the Houston/Katy area). This is what lets a deed polygon, an overlay,
-  and the site layout all live in the same space. Currently a stub in
-  `src/shared/coordinates/`, not yet wired in.
+  and the site layout all live in the same space. `src/shared/coordinates/` now has a
+  **real EPSG:2278 ↔ WGS84 projection** (`projectToGrid`/`gridToProject`, Lambert
+  Conformal Conic, validated vs pyproj <1e-4°); its first consumer is the **layer
+  coverage engine** (B283), which reprojects each GIS service's published extent to
+  test whether its data reaches the view. This is a **read-only screening use** — the
+  Site Planner still keeps its own per-site feet frame for drawn geometry; grow the
+  shared grid additively, not via a big-bang planner rewrite.
 - **Document Review layer model.** The imported drawing is an **immutable backdrop**
   (a fixed background, never altered). The user's measurements, markups, test-fit
   massing, and parsed polygons live on **editable layers stacked over it.** "Editing
@@ -125,12 +168,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
-- **Deploy = GitHub Pages (production).** Because the suite is one app with an in-app
-  workspace switcher, "seeing both live" is one URL — you switch tabs inside it.
-- **Cloudflare Pages is optional and deferred.** Its only job is per-branch preview
-  URLs (seeing an unmerged branch live without merging to `main`). Not required to
-  build or to see both workspaces. (Don't conflate this with PR status checks, which
-  are a separate GitHub Actions concern.)
+- **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
+  app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
+  inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
+  deploy pipeline — ✅ DONE" near the end of this file; GitHub Actions now only runs the
+  build status check, it doesn't publish.)
+- **Per-branch preview URLs** (seeing an unmerged branch live without merging to `main`)
+  are a separate, optional Cloudflare concern — not required to build or to see both
+  workspaces. (Don't conflate this with PR status checks, which are a separate GitHub
+  Actions concern.)
 - End commit messages with the session link the harness provides. Don't include the
   model identifier in commits/PRs/code.
 
@@ -145,6 +191,17 @@ server/                   # placeholder README only — NOT built or deployed; b
   exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
 - Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
   `layers=show:<sublayer IDs>` to paint the mains/pipes.
+- **Layer coverage engine + coverage-aware picker (B283/B284).** Each layer is tagged
+  national/statewide/regional; a regional layer's published `fullExtent` (read from the
+  existing `?f=json` probe, reprojected via the shared EPSG:2278 grid) is intersected
+  with the view so the Layers panel can say **"No data in this area"** instead of leaving
+  a silent blank (the COH-utilities-blank-outside-Houston confusion). A **Relevance**
+  control (Show all / Dim / Hide) + a **nearby-range** slider dim/collapse out-of-coverage
+  layers — **list ordering/visibility only, never the map** (hard rule: coverage never
+  alters a layer's request; the request builders live in `lib/layerRequest.js` and take
+  no coverage input). Fails open everywhere. Mapillary renamed "Poles & hydrants from
+  street imagery" + gated as "needs setup" (B285/B286); jurisdiction vector services now
+  retry transient 5xx with backoff (B287). `lib/coverage.js`.
 
 ### Supabase backend (built, Phases 1–4)
 - Phase 1 — connection to a cloud Postgres database.
@@ -153,6 +210,13 @@ server/                   # placeholder README only — NOT built or deployed; b
 - Phase 4 — cloud save/load: logged-in users' data lives in the cloud and syncs
   across devices. No migration of old browser-stored sites (few enough to recreate
   by hand — intentional).
+- User profiles (B297/B298) — first/last name captured at signup now persist to a
+  queryable **`public.profiles`** table (one row per `auth.uid()`, private-by-default
+  RLS, a `handle_new_user` signup trigger that copies names from the signup metadata,
+  plus a backfill for existing users). The header pill shows the user's **name** (never
+  blank: First Last → first → last → metadata → email) and opens an **account dropdown**
+  (Profile / Settings / Sign out). Reuses the existing anon client + session — no new
+  keys. Migration: `src/workspaces/site-planner/db/profiles.sql` (run once, idempotent).
 
 ### Multi-workspace foundation (new)
 - Monorepo restructure landed via **PR #3** (the new clean `main`): the shell, the
@@ -198,7 +262,112 @@ server/                   # placeholder README only — NOT built or deployed; b
   needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
   hasn't run yet, so saving never regresses.
 
+### Document Review — auto-filing: PLAIN CODE first, AI fallback (B299 + B312) — LIVE (Tier 1 on by default)
+- **Tier 1 (B312, LIVE, default-on, FREE):** the common case is **plain code in the browser, no
+  tokens, no cloud, no key.** For any PDF with an embedded text layer (most CAD vector drawings),
+  `extractPageText` (pdf.js, reused from B267) → pure parsers in `src/shared/files/`:
+  `titleBlockParse.js` (discipline keyword table incl. **ALTA**, latest-date, sheet #, revision) +
+  `matchProject.js` (`matchProjectInText` searches the sheet text for each named project's
+  name/parcel/job#, reusing the "never auto-guess" decision) → `doc-review/lib/localRead.js`
+  (`localTitleBlockRead`). The provider exposes `autofileReady = true` so the drawer auto-files
+  out of the box: **confident match → auto-route; else → today's behavior** (active project /
+  holding tray). 53 unit tests; real-sheet accuracy = **V79**.
+- **Tier 2 (B299, AI fallback, gated dormant):** `autofile` (`lib/autofiling.js`) is local-first and
+  only reaches the AI when Tier 1 finds **no text** (a scanned/image-only sheet) **and**
+  `VITE_AUTOFILE_ENABLED` is on. So tokens are spent only on the hard minority. The server-side
+  **title-block read** (`server/filing/`,
+  Cloud Run — the key must never reach the browser, so it's `/server` compute, not Supabase)
+  reads a dropped PDF with the Claude API, **matches it to a named project** (parcel / job # /
+  address / name, **never auto-guesses**), and returns a **filing decision** (auto-route +
+  auto-name, or "needs filing" → the one-click-confirm holding area) **plus placement facts**
+  captured in the **same read** ("Place on map" without reopening the file).
+- **Reader** mirrors the client `titleReader.js` request shape but calls the Messages API over
+  **raw `fetch`** (injectable, like `server/convert/aps.js`) so the image is dependency-free.
+  **Matcher** is pure + transparent (lists the signal it matched on). HTTP `POST /file` (PDF
+  bytes + `X-Planyr-Projects` base64 header) / `GET /health`, honest status codes, no silent
+  failures. `Dockerfile` + `README.md` alongside.
+- **File-facts index lives in Supabase Postgres, NOT /server** (`doc-review/db/file_facts.sql`,
+  `public.file_facts`, RLS like `doc_reviews`) — one small row per filed drawing so the library
+  answers "project → discipline → latest set" without re-reading the PDF. Client: the real index
+  provider `doc-review/lib/autofiling.js` fills the `capturePlacementFacts` seam (B181) +
+  `autofile`; `lib/fileIndex.js` + `reviewStore.upsertFileFacts/listFileFacts` persist/merge it.
+- **Gated dormant, like APS/Drive:** `backendReady` reflects `VITE_AUTOFILE_ENABLED`; the
+  same-origin proxy `functions/api/file.js` 503s until `DOC_FILING_URL` is set. Off by default
+  → the drawer files manually exactly as before (a 404/503 is a graceful skip). **Owner deploy
+  to light it up:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` (server-side) +
+  `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
+
+### Document Review — drop a set → auto-group, auto-stitch, crop, auto-calibrate (B335–B339) — LIVE
+- **The headline UX.** Drop a multi-page PDF set into the Stitcher and it now assembles itself
+  instead of making you add + align each page by hand. The pages are read, **grouped into logical
+  sheets** ("Grading Plan · C-5–C-7 · 3 sheets"), and clicking a grouped plan **auto-stitches**
+  every page, **crops** the title blocks so drawings butt cleanly, and **auto-calibrates** from
+  the sheet's stated scale. An "all pages" toggle + the 2-point manual Align remain the safety net.
+- **Shared positional reader (B336)** — pure `src/shared/files/sheetMeta.js` (+ pdf.js
+  `extractPageItems`): per page it finds the title-block band, sheet title, stated scale (reuses
+  B267 `parseSheetScale`), and every match-line label with position + orientation. REUSES the B312
+  filing parsers (`titleBlockParse`) — a positional superset, not a second reader. Glue +
+  read→group pipeline + per-group calibration in `doc-review/lib/sheetRead.js`, with a **dormant
+  injectable OCR seam** for scanned pages.
+- **Grouping (B335)** `src/shared/files/sheetGroups.js`; **auto-stitch (B337)**
+  `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
+  to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
+  **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
+- **Scanned-sheet OCR — BUILT (B352, owner-requested).** A scanned / image-only drawing (no text
+  layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
+  (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
+  so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
+  up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
+  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b352-ocr.mjs`).
+- **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
+  **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
+  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME
+  engines (`readSheetMeta`/`groupSheets`/`statedCalibration`) — no duplicate modules. A page with no
+  title block falls back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
+  (`ui-audit/verify-markup-sheet-labels.mjs` 7/7 + no-regression 13/13).
+- **Remaining CV tails are deferred behind seams → B340** (Later/Roadmap): graphic scale-bar reading,
+  the geometric edge-line stitch fallback, legend symbol-union. The common case (vector + now scanned
+  via OCR) is shipped. 30 unit tests; headless-verified end-to-end (V87, `ui-audit/verify-b335-b339.mjs`, 13/13).
+
+### Document Review — stitcher notes/legend capture + click-to-detail "cloud" (B350) — LIVE
+- **Notes/legend survive the crop, aggregated across the set.** The auto-crop (B338) hides the
+  title-block band where general notes/legends live. Pure `src/shared/files/sheetNotes.js`
+  (`parseNotes` finds each `GENERAL/GRADING/KEYED NOTES` / `LEGEND` / `ABBREVIATIONS` block;
+  `aggregateNotes` merges every placed sheet's blocks, dedupes boilerplate, and **flags a note
+  that differs by sheet** with its sheet tag) → the pinned **Composite key** gains an expandable
+  "Notes & legend · N" section. So a note that **changes page to page** is captured, never lost.
+- **Click a detail callout → that detail pops up (Bluebeam-style), without leaving the drawing.**
+  Pure `src/shared/files/detailRefs.js` reads detail-callout **bubbles** (a detail id stacked
+  over a sheet code "5 / A-3", plus inline / keyword forms — conservative: a plain fraction can't
+  match) and detail **definitions** (`DETAIL 5`, `SECTION A-A`). Callouts render as clickable
+  hotspot rings; clicking opens a floating **cloud popup** rendering the referenced sheet (reused
+  from a placed sheet or rendered on demand), centered on the named detail when the target labels
+  it, pan/zoomable. Honest fallback when the target sheet isn't in the set. Toolbar **Details**
+  toggle; hotspots only grab clicks in Pan mode.
+- Both REUSE the B336 positional reader (wired into `readSheetMeta` → each page carries `notes`/
+  `detailRefs`/`detailAnchors`); placed sheets persist them. 14 unit tests; V92 headless
+  (`ui-audit/verify-b350.mjs`, 11/11) + `verify-b335-b339.mjs` 13/13 no-regression.
+
 ## KEY DECISIONS (must persist)
+- **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
+  has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens
+  in `src/index.css`, mirrored to JS for the SVG canvas in `src/shared/theme/palette.js` (var()
+  can't be used in SVG attributes / canvas export — keep the two in sync). **Chrome themes WITH
+  the app** (light theme = light chrome) — never a permanently-dark bar over a light app (the
+  constant pupil readjustment is the worst case for eye strain). **Build text hierarchy through
+  weight, size, and uppercase letter-spacing — NEVER by fading text toward the background.**
+  Low-contrast gray body/label text is **disallowed** (eye strain in bright offices); subtle grays
+  are correct ONLY for borders, the drafting grid, and the semantic "Complete" status badge. New UI
+  must reference **theme tokens, never raw hex**, and clear **WCAG AA (≥ 4.5:1)** for body text on
+  its surface in **both** themes. This is now **machine-enforced**: `ui-audit/contrast-audit.mjs`
+  (parses the real `index.css`) + `test/contrast.test.js` fail CI if any defined token pair drops
+  below its floor — so a palette edit can't silently re-introduce a low-contrast pair. Text/icon ON
+  the global accent fill uses **`--on-accent`** (white in light, near-black in dark — the dark accent
+  is too light for white); saving/unsaved/offline labels use **`--warn-text`** (AA amber). The common
+  trap (the B341 regression): a chrome-region component that **hardcodes a color instead of a token**
+  reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
+  lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
+  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline
@@ -287,13 +456,18 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   (drop → read title block → file into Drive), which is the backend feature already
   on the roadmap. Two different things, two timelines.
 - Multi-sheet stitcher: assisted alignment (built — `Stitcher.jsx`, 2-point pairwise
-  align); automatic match-line detection later; near-automatic once DWG conversion lands.
+  align); **automatic match-line detection — BUILT (B337)**: drop a set → it auto-groups
+  (B335) + auto-stitches from match-line labels + auto-calibrates (B339) + crops title
+  blocks (B338); the 2-point manual Align stays the safety net (pre-seeded when a seam is
+  detected). **Scanned sheets read via OCR too (B349).** The remaining CV tails (scale-bar,
+  geometric edge-match, legend symbol-union) → B340. Near-automatic once DWG conversion lands.
 - Revision compare: add a revision to a discipline set and compare the two
   (overlay/diff) — confirm against the existing overlay/version-compare item.
 - ★ North-star: "map → drawings → latest set" — from the Site Planner map, click a
   project → Drawings → pick a discipline (e.g., Landscaping) → see the latest
   revision's full set, already stitched. Depends on the filing system + file index,
-  the stitcher, and project nav on the map. The convergence point; build once those exist.
+  the stitcher (the **auto-group + auto-stitch** half is now built — B335–B339), and
+  project nav on the map. The convergence point; build once those exist.
 
 ## KNOWN ISSUES
 - Houston utilities ride on the City's `geogimstest` **TEST** host — works, but could
@@ -303,22 +477,72 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   roughly 10 of 14 layers were live.
 
 ## Two backends — don't conflate
-1. **Supabase** (built, managed BaaS): user accounts, auth, row-level security, and
-   cloud save/load of site data **and now Document Review state** (the `doc_reviews`
-   table + the `doc-review-files` Storage bucket, same anon client + private-by-default
-   RLS). The client talks to Supabase directly (anon key + RLS); little custom server code.
-2. **`/server`** (not built; coming with Document Review): custom backend for CAD
-   conversion (APS), Google Drive auto-filing, and the file index database. This
-   holds the third-party secrets that must stay isolated from the public Pages deploy.
+Two layers that talk **over the network** — one for **data**, one for **compute**. Never
+conflate them.
 
-So "the backend" is built for user data (Supabase) but not yet for CAD conversion and
-filing (`/server`). Keep these separate when reasoning about what exists.
+1. **Supabase — the data / auth / storage layer (BUILT).** Cloud Postgres, email/password
+   auth, row-level security, and cloud save/load of site data **and** Document Review state
+   (the `doc_reviews` table + the `doc-review-files` Storage bucket, same anon client +
+   private-by-default RLS). The **frontend talks to Supabase directly with the anon key** —
+   which is safe to ship in the browser **because RLS protects it** (a request can only
+   ever see/write the signed-in user's own rows). This is the **permanent home for user
+   data**; little custom server code.
+2. **`/server` on Google Cloud Run — the compute layer (built in-repo, NOT yet deployed).**
+   Scale-to-zero containers (idle = free; a request spins one up) for the heavy work that
+   can't live in the browser or a Supabase row:
+   - **DWG→DXF conversion** — **LibreDWG** primary (free, native binary compiled into the
+     container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG
+     failures (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned;
+     a LibreDWG failure with APS off returns an explicit error, never a silent success).
+     Code: `server/convert/` (B238). LibreDWG needs a real container (native binary +
+     filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
+   - **Auto-filing title-block read + project match** — `server/filing/` (B299): reads a
+     dropped drawing's title block with the Claude API (key **server-side only**), matches it
+     to a named project (**never auto-guesses**), and returns a filing decision + placement
+     facts. Dormant behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED`
+     until provisioned (a not-yet-deployed proxy 503s → the drawer files manually, no
+     regression). The same-origin proxy is `functions/api/file.js`.
+   - **Google Drive auto-filing + bytes I/O** — the storage adapter (`server/storage/`,
+     B206–B209) that auto-filing writes through; the queryable **file-facts index lives in
+     Supabase Postgres** (`doc-review/db/file_facts.sql`), not on `/server`. (The one-time
+     Google OAuth *consent* callback is a thin same-origin Cloudflare Pages Function,
+     `functions/api/auth/google/*`; the heavy compute is Cloud Run.)
+
+   **All third-party secrets stay server-side only** — the APS key, the **Anthropic read key**
+   (auto-filing), the Google credentials, and the Supabase **service-role** key — **walled off
+   from the public Cloudflare Pages deploy**. The only Supabase key that reaches the frontend is the RLS-protected **anon**
+   key. `/server` is **additive compute layered onto** the permanent Supabase data home,
+   reached over the network in the backend tranche — never bundled into the browser build.
+
+So "the backend" is BUILT for user data (Supabase) while the CAD-conversion + filing compute
+(`/server` on Cloud Run) is built in-repo but not yet deployed. Keep the **data** layer and
+the **compute** layer separate when reasoning about what exists.
 
 ---
 
 # Technical reference (preserved implementation detail)
 Deeper specifics behind the summaries above. Paths reflect the monorepo layout
 (`src/workspaces/site-planner/…`).
+
+## Playwright / ui-audit in the sandbox
+All screenshot harnesses live in `ui-audit/` and target the Vite preview server on
+`:4173` (`npm run build && npx vite preview`). One non-obvious sandbox quirk:
+
+**Always pass `--ignore-certificate-errors` to Chromium.** The sandbox routes
+outbound HTTPS through a TLS inspection proxy. Node.js trusts it (system cert store);
+Chromium does not — every tile request fails with `ERR_CERT_AUTHORITY_INVALID` and
+the basemap renders gray. The flag is already set in `capture.mjs` and
+`verify-markers.mjs`. Add it to any new Playwright harness you write:
+```js
+chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] })
+```
+The allowed-domain list (`*.arcgisonline.com`, etc.) is configured at the environment
+level and works fine once Chromium trusts the proxy cert.
+
+**`statusOf(site)` reads `site.status` (top level), not `site.data.status`.** When
+seeding localStorage for verification, put `status: "active"` directly on the site
+object. Sites loaded through `loadSitesList()` → `createSiteModel()` get the field
+normalized automatically, but raw localStorage seeds bypass that path.
 
 ## Stack
 Vite + React 18, plain JS/JSX, inline styles, the `PAL` drafting palette, terse
@@ -410,6 +634,30 @@ create policy "Users update own sites" on public.sites for update to authenticat
 create policy "Users delete own sites" on public.sites for delete to authenticated using ((select auth.uid()) = user_id);
 ```
 No anon policy, no admin/cross-user policy (deferred by decision).
+
+**User profiles (`lib/profile.js`, `shared/profile/useProfile.js`, `db/profiles.sql`; B297/B298).**
+Names captured at signup live in a queryable `public.profiles` table (one row per
+`auth.uid()`) — NOT just auth `user_metadata` — so they're the scalable foundation for the
+B2B direction (org/role/prefs later). `signUp` still seeds `options.data` (first/last/org);
+a **`handle_new_user` SECURITY DEFINER trigger** on `auth.users insert` copies those into
+`profiles` (trigger route avoids the client follow-up-insert race), and a one-time backfill
+seeds rows for pre-existing users. RLS is the same own-row private-by-default shape as
+`public.sites` (`auth.uid() = id`; select/insert/update; no delete — `on delete cascade`).
+`profile.js` = pure I/O (`loadProfile`/`saveProfile`, reuses the anon client + session, no
+new keys); `useProfile(user)` = the hook → `{ profile, loading, displayName, firstName, org,
+initial, reload, save }` with a never-blank display chain (First Last → first → last →
+metadata → email; pure `displayNameFor`/`firstNameFor`/`initialFor`, unit-tested). The Shell
+pill reads it and opens an account dropdown (`AnchoredMenu` portal); `AuthPanel` is a tabbed
+Profile/Settings panel (Profile edits name/org → `profiles`; Settings hosts Change password,
+reusing `updatePassword`). Run `db/profiles.sql` once in the SQL editor (idempotent).
+```sql
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  first_name text, last_name text, org text,
+  updated_at timestamptz not null default now() );
+-- RLS: 3 own-row policies (select/insert/update) keyed on auth.uid() = id.
+-- Trigger handle_new_user() inserts the row from raw_user_meta_data on signup; + backfill.
+```
 
 ## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +

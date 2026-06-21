@@ -4,23 +4,40 @@
  * IMMUTABLE backdrop; all markups live on an SVG overlay (an editable layer over
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { loadPdf, renderPageToCanvas } from "./lib/pdf.js";
-import { measureLabel, rollup, dist } from "./lib/takeoff.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
+import { readSheetMeta } from "../../shared/files/sheetMeta.js";
+import { groupSheets } from "../../shared/files/sheetGroups.js";
+import { statedCalibration } from "./lib/sheetRead.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
+import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
+import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
+import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
+import AppHeader from "../../shared/ui/AppHeader.jsx";
+import ToolRail from "../../shared/ui/ToolRail.jsx";
+import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
+import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+// Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
+// ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
+// in via the module tab would re-fire the previous open on mount. Mirrors SitePlannerApp's
+// lastConsumedNavToken. (NEW-1)
+let lastConsumedDocToken = null;
+
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Click a markup to select; Delete removes it." },
+  { id: "select", label: "Select", hint: "Click a markup to select; drag to move; double-click a text note to edit; Delete removes it." },
+  { id: "pan", label: "Pan", hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then enter the real length." },
   { id: "distance", label: "Distance", hint: "Click two points to measure a distance." },
   { id: "perimeter", label: "Perimeter", hint: "Click points around a shape; double-click / Enter to close." },
@@ -31,6 +48,30 @@ const TOOLS = [
   { id: "text", label: "Text", hint: "Click to place a text note." },
 ];
 const MEASURE = new Set(["distance", "perimeter", "area", "count"]);
+
+// Rail icons for the Markup tools + zoom controls (B330). 16×16, stroke = currentColor so a
+// button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
+const MK_ICONS = {
+  select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
+  pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
+  calibrate: <><path d="M2.3 10.5 L10.5 2.3 L13.7 5.5 L5.5 13.7 Z" /><path d="M4.9 7.7 l1.5 1.5 M7.3 5.3 l1.5 1.5" /></>,
+  distance: <><path d="M3 12.6 L13 3.4" /><circle cx="3" cy="12.6" r="1.5" fill="currentColor" stroke="none" /><circle cx="13" cy="3.4" r="1.5" fill="currentColor" stroke="none" /></>,
+  perimeter: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" strokeDasharray="2.4 1.6" />,
+  area: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" fill="currentColor" fillOpacity="0.3" />,
+  count: <><circle cx="4.7" cy="5.2" r="1.7" fill="currentColor" stroke="none" /><circle cx="10.9" cy="6.1" r="1.7" fill="currentColor" stroke="none" /><circle cx="6.7" cy="11.2" r="1.7" fill="currentColor" stroke="none" /></>,
+  rect: <rect x="2.5" y="3.5" width="11" height="9" rx="0.5" />,
+  cloud: <path d="M5.2 11.6 a2.3 2.3 0 0 1-.5-4.5 a2.7 2.7 0 0 1 5.1-1 a2.2 2.2 0 0 1 2.6 3.2 a2.1 2.1 0 0 1-1.5 2.9 a2.3 2.3 0 0 1-2.2.9 a2.4 2.4 0 0 1-3-.4 Z" />,
+  text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
+  zoomIn: <path d="M8 3.4 V12.6 M3.4 8 H12.6" strokeWidth="1.7" />,
+  zoomOut: <path d="M3.4 8 H12.6" strokeWidth="1.7" />,
+  fitW: <><path d="M2.6 8 H13.4" /><path d="M2.6 8 l2.3 -2.3 M2.6 8 l2.3 2.3 M13.4 8 l-2.3 -2.3 M13.4 8 l-2.3 2.3" /></>,
+  fitP: <><rect x="2.6" y="3.4" width="10.8" height="9.2" rx="1" /><rect x="5.4" y="5.8" width="5.2" height="4.4" rx="0.5" opacity="0.55" /></>,
+};
+const MkIcon = ({ id, size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {MK_ICONS[id] || <circle cx="8" cy="8" r="5.5" />}
+  </svg>
+);
 
 function cloudPath(x, y, w, h, r = 9) {
   const edge = (x1, y1, x2, y2) => {
@@ -43,7 +84,7 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview() {
+export default function DocReview({ shellModule, onShellSwitch, authControl, onGoDashboard, onNewProject, docIntent = null } = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -58,37 +99,180 @@ export default function DocReview() {
     pdfRef.current = next;
   };
 
+  // A fresh (unconsumed) cross-workspace "open this review" request handed down by the Shell
+  // when a file is clicked in the GLOBAL Project Files panel (e.g. from the Site side).
+  // Captured ONCE at mount (not per-render) so consuming it can't be undone by a later
+  // render, and so the resume-last-review boot can reliably stand down for it. (NEW-1)
+  const bootDocIntentRef = useRef(undefined);
+  if (bootDocIntentRef.current === undefined) {
+    bootDocIntentRef.current = (docIntent && docIntent.token !== lastConsumedDocToken && docIntent.kind === "open-review") ? docIntent : null;
+  }
+
   const [mode, setMode] = useState("review"); // review (single sheet) | stitch (multi-sheet)
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  const [scale, setScale] = useState(1);
-  const [dims, setDims] = useState(null);          // { w,h,baseW,baseH } current render
+  // Viewport transform (B329): ONE shared pan/zoom model with the Site map. `view` is
+  // { scale, tx, ty } — pixels per page-unit + the page origin's position in the viewport —
+  // so the sheet pans freely in any direction (not trapped inside a scroll box). `renderScale`
+  // is the resolution the canvas bitmap was last rasterised at; it's decoupled from view.scale
+  // so a zoom gesture rescales the already-drawn bitmap and only re-rasterises (crisp) once the
+  // gesture settles. View transform ONLY — it never touches stored markups or calibration.
+  const [view, setView] = useState(null);          // { scale, tx, ty } | null until first fit
+  const [pageBase, setPageBase] = useState(null);  // { w, h } current page at scale 1
+  const [renderScale, setRenderScale] = useState(0); // scale the bitmap is currently drawn at
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const [tool, setTool] = useState("select");
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
+  const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
+  const [sheetMeta, setSheetMeta] = useState({});   // pageNum -> readSheetMeta facts (sheet #, title, …) for the labeled, grouped sidebar (B266/B348)
+  const [openGroups, setOpenGroups] = useState({}); // groupId -> expanded? in the logical-sheet list (B348)
   const [draft, setDraft] = useState(null);         // in-progress { kind, pts:[...] }
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
+  const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B295)
+  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B329)
+  const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
+  const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
+  const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
+  const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
+  const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
+  const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
+  const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
+  const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
+  const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
+  const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
   // --- cloud persistence (single-sheet review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
+  const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
+  // The project the header breadcrumb points at in Markup (B191). Follows the open
+  // review's project; picking another project here browses its files in place (it does
+  // NOT re-file the open review — browsing ≠ filing).
+  // Seed from a fresh cross-workspace open intent so the project context carries through the
+  // switch (no "Select a project" flash); loadSingleReview/openReview confirm it after load.
+  // project_id covers a listReviews row (snake_case), projectId a loaded record (camelCase).
+  const [markupProject, setMarkupProject] = useState(() => {
+    const r = bootDocIntentRef.current && bootDocIntentRef.current.row;
+    const pid = r && (r.project_id ?? r.projectId);
+    return pid ? { id: pid, name: r.project || r.title || "Project" } : null;
+  }); // { id, name } | null
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
+  const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
 
   const ftPerUnit = calByPage[page] || 0;
   const pageMarks = markups.filter((m) => m.page === page);
 
+  /* ---- undo / redo (B303) ----
+   * Snapshots of the editable doc state (markups + per-sheet calibration), by reference,
+   * mirroring the Site Planner's pushHistory pattern. pushHistory() is called BEFORE a real
+   * mutation (add/delete/move a markup, edit a text note, apply a hand calibration); undo()
+   * skips frames identical to the current state via histKey so a stray push can't make Ctrl-Z
+   * look like a no-op (B32/B105). The background auto-scale scan (B267) never pushes. */
+  const docStateRef = useRef({ markups: [], calByPage: {}, calInfo: {} });
+  useEffect(() => { docStateRef.current = { markups, calByPage, calInfo }; });
+  const pastRef = useRef([]);
+  const futureRef = useRef([]);
+  const [, bumpHist] = useState(0);
+  const touchHist = () => bumpHist((n) => n + 1);
+  const histKey = (s) => JSON.stringify({ m: s.markups, c: s.calByPage, i: s.calInfo });
+  const pushHistory = () => {
+    pastRef.current.push(docStateRef.current);
+    if (pastRef.current.length > 80) pastRef.current.shift();
+    futureRef.current = [];
+    touchHist();
+  };
+  const clearHistory = () => { pastRef.current = []; futureRef.current = []; touchHist(); };
+  const applySnapshot = (s) => {
+    setMarkups(s.markups || []); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {});
+    setDraft(null); setSel(null); setCalInput(null); setDragPreview(null); setEditing(null);
+  };
+  const undo = () => {
+    let prev = null;
+    while (pastRef.current.length) {
+      const cand = pastRef.current.pop();
+      if (histKey(cand) !== histKey(docStateRef.current)) { prev = cand; break; }
+    }
+    if (!prev) return;
+    futureRef.current.push(docStateRef.current);
+    applySnapshot(prev);
+    touchHist();
+  };
+  const redo = () => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(docStateRef.current);
+    applySnapshot(next);
+    touchHist();
+  };
+  const canUndo = pastRef.current.length > 0;
+  const canRedo = futureRef.current.length > 0;
+  // Mid-draw: step back the last placed vertex of a poly/count draft (B303 "poly-vertex
+  // placement"). Returns true if it consumed something so Ctrl-Z / Backspace fall through to
+  // full undo / delete-selection only when there's no draft to trim.
+  const removeLastVertex = () => {
+    if (!draft || !draft.pts || draft.pts.length === 0) return false;
+    setDraft((d) => { if (!d) return d; const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; });
+    return true;
+  };
+  // Navigate sheets (Prev/Next + keyboard, B306). Keeps the current zoom (matching the sheet
+  // list's click behaviour) and drops any in-progress draft/selection/inline entry.
+  const goToPage = (n) => {
+    const t = Math.max(1, Math.min(numPages || 1, n));
+    if (t === page) return;
+    setPage(t); setDraft(null); setSel(null); setCalInput(null); setDragPreview(null);
+  };
+
   /* ---- load ---- */
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
+
+  // Read each sheet's metadata in the background (B348): sheet #, title, discipline, stated scale —
+  // via the SAME shared reader the Stitcher uses (sheetMeta.readSheetMeta), so the single-sheet
+  // sidebar can show real labels + collapse into logical sheets instead of "Sheet N" (B266). Also
+  // pre-fills the per-sheet stated-scale calibration (B267) via the shared statedCalibration (which
+  // gates on a standard plot size), never overwriting a user/loaded cal. A page with no text layer
+  // reads hasText:false — the OCR seam (shared with B267/B336). Superseded if another file opens.
+  const scanTok = useRef(0);
+  const scanSheets = useCallback(async (pdf, pages) => {
+    const tok = ++scanTok.current;
+    for (let p = 1; p <= pages; p++) {
+      if (tok !== scanTok.current) return;             // a newer open superseded this scan
+      const page = await extractPageItems(pdf, p);
+      if (tok !== scanTok.current) return;
+      const meta = { ...readSheetMeta(page), width: page.width, height: page.height };
+      setSheetMeta((m) => ({ ...m, [p]: meta }));
+      const sc = meta.scale;
+      if (sc && sc.explicit === "nts") { setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "nts", label: sc.label } })); continue; }
+      const ft = statedCalibration(meta); // 0 unless a trustworthy stated scale on a standard plot size
+      if (ft) {
+        setCalByPage((c) => (c[p] ? c : { ...c, [p]: ft }));
+        setCalInfo((m) => (m[p] ? m : { ...m, [p]: { src: "auto", label: (sc && sc.label) || "" } }));
+      }
+    }
+  }, []);
+
+  // Logical sheets (B348): collapse the read pages into the SAME logical groups the Stitcher uses —
+  // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
+  // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
+  // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
+  const groups = useMemo(
+    () => groupSheets(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
+    [sheetMeta, numPages]
+  );
+
   const openFile = async (file) => {
     if (!file) return;
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
@@ -101,63 +285,135 @@ export default function DocReview() {
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
-      setScale(0); // 0 = fit-to-width on next render
-      setRedrop("");
+      setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // fit the new backdrop (B329)
+      setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B303)
+      // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
+      // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
+      // of the SAME file keeps them (its saved/auto cals still apply). (B267)
+      const reuse = sourceRef.current && sameName(sourceRef.current.name, file.name);
+      if (!reuse) { setCalByPage({}); setCalInfo({}); }
+      setSheetMeta({}); setOpenGroups({}); // re-read the new backdrop's sheets (B266/B348)
+      scanSheets(pdf, pdf.numPages); // background sheet-metadata read (labels + grouping) + B267 auto-calibration
       // Source bookkeeping: reuse the srcId when this is a re-drop of the review's
       // known file (so its markups stay bound); otherwise mint one and upload once.
-      const keepId = sourceRef.current && sameName(sourceRef.current.name, file.name) ? sourceRef.current.srcId : null;
+      const keepId = reuse ? sourceRef.current.srcId : null;
       const srcId = keepId || newSourceId();
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
-      setSource({ ...base, storageKey: null, oversize: false });
-      uploadSource(srcId, file, meta.projectId, meta.discipline).then((r) => {
-        setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, oversize: !!r.oversize } : s));
-      }).catch(() => {}); // best-effort upload; a rejection mustn't become an unhandled rejection
+      setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+      // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
+      // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
+      // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
+      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
+        setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+      }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
       setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
     } finally { setBusy(false); }
   };
 
-  /* ---- render current page ---- */
-  // Compute the fit-to-width scale in its OWN effect when scale===0, so render() stays a
-  // pure draw at a concrete scale. render() used to call setScale internally, which
-  // re-fired the render effect → two overlapping renders / brief dims mismatch (B34).
+  /* ---- prepare page + fit (B329) ---- */
+  const VIEW_MIN = 0.05, VIEW_MAX = 6; // px-per-page-unit clamp for the viewport
+  // When the page or a load changes: refresh the page's base (scale-1) size, and — only on a
+  // fresh open/reset/load (view === null) — fit the sheet to the viewport. Switching sheets
+  // keeps the current zoom/pan (B292): view stays non-null, so we only update pageBase.
   useEffect(() => {
-    if (scale || !pdfRef.current || !canvasRef.current) return;
+    const pdf = pdfRef.current;
+    if (!pdf) return;
     let live = true;
     (async () => {
-      const p = await pdfRef.current.getPage(page);
+      const p = await pdf.getPage(page);
       const base = p.getViewport({ scale: 1 });
-      const avail = (wrapRef.current?.clientWidth || 900) - 24;
-      const s = Math.max(0.2, Math.min(4, avail / base.width));
-      if (live) setScale(s);
+      if (!live) return;
+      setPageBase({ w: base.width, h: base.height });
+      if (!viewRef.current) {
+        const wrap = wrapRef.current;
+        const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
+        const nv = fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode });
+        setView(nv); setRenderScale(nv.scale);
+      }
     })();
     return () => { live = false; };
-  }, [scale, page, numPages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, numPages, loadNonce]);
+
+  // Re-rasterise crisply once a zoom gesture settles: debounce view.scale → renderScale, so a
+  // smooth zoom rescales the already-drawn bitmap during the gesture (cheap) and only redraws
+  // the PDF at full resolution when it stops. Panning (tx/ty only) never re-rasters. (B329)
+  useEffect(() => {
+    if (!view || view.scale === renderScale) return;
+    const id = setTimeout(() => setRenderScale(view.scale), 140);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view && view.scale]);
 
   const render = useCallback(async () => {
     const pdf = pdfRef.current, canvas = canvasRef.current;
-    if (!pdf || !canvas || !scale) return; // the fit effect sets a concrete scale first; render only draws
+    if (!pdf || !canvas || !renderScale) return; // a concrete renderScale is set first; render only draws
     const tok = ++renderTok.current;
     // Cancel any in-flight render before starting a new one, so overlapping page/zoom
     // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
     try {
-      const d = await renderPageToCanvas(pdf, page, canvas, scale, (task) => { renderTaskRef.current = task; });
-      if (tok !== renderTok.current) return; // a newer render superseded this
-      setDims(d);
+      // setCssSize=false: the canvas fills its CSS-scaled page box (width/height 100%), so a zoom
+      // rescales the bitmap without a re-raster; the page box carries the size. isStale bails BEFORE
+      // page.render() if a newer render started while awaiting getPage (the B40 same-canvas race,
+      // from main). The transform model has no dims to set — pageBase + view size the box. (B329/B40)
+      const d = await renderPageToCanvas(pdf, page, canvas, renderScale,
+        (task) => { renderTaskRef.current = task; }, () => tok !== renderTok.current, false);
+      if (!d || tok !== renderTok.current) return; // null = superseded mid-getPage (B40), or a newer render won
+
     } catch (e) {
       if (e && e.name === "RenderingCancelledException") return; // expected when superseded/unmounted
       // other render errors: keep the prior frame rather than crashing
     }
-  }, [page, scale]);
+  }, [page, renderScale]);
 
   useEffect(() => { render(); }, [render, numPages]);
+
+  // Keep the current sheet scrolled into view in the (long) sheet list as you page (B306).
+  useEffect(() => { activeSheetRef.current?.scrollIntoView({ block: "nearest" }); }, [page]);
 
   // Free PDF.js resources on unmount: cancel any in-flight render + destroy the doc (B39/B40).
   useEffect(() => () => {
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} }
     try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
+  }, []);
+
+  /* ---- zoom/pan viewport — the shared engine (B329) ---- */
+  // Zoom about a screen anchor (the cursor for wheel/pinch; the viewport centre for ± / null).
+  // zoomAround holds the page point under the anchor fixed; the bitmap rescales now, re-rasters
+  // on settle. Reads the live view from the ref so the once-bound wheel handler isn't stale.
+  const doZoom = (factor, clientX, clientY) => {
+    const wrap = wrapRef.current, v = viewRef.current;
+    if (!wrap || !v) return;
+    const r = wrap.getBoundingClientRect();
+    const ax = clientX == null ? r.width / 2 : clientX - r.left;
+    const ay = clientY == null ? r.height / 2 : clientY - r.top;
+    setView(zoomAround(v, factor, ax, ay, VIEW_MIN, VIEW_MAX));
+  };
+  // Fit the current sheet to the viewport (Fit = width, Fit page = the whole sheet). (B295/B329)
+  const fitNow = (mode) => {
+    setFitMode(mode);
+    const base = pageBase, wrap = wrapRef.current;
+    if (!base || !wrap) { setView(null); setLoadNonce((n) => n + 1); return; } // no page yet → prepare effect fits
+    const vw = wrap.clientWidth || 900, vh = wrap.clientHeight || 600;
+    const nv = fitView(base.w, base.h, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode });
+    setView(nv); setRenderScale(nv.scale);
+  };
+  // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
+  // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
+  // and so it attaches exactly when the viewport mounts. Plain wheel, Ctrl/Cmd+wheel, and
+  // trackpad pinch all arrive here as wheel events and all zoom toward the cursor. (B329)
+  const wheelCleanup = useRef(null);
+  const attachWrap = useCallback((node) => {
+    if (wheelCleanup.current) { wheelCleanup.current(); wheelCleanup.current = null; }
+    wrapRef.current = node;
+    if (node) {
+      const onWheel = (e) => { e.preventDefault(); doZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY); };
+      node.addEventListener("wheel", onWheel, { passive: false });
+      wheelCleanup.current = () => node.removeEventListener("wheel", onWheel);
+    }
   }, []);
 
   /* ---- cloud persistence: badge, autosave, resume, load, new ---- */
@@ -175,15 +431,15 @@ export default function DocReview() {
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
-    sources: source ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, oversize: !!source.oversize }] : [],
-    single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage },
-  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage]);
+    sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
+    single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
+  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
   const { status, suspendSave } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
-    deps: [reviewId, meta, source, markups, calByPage],
+    deps: [reviewId, meta, source, markups, calByPage, calInfo],
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
@@ -196,13 +452,18 @@ export default function DocReview() {
     if (!src) return;
     if (tok != null && tok !== loadTok.current) return; // superseded before fetching
     if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
-    const buf = src.storageKey ? await downloadSource(src.storageKey) : null;
+    // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
+    // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
+    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+    if (tok != null && tok !== loadTok.current) return; // superseded while downloading
+    if (!buf) buf = src.storageKey ? await downloadSource(src.storageKey) : null;
     if (tok != null && tok !== loadTok.current) return; // a newer review opened while downloading
     if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
-    setNumPages(pdf.numPages); setScale(0);
+    setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B329)
+    scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -213,32 +474,64 @@ export default function DocReview() {
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
-    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, oversize: !!src.oversize } : null);
-    setMarkups(s.markups || []); setCalByPage(s.calByPage || {});
+    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
+    setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
+    setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
-    setDraft(null); setSel(null); setTool("select"); setRedrop("");
+    setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
+    scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
     await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
+    setMarkupProject(null);
     setSource(null); setRedrop("");
-    setFileName(""); setNumPages(0); setPage(1); setScale(0);
-    setMarkups([]); setCalByPage({}); setDraft(null); setSel(null); setTool("select");
+    setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
+    setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
+    clearHistory();
+    scanTok.current++; // cancel any in-flight scan from a prior file
   };
-  // Open a saved review from either toolbar; route single vs. stitch by kind.
+  // Open a saved review from either toolbar OR the global Project Files panel; route single
+  // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
+  // never fail silently again (NEW-1).
   const openReview = async (row) => {
-    const rec = await loadReview(row.id);
-    if (!rec) return;
+    if (!row || !row.id) return;
+    setOpenErr("");
+    let rec = null;
+    try { rec = await loadReview(row.id); } catch (_) { rec = null; }
+    if (!rec) {
+      setOpenErr(`Couldn't open “${row.title || row.item || "that file"}”. It may have been removed, or the cloud is unreachable — try again.`);
+      return;
+    }
+    // Carry the project context through so the breadcrumb reflects the opened file (single
+    // reviews are also set inside loadSingleReview; this also covers stitch).
+    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
     if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
+
+  // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
+  // the GLOBAL Project Files panel switches here AND hands us the review; because this
+  // workspace is lazy-mounted, we can only open it once we exist. Token-guarded (module-
+  // scoped) so a plain tab switch-back doesn't re-fire the last open.
+  useEffect(() => {
+    if (!docIntent || docIntent.token === lastConsumedDocToken) return;
+    lastConsumedDocToken = docIntent.token;
+    if (docIntent.kind === "open-review" && docIntent.row) openReview(docIntent.row);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docIntent]);
   // Resume the last review (and its mode) on mount, once. Stitch reviews are handed
   // to <Stitcher> via pendingStitch; single reviews load here.
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return; booted.current = true;
+    // A cross-workspace open is incoming — let the docIntent effect load THAT review rather
+    // than also resuming the last one (the two are async and would race; resume could win
+    // and silently replace the file the user just clicked). (NEW-1)
+    if (bootDocIntentRef.current) return;
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -259,26 +552,89 @@ export default function DocReview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- pointer → page units ---- */
+  /* ---- pointer → page units (via the shared transform; relative to the viewport so it
+   * works at any pan/zoom — the sheet lives inside the viewport, offset by view.tx/ty) ---- */
   const toPage = (e) => {
-    const r = canvasRef.current.getBoundingClientRect();
-    return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale };
+    const wrap = wrapRef.current, v = viewRef.current;
+    if (!wrap || !v) return { x: 0, y: 0 };
+    const r = wrap.getBoundingClientRect();
+    return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
+  };
+  // Viewport-relative screen point (for two-finger pinch midpoint math). (B331)
+  const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => (v ? pinchZoom(v, pinchRef.current.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
+    pinchRef.current = { mid, dist };
+  };
+  // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
+  // first two), else end it. Called on every finger add/remove so a 3rd finger or a partial lift
+  // re-anchors the gesture instead of zoom-jumping off a stale pair. (B331)
+  const reseedPinch = () => {
+    const pts = [...pointersRef.current.values()];
+    pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
   };
 
-  const commit = (mk) => { setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
+  const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
+
+  const panMode = () => tool === "pan" || spaceHeld;
+
+  const openEditor = (ed) => { editDoneRef.current = false; setEditing(ed); };
+  const closeEditor = (save) => {
+    if (editDoneRef.current) return; // a prior Enter/Esc already handled it; ignore the unmount blur (B293)
+    editDoneRef.current = true;
+    const ed = editing; setEditing(null);
+    if (!save || !ed) return;
+    const text = (ed.text || "").trim();
+    if (!text) { if (ed.id) { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== ed.id)); } return; } // empty → drop / delete
+    pushHistory();
+    if (ed.id) setMarkups((a) => a.map((m) => (m.id === ed.id ? { ...m, text } : m)));
+    else setMarkups((a) => [...a, { id: uid(), page: ed.page, kind: "text", pts: [ed.pt], text }]);
+  };
 
   const onDown = (e) => {
-    if (!dims) return;
+    if (!pageBase || !view) return;
+    // Two-finger touch pinch (B331): track touch pointers; a 2nd touch starts a pinch and takes
+    // over from any pan/draw in progress. Gated on pointerType==='touch' → mouse/trackpad untouched.
+    if (e.pointerType === "touch") {
+      pointersRef.current.set(e.pointerId, vpPoint(e));
+      if (pointersRef.current.size >= 2) { // 2nd finger starts a pinch; a 3rd+ finger is absorbed (never draws/pans)
+        reseedPinch();
+        touchPinchedRef.current = true;
+        panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
+        e.preventDefault();
+        return;
+      }
+    }
+    if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
+    // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
+    // pans instead (Bluebeam). hitTest is cheap + math-based, so probe it up front for the rule.
+    const hitId = tool === "select" ? hitTest(p) : null;
+    // Bluebeam pan/tool collision (shared rule): middle-mouse / Space / Pan tool / Select-on-
+    // empty → pan; Select-on-object → select/move; a drawing tool → draw, never pan. (B329)
+    if (shouldPan({ button: e.button, spaceHeld, tool, onObject: !!hitId })) {
+      e.preventDefault();
+      if (tool === "select") setSel(null); // a pan starting on empty canvas also clears the selection
+      panRef.current = { sx: e.clientX, sy: e.clientY, tx0: view.tx, ty0: view.ty };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      setPanning(true);
+      return;
+    }
+    if (e.button !== 0) return; // only the left button draws / selects past here
     if (tool === "select") {
-      setSel(hitTest(p));
+      setSel(hitId);
+      if (hitId) { // arm a move-drag; a sub-threshold drag stays a plain click-select (B293)
+        const m = pageMarks.find((mm) => mm.id === hitId);
+        if (m) { dragRef.current = { id: hitId, start: p, orig: (m.pts || []).map((q) => ({ x: q.x, y: q.y })), moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }
+      }
       return;
     }
-    if (tool === "text") {
-      const t = window.prompt("Text note:");
-      if (t) commit({ kind: "text", pts: [p], text: t });
-      return;
-    }
+    if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B293)
     if (tool === "calibrate" || tool === "distance" || tool === "rect" || tool === "cloud") {
       if (!draft) setDraft({ kind: tool, pts: [p] });
       else {
@@ -295,27 +651,118 @@ export default function DocReview() {
     }
   };
 
+  const onMove = (e) => {
+    if (pinchRef.current && e.pointerType === "touch") { // two-finger pinch in progress (B331)
+      if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+      applyPinch();
+      return;
+    }
+    if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B329)
+      const d = panRef.current;
+      setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
+      return;
+    }
+    if (!view) return;
+    const p = toPage(e);
+    if (dragRef.current) { // moving a markup: translate its page-unit points live (B293)
+      const dx = p.x - dragRef.current.start.x, dy = p.y - dragRef.current.start.y;
+      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(p); return; }
+      dragRef.current.moved = true;
+      setDragPreview({ id: dragRef.current.id, pts: dragRef.current.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) });
+      return;
+    }
+    setCursor(p);
+  };
+
+  const onUp = (e) => {
+    if (e.pointerType === "touch") { // wind down a touch pointer / pinch (B331)
+      pointersRef.current.delete(e.pointerId);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      reseedPinch(); // re-baseline (or end) the pinch to whatever fingers remain — a lift never jumps
+      if (pointersRef.current.size > 0) return;            // fingers remain — wait for full lift
+      if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
+    }
+    if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (dragRef.current) {
+      const d = dragRef.current; dragRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (d.moved) { // commit the move ONCE on pointer-up so it's a single edit/save (B293) + one undo frame (B303)
+        const p = toPage(e), dx = p.x - d.start.x, dy = p.y - d.start.y;
+        pushHistory();
+        setMarkups((a) => a.map((m) => (m.id === d.id ? { ...m, pts: d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m)));
+      }
+      setDragPreview(null);
+      return;
+    }
+    // Text places on release: opening the inline editor here (not on pointer-down) means the
+    // click's own focus change has already happened, so autofocus sticks and the empty editor
+    // isn't immediately blurred + discarded. (B293)
+    if (tool === "text" && e.button === 0) openEditor({ id: null, page, pt: toPage(e), text: "" });
+  };
+
+  // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
+  // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
+  const onCancel = (e) => {
+    if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
+    reseedPinch();
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
+  };
+
   const finishDraft = () => {
     if (!draft) return;
     const { kind, pts } = draft;
-    if (kind === "count" && pts.length >= 1) commit({ kind, pts });
-    else if ((kind === "area" || kind === "perimeter") && pts.length >= 2) commit({ kind, pts });
+    // Area + perimeter need ≥3 points to be real polygons; a 2-point area is 0 sf and a
+    // 2-point perimeter is a single segment, both meaningless in the takeoff (B302).
+    if ((kind === "count" || kind === "area" || kind === "perimeter") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
     else setDraft(null);
   };
-  const onDbl = () => finishDraft();
+  const onDbl = (e) => {
+    if (tool === "select") { // double-click a text note → edit it inline (B293)
+      const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
+      if (m && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      return;
+    }
+    if (!draft) return;
+    // The browser fires TWO pointerdowns before a dblclick, each appending a coincident
+    // point at the finish spot — strip that trailing run so a Count isn't inflated and a
+    // poly isn't distorted. Enter (no extra downs) keeps every point. (B291)
+    if (draft.kind === "area" || draft.kind === "perimeter" || draft.kind === "count") {
+      const d = toPage(e), tol = 6 / view.scale;
+      const pts = draft.pts.slice();
+      while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
+      // Same min-point gate as Enter/finishDraft so a 2-point area/perimeter can't slip in
+      // via double-click either (count ≥1, area/perimeter ≥3). (B302)
+      if (canCommitMeasure(draft.kind, pts.length)) commit({ kind: draft.kind, pts });
+      else setDraft(null);
+    } else finishDraft();
+  };
 
+  // Two points placed → open an INLINE entry box at the line's midpoint (no window.prompt —
+  // owner "no dialog boxes" rule). Commit/validation happens in commitCalibrate (B304).
   const finishCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Calibration line too short — zoom in and try again."); return; }
-    const v = window.prompt("Real-world length of that line (in feet):");
-    const ft = parseFloat(v);
-    if (!isFinite(ft) || ft <= 0) return;
-    setCalByPage((c) => ({ ...c, [page]: ft / u }));
     setErr("");
+    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.scale, y: ((pts[0].y + pts[1].y) / 2) * view.scale, value: "" });
+  };
+  // Validate the typed length and set the sheet's scale. Rejects ratios / bare fractions /
+  // junk with a clear message (parseFeet) instead of silently mis-calibrating (B304).
+  const commitCalibrate = () => {
+    if (!calInput) return;
+    const r = parseFeet(calInput.value);
+    if (r.empty) { setCalInput(null); setErr(""); return; } // blank = cancel, no error
+    if (!r.ok) { setErr(r.message); return; }               // invalid → keep the box open to fix
+    const u = dist(calInput.pts[0], calInput.pts[1]);
+    pushHistory();
+    setCalByPage((c) => ({ ...c, [page]: r.ft / u }));
+    setCalInfo((m) => ({ ...m, [page]: { src: "manual" } })); // a hand-calibration supersedes any auto guess (B267)
+    setCalInput(null); setErr("");
   };
 
   const hitTest = (p) => {
-    const tol = 10 / scale; // page-unit click tolerance
+    const Z = view ? view.scale : 1;
+    const tol = 10 / Z; // page-unit click tolerance
     const segDist = (a, b) => { // distance from p to segment a–b (page units)
       const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
       if (!L2) return dist(p, a);
@@ -334,8 +781,8 @@ export default function DocReview() {
       } else if (m.kind === "text") {
         // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
         const q = pts[0]; if (!q) continue;
-        const w = ((m.text || "").length * 6.5 + 6) / scale, h = 16 / scale;
-        if (p.x >= q.x - 2 / scale && p.x <= q.x - 2 / scale + w && p.y >= q.y - 12 / scale && p.y <= q.y - 12 / scale + h) d = 0;
+        const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
+        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) d = 0;
       } else {
         // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
         for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
@@ -352,24 +799,64 @@ export default function DocReview() {
   const onKeyRef = useRef(null);
   onKeyRef.current = (e) => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
+    if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo
+    if (mod) return; // leave other modified keys (copy/paste/etc.) to the browser
+    if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
-    else if (e.key === "Escape") { setDraft(null); setSel(null); }
-    else if ((e.key === "Delete" || e.key === "Backspace") && sel) { e.preventDefault(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
+    else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null); }
+    else if (e.key === "Delete" || e.key === "Backspace") {
+      if (removeLastVertex()) { e.preventDefault(); return; }            // trim a draft vertex first (B303)
+      if (sel) { e.preventDefault(); pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
+    }
+    // Sheet paging (B306) — only when not mid-draft / mid-entry so arrows don't drop work.
+    else if (!draft && !calInput && (e.key === "ArrowLeft" || e.key === "PageUp")) { e.preventDefault(); goToPage(page - 1); }
+    else if (!draft && !calInput && (e.key === "ArrowRight" || e.key === "PageDown")) { e.preventDefault(); goToPage(page + 1); }
   };
   useEffect(() => {
     const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
+    const onKeyUp = (e) => { if (e.key === " " || e.code === "Space") setSpaceHeld(false); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, []);
 
-  const zoom = (f) => setScale((s) => Math.max(0.2, Math.min(6, (s || 1) * f)));
+  const zoom = (f) => doZoom(f, null, null); // ± buttons zoom about the viewport centre (B290/B329)
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
   const f0 = (n) => Math.round(n).toLocaleString();
   const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const btn = (on) => ({ padding: "6px 10px", fontSize: 12, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+  // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
+  // + tightened padding for density on the single header row (B305).
+  const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
+  const chromeBtn = (extra = {}) => ({ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk, ...extra });
+  const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 7px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
+  const tbDiv = { width: 1, height: 18, background: "var(--chrome-divider)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
+  // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
+  const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
+  const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
+  const sheetTip = (n) => {
+    const m = sheetMeta[n]; const parts = [];
+    if (m?.sheetNumber) parts.push(m.sheetNumber);
+    if (m?.titleBlock && m.sheetTitle && m.sheetTitle !== "Document") parts.push(m.sheetTitle); // title only from a real title block
+    if (calInfo[n]?.label) parts.push(`scale ${calInfo[n].label}${calInfo[n].src !== "manual" ? " — verify" : ""}`);
+    return parts.join(" · ") || `Sheet ${n}`;
+  };
+
+  // Right-side tool rail (B330): the drawing/measure tools + zoom controls, Bluebeam-style.
+  const railItems = [
+    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
+    { kind: "spacer" },
+    { kind: "header", label: "Zoom" },
+    { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
+    { kind: "tool", id: "zoomIn", label: "In", title: "Zoom in", icon: <MkIcon id="zoomIn" />, onClick: () => zoom(1.2) },
+    { kind: "tool", id: "zoomOut", label: "Out", title: "Zoom out", icon: <MkIcon id="zoomOut" />, onClick: () => zoom(1 / 1.2) },
+    { kind: "tool", id: "fitW", label: "Fit", title: "Fit to width", icon: <MkIcon id="fitW" />, onClick: () => fitNow("width") },
+    { kind: "tool", id: "fitP", label: "Page", title: "Fit the whole sheet", icon: <MkIcon id="fitP" />, onClick: () => fitNow("page") },
+  ];
 
   if (mode === "stitch") return (
     <Stitcher
@@ -383,7 +870,7 @@ export default function DocReview() {
 
   // SVG element for one markup (coords ×scale)
   const draw = (m, selected) => {
-    const S = (q) => ({ x: q.x * scale, y: q.y * scale });
+    const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const stroke = selected ? PAL.accent : (MEASURE.has(m.kind) ? "#0e7490" : "#b91c1c");
     const lbl = MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : null;
     const labelAt = (x, y, text, color) => (
@@ -393,12 +880,12 @@ export default function DocReview() {
       const pts = m.pts.map(S);
       const closed = m.kind === "perimeter";
       const dd = (closed ? [...pts, pts[0]] : pts).map((q) => `${q.x},${q.y}`).join(" ");
-      const mid = pts[Math.floor((pts.length - 1) / 2)];
+      const mid = midOfPath(pts, closed); // true arc-length midpoint, not a vertex (B307)
       return <g key={m.id}><polyline points={dd} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />{pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill={stroke} />)}{lbl && labelAt(mid.x + 4, mid.y - 4, lbl, "#0e7490")}</g>;
     }
     if (m.kind === "area") {
       const pts = m.pts.map(S);
-      const c = pts.reduce((a, q) => ({ x: a.x + q.x / pts.length, y: a.y + q.y / pts.length }), { x: 0, y: 0 });
+      const c = centroidOf(pts); // area-weighted centroid, clamped inside concave shapes (B307)
       return <g key={m.id}><polygon points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke={stroke} strokeWidth={selected ? 3 : 2} />{lbl && labelAt(c.x, c.y, lbl, "#0e7490")}</g>;
     }
     if (m.kind === "count") {
@@ -413,15 +900,16 @@ export default function DocReview() {
         : <rect key={m.id} x={x} y={y} width={w} height={h} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />;
     }
     if (m.kind === "text") {
-      const q = S(m.pts[0]);
-      return <g key={m.id}><rect x={q.x - 2} y={q.y - 12} width={(m.text.length * 6.5) + 6} height={16} fill="#fff" stroke={stroke} strokeWidth={1} rx={3} /><text x={q.x + 2} y={q.y} fontSize="11" fill="#b91c1c" fontWeight="600" pointerEvents="none">{m.text}</text></g>;
+      const q = S((m.pts && m.pts[0]) || { x: 0, y: 0 });
+      const text = m.text || ""; // guard a missing text (mirrors hitTest) so one bad note can't crash the overlay
+      return <g key={m.id}><rect x={q.x - 2} y={q.y - 12} width={(text.length * 6.5) + 6} height={16} fill="#fff" stroke={stroke} strokeWidth={1} rx={3} /><text x={q.x + 2} y={q.y} fontSize="11" fill="#b91c1c" fontWeight="600" pointerEvents="none">{text}</text></g>;
     }
     return null;
   };
 
   const drawDraft = () => {
     if (!draft) return null;
-    const S = (q) => ({ x: q.x * scale, y: q.y * scale });
+    const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const pts = draft.pts.map(S);
     const cur = cursor ? S(cursor) : null;
     const col = draft.kind === "calibrate" ? PAL.accent : MEASURE.has(draft.kind) ? "#0e7490" : "#b91c1c";
@@ -442,29 +930,66 @@ export default function DocReview() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={openReview} signedIn={signedIn} />
-      {/* toolbar */}
-      <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: `1px solid #2e2a23`, flexWrap: "wrap" }}>
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => fileRef.current?.click()}>{fileName ? "Open another…" : "Open PDF…"}</button>
-        <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch sheets ▸</button>
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
-        {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
-        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
-        {pdfRef.current && TOOLS.map((t) => <button key={t.id} style={{ ...btn(tool === t.id), fontSize: 11.5 }} onClick={() => { setTool(t.id); setDraft(null); }}>{t.label}</button>)}
-        {pdfRef.current && <>
-          <button style={{ ...btn(false) }} onClick={() => zoom(1 / 1.2)}>−</button>
-          <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(scale * 100)}%</span>
-          <button style={{ ...btn(false) }} onClick={() => zoom(1.2)}>+</button>
-          <button style={{ ...btn(false) }} onClick={() => setScale(0)} title="Fit width">Fit</button>
-        </>}
-        <div style={{ flex: 1 }} />
-        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
-      </div>
+      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
+        projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
+      <AppHeader
+        module={shellModule || "doc-review"}
+        onSwitch={onShellSwitch}
+        // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
+        // picking a project browses its files in place (opens the Files drawer scoped
+        // to it); New project is born in the Site Planner. Save state from persistence.
+        onDashboard={onGoDashboard}
+        currentProject={markupProject}
+        onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
+        onNewProject={onNewProject}
+        saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
+        centerContent={
+          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
+          // a shelf every workspace reaches into, so it lives next to the project name.
+          <span style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: "100%" }}>
+            {meta.title && (
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--chrome-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {meta.title}
+              </span>
+            )}
+            <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
+              style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+              🗂 Files
+            </button>
+          </span>
+        }
+        saveSlot={<ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />}
+        authControl={authControl}
+        toolbarContent={
+          <>
+            <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
+            <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
+            <button style={chromeBtn()} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+            {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
+            {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
+                Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
+            {pdfRef.current && <>
+              <span style={tbDiv} />
+              <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
+              <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
+            </>}
+          </>
+        }
+      />
 
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
+        </div>
+      )}
+
+      {openErr && (
+        <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
+          <span>⚠ {openErr}</span>
+          <button onClick={() => { setOpenErr(""); setFilesOpen(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
@@ -480,37 +1005,135 @@ export default function DocReview() {
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          {/* sheet list */}
-          <div style={{ flex: "none", width: 116, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
-            <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Sheets · {numPages}</div>
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
-              <button key={n} onClick={() => { setPage(n); setScale(0); setDraft(null); setSel(null); }}
-                style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-                  border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "#fbf3ee" : "#fff", color: PAL.ink }}>
-                Sheet {n}{calByPage[n] ? " ·✓" : ""}
-              </button>
-            ))}
-          </div>
-
-          {/* canvas + overlay */}
-          <div ref={wrapRef} style={{ flex: 1, minWidth: 0, overflow: "auto", background: "#cfc8ba", display: "grid", placeItems: "center", padding: 12 }}>
-            <div style={{ position: "relative", width: dims?.w, height: dims?.h, boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
-              <canvas ref={canvasRef} style={{ display: "block" }} />
-              {dims && (
-                <svg width={dims.w} height={dims.h} style={{ position: "absolute", inset: 0, cursor: tool === "select" ? "default" : "crosshair" }}
-                  onPointerDown={onDown} onDoubleClick={onDbl} onPointerMove={(e) => setCursor(toPage(e))} onPointerLeave={() => setCursor(null)}>
-                  {pageMarks.map((m) => draw(m, m.id === sel))}
-                  {drawDraft()}
-                </svg>
-              )}
+          {/* sheet list — logical sheets (B348) with real labels (B266) */}
+          <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
+            <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
+              {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: on ? PAL.ink : "var(--text-tertiary)" }); return (
+                <>
+                  <button style={pg(page > 1)} disabled={page <= 1} onClick={() => goToPage(page - 1)} title="Previous sheet (←)">‹</button>
+                  <span style={{ flex: "none", fontSize: 10.5, color: PAL.muted, fontWeight: 700, minWidth: 40, textAlign: "center" }}>{page} / {numPages}</span>
+                  <button style={pg(page < numPages)} disabled={page >= numPages} onClick={() => goToPage(page + 1)} title="Next sheet (→)">›</button>
+                </>
+              ); })()}
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 8px", minHeight: 0 }}>
+              {/* Logical sheets (B348): grouped plans collapse to one entry; the real sheet # + title
+                  replace "Sheet N" (B266). The same shared engine (sheetGroups/sheetMeta) the Stitcher
+                  uses; the count reads "logical sheets · pages" so the collapse is visible. */}
+              <div data-testid="sheet-count" style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{groups.length} sheet{groups.length === 1 ? "" : "s"} · {numPages} pages</div>
+              {groups.map((g, gi) => {
+                const gid = `${gi}:${g.pages[0]?.pageNum}`;
+                if (g.kind === "single") {
+                  const n = g.pages[0].pageNum, active = n === page;
+                  // Use a real label only when this sheet has a confident title-block read (a detected
+                  // band or a real sheet number) — never surface a random body-text line as the label
+                  // (a textless/title-block-less page stays "Sheet N"). (B266)
+                  const m = sheetMeta[n];
+                  const hasReal = !!(m && (m.sheetNumber || m.titleBlock));
+                  const lbl = hasReal && g.label && g.label !== "Sheet" ? g.label : `Sheet ${n}`;
+                  return (
+                    <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+                        border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {lbl}{calMark(n)}
+                    </button>
+                  );
+                }
+                const pagesN = g.pages.map((p) => p.pageNum);
+                const open = openGroups[gid] ?? pagesN.includes(page);
+                const activeInGroup = pagesN.includes(page);
+                return (
+                  <div key={gid} style={{ marginBottom: 4 }}>
+                    <button onClick={() => { setOpenGroups((o) => ({ ...o, [gid]: !open })); goToPage(g.pages[0].pageNum); }} title={g.label} data-testid="sheet-group"
+                      style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700,
+                        border: `1px solid ${activeInGroup ? PAL.accent : PAL.line}`, background: activeInGroup ? "var(--hover-ghost)" : "var(--surface-page)", color: PAL.ink }}>
+                      <span style={{ flex: "none", fontSize: 9, color: PAL.muted }}>{open ? "▾" : "▸"}</span>
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.label}</span>
+                    </button>
+                    {open && pagesN.map((n) => {
+                      const active = n === page;
+                      return (
+                        <button key={n} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
+                          style={{ display: "block", width: "calc(100% - 12px)", marginLeft: 12, textAlign: "left", padding: "5px 8px", marginBottom: 2, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 600,
+                            border: `1px solid ${active ? PAL.accent : PAL.line}`, background: active ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sheetShort(n)}{calMark(n)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* takeoff */}
-          <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 2 }}>Takeoff</div>
-            <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 8 }}>
-              {ftPerUnit ? `Sheet ${page} calibrated` : `Sheet ${page} not calibrated — use Calibrate`}
+          {/* canvas + overlay — a transform viewport (B329). The sheet is a page-sized box
+              positioned by translate(tx,ty) and sized by view.scale, so it pans freely in any
+              direction and zooms toward the cursor (no scroll box). The wheel + pointer handlers
+              live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
+          <div ref={attachWrap}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}
+            onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
+            style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
+              cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
+            {pageBase && view && (
+              <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
+              {/* canvas fills the CSS-scaled box; its bitmap is rastered at renderScale and rescaled
+                  by the browser between re-rasters. pointerEvents:none so the viewport gets the gesture. */}
+              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} />
+              <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
+                {drawDraft()}
+              </svg>
+              {editing && (
+                <input autoFocus value={editing.text}
+                  onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
+                  onPointerDown={(ev) => ev.stopPropagation()}
+                  onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); closeEditor(true); } else if (ev.key === "Escape") { ev.preventDefault(); closeEditor(false); } }}
+                  onBlur={() => closeEditor(true)} placeholder="Text note…"
+                  style={{ position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color: "#b91c1c", minWidth: 90, zIndex: 5 }} />
+              )}
+              {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
+              {calInput && (
+                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
+                    <input autoFocus value={calInput.value}
+                      onChange={(e) => { const v = e.target.value; setCalInput((c) => (c ? { ...c, value: v } : c)); if (err) setErr(""); }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitCalibrate(); } else if (e.key === "Escape") { e.preventDefault(); setCalInput(null); setErr(""); } }}
+                      placeholder={`120  or  38'-7"`}
+                      style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontFamily: "inherit", padding: "3px 6px", border: `1px solid ${err ? "#dc2626" : PAL.line}`, borderRadius: 5, outline: "none" }} />
+                    <button onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.preventDefault()} onClick={commitCalibrate} style={{ ...btn(true), padding: "3px 9px", fontSize: 11.5 }}>Set</button>
+                  </div>
+                  <div style={{ fontSize: 10.5, marginTop: 4, color: err ? "#dc2626" : PAL.muted, lineHeight: 1.35 }}>
+                    {err || "Feet, or feet-inches. Enter to set · Esc to cancel."}
+                  </div>
+                </div>
+              )}
+              </div>
+            )}
+          </div>
+
+          {/* tool rail (B330) — drawing/measure tools + zoom, flush to the canvas */}
+          <ToolRail items={railItems} accent={MODULE_ACCENT["doc-review"]} data-testid="markup-rail" />
+
+          {/* takeoff — collapsible (B330); a thin re-open tab when hidden */}
+          {takeoffOpen ? (
+          <div style={{ flex: "none", width: 246, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>Takeoff</div>
+              <button onClick={() => setTakeoffOpen(false)} title="Hide the takeoff panel" style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: PAL.muted, fontSize: 14, fontWeight: 700, lineHeight: 1, padding: "2px 4px", fontFamily: "inherit" }}>▸</button>
+            </div>
+            <div style={{ fontSize: 11, marginBottom: 8 }}>
+              {(() => {
+                const info = calInfo[page];
+                if (ftPerUnit && info?.src === "auto")
+                  return <span style={{ color: "#b45309" }}>Sheet {page} — scale from sheet: <b>{info.label}</b> · verify</span>;
+                if (ftPerUnit) return <span style={{ color: "#15803d" }}>Sheet {page} calibrated</span>;
+                if (info?.src === "nts") return <span style={{ color: "#b45309" }}>Sheet {page} — marked NOT TO SCALE</span>;
+                return <span style={{ color: "#b45309" }}>Sheet {page} not calibrated — use Calibrate</span>;
+              })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
             {pageMarks.filter((m) => MEASURE.has(m.kind)).length === 0
@@ -533,15 +1156,20 @@ export default function DocReview() {
               {totals.uncal > 0 && <div style={{ fontSize: 10.5, color: "#b45309", marginTop: 5, lineHeight: 1.4 }}>{totals.uncal} measurement(s) on uncalibrated sheets are excluded.</div>}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>Areas/counts use the shared coordinate module — the seam to feed the Site Planyr's yield panel (pending the shared coordinate spine).</div>
             </div>
-            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "#b3361b" }} onClick={() => { setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
+            {sel && <button style={{ ...btn(false), width: "100%", marginTop: 10, color: "#b3361b" }} onClick={() => { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }}>Delete selected</button>}
           </div>
+          ) : (
+            <button onClick={() => setTakeoffOpen(true)} title="Show the takeoff panel" style={{ flex: "none", width: 26, background: "#fff", borderLeft: `1px solid ${PAL.line}`, cursor: "pointer", color: PAL.muted, fontFamily: "system-ui, sans-serif", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>
+              <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap" }}>◂ Takeoff</span>
+            </button>
+          )}
         </div>
       )}
 
       {/* tool hint */}
       {pdfRef.current && curTool && (
-        <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid #2e2a23`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "#fbbf24", marginLeft: 10 }}>{err}</span>}
+        <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
+          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
     </div>

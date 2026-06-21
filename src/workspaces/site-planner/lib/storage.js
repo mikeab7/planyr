@@ -9,14 +9,18 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions } from "./cloudSync.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
  * login) and writes mirror to Supabase (RLS-scoped to them). Logged out,
  * activeUser is null and everything stays 100% localStorage (the legacy store). */
 let activeUser = null;
-export function setActiveUser(uid) { activeUser = uid || null; }
+export function setActiveUser(uid) {
+  const next = uid || null;
+  if (next !== activeUser) clearSiteVersions(); // don't carry one user's optimistic-version tokens into another's session (B314)
+  activeUser = next;
+}
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // Pure merge of the local cache with the cloud's records (exported for tests).
@@ -30,10 +34,11 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // `toPush` = ids the cloud is missing, has an OLDER copy of, or now has LESS content than
 // the merged result — re-push so a building kept from the local side actually reaches the
 // cloud instead of being stranded on one device.
-// (Trade-off: a delete made in only one copy can reappear once if a stale copy still has
-// it — recoverable by deleting again; silently losing work is not. Per-item tombstones
-// are the fully-correct follow-up. The new local version history makes any surprise
-// recoverable in the meantime — see BACKLOG B126.)
+// (Delete handling: mergeSiteContent now honors per-item tombstones (`deletedIds`, B276), so a
+// deliberate delete that recorded a tombstone — e.g. removing a placed overlay — stays deleted
+// across this merge instead of being resurrected. Collections not yet wired to record a tombstone
+// keep the old recoverable "a delete can reappear once" trade-off; never silent data loss, and
+// the local version history makes any surprise recoverable meanwhile — see BACKLOG B126/B276.)
 export function mergePulledSites(existing, cloudModels) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
@@ -131,6 +136,95 @@ export function pendingLegacyCount(uid) {
   }
   return n;
 }
+
+// Returns the list of on-device (legacy) sites that are not yet in (or are newer than)
+// the signed-in user's cloud cache — the set pendingLegacyCount counts.
+export function pendingLegacySites(uid) {
+  if (!uid) return legacySitesList();
+  let legacy = {}, cloud = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  return Object.values(legacy)
+    .map(migrate)
+    .filter((rec) => {
+      if (!rec.id) return false;
+      const cur = cloud[rec.id];
+      return !cur || (cur.updatedAt || 0) < (rec.updatedAt || 0);
+    })
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+// localStorage is the INTENTIONAL PRIMARY store. When signed in, active store =
+// planarfit:sites:cloud:<uid> (local cache pulled from Supabase on login). Supabase is
+// a fire-and-forget mirror — not a fallback, not a gate. Writing always succeeds locally
+// first; the cloud write follows asynchronously. The "legacy" store (planarfit:sites:v1)
+// is the pre-login store; the migration flow bridges it to the cloud cache.
+
+// Stage a legacy site into the signed-in user's cloud cache WITHOUT pushing to Supabase.
+// Used when the user clicks "Open" in the migration modal so the planner can load the
+// site normally. The user then decides (Save = push; Discard = remove from both stores).
+// Non-destructive: the original legacy copy is kept.
+export function stageLegacySite(uid, siteId) {
+  if (!uid || !siteId) return null;
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const rec = legacy[siteId];
+  if (!rec) return null;
+  const local = createSiteModel(rec);
+  if (!local.id) return null;
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  cloud[local.id] = local;
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return local;
+}
+
+// Remove a site from both the legacy store and the signed-in user's cloud cache.
+// Used for an explicit Discard in the migration flow — the user wants to erase this
+// on-device copy entirely, not save it to their account.
+export function discardLegacySite(uid, siteId) {
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  delete legacy[siteId];
+  try { localStorage.setItem(SITES_KEY, JSON.stringify(legacy)); } catch (_) {}
+  if (uid) {
+    let cloud = {};
+    try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+    delete cloud[siteId];
+    try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  }
+}
+
+// True when a site has no meaningful content — nothing drawn, no parcels, no underlay.
+// Used to decide whether to offer Save (nothing to keep) vs. only Discard.
+export function isEmptySite(model) {
+  if (!model) return true;
+  return !(
+    (model.parcels || []).length ||
+    (model.els || []).length ||
+    (model.markups || []).length ||
+    (model.measures || []).length ||
+    model.underlay
+  );
+}
+
+// Import a SINGLE legacy site into the cloud for uid. Non-destructive — original stays
+// in the legacy store. Returns { ok } (same shape as cloudUpsert).
+export async function importOneSiteToCloud(uid, siteId) {
+  if (!uid || !siteId) return { ok: false, error: "missing args" };
+  let legacy = {};
+  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
+  const rec = legacy[siteId];
+  if (!rec) return { ok: false, error: "not found" };
+  const local = createSiteModel(rec);
+  if (!local.id) return { ok: false, error: "invalid record" };
+  let cloud = {};
+  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
+  cloud[local.id] = local; // stage in cache so it shows immediately
+  try { localStorage.setItem(cloudKey(uid), JSON.stringify(cloud)); } catch (_) {}
+  return cloudUpsert(uid, local);
+}
+
 // Push one site (by id) to the cloud; resolves { ok }. No-op (ok:true) when logged
 // out, so the save badge can await it unconditionally.
 export async function pushSiteToCloud(id) {

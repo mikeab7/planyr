@@ -24,6 +24,100 @@ export function polyArea(pts) {
   return Math.abs(a) / 2;
 }
 
+const avgOf = (pts) => pts.reduce((s, q) => ({ x: s.x + q.x / pts.length, y: s.y + q.y / pts.length }), { x: 0, y: 0 });
+
+/* Midpoint ALONG a polyline by arc length — the true center of the drawn path,
+ * not a vertex. `closed` walks the closing edge too (for a perimeter loop). Used
+ * to anchor distance/perimeter labels so a 2-point line labels at its middle, not
+ * its first endpoint (B307). */
+export function midOfPath(pts, closed = false) {
+  if (!pts || !pts.length) return { x: 0, y: 0 };
+  if (pts.length === 1) return { x: pts[0].x, y: pts[0].y };
+  const seq = closed ? [...pts, pts[0]] : pts;
+  const segs = [];
+  let total = 0;
+  for (let i = 1; i < seq.length; i++) { const L = dist(seq[i - 1], seq[i]); segs.push(L); total += L; }
+  if (total === 0) return { x: seq[0].x, y: seq[0].y };
+  let half = total / 2;
+  for (let i = 0; i < segs.length; i++) {
+    if (half <= segs[i]) {
+      const t = segs[i] ? half / segs[i] : 0;
+      return { x: seq[i].x + (seq[i + 1].x - seq[i].x) * t, y: seq[i].y + (seq[i + 1].y - seq[i].y) * t };
+    }
+    half -= segs[i];
+  }
+  const last = seq[seq.length - 1];
+  return { x: last.x, y: last.y };
+}
+
+// Ray-cast point-in-polygon (helper for centroidOf's interior clamp).
+function pointInPoly(p, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if ((yi > p.y) !== (yj > p.y) && p.x < ((xj - xi) * (p.y - yi)) / ((yj - yi) || 1e-12) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/* Label anchor for a filled polygon: the AREA-weighted centroid, clamped to lie
+ * inside the shape. A concave / L-shaped region's centroid can fall outside the
+ * outline; when it does we drop to the midpoint of the widest interior span on a
+ * horizontal scanline through it, so the area label always sits on the shape (B307).
+ * Falls back to the vertex average for degenerate input. */
+export function centroidOf(pts) {
+  if (!pts || !pts.length) return { x: 0, y: 0 };
+  if (pts.length < 3) return avgOf(pts);
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    const cross = p.x * q.y - q.x * p.y;
+    a += cross; cx += (p.x + q.x) * cross; cy += (p.y + q.y) * cross;
+  }
+  a *= 0.5;
+  if (Math.abs(a) < 1e-9) return avgOf(pts);
+  const c = { x: cx / (6 * a), y: cy / (6 * a) };
+  if (pointInPoly(c, pts)) return c;
+  // Centroid sits outside (concave) → take the widest interior span at y = c.y.
+  const ys = c.y, xs = [];
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const yi = pts[i].y, yj = pts[j].y;
+    if ((yi > ys) !== (yj > ys)) xs.push(pts[j].x + ((pts[i].x - pts[j].x) * (ys - yj)) / ((yi - yj) || 1e-12));
+  }
+  xs.sort((p, q) => p - q);
+  let best = null, bw = -1;
+  for (let i = 0; i + 1 < xs.length; i += 2) { const w = xs[i + 1] - xs[i]; if (w > bw) { bw = w; best = (xs[i] + xs[i + 1]) / 2; } }
+  return best == null ? avgOf(pts) : { x: best, y: ys };
+}
+/* Minimum points needed to COMMIT each measurement kind. Area + perimeter describe a
+ * polygon, so they need ≥3 distinct points — a 2-point "area" is 0 sf (shoelace) and a
+ * 2-point "perimeter" is a single segment drawn back on itself (half the loop it implies),
+ * both meaningless in the takeoff. Distance is a 2-point segment; count is ≥1 marker. (B302) */
+export const MIN_MEASURE_PTS = { distance: 2, perimeter: 3, area: 3, count: 1 };
+export const canCommitMeasure = (kind, n) => (n || 0) >= (MIN_MEASURE_PTS[kind] ?? 1);
+
+/* Normalize ONE markup loaded from storage into a render-safe shape. A persisted review
+ * is just JSON — it can arrive partial or corrupted (a hand-edited row, an older/newer
+ * schema, or — pre-fix — a coordinate that a degenerate gesture turned non-finite, which
+ * JSON.stringify silently rewrote to `null`). The render/hit-test/takeoff code assumes
+ * each markup has a string `kind`, an array of finite-coordinate `pts`, and (for text) a
+ * string `text`; one violation used to crash the WHOLE overlay (e.g. m.text.length on a
+ * note with no text), taking down a reviewer's entire markup view over a single bad item.
+ * This is the validation boundary the load path was missing: it drops junk points and
+ * fills the required fields, losslessly preserving everything else. Returns null for an
+ * unsalvageable entry (no kind) so the caller can filter it out. */
+export function sanitizeMarkup(m) {
+  if (!m || typeof m.kind !== "string") return null;
+  const pts = Array.isArray(m.pts)
+    ? m.pts.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => ({ x: p.x, y: p.y }))
+    : [];
+  const out = { ...m, pts };
+  if (m.kind === "text") out.text = typeof m.text === "string" ? m.text : "";
+  return out;
+}
+// Sanitize a loaded markups array (drops unsalvageable entries). Safe on non-arrays.
+export const sanitizeMarkups = (arr) => (Array.isArray(arr) ? arr.map(sanitizeMarkup).filter(Boolean) : []);
+
 /* Real-world value of one measurement markup, given the sheet's calibration
  * (`ftPerUnit`, feet per page unit; 0/undefined = uncalibrated). Returns
  * { kind, calibrated, ...values }. Area in sf + acres; lengths in ft; count int. */
@@ -49,22 +143,33 @@ export function measureValue(m, ftPerUnit) {
 }
 
 const f0 = (n) => Math.round(n).toLocaleString();
+// One-decimal feet for LINEAR measures (distance/perimeter): whole-foot rounding hid
+// sub-foot precision (a 150.6 ft line read "151 ft") and clashed with the 2-dp acres
+// shown for area — takeoff wants the extra digit. (B296)
+const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Human label for a measurement, e.g. "150.0 ft", "1.83 ac (79,715 sf)", "42".
+// Human label for a measurement, e.g. "150.6 ft", "1.83 ac (79,715 sf)", "42".
 export function measureLabel(m, ftPerUnit) {
   const v = measureValue(m, ftPerUnit);
   if (v.kind === "count") return `${v.count}`;
   if (!v.calibrated) return "set scale";
   if (v.kind === "area") return Number.isFinite(v.areaSf) ? `${f2(v.areaAc)} ac · ${f0(v.areaSf)} sf` : "—";
-  return Number.isFinite(v.lengthFt) ? `${f0(v.lengthFt)} ft` : "—";
+  return Number.isFinite(v.lengthFt) ? `${f1(v.lengthFt)} ft` : "—";
 }
 
 /* Roll up all measurements (across the supplied list) into yield-style totals,
- * using each markup's sheet calibration. Skips uncalibrated length/area items. */
+ * using each markup's sheet calibration. Skips uncalibrated length/area items.
+ * B351-adjacent: only MEASUREMENT markups count. The caller passes the whole markup
+ * list (measures + redline shapes + text notes), so a non-measure kind must be skipped
+ * outright — otherwise a redline cloud / text note on an UNcalibrated sheet fell into
+ * measureValue's generic branch (calibrated:false) and inflated `uncal`, making the panel
+ * falsely warn "N measurement(s) on uncalibrated sheets are excluded" when zero were made. */
+const MEASURE_KINDS = new Set(Object.keys(MIN_MEASURE_PTS));
 export function rollup(markups, calByPage) {
   let areaSf = 0, perimFt = 0, distFt = 0, count = 0, uncal = 0;
   for (const m of markups) {
+    if (!m || !MEASURE_KINDS.has(m.kind)) continue; // redline shapes / text notes aren't measurements
     const ftPerUnit = calByPage[m.page];
     const v = measureValue(m, ftPerUnit);
     if (v.kind === "count") { count += v.count; continue; }

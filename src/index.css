@@ -2,35 +2,199 @@
 
 :root {
   --font: "Inter", system-ui, sans-serif;  /* the one UI face — swap here only */
-  --ink: #26231e;
-  --muted: #8a8473;
-  --line: #e7e2d6;
-  --accent: #e8590c;
-  --chrome: #191613;        /* dark graphite chrome (bars, rail) */
-  --chrome-line: #2e2a23;
-  --chrome-ink: #ece7db;
-  --chrome-muted: #9b9482;
+
+  /* ============================================================================
+     THEME TOKENS — LIGHT (defaults). Dark overrides live in [data-theme="dark"].
+     Components reference tokens via var(--…) — never raw hex. The drafting canvas
+     reads the JS mirror in src/shared/theme/palette.js (var() can't be used in SVG
+     attributes / canvas export). Keep the two in sync. (B316/B317/B318/B319)
+     ============================================================================ */
+
+  /* Surfaces */
+  --surface-page:   #F3F5F8;
+  --surface-raised: #FFFFFF;
+  --surface-overlay: rgba(255, 255, 255, 0.94); /* frosted floating panels over the map */
+  --border-default: #E1E5EB;
+  --border-strong:  #CDD3DC;
+  --text-primary:   #1B1E26;
+  --text-secondary: #353B49;
+  --text-tertiary:  #4B5263;
+
+  /* Chrome — top bars, tool rail, status bar. Themes WITH the app (B318): light
+     theme = light chrome, dark theme = dark chrome (no dark bar over a white app). */
+  --chrome-bg:           #EAEEF3;
+  --chrome-bg-elev:      #FFFFFF;
+  --chrome-divider:      #D7DDE5;
+  --chrome-text:         #1B1E26;
+  --chrome-muted:        #353B49;
+  --chrome-tab-inactive: #454C5C;
+  --save-badge:          #0F6E56;
+  --warn-text:           #8A5410;   /* saving / unsaved / offline label on chrome (AA amber) */
+
+  /* Module accents — FILLS fixed in both themes; the -text variants swap per theme. */
+  --accent-site:          #1D9E75;
+  --accent-schedule:      #7F77DD;
+  --accent-markup:        #EF9F27;
+  --on-accent-site:       #FFFFFF;
+  --on-accent-schedule:   #FFFFFF;
+  --on-accent-markup:     #412402;   /* dark text on amber — never white */
+  --accent-site-text:     #0F6E56;
+  --accent-schedule-text: #534AB7;
+  --accent-markup-text:   #8A5410;
+
+  /* Project-status palette (B234) as tokens so DOM badges theme live. The canonical
+     hexes mirror src/shared/ui/statusTokens.js (map pins read those directly — pins
+     sit on the aerial map, a theme-neutral surface). Dark = lighter variants (B320). */
+  --status-pursuit:  #378ADD;
+  --status-active:   #639922;
+  --status-onhold:   #BA7517;
+  --status-complete: #888780;
+  --status-dead:     #E24B4A;
+
+  /* Work surfaces — drafting canvas + Markup mat (B319). */
+  --canvas-bg:          #EDF1F6;   /* cool drafting field (retires the warm cream) */
+  --canvas-grid-minor:  #DCE3EB;
+  --canvas-grid-major:  #C5CED9;
+  --canvas-parcel:      #5b6650;
+  --canvas-setback:     #b45309;
+  --canvas-selection:   #C2410C;   /* drafting red-orange — selection + dimension lines */
+  --canvas-accent-soft: #f0d9cc;
+  --canvas-mat:         #DCE1E8;
+
+  /* Global interactive accent (focus rings, form controls, active states).
+     Replaces the retired ember (#e8590c); tracks the drafting accent. */
+  --accent:          #C2410C;
+  --on-accent:       #FFFFFF;   /* text/icon ON a solid --accent fill (active tool/btn) */
+  --focus-ring:      rgba(194, 65, 12, .45);
+  --focus-ring-soft: rgba(194, 65, 12, .10);
+
+  /* Interaction surfaces (hovers, scrollbars, kbd chips) — theme-aware. */
+  --hover-ghost:         #eef1f5;
+  --hover-ghost-danger:  #fcebe3;
+  --hover-menu:          #eef1f5;
+  --hover-chrome:        rgba(0, 0, 0, .06);
+  --hover-chrome-danger: rgba(220, 38, 38, .12);
+  --scroll-thumb:        #c8cfd9;
+  --scroll-thumb-hover:  #b3bcc9;
+  --scroll-track-border: #F3F5F8;
+  --kbd-bg:   #e7ebf1;
+  --kbd-text: #565E6E;
+  --kbd-line: #cdd3dc;
+
+  /* Legacy aliases — existing var(--ink)/(--muted)/(--line)/(--chrome*) usages keep
+     working and now theme correctly. */
+  --ink:         var(--text-primary);
+  --muted:       var(--text-secondary);
+  --line:        var(--border-default);
+  --chrome:      var(--chrome-bg);
+  --chrome-line: var(--chrome-divider);
+  --chrome-ink:  var(--chrome-text);
+  /* --chrome-muted defined above */
+
+  /* Brand — Planyr coral mark palette (mirrors src/shared/brand/tokens.js).
+     Three isometric tiers, each a lit top face + two darker side faces. */
+  --coral-base: #a8482b; --coral-base-l: #963f26; --coral-base-r: #823620;
+  --coral-mid:  #dc6b42; --coral-mid-l:  #c85f3a; --coral-mid-r:  #b25431;
+  --coral-top:  #f8946a; --coral-top-l:  #e8825a; --coral-top-r:  #d6744e;
+  /* Linework for the full-finish mark on a dark surface */
+  --brand-grid: #e89a78; --brand-glass-edge: #f0a888; --brand-wire: #fbb89a;
+  /* Brand surfaces + wordmark */
+  --brand-ink: #15171c; --brand-cream: #f4efe6;
+  --brand-wordmark-dark: #f4f1e9; --brand-wordmark-light: #2a211c;
+}
+
+[data-theme="dark"] {
+  /* Surfaces */
+  --surface-page:   #14161B;
+  --surface-raised: #1D2027;
+  --surface-overlay: rgba(24, 27, 33, 0.93); /* frosted floating panels over the map */
+  --border-default: #2A2E37;
+  --border-strong:  #3A3F4B;
+  --text-primary:   #E8EBF0;
+  --text-secondary: #CAD0DA;
+  --text-tertiary:  #A4ABB8;
+
+  /* Chrome */
+  --chrome-bg:           #111319;
+  --chrome-bg-elev:      #171A21;
+  --chrome-divider:      #262A33;
+  --chrome-text:         #ECEFF4;
+  --chrome-muted:        #A6ADBA;
+  --chrome-tab-inactive: #C2C8D2;
+  --save-badge:          #7FD8B8;
+  --warn-text:           #EFB54E;
+
+  /* Module accent TEXT — light-on-dark set (for the dark chrome). Fills unchanged. */
+  --accent-site-text:     #5DCAA5;
+  --accent-schedule-text: #AFA9EC;
+  --accent-markup-text:   #EF9F27;
+
+  /* Status — lighter variants so saturated values don't go muddy on dark cards (B320) */
+  --status-pursuit:  #6FB4F0;
+  --status-active:   #8FCB4E;
+  --status-onhold:   #E0A23E;
+  --status-complete: #9DA3AD;
+  --status-dead:     #F2706F;
+
+  /* Work surfaces */
+  --canvas-bg:          #0E1014;
+  --canvas-grid-minor:  rgba(232, 235, 240, 0.05);
+  --canvas-grid-major:  rgba(232, 235, 240, 0.10);
+  --canvas-parcel:      #2FBE90;
+  --canvas-setback:     #E0954A;
+  --canvas-selection:   #F26B3A;
+  --canvas-accent-soft: rgba(242, 107, 58, 0.18);
+  --canvas-mat:         #0E1014;
+
+  /* Global interactive accent */
+  --accent:          #F26B3A;
+  /* The dark accent is intentionally light (B319, legible on the dark canvas), so
+     white-on-it is only 3.03:1 — on-fill text goes near-black instead (6:1+). */
+  --on-accent:       #15171C;
+  --focus-ring:      rgba(242, 107, 58, .50);
+  --focus-ring-soft: rgba(242, 107, 58, .16);
+
+  /* Interaction surfaces */
+  --hover-ghost:         rgba(255, 255, 255, .06);
+  --hover-ghost-danger:  rgba(248, 113, 113, .14);
+  --hover-menu:          rgba(255, 255, 255, .06);
+  --hover-chrome:        rgba(255, 255, 255, .09);
+  --hover-chrome-danger: rgba(248, 113, 113, .14);
+  --scroll-thumb:        #3d4250;
+  --scroll-thumb-hover:  #4c5260;
+  --scroll-track-border: #14161B;
+  --kbd-bg:   #262A33;
+  --kbd-text: #CAD0DA;
+  --kbd-line: #3A3F4B;
 }
 
 html, body, #root {
   height: 100%;
   margin: 0;
+  /* Pin the app to the viewport — the whole UI lives inside one screen, so the page
+     itself never scrolls (that scroll used to hide the map scale bar / push the
+     header off-screen). Each panel scrolls internally instead. (B168) */
+  overflow: hidden;
+}
+/* Prefer the dynamic viewport height where supported, so mobile browser chrome
+   can't crop the bottom of the canvas. (B168) */
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
 }
 
 body {
-  background: #efeadf;
+  background: var(--surface-page);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv05", "cv11";
   /* tabular + slashed-zero digits everywhere numbers appear */
   font-variant-numeric: tabular-nums slashed-zero;
-  color: var(--ink);
+  color: var(--text-primary);
 }
 
-/* App-like UI: double-clicking the canvas/labels is a real action (close a
-   polygon, open an element's menu), so suppress the browser's default text
-   selection that would otherwise highlight stray labels across the page. */
+/* App-like UI: double-clicking the canvas/labels is a real action, so suppress the
+   browser's default text selection that would otherwise highlight stray labels. */
 #root {
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -53,33 +217,33 @@ button:active:not(:disabled) { transform: translateY(0.5px); }
 button:disabled { opacity: .45; cursor: default; }
 
 button:focus-visible, input:focus-visible, select:focus-visible {
-  outline: 2px solid rgba(232, 89, 12, .45);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus, select:focus {
-  border-color: #d4a380 !important;
-  box-shadow: 0 0 0 3px rgba(232, 89, 12, .1);
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--focus-ring-soft);
   outline: none;
 }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
 /* light ghost buttons (over light panels) */
-.gbtn:hover:not(:disabled) { background: #f1ece1 !important; filter: none; }
-.gbtn-danger:hover:not(:disabled) { background: #fcebe3 !important; filter: none; }
+.gbtn:hover:not(:disabled) { background: var(--hover-ghost) !important; filter: none; }
+.gbtn-danger:hover:not(:disabled) { background: var(--hover-ghost-danger) !important; filter: none; }
 
-/* dark-chrome ghost buttons (top bar, status bar) */
-.dbtn:hover:not(:disabled) { background: rgba(255,255,255,.09) !important; filter: none; }
-.dbtn-danger:hover:not(:disabled) { background: rgba(248,113,113,.14) !important; filter: none; }
+/* chrome ghost buttons (top bar, status bar) — overlay adapts to chrome lightness */
+.dbtn:hover:not(:disabled) { background: var(--hover-chrome) !important; filter: none; }
+.dbtn-danger:hover:not(:disabled) { background: var(--hover-chrome-danger) !important; filter: none; }
 
-/* tool-rail buttons (dark) — idle hover; active state styled inline */
-.rbtn:hover:not(:disabled):not(.on) { background: rgba(255,255,255,.07) !important; color: #fff !important; filter: none; }
+/* tool-rail buttons — idle hover; active state styled inline */
+.rbtn:hover:not(:disabled):not(.on) { background: var(--hover-chrome) !important; color: var(--chrome-text) !important; filter: none; }
 .rbtn.on:hover:not(:disabled) { filter: brightness(1.06); }
 
-/* dropdown menus (white floating panels) */
-.menu button:hover:not(:disabled) { background: #f5f0e6 !important; filter: none; }
+/* dropdown menus (floating panels) */
+.menu button:hover:not(:disabled) { background: var(--hover-menu) !important; filter: none; }
 
 /* card section headers */
-.sec-head:hover .sec-title { color: #3a362e; }
+.sec-head:hover .sec-title { color: var(--text-primary); }
 
 /* color swatch inputs — clean rounded chip, no UA chrome */
 input[type="color"] {
@@ -97,26 +261,35 @@ input[type="range"] { height: 18px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #d2cab7;
+  background: var(--scroll-thumb);
   border-radius: 8px;
-  border: 2.5px solid #f4f1e9;
+  border: 2.5px solid var(--scroll-track-border);
 }
-::-webkit-scrollbar-thumb:hover { background: #c2b9a3; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 
-/* dark surfaces get a dark scrollbar */
-.dark-scroll::-webkit-scrollbar-thumb { background: #3d382f; border-color: var(--chrome); }
-.dark-scroll::-webkit-scrollbar-thumb:hover { background: #4c463a; }
+/* chrome surfaces get a chrome-matched scrollbar */
+.dark-scroll::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-color: var(--chrome-bg); }
+.dark-scroll::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 
 @keyframes pf-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .35; transform: scale(.7); }
 }
 
+/* spinner — e.g. the "Preparing PDF…" indicator */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Project Files upload tray (B260): a filed row demotes into the "Recently filed"
+   trail with a subtle slide/fade — never an abrupt removal. */
+@keyframes pf-demote-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: .92; transform: none; } }
+.pf-queue-row { transition: opacity .25s ease, background-color .25s ease; }
+.pf-queue-recent { animation: pf-demote-in .25s ease; }
+
 /* keyboard hint chips */
 kbd {
   font-family: "Inter", system-ui, sans-serif;
   font-size: 10px; font-weight: 600;
-  background: #f1ece1; color: #6b6557;
-  border: 1px solid #ddd6c5; border-bottom-width: 2px;
+  background: var(--kbd-bg); color: var(--kbd-text);
+  border: 1px solid var(--kbd-line); border-bottom-width: 2px;
   border-radius: 4px; padding: 1px 5px;
 }

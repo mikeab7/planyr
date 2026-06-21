@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-const PAL = { ink: "#26231e", muted: "#6b6557", line: "#ddd6c5", paper: "#f6f3ec", accent: "#e8590c" };
+const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", paper: "var(--surface-page)", accent: "var(--accent)" };
 const COLORS = ["#dc2626", "#ea580c", "#2563eb", "#16a34a", "#7c3aed", "#111827"];
 const uid = () => "k" + Math.random().toString(36).slice(2, 9);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -108,6 +108,21 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
     }
     setDraft(null);
   };
+  // NEW-1 — recover from a pan/draw whose gesture was interrupted (browser pointercancel,
+  // window blur, tab hidden, or a debugger attaching) rather than ending with a normal
+  // pointer-up, so this drawing canvas can never be left stuck mid-pan with pointer-capture
+  // held and a frozen grab cursor. Aborts (no commit) instead of finalizing.
+  const abortGesture = (e) => {
+    if (e?.pointerId != null) { try { wrapRef.current?.releasePointerCapture?.(e.pointerId); } catch (_) {} }
+    drag.current = null; setDraft(null); setMoving(null);
+  };
+  useEffect(() => {
+    const recover = () => abortGesture();
+    const onVis = () => { if (document.hidden) recover(); };
+    window.addEventListener("blur", recover);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
 
   // Render one markup as SVG (coords 0..1; viewBox 0 0 1 1). `moving` overrides its points live.
   const renderMark = (m, isSel) => {
@@ -157,7 +172,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
         <button onClick={onClose} title="Close (markups are saved)" style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.accent}`, background: PAL.accent, color: "#fff" }}>Done</button>
       </div>
 
-      <div ref={wrapRef} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={onUp}
+      <div ref={wrapRef} onWheel={onWheel} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={abortGesture} onPointerLeave={onUp}
         style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#3a352e", touchAction: "none", cursor: tool === "select" ? "grab" : "crosshair" }}>
         {drawing.src ? (
           <>

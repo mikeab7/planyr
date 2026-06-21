@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 # Claude Code agent worktrees (transient harness scaffolding — never commit)
 .claude/worktrees/
+
+# Transient ui-audit verification screenshots
+ui-audit/screens/
+ui-audit/stress/*.png

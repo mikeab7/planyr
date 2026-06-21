@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion } from "../src/workspaces/site-planner/lib/storage.js";
-import { mergeSiteContent, contentCount } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 // A plain building element (what users mostly lose); `bld("a")` etc.
 const bld = (id) => ({ id, type: "building", cx: 0, cy: 0, w: 100, h: 100 });
@@ -86,6 +86,53 @@ describe("mergeSiteContent — a thinner copy can never erase a fuller one (B126
   });
 });
 
+// B276 — a deliberate delete records a tombstone (`deletedIds`); the merge must honor it so a
+// stale/other copy that still has the item can't resurrect it (the documented B126 trade-off, fixed).
+describe("mergeSiteContent — delete-tombstones keep a deletion deleted (B276)", () => {
+  const ov = (id) => ({ id, name: "sheet", src: "data:img", imgW: 100, imgH: 100, x: 0, y: 0, ftPerPx: 1 });
+
+  it("does NOT resurrect an overlay the newer copy tombstoned, though the older copy still has it", () => {
+    const older = site("s", 100, [], { sheetOverlays: [ov("o1")] });            // pre-delete copy still has it
+    const newer = site("s", 500, [], { sheetOverlays: [], deletedIds: ["o1"] }); // deleted here
+    const m = mergeSiteContent(older, newer);
+    expect(m.sheetOverlays.map((o) => o.id)).toEqual([]); // stays deleted
+    expect(m.deletedIds).toContain("o1");                  // tombstone carried forward
+  });
+
+  it("a tombstone in the OLDER copy still wins (a deletion isn't undone by any copy that still has the item)", () => {
+    const older = site("s", 100, [], { sheetOverlays: [], deletedIds: ["o1"] });
+    const newer = site("s", 500, [], { sheetOverlays: [ov("o1")] }); // still carries the stale item
+    const m = mergeSiteContent(older, newer);
+    expect(m.sheetOverlays.map((o) => o.id)).toEqual([]); // either-copy tombstone wins
+  });
+
+  it("unions the tombstone sets from both copies", () => {
+    const a = site("s", 200, [], { deletedIds: ["o1"] });
+    const b = site("s", 100, [], { deletedIds: ["o2"] });
+    expect(mergeSiteContent(a, b).deletedIds.sort()).toEqual(["o1", "o2"]);
+  });
+
+  it("leaves non-tombstoned overlays alone — the normal union still keeps work from either copy (no regression)", () => {
+    const a = site("s", 200, [], { sheetOverlays: [ov("keep")] });
+    const b = site("s", 100, [], { sheetOverlays: [ov("alsoKeep")], deletedIds: ["gone"] });
+    const m = mergeSiteContent(a, b);
+    expect(m.sheetOverlays.map((o) => o.id).sort()).toEqual(["alsoKeep", "keep"]);
+  });
+
+  it("generalizes to any drawn item — a tombstoned building stays deleted", () => {
+    const older = site("s", 100, [bld("a"), bld("b")]);
+    const newer = site("s", 500, [bld("a")], { deletedIds: ["b"] });
+    expect(mergeSiteContent(older, newer).els.map((e) => e.id)).toEqual(["a"]);
+  });
+
+  it("end-to-end via mergePulledSites: a locally-deleted overlay isn't brought back by a cloud copy that still has it", () => {
+    const localDeleted = site("s", 500, [bld("a")], { sheetOverlays: [], deletedIds: ["o1"] });
+    const cloudStillHas = site("s", 100, [bld("a")], { sheetOverlays: [ov("o1")] });
+    const { map } = mergePulledSites({ s: localDeleted }, [cloudStillHas]);
+    expect(map.s.sheetOverlays.map((o) => o.id)).toEqual([]); // tombstone survives the cloud pull
+  });
+});
+
 describe("mergePulledSites — content merge end-to-end (B126)", () => {
   it("a newer-but-thinner cloud copy cannot thin a fuller local one; the union re-pushes", () => {
     const existing = { s: site("s", 100, [bld("a"), bld("b"), bld("c"), bld("d"), bld("e")]) };
@@ -166,5 +213,74 @@ describe("saveSite — cross-tab stale-write guard (B127)", () => {
     saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });
     saveSite({ id: "s", els: [bld("a"), bld("b")] }); // deleted c in the SAME tab
     expect(loadSite("s").els.map((e) => e.id).sort()).toEqual(["a", "b"]);
+  });
+});
+
+// B343 — a site-plan overlay's "hide" (eye toggle) must persist across reload, INCLUDING the
+// signed-in cloud round-trip. The hidden flag rides in the overlay record's `visible` field and
+// is saved / cloud-mirrored / content-merged exactly like opacity, rotation, page, and position.
+// The logged-out path already had a live-browser harness (ui-audit/verify-overlay-delete-hide.mjs);
+// these lock the DATA layer — especially the signed-in pull/merge, which had NO `visible`-specific
+// regression test, so a future merge-logic change can't silently un-hide an overlay on reload.
+describe("overlay hide persists — visible:false survives save/load + the signed-in cloud merge (B343)", () => {
+  const ov = (extra = {}) => ({ id: "ovJ", name: "ARCH IFC.pdf", imgW: 800, imgH: 600, page: 1,
+    pageCount: 1, ftPerPx: 1.25, rotation: 89, opacity: 0.85, locked: false, x: -500, y: -375, ...extra });
+  // A cloud-row overlay: its big PNG raster was stripped for the DB row (B72/slimForCloud), which
+  // is exactly the shape an overlay has on a real signed-in reload (src null, storageKey kept).
+  const stripped = (extra = {}) => ov({ src: null, strippedForCloud: true, storageKey: "uid/site-overlays/J/ovJ.pdf", ...extra });
+
+  describe("logged-out (localStorage) save → reload", () => {
+    beforeEach(() => {
+      const store = {};
+      globalThis.localStorage = {
+        getItem: (k) => (k in store ? store[k] : null),
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; },
+        clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+        key: (i) => Object.keys(store)[i] ?? null,
+        get length() { return Object.keys(store).length; },
+      };
+    });
+    it("hiding then reloading keeps visible:false on the overlay", () => {
+      saveSite({ id: "s", site: "Jacinto", sheetOverlays: [ov()] });                 // visible (flag absent)
+      saveSite({ id: "s", site: "Jacinto", sheetOverlays: [ov({ visible: false })] }); // hidden
+      expect(loadSite("s").sheetOverlays[0].visible).toBe(false);
+    });
+    it("showing again clears it back to visible across reload", () => {
+      saveSite({ id: "s", sheetOverlays: [ov({ visible: false })] });
+      saveSite({ id: "s", sheetOverlays: [ov({ visible: true })] });
+      expect(loadSite("s").sheetOverlays[0].visible).toBe(true);
+    });
+  });
+
+  describe("signed-in cloud round-trip (the path the logged-out harness can't reach)", () => {
+    const hiddenLocal = (t) => createSiteModel({ id: "J", site: "Jacinto", updatedAt: t, sheetOverlays: [stripped({ visible: false })] });
+    const visibleCloud = (t) => createSiteModel({ id: "J", site: "Jacinto", updatedAt: t, sheetOverlays: [stripped()] });
+    const hiddenCloud = (t) => createSiteModel({ id: "J", site: "Jacinto", updatedAt: t, sheetOverlays: [stripped({ visible: false })] });
+
+    it("createSiteModel normalize keeps visible:false (lossless save normalization)", () => {
+      expect(createSiteModel({ id: "J", sheetOverlays: [ov({ visible: false })] }).sheetOverlays[0].visible).toBe(false);
+    });
+    it("mergeSiteContent keeps the hide in BOTH directions — never resurrects a visible copy", () => {
+      expect(mergeSiteContent(hiddenLocal(2000), visibleCloud(1000)).sheetOverlays[0].visible).toBe(false);
+      expect(mergeSiteContent(visibleCloud(1000), hiddenLocal(2000)).sheetOverlays[0].visible).toBe(false);
+    });
+    it("reload merge (mergePulledSites): local-hidden wins over a stale still-visible cloud copy", () => {
+      const { map } = mergePulledSites({ J: hiddenLocal(2000) }, [visibleCloud(1000)]);
+      expect(map.J.sheetOverlays[0].visible).toBe(false);
+    });
+    it("reload merge: a cloud copy that already carries the hide stays hidden", () => {
+      const { map } = mergePulledSites({ J: hiddenLocal(2000) }, [hiddenCloud(2000)]);
+      expect(map.J.sheetOverlays[0].visible).toBe(false);
+    });
+    it("a freshly-hidden local copy is re-pushed so the hide actually reaches the cloud", () => {
+      const { toPush } = mergePulledSites({ J: hiddenLocal(2000) }, [visibleCloud(1000)]);
+      expect(toPush).toContain("J");
+    });
+    it("rehydrating the stripped raster on reload doesn't disturb visible (SitePlanner spreads {...overlay, src})", () => {
+      const o = stripped({ visible: false });
+      const rehydrated = { ...o, src: "data:image/png;base64,AAAA", strippedForCloud: false };
+      expect(rehydrated.visible).toBe(false);
+    });
   });
 });

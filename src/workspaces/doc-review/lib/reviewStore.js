@@ -21,6 +21,7 @@
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
+import { casUpsert, isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -72,6 +73,14 @@ const storageKeyFor = (uid, projectId, discipline, srcId) =>
 
 /* ------------------------- review records (Postgres) ------------------------ */
 
+// Per-tab `version` tokens for the optimistic-concurrency guard (B314), populated by
+// loadReview/listReviews and advanced on every successful write. Same primitive the Site
+// Planner uses (shared casUpsert), so a review changed in another session can't be silently
+// clobbered. Until db/optimistic_concurrency.sql adds the column, every write degrades to a
+// plain upsert (today's behaviour) and this stays empty.
+const reviewVersions = {};
+export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; }
+
 export async function upsertReview(record) {
   if (!supabase) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
@@ -92,18 +101,35 @@ export async function upsertReview(record) {
     data,
   };
   const full = { ...base, project_id: record.projectId || null, item: record.item || null, revision: record.revision || null, doc_date: record.docDate || null };
-  let { error } = await supabase.from("doc_reviews").upsert(full, { onConflict: "user_id,id" });
-  if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
-    ({ error } = await supabase.from("doc_reviews").upsert(base, { onConflict: "user_id,id" }));
-  if (!error) writeDraft(uid, data); // keep the local mirror in lockstep with the cloud
-  return { ok: !error, error: error ? error.message : null };
+  // Optimistic concurrency (B314), guarded by the version we last synced. TWO independent
+  // graceful degrades layer here: (a) the library index columns may be un-migrated → retry
+  // with the core `base` row; (b) the `version` column may be un-migrated → fall back to a
+  // plain upsert (today's full→base behaviour). Either way saving never regresses.
+  const libColMiss = (e) => !!e && /column|project_id|doc_date|revision|item|schema cache/i.test(e) && !/version/i.test(e);
+  const expected = reviewVersions[record.id];
+  let r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: full, expected });
+  if (r.ok === false && r.error && libColMiss(r.error)) // library columns absent → core row
+    r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: base, expected });
+  if (r.degrade) { // version column absent → plain upsert (today's full→base fallback)
+    let { error } = await supabase.from("doc_reviews").upsert(full, { onConflict: "user_id,id" });
+    if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
+      ({ error } = await supabase.from("doc_reviews").upsert(base, { onConflict: "user_id,id" }));
+    if (!error) writeDraft(uid, data);
+    return { ok: !error, error: error ? error.message : null };
+  }
+  if (r.conflict) return { ok: false, conflict: true }; // another session advanced this review — caller prompts a reload
+  if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, data); return { ok: true }; }
+  return { ok: false, error: r.error || "save failed" };
 }
 
 // The full serialized review (the `data` jsonb), or null. RLS scopes to the user.
 export async function loadReview(id) {
   if (!supabase || !id) return null;
-  const { data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle();
+  let { data, error } = await supabase.from("doc_reviews").select("data, version").eq("id", id).maybeSingle();
+  if (error && isMissingVersionColumn(error)) // pre-migration → re-select without version
+    ({ data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle());
   if (error || !data) return null;
+  if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B314)
   return data.data || null;
 }
 
@@ -111,22 +137,45 @@ export async function loadReview(id) {
 // the core columns if the library migration hasn't run yet (so the picker still works).
 export async function listReviews() {
   if (!supabase || !(await currentUid())) return [];
+  // `placed:data->placed` pulls just the on-map flag out of the data jsonb (NOT the whole
+  // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). On any error
+  // we fall back to the core columns — the badge degrades to "filed", never regresses.
   let res = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at")
+    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
     .order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
   return res.error || !res.data ? [] : res.data;
 }
 
+// Mark a review as placed on the map at least once (NEW-3) — the write half of the
+// Filed → On-map transition the drawer's "Place on map" action triggers. Stores `placed`
+// in the review's data jsonb (so listReviews' `data->placed` surfaces it); idempotent.
+export async function markReviewPlaced(id) {
+  if (!(await cloudReady())) return { ok: false, error: "Sign in to place documents." };
+  const rec = await loadReview(id);
+  if (!rec) return { ok: false, error: "Review not found." };
+  if (rec.placed) return { ok: true }; // already on the map — nothing to write
+  return upsertReview({ ...rec, placed: true, placedAt: Date.now(), updatedAt: Date.now() });
+}
+
 export async function deleteReview(id) {
   if (!supabase || !id) return { ok: false };
+  delete reviewVersions[id]; // stop tracking a removed review's version (B314)
   const uid = await currentUid();
   // Remove the source files (by their stored keys, so any path scheme is covered),
   // then the row. RLS scopes both stores to the owner.
   try {
-    const rec = await loadReview(id);
-    const keys = ((rec && rec.sources) || []).map((s) => s.storageKey).filter(Boolean);
+    // Prefer the cloud record; if the network read misses, fall back to the local mirror so
+    // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
+    let rec = await loadReview(id);
+    if (!rec && uid) rec = readDraft(uid, id);
+    const srcs = (rec && rec.sources) || [];
+    const keys = srcs.map((s) => s.storageKey).filter(Boolean);
     if (keys.length) await supabase.storage.from(BUCKET).remove(keys);
+    // Also remove the Google Drive copy (B207) so a Drive-only file doesn't orphan bytes
+    // in Drive when its review is deleted. Best-effort, in parallel; never blocks the row.
+    const driveKeys = srcs.map((s) => s.driveKey).filter(Boolean);
+    if (driveKeys.length) await Promise.allSettled(driveKeys.map((k) => deleteFromDrive(k)));
     if (uid) { // back-compat: also clear any legacy <uid>/<reviewId>/ folder
       const { data: files } = await supabase.storage.from(BUCKET).list(`${uid}/${id}`);
       if (files && files.length) await supabase.storage.from(BUCKET).remove(files.map((f) => `${uid}/${id}/${f.name}`));
@@ -135,6 +184,21 @@ export async function deleteReview(id) {
   if (uid) clearDraft(uid, id);
   const { error } = await supabase.from("doc_reviews").delete().eq("user_id", uid).eq("id", id); // scope by owner (defense-in-depth, matches cloudDelete)
   return { ok: !error, error: error ? error.message : null };
+}
+
+// Re-file an existing review under a (different) project/discipline — the one-click
+// confirm out of the "needs filing" holding area (B217). Loads the full record, updates
+// only the filing fields, and re-upserts; the work layer + sources are untouched. (The
+// stored object path doesn't move — storageKey already encodes the prior location and
+// stays valid; re-pathing the bytes is a backend-tranche nicety, not needed to re-file.)
+export async function refileReview(id, { projectId = null, project = "", discipline, item } = {}) {
+  if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
+  const rec = await loadReview(id);
+  if (!rec) return { ok: false, error: "Review not found." };
+  const next = { ...rec, projectId: projectId || null, project: project || "" };
+  if (discipline) next.discipline = discipline;
+  if (item) next.item = item;
+  return upsertReview({ ...next, updatedAt: Date.now() });
 }
 
 /* --------------------------- projects (Site groups) ------------------------ */
@@ -172,30 +236,132 @@ export async function setProjectStatus(projectId, status) {
   return { ok: failed === 0, failed, total: rows.length };
 }
 
-// File a dropped PDF as a new (single-sheet) review under a project/discipline: upload
-// the bytes, then upsert the indexed record. Returns { ok, id }.
-export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", blob, fileName }) {
+/* --------------------------- file-facts index (B299) ----------------------- */
+// The queryable auto-filing index (db/file_facts.sql): one small row per filed drawing, so the
+// library can answer "this project's Civil set, latest revision" WITHOUT re-reading the PDF.
+// Degrades gracefully — if the migration hasn't run (or the user's signed out) upsert no-ops
+// and list returns [], so filing never regresses (same discipline as listReviews' fallback).
+export async function upsertFileFacts(row) {
+  if (!supabase || !row || !row.id) return { ok: false, error: "Cloud not configured." };
+  const uid = await currentUid();
+  if (!uid) return { ok: false, error: "Sign in to file documents." };
+  const { error } = await supabase.from("file_facts").upsert({ ...row, user_id: uid }, { onConflict: "user_id,id" });
+  return { ok: !error, error: error ? error.message : null };
+}
+
+export async function listFileFacts() {
+  if (!supabase || !(await currentUid())) return [];
+  const { data, error } = await supabase.from("file_facts")
+    .select("id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at")
+    .order("updated_at", { ascending: false });
+  return error || !data ? [] : data;
+}
+
+/* Push a file's bytes to Google Drive via the /server files API (B207 wiring). Returns
+ * { ok, driveKey } on success (driveKey = the stable key to read it back with),
+ * { ok:false, skipped:true } when Drive isn't enabled yet, or { ok:false, error }.
+ * Best-effort — never throws. */
+export async function pushFileToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
+  if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
+  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
+  const name = fileName || "document.pdf";
+  const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
+  try {
+    const resp = await fetch("/api/files", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": file.type || "application/pdf",
+        "x-planyr-key": driveKey, "x-planyr-folder": folder, "x-planyr-name": name },
+      body: file,
+    });
+    if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
+    let jr = {}; try { jr = await resp.json(); } catch (_) { /* ignore */ }
+    return resp.ok && jr.ok ? { ok: true, driveKey } : { ok: false, error: jr.error || `HTTP ${resp.status}` };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
+/* Delete a file's bytes FROM Google Drive (DELETE /api/files?key=…). Best-effort —
+ * returns true on a clean delete, false otherwise; never throws. Called when a review is
+ * deleted so a Drive-only file doesn't orphan a copy in Drive. */
+export async function deleteFromDrive(driveKey) {
+  if (!supabase || !driveKey) return false;
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return false; }
+  if (!token) return false;
+  try {
+    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    return resp.ok;
+  } catch (_) { return false; }
+}
+
+/* Read a file's bytes back FROM Google Drive (B207 read-back). Returns an ArrayBuffer
+ * (ready for loadPdf) or null — null lets the caller fall back to Supabase Storage so a
+ * pre-Drive file (or any Drive miss) still opens. Never throws. */
+export async function downloadFromDrive(driveKey) {
+  if (!supabase || !driveKey) return null;
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { return null; }
+  if (!token) return null;
+  try {
+    const resp = await fetch(`/api/files?key=${encodeURIComponent(driveKey)}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!resp.ok) return null;
+    return await resp.arrayBuffer();
+  } catch (_) { return null; }
+}
+
+// File a dropped PDF as a new (single-sheet) review under a project/discipline. Drive is
+// the home: push there first; only fall back to Supabase Storage if Drive didn't take it,
+// so a file is never left unstored AND the redundant Supabase copy stops consuming storage
+// on the happy path. Then upsert the indexed record. Returns { ok, id }.
+export async function fileNewReview({ projectId = null, project = "", discipline = "Other", item = "", docDate = null, blob, fileName }) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const id = newReviewId();
   const srcId = newSourceId();
-  const up = await uploadSource(srcId, blob, projectId, discipline);
-  const docDate = new Date().toISOString().slice(0, 10);
+  // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
+  const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
-  // A non-oversize upload failure (network / RLS / transient 5xx) still files the work layer, but
-  // the bytes weren't stored — surface it so the caller can warn, rather than silently filing a
-  // document that can't be opened until it's re-dropped (storageKey stays null → re-drop on load).
-  const uploadFailed = !up.ok && !up.oversize;
+  // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
+  const stored = blob
+    ? await storeSource(srcId, blob, { projectId, discipline, fileName })
+    : { ok: false, storageKey: null, driveKey: null, oversize: false, driveError: null, driveSkipped: true };
+  // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
+  const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
-    id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate }),
-    project, projectId, discipline, item: itemLabel, revision: "", docDate,
-    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: up.storageKey || null, oversize: !!up.oversize }],
+    id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
+    project, projectId, discipline, item: itemLabel, revision: "", docDate: filedDate,
+    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: stored.storageKey, oversize: stored.oversize, driveKey: stored.driveKey }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf" };
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, name: fileName || "document.pdf",
+    driveError: stored.driveError };
 }
 
 /* --------------------------- source PDFs (Storage) -------------------------- */
+
+// A source is safe to PERSIST only once its bytes are actually stored somewhere — it has a
+// Drive key, a Supabase Storage key, or is known-oversize (which the loader turns into a
+// "re-drop" placeholder). Persisting a still-uploading (keyless) source would save a pointer
+// the loader can't fetch → a permanent "re-open it to view" even though the bytes may have
+// landed; buildSnapshot filters by this so a quick reload mid-upload can't strand a backdrop
+// (B323/NEW-3).
+export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.oversize));
+
+/* Store ONE interactively-opened source PDF (the "Open PDF…" single sheet and every Stitcher
+ * sheet) the same way filing does: Google Drive is the primary home, Supabase Storage the
+ * fallback — so these files (a) live in Drive like filed ones and (b) bypass Supabase's 50 MB
+ * per-file cap on the happy path (the cap otherwise silently flagged big E-size drawings
+ * "oversize"). Returns { ok, storageKey, driveKey, oversize, driveError, driveSkipped }.
+ * Never throws. (B322/NEW-2.) */
+export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName } = {}) {
+  const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
+  if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, driveError: null, driveSkipped: false };
+  const up = await uploadSource(srcId, blob, projectId, discipline);
+  return { ok: up.ok, storageKey: up.storageKey || null, driveKey: null, oversize: !!up.oversize,
+    driveError: drive.skipped ? null : (drive.error || null), driveSkipped: !!drive.skipped };
+}
 
 // Upload one source PDF. Returns { ok, oversize, storageKey, error }. A file over
 // the free-tier cap is NOT uploaded (oversize:true, no key) so the caller can still

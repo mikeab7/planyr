@@ -14,7 +14,11 @@
  */
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
-import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
+import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
+import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import {
+  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
+} from "./layerRequest.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -92,8 +96,15 @@ export const EVIDENCE = {
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
   },
   mapillary: {
-    kind: "mapillary", label: "Street-level detections (Mapillary)", opacity: 0.95,
-    note: "Crowdsourced pole/hydrant detections — needs a free Mapillary token (set below). Loads at zoom ≥ 16.",
+    // NEW-3/B285: plain-language name; the "Mapillary" brand is demoted to a small
+    // source/attribution note (`source`) since the brand wasn't recognized.
+    // B308: served for every visitor via the same-origin /api/mapillary proxy (token
+    // held server-side), so it works with NO per-user token — `needsSetup` is gone.
+    // If the proxy has no token (e.g. a preview deploy) the layer degrades gracefully.
+    kind: "mapillary", label: "Poles & hydrants from street imagery",
+    sublabel: "Detected in crowdsourced street-level photos.",
+    source: "Mapillary", opacity: 0.95,
+    note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
   },
   hifld_tx: {
     kind: "esriFeature", label: "Transmission lines (HIFLD)",
@@ -117,6 +128,48 @@ export const EVIDENCE = {
   },
 };
 
+/* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
+ * county, city limits, city ETJ, and MUD / water districts. County / city / ETJ reuse
+ * the SAME verified endpoints the jurisdiction *identify* uses (lib/jurisdiction.js), so
+ * a boundary you see is the boundary the identify reports — one source of truth.
+ *
+ * ⚠ A boundary means the district HAS JURISDICTION there (it can tax / regulate) — it
+ * does NOT mean the district physically serves or connects water/sewer to a parcel.
+ * Service area ≠ taxing/authority boundary. Labelled so a MUD outline never reads as
+ * "a MUD provides water here." Screening only — verify with the district. */
+const HGAC_ETJ = ETJ_SOURCES.find((s) => s.id === "etj_hgac");
+export const JURISDICTIONS = {
+  jur_county: {
+    kind: "esriFeature", label: "County boundaries",
+    url: JURISDICTION_SOURCES.county.url, minZoom: 6, color: "#374151", weight: 2.4, opacity: 0.85,
+    note: "Texas county lines (TxDOT). A has-jurisdiction boundary, not a service area. Screening only — verify with the jurisdiction.",
+  },
+  jur_city: {
+    kind: "esriFeature", label: "City limits",
+    url: JURISDICTION_SOURCES.city.url, minZoom: 9, color: "#1d4ed8", weight: 1.8, opacity: 0.85,
+    note: "Texas city limits (TxGIO). Inside = in the city; a parcel in no city is unincorporated. The boundary is jurisdiction, NOT proof of utility service. Screening only.",
+  },
+  jur_etj: {
+    kind: "esriFeature", label: "City ETJ (Houston region)",
+    url: HGAC_ETJ.url, minZoom: 9, color: "#7c3aed", weight: 1.6, opacity: 0.85,
+    note: "City extraterritorial jurisdiction across the H-GAC 13-county region (blank elsewhere — there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service. Screening only.",
+  },
+  jur_mud: {
+    // Statewide MUD / WCID / water-district boundaries from TCEQ (the agency with
+    // supervisory authority over Texas water districts), republished by HARC (Houston
+    // Advanced Research Center) — this is the data behind TCEQ's public Water Districts
+    // Map Viewer (tceq.texas.gov/gis/iwudview.html), so it covers Harris + Fort Bend +
+    // statewide, not just one county. A `dynamic` image export renders via a CORS-exempt
+    // <img>, so it paints even where the probe can't reach the host; the probe + per-layer
+    // status still flag a genuine outage honestly. (harcresearch.org on the env egress
+    // allowlist since 2026-06-19; MUD tile paint verified headless from a fresh session
+    // 2026-06-19 — V44 PASS, see VERIFICATION.md.)
+    kind: "dynamic", label: "MUD / water districts (TCEQ, statewide)",
+    url: "https://harcags.harcresearch.org/arcgisserver/rest/services/Boundaries/TCEQ_Water_Districts/MapServer", layers: null, opacity: 0.55,
+    note: "Texas water-district BOUNDARIES — MUD / WCID / etc. (TCEQ, via HARC). Statewide coverage incl. Harris & Fort Bend. A boundary is a TAXING / authority district, NOT proof that water or sewer is connected to a parcel. Screening only — verify against the district / tax statement.",
+  },
+};
+
 // Flatten the per-jurisdiction registry into id→config (tagged with its county),
 // then merge with the statewide overlays. The sync helper manages every layer by
 // id, so a layer keeps its toggle state across county switches; the sidebar only
@@ -125,7 +178,47 @@ export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
   Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
 
-export const ALL_LAYERS = { ...STATEWIDE, ...EVIDENCE, ...JLAYERS };
+export const ALL_LAYERS = { ...STATEWIDE, ...JURISDICTIONS, ...EVIDENCE, ...JLAYERS };
+
+/* NEW-5 (B236): per-layer SOURCE VINTAGE — the data's own effective / publication
+ * date or maintenance cadence, as documented by the provider. This is the
+ * decision-relevant "current as of" stamp, and is DELIBERATELY DISTINCT from
+ * "last refreshed" (when WE pulled the copy — that rides the gisCache age, and
+ * only becomes meaningful once caching lands; until then a fetch is effectively
+ * live). Honest by rule: where a source has no single date — per-panel FIRMs,
+ * per-area LiDAR, continuously-maintained registries — we SAY SO rather than
+ * invent one, and a layer with no entry here renders "vintage unknown" (an honest
+ * state, never a fabricated date). Keyed by layer id, so the per-county utility
+ * layers (spread into JLAYERS) are covered too. When the GIS-cache work (B96)
+ * lands, fold this together with the refreshed-age stamp into one surface. */
+export const LAYER_VINTAGE = {
+  // Statewide overlays
+  fema: "Effective date varies by FIRM panel",
+  wetlands: "Survey date varies by NWI project area",
+  txrrc_pipe: "RRC permit data — continuously updated",
+  txrrc_wells: "RRC permit data — continuously updated",
+  // Utility evidence
+  osm_power: "OpenStreetMap — community-edited, live",
+  osm_hydrants: "OpenStreetMap — community-edited, live",
+  mapillary: "Capture date varies by street",
+  hifld_tx: "HIFLD (US DOE/NETL) — periodically updated",
+  coh_hydrants: "City of Houston Public Works — current edition",
+  elevation: "LiDAR collection varies by county (USGS 3DEP)",
+  // Jurisdiction boundaries
+  jur_county: "TxDOT county boundaries — current edition",
+  jur_city: "TxGIO city limits — current edition",
+  jur_etj: "H-GAC ETJ — current edition",
+  jur_mud: "TCEQ water districts (via HARC) — current edition",
+  // Per-county utility layers
+  hcfcd_row: "HCFCD channels & ROW — current edition",
+  coh_ww: "City of Houston GIS (test host) — current edition",
+  coh_storm: "City of Houston GIS (test host) — current edition",
+  coh_water: "City of Houston GIS (test host) — current edition",
+  fb_contours: "Fort Bend Drainage District — current edition",
+};
+// A layer's vintage: an explicit per-config override wins; else the central map;
+// else null → the UI shows the honest "vintage unknown".
+export const layerVintage = (id, cfg) => (cfg && cfg.vintage) || LAYER_VINTAGE[id] || null;
 
 // Fresh per-layer UI state (all off, each at its default opacity).
 export const defaultOverlayState = () => {
@@ -156,7 +249,7 @@ export async function fetchWithRetry(url, opts = {}, tries = 3) {
   for (let i = 0; ; i++) {
     try {
       const r = await fetch(url, opts);
-      if (r.ok || ![429, 500, 502, 503, 504].includes(r.status) || i >= tries - 1) return r;
+      if (r.ok || !isTransientStatus(r.status) || i >= tries - 1) return r;
     } catch (e) {
       if (i >= tries - 1) throw e;
     }
@@ -183,7 +276,11 @@ export async function probeService(url) {
       const j = await r.json().catch(() => ({}));
       result = j && j.error
         ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
-        : { ok: true, error: null };
+        // Capture the service's own data extent (fullExtent, or `extent` on a
+        // FeatureServer/layer) straight from the health probe — the coverage engine
+        // (NEW-1/B283) reprojects it to test whether this layer's data reaches the view.
+        // No extra request: it's already in this same ?f=json response.
+        : { ok: true, error: null, fullExtent: (j && (j.fullExtent || j.extent)) || null };
     }
   } catch (e) {
     // The fetch threw — we couldn't even reach the service to health-check it (CORS,
@@ -196,6 +293,31 @@ export async function probeService(url) {
   result.ts = Date.now();
   _probeCache.set(key, result);
   return result;
+}
+
+/* esri-leaflet FeatureLayer retry/backoff (NEW-5/B287). Wires the pure retry policy
+ * (featureRetryDecision in layerRequest.js) onto a live FeatureLayer: esri-leaflet
+ * issues its own GeoJSON queries with no retry of its own, so a single transient
+ * 5xx/429 (or a codeless network/CORS blip) on a jurisdiction vector service — City ETJ
+ * (H-GAC), County boundaries (TxDOT) — would otherwise drop the whole layer to "failed"
+ * (both threw transient 503s live 2026-06-20). Re-issue via refresh() with exponential
+ * backoff; hold the dot at "loading" while retrying; report "failed" only once we give
+ * up; a successful 'load' resets the counter. */
+export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
+  let tries = 0, timer = null;
+  lyr.on("load", () => { tries = 0; onStatus && onStatus(k, "loaded"); });
+  lyr.on("requesterror", (e) => {
+    const code = e && e.error && (e.error.code ?? e.error.httpStatus);
+    const { retry, delayMs } = featureRetryDecision(code, tries, max);
+    if (retry) {
+      tries += 1;
+      onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
+      clearTimeout(timer);
+      timer = setTimeout(() => { try { lyr.refresh(); } catch (_) {} }, delayMs);
+    } else {
+      onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
+    }
+  });
 }
 
 /* Reconcile the live esri/vector layers on `map` with the `overlays` state. `refs`
@@ -233,7 +355,10 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         const lyr = overpassLayer(cfg.query, report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "mapillary") {
-        if (!mapillaryToken()) { fail(k, cfg, "Add a Mapillary token to enable this layer."); return; }
+        // B308: served via the same-origin /api/mapillary proxy (token held server-side),
+        // so the layer loads for every visitor with NO per-user token. mapillaryLayer
+        // reports a quiet "unconfigured" (gray) only if the proxy itself has no server
+        // token (e.g. a preview deploy) — never a hard failure, never an error toast.
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else {
@@ -248,31 +373,29 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriImage") {
-            const o = { url: cfg.url, opacity: st.opacity, pane };
-            if (cfg.rendering) o.renderingRule = { rasterFunction: cfg.rendering };
-            lyr = EL.imageMapLayer(o);
+            lyr = EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane));
           } else if (cfg.kind === "esriFeature") {
-            lyr = EL.featureLayer({ url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false, style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity: st.opacity, fillOpacity: 0 }) });
+            lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
             lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
           } else {
-            const o = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
-            if (cfg.layers) o.layers = cfg.layers;
-            lyr = EL.dynamicMapLayer(o);
+            lyr = EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane));
           }
-          // A requesterror is often a NON-fatal hiccup — e.g. a CORS-blocked metadata /
-          // service-info fetch while the f=image export still renders via a CORS-exempt
-          // <img>. Surface a quiet per-layer status, but DON'T drop the layer or fire the
-          // alarming toast; the 'load' event below flips it back to "loaded" if the image
-          // lands. (A genuinely-down service simply shows its quiet "failed" dot.)
-          // esri's own requesterror text wrongly fingers "CORS" / "could not parse JSON"
-          // even when the real cause is the agency host being down (a plain HTTP 500), so
-          // surface a plain, honest status instead of esri's misleading message (verified
-          // against NWI's 2026-06-17 outage). This is NOT necessarily fatal: the picture
-          // loads via a CORS-exempt <img>, and the 'load' handler below flips the dot back
-          // to "loaded" if it lands — so this message only persists for a service that is
-          // genuinely unavailable.
-          lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
-          lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+          if (cfg.kind === "esriFeature") {
+            // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
+            // won't retry its own request, so a transient 5xx/blip on City ETJ or County
+            // boundaries would otherwise drop the layer on a single hiccup.
+            attachFeatureRetry(lyr, k, cfg, onStatus);
+          } else {
+            // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a
+            // CORS-blocked metadata fetch while the f=image export still renders via a
+            // CORS-exempt <img>. Surface a quiet per-layer status, but DON'T drop the layer
+            // or fire the alarming toast; the 'load' event flips it back to "loaded" if the
+            // image lands. (esri's own requesterror text wrongly fingers "CORS"/"could not
+            // parse JSON" even when the real cause is the agency host being down — so we say
+            // something plain + honest; this message only persists for a genuinely-down one.)
+            lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
+            lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+          }
           if (lyr.setOpacity) lyr.setOpacity(st.opacity);
           lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)

@@ -31,8 +31,36 @@ describe("shared/coordinates (cross-workspace spine)", () => {
     expect(makePoint(3, 4)).toEqual({ x: 3, y: 4 });
   });
 
-  it("the unimplemented projections are honest stubs — they THROW, never return a wrong number", () => {
-    expect(() => projectToGrid(29.7, -95.4)).toThrow();
-    expect(() => gridToProject({ x: 0, y: 0 })).toThrow();
+  // EPSG:2278 ↔ WGS84 — validated against pyproj (Transformer 2278→4326). The City of
+  // Houston / HCFCD publish their service extents in this State-Plane frame, so the
+  // coverage engine relies on this projection being right.
+  describe("EPSG:2278 ↔ WGS84 projection", () => {
+    it("gridToProject: State-Plane feet → lat/lon matches pyproj to <1e-4°", () => {
+      // HCFCD fullExtent corners (ftUS) → Harris-County lat/lon (pyproj ground truth).
+      const sw = gridToProject({ x: 2933015.36, y: 13740884.42 });
+      expect(sw.lat).toBeCloseTo(29.497360, 4);
+      expect(sw.lon).toBeCloseTo(-95.967511, 4);
+      const ne = gridToProject({ x: 3265645.57, y: 13989597.88 });
+      expect(ne.lat).toBeCloseTo(30.153088, 4);
+      expect(ne.lon).toBeCloseTo(-94.895011, 4);
+    });
+
+    it("projectToGrid: downtown Houston lat/lon → State-Plane feet matches pyproj", () => {
+      const g = projectToGrid(29.7604, -95.3698);
+      expect(g.x).toBeCloseTo(3120099.088, 1);
+      expect(g.y).toBeCloseTo(13841900.858, 1);
+    });
+
+    it("round-trips lat/lon → grid → lat/lon to sub-micro-degree", () => {
+      const rt = gridToProject(projectToGrid(29.7604, -95.3698));
+      expect(rt.lat).toBeCloseTo(29.7604, 8);
+      expect(rt.lon).toBeCloseTo(-95.3698, 8);
+    });
+
+    it("still guards junk input (honest throw, never a silent wrong number)", () => {
+      expect(() => projectToGrid(NaN, -95.4)).toThrow();
+      expect(() => gridToProject({ x: undefined, y: 0 })).toThrow();
+      expect(() => gridToProject()).toThrow();
+    });
   });
 });
