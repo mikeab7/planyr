@@ -89,7 +89,7 @@ const ppfToZoom = (ppf, lat) =>
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — a lighter tint of the cartographic teal pond, distinct from the existing basin
-// Corner bump-out (dog-ear) defaults + geometry live in lib/dogEar.js (pure, unit-tested — B357).
+// Corner bump-out (dog-ear) defaults + geometry live in lib/dogEar.js (pure, unit-tested — B362).
 // B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
 // FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
 // footprint shrinks below them (zoomed out) the cluster grows larger than the
@@ -3222,7 +3222,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // move and rotate as one assembly and can't be separated by dragging.
   const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
   const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
-  // Re-derive every bonded box child's angle from its host (B358): a child's rot is always
+  // Re-derive every bonded box child's angle from its host (B363): a child's rot is always
   // host.rot + its fixed quarter-turn offset, so this removes any stored drift. Pure; preserves
   // object identity for children that are already in sync. Called from EVERY host-geometry path
   // (resize via refitChildren, rotate via rotateAssemblyTo + the rotate drag) so a child can't
@@ -3329,7 +3329,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // dock wall and projects out into the court, taking that span out of dock use.
   // It's a building element (adds to SF), with no docks/label of its own.
   // Bump-out box geometry (dogEarGeom) + the size-by-wall helper (dogEarSize) are pure, in
-  // lib/dogEar.js (B357). `de` carries the corner (side/sign) and, once resized, its stored
+  // lib/dogEar.js (B362). `de` carries the corner (side/sign) and, once resized, its stored
   // span along the wall + projection (`along`/`proj`); absent → the 55′×60′ default.
   const makeDogEar = (b, side, sign) => ({
     id: uid(), type: "building", ...dogEarGeom(b, { side, sign }),
@@ -3337,7 +3337,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   // Re-anchor a dog-ear to the building corner when the building is resized: slides to the
   // new corner / dock face and re-derives the host angle, while KEEPING its size — the
-  // user's if it was resized (B357), else the 55′×60′ default.
+  // user's if it was resized (B362), else the 55′×60′ default.
   const fitDogEar = (nb, de) => dogEarGeom(nb, de);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
@@ -3595,7 +3595,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let next = a.map((x) => {
       if (x.id === buildingId) {
         const moved = { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
-        // B357: a bump-out resized on its own remembers its new size (span along the dock wall +
+        // B362: a bump-out resized on its own remembers its new size (span along the dock wall +
         // projection) on its dogEar tag, so a later host refit re-anchors it AT that size instead
         // of snapping it back to the 55′×60′ default.
         if (x.dogEar) moved.dogEar = { ...x.dogEar, ...dogEarSize(x.dogEar, nb.w, nb.h) };
@@ -3625,7 +3625,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         next = relayoutSide(next, b, side);
       }
     }
-    // Keep every bonded child's angle locked to the building's (B358) — closes the gap where a
+    // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
     // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
     return resyncBondedRot(next, resized && resized.attachedTo ? resized.attachedTo : buildingId);
   };
@@ -4023,7 +4023,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       bldg += a;
       if (e.dogEar) {
         bumpCount++; bumpArea += a;
-        // Is this bump still the 55′×60′ default (so the summary can name the size)? (B357)
+        // Is this bump still the 55′×60′ default (so the summary can name the size)? (B362)
         const horiz = e.dogEar.side === "top" || e.dogEar.side === "bottom";
         if (Math.abs((horiz ? e.w : e.h) - DOGEAR_W) > 0.5 || Math.abs((horiz ? e.h : e.w) - DOGEAR_D) > 0.5) bumpsUniform = false;
       }
@@ -8393,7 +8393,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       const horiz = s === "top" || s === "bottom";
       const L = horiz ? el.w : el.h; // wall length (ft)
       // Don't draw doors where a dog-ear takes up the end of the wall — by its ACTUAL span
-      // along this wall (B357: a resized bump consumes more/less of the dock face than 55′).
+      // along this wall (B362: a resized bump consumes more/less of the dock face than 55′).
       const bumpAlong = (sign) => { const d = dogEars.find((g) => g.dogEar.side === s && g.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
       const startF = bumpAlong(-1);
       const endF = L - bumpAlong(1);

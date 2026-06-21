@@ -40,7 +40,7 @@ const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
 const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
-// an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B357/B358
+// an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
 // bump-out sizing + bonded-rotation repair) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
@@ -53,7 +53,7 @@ const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 // headroom — a real plan deletes a handful of items, never thousands.
 const MAX_TOMBSTONES = 5000;
 
-/* ---- Bonded-child rotation invariant (B358) ----
+/* ---- Bonded-child rotation invariant (B363) ----
  * Every box element bonded to a host building (`attachedTo` set) is axis-aligned to that
  * host at a FIXED quarter-turn offset (0/90/180/270): sidewalks, truck courts, and corner
  * bump-outs share the host's angle; side-parking rows and wall trailers sit at a +90/180/270
@@ -137,7 +137,7 @@ export function createSiteModel(p = {}) {
     parcelDrawings: arr(p.parcelDrawings),
     settings: obj(p.settings),
     // drawn layout + shapes (kept flat; selectors classify markups). Bonded children are
-    // re-anchored to their host's angle (B358) — idempotent, only touches drifted records.
+    // re-anchored to their host's angle (B363) — idempotent, only touches drifted records.
     els: normalizeBondedRotations(Array.isArray(p.els) ? p.els : arr(p.elements)),
     markups: arr(p.markups),
     measures: arr(p.measures),

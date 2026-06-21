@@ -5,7 +5,7 @@ import {
 
 const norm = (a) => ((a % 360) + 360) % 360;
 
-describe("bonded-child rotation invariant (B358)", () => {
+describe("bonded-child rotation invariant (B363)", () => {
   it("quarterOffset rounds the child→host angle gap to the nearest quarter turn", () => {
     expect(quarterOffset(359.035, 0)).toBe(0);    // Jacintoport: ~1° drift → offset 0
     expect(quarterOffset(0.9, 0)).toBe(0);

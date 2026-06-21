@@ -4,7 +4,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize } from "../src/workspaces/si
 // A square host building centred at the origin, axis-aligned, 100×100.
 const host = (over = {}) => ({ cx: 0, cy: 0, w: 100, h: 100, rot: 0, ...over });
 
-describe("dogEar — corner bump-out geometry (B357)", () => {
+describe("dogEar — corner bump-out geometry (B362)", () => {
   it("default bump-out is 55′ along the wall × 60′ projection, flush at the corner", () => {
     // bottom wall, right corner (sign +1): along runs on X (w), projection on Y (h)
     const g = dogEarGeom(host(), { side: "bottom", sign: 1 });

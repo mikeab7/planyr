@@ -5,39 +5,44 @@ two tracks of work: the mature **Site Planner** (basemap, GIS layers, Supabase
 backend) and the newly-started **Document Review** module (foundation just
 scaffolded). Last updated mid-2026.
 
-> **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT. Do not log-and-defer.**
-> If Michael reports a bug or asks for a change, the job is to **fix it, verify it, and merge it to
-> live this session** — not to file it in `BACKLOG.md` and leave it for "a future session." That
-> turns his one request into homework he has to chase later, wastes a round-trip, and is exactly the
-> opposite of what he wants. **The backlog is for things that genuinely cannot be done now** (blocked
-> on a decision, an external dependency, or too large to finish this run) — NOT a parking lot for his
-> requests. Even if he literally says "add this to the backlog," read the intent: he wants it
-> **handled**. So: file it (for the record) **and then go fix it the same session**, moving it
-> straight to `BACKLOG-DONE.md` when it ships. Default to action. The only acceptable reason to leave
-> something merely filed is a hard blocker — and then you say so plainly, you don't go quiet. If
-> several items arrive at once, fix them all; if one is genuinely too big, fix the rest and flag that
-> one with the specific blocker. (Owner rule, 2026-06-19, after a session filed three fixable items
-> instead of fixing them.)
+> **⛔ STANDING RULE #1 — when Michael drops in a problem, FIX IT AND SHIP IT this session. Never log-and-defer.**
+> A bug report or change request = **fix it, verify it, and merge it live this same session.** Parking it in
+> `BACKLOG.md` for "a future session" turns his one request into homework he has to chase — the opposite of
+> what he wants. The backlog is ONLY for what genuinely can't be done now (blocked on a decision, an external
+> dependency, or too large to finish this run) — never a parking lot for his requests. Even if he says "add it
+> to the backlog," read the intent: he wants it **handled** — file it for the record **and fix it the same
+> session.** Default to action. The one acceptable reason to leave something merely filed is a hard blocker —
+> then say so plainly, don't go quiet. Several at once → fix them all; if one is genuinely too big, fix the
+> rest and flag that one with its specific blocker. (Owner rule, 2026-06-19.)
 >
-> **📋 `BACKLOG.md` is the single source of truth for open bugs & feature requests.**
-> On every run, check `BACKLOG.md` **🔲 Open** section and work those items.
-> Completed items are archived in `BACKLOG-DONE.md` — **do not read that file** unless
-> looking up a specific past item; it is historical record only. When finishing an item,
-> move its block to `BACKLOG-DONE.md` (not to the Done stub in `BACKLOG.md`). The next
-> B# = highest `B#` across **both** files + 1. (This is the product backlog — distinct
-> from the "Deferred / maintenance backlog" section near the end of this file.)
+> **Finish the WHOLE job — no diagnosis-only, no band-aid, no half.** "Fix it" means implement **every** part,
+> including the harder/real one: go through the code, make the actual change, and verify it (build green + the
+> right self-test/headless check). A diagnosis or a backlog note is never a substitute for the work. If Michael
+> picks a multi-part option ("do both"), do **every** part before reporting — don't ship part 1 and describe
+> part 2. "Bigger/riskier" is NOT a reason to defer — it's a reason to do it carefully (own branch, verify,
+> merge). Stop early ONLY for a true blocker: a hard technical blocker, a destructive/irreversible action
+> needing confirmation, or a genuine either/or product decision only Michael can make; a fix too large for one
+> session is itself a blocker — raise it with a plan, never a silent stop after the easy half. (Owner rule,
+> 2026-06-19, after a session shipped only the quick half.)
 >
-> **🔍 `VERIFICATION.md` is the live-browser test checklist** — things that build/test
-> green but still need a click-through on planyr.io. On every run, scan it and **verify any
-> ⏳/due items yourself in a headless browser**, then record the result. A headless Chromium is
-> available in the environment (Playwright — see "🤖 Self-verification" in `VERIFICATION.md`), so
-> the session that ships a UI change should drive the live app itself rather than defer it.
-> **Michael does NOT self-test — never wait on him or hand him a test to-do.** Browser
-> verification is **Claude's own in-session job** (no separate "cohort"); only if no browser is
-> reachable, log the item there and **move on** (after CI-green + build-green). Self-tests run
-> **logged-out** (the sandbox proxy blocks sign-in), so auth-only features (cloud sync) still need a
-> signed-in check. **Only interrupt Michael for a CRITICAL failure** — won't build, won't render, or
-> a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
+> **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
+> work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `BACKLOG-DONE.md` that same
+> session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
+> B# = highest `B#` across **both** files + 1. (Product backlog; distinct from the "Deferred / maintenance
+> backlog" near the end of this file.)
+>
+> **🔍 `VERIFICATION.md` = the live-browser test checklist — KEEP IT LEAN too.** Every run, scan it and
+> **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
+> "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
+> pending, MOVE it to `VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
+> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
+> on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
+> build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
+> still need a signed-in check. **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
+> or a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
+>
+> **📦 `BACKLOG-DONE.md` / `VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking
+> up a specific past item; they are historical record only, and exist so the two live files above stay small.
 
 ## How to talk to me (Michael) — IMPORTANT, applies to every reply
 Michael is an industrial real-estate developer, not a software engineer. In chat,
@@ -67,28 +72,6 @@ doesn't write code. This is a standing rule, not a one-off.
 
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
-
-## Finish the job — IMPORTANT, standing rule (added 2026-06-19 after a miss)
-**When I ask you to fix a problem, fix it ALL the way through in the same session — do
-not stop at a diagnosis, a band-aid, or part of what I asked and defer the rest.** This
-is a hard rule, born from a real miss: I picked "both: quick fix now, then real fix" and
-the session shipped only the quick fix plus a writeup of the real one. That is exactly
-what NOT to do.
-- **"Fix it" means implement every part of the fix**, including the harder/real one —
-  go through all the relevant code, make the actual change, and verify it (build green +
-  the appropriate self-test/headless check). A diagnosis or a backlog note is **never**
-  a substitute for doing the work.
-- **If I pick a multi-part option (e.g. "do both"), do every part** before you report
-  back. Don't deliver part 1 and describe part 2.
-- **Default to taking it live.** I almost always want the fix merged (that's why "commit"
-  = ship the whole chain incl. merge — see Workflow & deploy). If you genuinely can't
-  merge (hard blocker), say so; otherwise carry it through to merged.
-- **Only stop early for a true blocker** — a hard technical blocker, a destructive/
-  irreversible action needing confirmation, or a genuine either/or product decision only
-  I can make. "This part is bigger/riskier" is NOT a reason to defer it; it's a reason to
-  do it carefully (own branch, verify, then merge), not to hand it back to me.
-- If a fix is genuinely too large to finish in one session, that itself is a blocker to
-  raise explicitly with a plan — not a silent stop after the easy half.
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -182,171 +165,126 @@ server/                   # placeholder README only — NOT built or deployed; b
 
 ## DONE & VERIFIED
 ### Site Planner (mature)
-- Geographic basemap refactor.
-- Shared layer state across the planner.
-- Site-model schema, migration, and selectors.
-- New-site data-loss fix: first-edit persistence, an honest save badge, and a
-  `beforeunload` flush so in-progress work isn't lost on tab close.
-- Layer-status fixes: error-body parsing, per-layer status dots, no zero-size
-  exports, wetlands consolidated to a single host, ~45s self-heal re-probe.
-- Houston water/wastewater/storm pointed at the City's `geogimstest` host, using
-  `layers=show:<sublayer IDs>` to paint the mains/pipes.
-- **Layer coverage engine + coverage-aware picker (B283/B284).** Each layer is tagged
-  national/statewide/regional; a regional layer's published `fullExtent` (read from the
-  existing `?f=json` probe, reprojected via the shared EPSG:2278 grid) is intersected
-  with the view so the Layers panel can say **"No data in this area"** instead of leaving
-  a silent blank (the COH-utilities-blank-outside-Houston confusion). A **Relevance**
-  control (Show all / Dim / Hide) + a **nearby-range** slider dim/collapse out-of-coverage
-  layers — **list ordering/visibility only, never the map** (hard rule: coverage never
-  alters a layer's request; the request builders live in `lib/layerRequest.js` and take
-  no coverage input). Fails open everywhere. Mapillary renamed "Poles & hydrants from
-  street imagery" + gated as "needs setup" (B285/B286); jurisdiction vector services now
-  retry transient 5xx with backoff (B287). `lib/coverage.js`.
+- Geographic basemap refactor; shared layer state; Site-model schema/migration/selectors.
+- New-site data-loss fix: first-edit persistence, honest save badge, `beforeunload` flush.
+- Layer-status: error-body parsing, per-layer status dots, no zero-size exports, wetlands
+  on a single host, ~45s self-heal re-probe.
+- Houston water/wastewater/storm on the City's `geogimstest` host via `layers=show:<sublayer IDs>`.
+- **Layer coverage engine + coverage-aware picker (B283/B284).** Layers tagged national/
+  statewide/regional; a regional layer's published `fullExtent` (from the `?f=json` probe,
+  reprojected via the shared EPSG:2278 grid) is intersected with the view so the panel says
+  **"No data in this area"** instead of a silent blank (the COH-blank-outside-Houston confusion).
+  A **Relevance** control (Show all/Dim/Hide) + **nearby-range** slider dim/collapse out-of-coverage
+  layers — **list ordering/visibility only, never the map** (hard rule: the request builders in
+  `lib/layerRequest.js` take no coverage input). Fails open. Mapillary renamed "Poles & hydrants
+  from street imagery" + gated "needs setup" (B285/B286); jurisdiction vectors retry transient
+  5xx with backoff (B287). `lib/coverage.js`.
 
 ### Supabase backend (built, Phases 1–4)
-- Phase 1 — connection to a cloud Postgres database.
-- Phase 2 — email/password auth.
-- Phase 3 — row-level security: each user's sites are private by default.
-- Phase 4 — cloud save/load: logged-in users' data lives in the cloud and syncs
-  across devices. No migration of old browser-stored sites (few enough to recreate
-  by hand — intentional).
-- User profiles (B297/B298) — first/last name captured at signup now persist to a
-  queryable **`public.profiles`** table (one row per `auth.uid()`, private-by-default
-  RLS, a `handle_new_user` signup trigger that copies names from the signup metadata,
-  plus a backfill for existing users). The header pill shows the user's **name** (never
-  blank: First Last → first → last → metadata → email) and opens an **account dropdown**
-  (Profile / Settings / Sign out). Reuses the existing anon client + session — no new
-  keys. Migration: `src/workspaces/site-planner/db/profiles.sql` (run once, idempotent).
+- Phase 1 cloud Postgres; Phase 2 email/password auth; Phase 3 RLS (sites private by default);
+  Phase 4 cloud save/load + cross-device sync. No migration of old browser-stored sites (intentional).
+- User profiles (B297/B298) — signup first/last name persists to a queryable **`public.profiles`**
+  table (one row per `auth.uid()`, private RLS, a `handle_new_user` signup trigger copying signup
+  metadata + a backfill). Header pill shows the **name** (never blank: First Last → first → last →
+  metadata → email) + **account dropdown** (Profile/Settings/Sign out). Reuses the anon client +
+  session, no new keys. Migration `src/workspaces/site-planner/db/profiles.sql` (idempotent).
 
-### Multi-workspace foundation (new)
-- Monorepo restructure landed via **PR #3** (the new clean `main`): the shell, the
-  workspace folders, the coordinate stub, and the `/server` placeholder, with the
-  Site Planner moved in and functioning exactly as before, no behavior change. Build
-  passes; the workspace split is real (separate lazy chunks).
+### Multi-workspace foundation
+- Monorepo restructure via **PR #3** (clean `main`): shell, workspace folders, coordinate stub,
+  `/server` placeholder; Site Planner moved in unchanged. Build passes; real lazy-chunk split.
 
-### Document Review — cloud persistence (new)
-- Review state now persists to the **existing Supabase backend** (no new project,
-  client, or keys — reuses the app's anon client + auth session), so nothing is lost
-  on refresh. Covers **both** a single sheet and a stitched multi-sheet set.
-- **Postgres `public.doc_reviews`** holds the small work layer (markups, measurements,
-  calibration, stitch transforms, takeoff, source-file refs) in a `data` jsonb column;
-  RLS is private-by-default, identical in shape to `public.sites`. **Source PDFs** live
-  in a private Storage bucket `doc-review-files` at `<uid>/<reviewId>/<srcId>.pdf`, RLS-
-  scoped so each user only sees their own files. Migration: `src/workspaces/doc-review/
-  db/doc_reviews.sql` (run once in the Supabase SQL editor; idempotent).
-- Persistence copies the Site Planner data-loss pattern: persist on first edit, an
-  honest save badge (true cloud state), a synchronous localStorage mirror + a
-  beforeunload/visibility/unmount flush, and resume-the-last-review on reopen.
-- **50 MB free-tier per-file limit handled gracefully:** an oversize PDF still saves
-  the work layer and is flagged "re-drop on load" (a banner in single mode; a dashed
-  placeholder + drop-to-rebind in the stitcher) rather than failing the save.
-- All changes are inside the doc-review workspace; the lazy chunk split still holds.
+### Document Review — cloud persistence
+- Persists to the **existing Supabase backend** (reuses the anon client + auth session, no new
+  keys), single sheet + stitched set. **Postgres `public.doc_reviews`** holds the work layer
+  (markups, measurements, calibration, stitch transforms, takeoff, source-file refs) as `data`
+  jsonb, RLS private like `public.sites`; **source PDFs** in a private Storage bucket
+  `doc-review-files` at `<uid>/<reviewId>/<srcId>.pdf`. Migration `src/workspaces/doc-review/db/doc_reviews.sql`.
+- Copies the Site Planner data-loss pattern (persist on first edit, honest badge, sync localStorage
+  mirror + beforeunload/visibility/unmount flush, resume-last-review). **Oversize (≥50 MB free-tier)
+  PDFs:** work layer still saves, file flagged "re-drop on load" (banner single / dashed placeholder
+  + drop-to-rebind stitcher). All inside the doc-review lazy chunk.
 
-### Document Review — project library (B14, new)
-- Reviews/files are **filed under the existing Project/Site records** (a "project" = a
-  Site Planner site group; name = `site`, id = `group_id`). Each review now also carries
-  a `project_id`, `discipline` (Survey/Civil/Architectural/Landscape/Environmental/CAD/
-  Geotech/Other), `item`/type, `revision`, and `doc_date`; the name defaults to
-  `"<Project> - <Item> - YYYY.MM.DD"` (each piece editable in the Reviews menu).
-- **Project lifecycle status is REUSED, not re-added** — it already lives on the Site
-  Model (`sites.data ->> status`; pursuit/active/onhold/complete/dead, per B7/B8). The
-  library reads projects + status from `sites` and writes status back through the Site
-  Planner's own `cloudUpsert`, so there's one source of truth (no parallel store).
-- **`ProjectLibrary` drawer** (file explorer): project (+ status badge, editable) →
-  discipline folder → files newest-first → click to open in the viewer/stitcher; drag-
-  drop a PDF onto a project or discipline to file it. Files stay attached regardless of
-  status. Unlinked reviews show under an "Unfiled" bucket.
-- **Storage paths** are now `<uid>/project-<id>/<discipline>/<srcId>.pdf` (uid still
-  first, so the existing Storage RLS is unchanged). Additive migration:
-  `src/workspaces/doc-review/db/project_library.sql` (adds the index columns; status
-  needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
-  hasn't run yet, so saving never regresses.
+### Document Review — project library (B14)
+- Reviews/files filed under existing Project/Site records (a "project" = a Site Planner site group;
+  name=`site`, id=`group_id`). Each review carries `project_id`, `discipline` (Survey/Civil/
+  Architectural/Landscape/Environmental/CAD/Geotech/Other), `item`, `revision`, `doc_date`; name
+  defaults to `"<Project> - <Item> - YYYY.MM.DD"` (editable in the Reviews menu).
+- **Lifecycle status REUSED, not re-added** — lives on the Site Model (`sites.data ->> status`;
+  pursuit/active/onhold/complete/dead, per B7/B8); the library reads projects+status from `sites`
+  and writes back via the planner's `cloudUpsert` (one source of truth).
+- **`ProjectLibrary` drawer:** project (+ editable status badge) → discipline folder → files
+  newest-first → click to open; drag-drop a PDF onto a project/discipline to file it; unlinked
+  reviews under "Unfiled". Storage paths `<uid>/project-<id>/<discipline>/<srcId>.pdf` (uid first →
+  Storage RLS unchanged). Additive migration `src/workspaces/doc-review/db/project_library.sql`;
+  `upsertReview`/`listReviews` fall back to core columns until it's run.
 
-### Document Review — auto-filing: PLAIN CODE first, AI fallback (B299 + B312) — LIVE (Tier 1 on by default)
-- **Tier 1 (B312, LIVE, default-on, FREE):** the common case is **plain code in the browser, no
-  tokens, no cloud, no key.** For any PDF with an embedded text layer (most CAD vector drawings),
-  `extractPageText` (pdf.js, reused from B267) → pure parsers in `src/shared/files/`:
-  `titleBlockParse.js` (discipline keyword table incl. **ALTA**, latest-date, sheet #, revision) +
-  `matchProject.js` (`matchProjectInText` searches the sheet text for each named project's
-  name/parcel/job#, reusing the "never auto-guess" decision) → `doc-review/lib/localRead.js`
-  (`localTitleBlockRead`). The provider exposes `autofileReady = true` so the drawer auto-files
-  out of the box: **confident match → auto-route; else → today's behavior** (active project /
-  holding tray). 53 unit tests; real-sheet accuracy = **V79**.
-- **Tier 2 (B299, AI fallback, gated dormant):** `autofile` (`lib/autofiling.js`) is local-first and
-  only reaches the AI when Tier 1 finds **no text** (a scanned/image-only sheet) **and**
-  `VITE_AUTOFILE_ENABLED` is on. So tokens are spent only on the hard minority. The server-side
-  **title-block read** (`server/filing/`,
-  Cloud Run — the key must never reach the browser, so it's `/server` compute, not Supabase)
-  reads a dropped PDF with the Claude API, **matches it to a named project** (parcel / job # /
-  address / name, **never auto-guesses**), and returns a **filing decision** (auto-route +
-  auto-name, or "needs filing" → the one-click-confirm holding area) **plus placement facts**
-  captured in the **same read** ("Place on map" without reopening the file).
-- **Reader** mirrors the client `titleReader.js` request shape but calls the Messages API over
-  **raw `fetch`** (injectable, like `server/convert/aps.js`) so the image is dependency-free.
-  **Matcher** is pure + transparent (lists the signal it matched on). HTTP `POST /file` (PDF
-  bytes + `X-Planyr-Projects` base64 header) / `GET /health`, honest status codes, no silent
-  failures. `Dockerfile` + `README.md` alongside.
-- **File-facts index lives in Supabase Postgres, NOT /server** (`doc-review/db/file_facts.sql`,
-  `public.file_facts`, RLS like `doc_reviews`) — one small row per filed drawing so the library
-  answers "project → discipline → latest set" without re-reading the PDF. Client: the real index
-  provider `doc-review/lib/autofiling.js` fills the `capturePlacementFacts` seam (B181) +
-  `autofile`; `lib/fileIndex.js` + `reviewStore.upsertFileFacts/listFileFacts` persist/merge it.
-- **Gated dormant, like APS/Drive:** `backendReady` reflects `VITE_AUTOFILE_ENABLED`; the
-  same-origin proxy `functions/api/file.js` 503s until `DOC_FILING_URL` is set. Off by default
-  → the drawer files manually exactly as before (a 404/503 is a graceful skip). **Owner deploy
-  to light it up:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` (server-side) +
-  `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
+### Document Review — auto-filing: PLAIN CODE first, AI fallback (B299 + B312) — LIVE (Tier 1 default-on)
+- **Tier 1 (B312, LIVE, default-on, FREE)** — plain code in the browser, no tokens/cloud/key. For
+  any PDF with a text layer, `extractPageText` (pdf.js, from B267) → pure parsers in `src/shared/files/`:
+  `titleBlockParse.js` (discipline keywords incl. **ALTA**, latest-date, sheet #, revision) +
+  `matchProject.js` (`matchProjectInText`, reusing "never auto-guess") → `doc-review/lib/localRead.js`
+  (`localTitleBlockRead`). `autofileReady = true` so the drawer auto-files: **confident match →
+  auto-route; else → active project / holding tray.** 53 unit tests; real-sheet accuracy = **V79**.
+- **Tier 2 (B299, AI fallback, gated dormant)** — `autofile` (`lib/autofiling.js`) is local-first,
+  reaching AI only when Tier 1 finds **no text** (scanned/image-only) **and** `VITE_AUTOFILE_ENABLED`
+  is on. Server-side title-block read (`server/filing/`, Cloud Run — key never reaches the browser)
+  reads the PDF with the Claude API, **matches to a named project** (parcel/job#/address/name,
+  **never auto-guesses**), returns a filing decision (auto-route+name, or "needs filing" holding area)
+  **plus placement facts** in the same read. **Reader** mirrors client `titleReader.js` but calls the
+  Messages API over raw `fetch` (injectable, like `server/convert/aps.js`); **Matcher** is pure + lists
+  its matched signal. `POST /file` (PDF + `X-Planyr-Projects` base64 header) / `GET /health`, honest
+  statuses; `Dockerfile` + `README.md`.
+- **File-facts index in Supabase Postgres, NOT /server** (`doc-review/db/file_facts.sql`,
+  `public.file_facts`, RLS like `doc_reviews`) — one row per filed drawing so the library answers
+  "project → discipline → latest set" without re-reading the PDF. Client: index provider
+  `doc-review/lib/autofiling.js` fills the `capturePlacementFacts` seam (B181) + `autofile`;
+  `lib/fileIndex.js` + `reviewStore.upsertFileFacts/listFileFacts` persist it.
+- **Gated dormant (like APS/Drive):** `backendReady` reflects `VITE_AUTOFILE_ENABLED`; proxy
+  `functions/api/file.js` 503s until `DOC_FILING_URL` is set → drawer files manually as before
+  (404/503 = graceful skip). **Owner deploy:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY`
+  + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
 
 ### Document Review — drop a set → auto-group, auto-stitch, crop, auto-calibrate (B335–B339) — LIVE
-- **The headline UX.** Drop a multi-page PDF set into the Stitcher and it now assembles itself
-  instead of making you add + align each page by hand. The pages are read, **grouped into logical
-  sheets** ("Grading Plan · C-5–C-7 · 3 sheets"), and clicking a grouped plan **auto-stitches**
-  every page, **crops** the title blocks so drawings butt cleanly, and **auto-calibrates** from
-  the sheet's stated scale. An "all pages" toggle + the 2-point manual Align remain the safety net.
-- **Shared positional reader (B336)** — pure `src/shared/files/sheetMeta.js` (+ pdf.js
-  `extractPageItems`): per page it finds the title-block band, sheet title, stated scale (reuses
-  B267 `parseSheetScale`), and every match-line label with position + orientation. REUSES the B312
-  filing parsers (`titleBlockParse`) — a positional superset, not a second reader. Glue +
-  read→group pipeline + per-group calibration in `doc-review/lib/sheetRead.js`, with a **dormant
-  injectable OCR seam** for scanned pages.
-- **Grouping (B335)** `src/shared/files/sheetGroups.js`; **auto-stitch (B337)**
-  `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
-  to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
-  **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **Scanned-sheet OCR — BUILT (B352, owner-requested).** A scanned / image-only drawing (no text
-  layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
-  (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
-  so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
-  up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
-  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b352-ocr.mjs`).
-- **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
-  **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
-  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME
-  engines (`readSheetMeta`/`groupSheets`/`statedCalibration`) — no duplicate modules. A page with no
-  title block falls back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
-  (`ui-audit/verify-markup-sheet-labels.mjs` 7/7 + no-regression 13/13).
-- **Remaining CV tails are deferred behind seams → B340** (Later/Roadmap): graphic scale-bar reading,
-  the geometric edge-line stitch fallback, legend symbol-union. The common case (vector + now scanned
-  via OCR) is shipped. 30 unit tests; headless-verified end-to-end (V87, `ui-audit/verify-b335-b339.mjs`, 13/13).
+- **Headline UX:** drop a multi-page set into the Stitcher → pages are read, **grouped into logical
+  sheets** ("Grading Plan · C-5–C-7 · 3 sheets"); clicking a group **auto-stitches** every page,
+  **crops** title blocks so drawings butt cleanly, **auto-calibrates** from the stated scale.
+  "All pages" toggle + 2-point manual Align remain the safety net.
+- **Positional reader (B336):** pure `src/shared/files/sheetMeta.js` (+ pdf.js `extractPageItems`) —
+  per page finds the title-block band, sheet title, stated scale (reuses B267 `parseSheetScale`), and
+  match-line labels with position+orientation; REUSES the B312 `titleBlockParse` (a positional superset,
+  not a second reader). Pipeline + per-group calibration in `doc-review/lib/sheetRead.js`, with a dormant
+  injectable OCR seam.
+- **Grouping (B335)** `src/shared/files/sheetGroups.js`; **auto-stitch (B337)** `doc-review/lib/autoStitch.js`
+  (seam graph → existing `solveM`, B300; label-less sheets → manual Align pre-seeded with detected
+  endpoints); **crop + pinned composite key (B338)** + **per-group auto-calibrate (B339)** in `Stitcher.jsx`.
+- **Scanned-sheet OCR (B352, owner-requested):** a no-text-layer drawing reads too — `doc-review/lib/ocr.js`
+  renders to canvas, runs **Tesseract.js** (WASM worker), converts per-word boxes into the SAME page-unit
+  items `sheetMeta` consumes (identical group/stitch/crop/calibrate pipeline). Lazy (worker spins up only
+  for no-text pages; WASM + English model from a pinned CDN — jsDelivr; pixels never leave the browser).
+  7 unit + 15 stress tests + LIVE headless V93 (`verify-b352-ocr.mjs`).
+- **Markup-sidebar parity (B266 + B348):** the single-sheet **Markup** sidebar now shows each sheet's
+  **real # + title** (B266) and **collapses into the same logical sheets** (B348), reusing
+  `readSheetMeta`/`groupSheets`/`statedCalibration` (no duplicate modules); no-title-block page falls
+  back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
+  (`ui-audit/verify-markup-sheet-labels.mjs`).
+- **Remaining CV tails → B340** (Later/Roadmap): graphic scale-bar reading, geometric edge-line stitch
+  fallback, legend symbol-union. Common case (vector + scanned-via-OCR) shipped. 30 unit tests; headless
+  V87 (`ui-audit/verify-b335-b339.mjs`).
 
 ### Document Review — stitcher notes/legend capture + click-to-detail "cloud" (B350) — LIVE
-- **Notes/legend survive the crop, aggregated across the set.** The auto-crop (B338) hides the
-  title-block band where general notes/legends live. Pure `src/shared/files/sheetNotes.js`
-  (`parseNotes` finds each `GENERAL/GRADING/KEYED NOTES` / `LEGEND` / `ABBREVIATIONS` block;
-  `aggregateNotes` merges every placed sheet's blocks, dedupes boilerplate, and **flags a note
-  that differs by sheet** with its sheet tag) → the pinned **Composite key** gains an expandable
-  "Notes & legend · N" section. So a note that **changes page to page** is captured, never lost.
-- **Click a detail callout → that detail pops up (Bluebeam-style), without leaving the drawing.**
-  Pure `src/shared/files/detailRefs.js` reads detail-callout **bubbles** (a detail id stacked
-  over a sheet code "5 / A-3", plus inline / keyword forms — conservative: a plain fraction can't
-  match) and detail **definitions** (`DETAIL 5`, `SECTION A-A`). Callouts render as clickable
-  hotspot rings; clicking opens a floating **cloud popup** rendering the referenced sheet (reused
-  from a placed sheet or rendered on demand), centered on the named detail when the target labels
-  it, pan/zoomable. Honest fallback when the target sheet isn't in the set. Toolbar **Details**
-  toggle; hotspots only grab clicks in Pan mode.
-- Both REUSE the B336 positional reader (wired into `readSheetMeta` → each page carries `notes`/
-  `detailRefs`/`detailAnchors`); placed sheets persist them. 14 unit tests; V92 headless
-  (`ui-audit/verify-b350.mjs`, 11/11) + `verify-b335-b339.mjs` 13/13 no-regression.
+- **Notes/legend survive the crop, aggregated across the set.** Auto-crop (B338) hides the title-block
+  band where notes/legends live. Pure `src/shared/files/sheetNotes.js` (`parseNotes` finds each
+  `GENERAL/GRADING/KEYED NOTES`/`LEGEND`/`ABBREVIATIONS` block; `aggregateNotes` merges placed sheets,
+  dedupes boilerplate, **flags a note that differs by sheet** with its tag) → the pinned **Composite key**
+  gains an expandable "Notes & legend · N" section.
+- **Click a detail callout → it pops up (Bluebeam-style) without leaving the drawing.** Pure
+  `src/shared/files/detailRefs.js` reads callout **bubbles** (detail id over sheet code "5 / A-3", plus
+  inline/keyword forms — conservative: a plain fraction can't match) + **definitions** (`DETAIL 5`,
+  `SECTION A-A`). Callouts render as clickable hotspot rings → a floating **cloud popup** renders the
+  referenced sheet (reused or on-demand), centered on the named detail, pan/zoomable; honest fallback
+  when the target isn't in the set. Toolbar **Details** toggle; hotspots grab clicks only in Pan mode.
+- Both REUSE the B336 reader (`readSheetMeta` → each page carries `notes`/`detailRefs`/`detailAnchors`;
+  placed sheets persist them). 14 unit tests; V92 headless (`ui-audit/verify-b350.mjs`).
 
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app

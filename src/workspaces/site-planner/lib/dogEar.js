@@ -1,4 +1,4 @@
-/* Corner bump-out ("dog-ear") geometry (B357).
+/* Corner bump-out ("dog-ear") geometry (B362).
  *
  * A dog-ear is a building element flush at the END of a dock wall that projects out into the
  * truck court, taking that span out of dock use. It stores its corner (`side` = top/bottom/
