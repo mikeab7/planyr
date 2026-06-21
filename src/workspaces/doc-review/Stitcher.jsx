@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
-import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
+import { fwd, inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
@@ -32,6 +32,10 @@ const ID = { A: 1, B: 0, e: 0, f: 0 };
 // in lib/stitchGeom.js so it can be unit-tested away from the component.
 
 const f0 = (n) => Math.round(n).toLocaleString();
+// One-decimal feet for LINEAR measures, matching the single-sheet Markup tool (B296) — whole-
+// foot rounding hid sub-foot precision (a 150.6 ft line read "151 ft") and clashed with the
+// 2-dp acres shown for area.
+const f1 = (n) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOpenReview, signedIn = false }) {
@@ -171,6 +175,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (!pdfsRef.current.some((p) => p.missing && p.srcId !== srcId)) setErr("");
   };
 
+  // Remove a placed sheet. If this drops the world-frame (the index-0 sheet that defines the
+  // shared coordinate space), promote the NEW first sheet to the frame so a leftover
+  // aligned:false sheet isn't stranded — otherwise it loses its "Align" button (gated on i>0)
+  // AND stays measurement-blocked (aligned:false), an unrecoverable stuck state.
+  const removeSheet = (id) => setPlaced((arr) => {
+    const next = arr.filter((x) => x.id !== id);
+    if (next.length && next[0].aligned === false) next[0] = { ...next[0], aligned: true };
+    return next;
+  });
+
   const addSheet = async (pdf, pageNum) => {
     if (loadingRef.current) return; // a load is rebuilding placed[]; its blind setPlaced would clobber this sheet (B51)
     setBusy(true);
@@ -272,6 +286,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const w = toWorld(e);
     if (align) {
       const sheet = placed.find((s) => s.id === align.sheetId);
+      if (!sheet) { setAlign(null); return; } // the sheet being aligned was removed mid-align — bail, don't crash on sheet.M
       if (align.seeded) {
         // The moving sheet's seam endpoints (b1,b2) are already known — just collect the two
         // matching points on a placed sheet, then solve.
@@ -342,6 +357,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
+  // ± zoom buttons anchor on the viewport CENTRE (not the world origin), matching the cursor-
+  // anchored wheel path — otherwise the content slid toward the top-left corner on every click.
+  const zoomBtn = (factor) => { const el = svgRef.current; if (!el) return; const r = el.getBoundingClientRect(); setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, factor, r.width / 2, r.height / 2, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
   // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
   // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
@@ -500,12 +518,17 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // The tray shows LOGICAL sheets (B335) once a file has been read+grouped: one entry per
   // group/single, click to add the whole thing auto-stitched. "Show all pages" (or a file still
   // being read) falls back to the raw per-page list — the safety net that never went away.
+  // A file has a usable grouped view only once its read produced ≥1 logical sheet. On a read
+  // FAILURE (`groups` set to []) — or a 0-page doc — fall back to the raw per-page list instead
+  // of rendering nothing, otherwise that file's pages were invisible in the grouped tray with no
+  // way to add them (groupSheets always yields ≥1 run for a readable page, so empty == failure).
+  const hasGroups = (p) => Array.isArray(p.groups) && p.groups.length > 0;
   const trayItems = pdfs.flatMap((p) => {
-    const useGroups = !showAllPages && Array.isArray(p.groups);
+    const useGroups = !showAllPages && hasGroups(p);
     if (useGroups) return p.groups.map((g, gi) => ({ key: p.srcId + ":g" + gi, pdf: p, group: g }));
     return Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":p" + (i + 1), pdf: p, page: i + 1 }));
   });
-  const anyGroups = pdfs.some((p) => Array.isArray(p.groups));
+  const anyGroups = pdfs.some(hasGroups);
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
   const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
@@ -532,9 +555,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
         <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
-        <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.05, v.zoom / 1.2) }))}>−</button>
+        <button style={btn(false)} onClick={() => zoomBtn(1 / 1.2)}>−</button>
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
-        <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
+        <button style={btn(false)} onClick={() => zoomBtn(1.2)}>+</button>
         <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
@@ -602,7 +625,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               })}
               {/* measures (world coords) */}
               {measures.map((m) => {
-                if (m.kind === "distance") { const a = m.pts[0], b = m.pts[1]; const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return <g key={m.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={ls(2)} /><text x={mid.x} y={mid.y - ls(4)} fontSize={ls(12)} fontWeight="700" fill="#0e7490" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f0(dist(a, b) * ftPerUnit)} ft` : "set scale"}</text></g>; }
+                if (m.kind === "distance") { const a = m.pts[0], b = m.pts[1]; const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return <g key={m.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={ls(2)} /><text x={mid.x} y={mid.y - ls(4)} fontSize={ls(12)} fontWeight="700" fill="#0e7490" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f1(dist(a, b) * ftPerUnit)} ft` : "set scale"}</text></g>; }
                 const c = centroidOf(m.pts); // area-weighted centroid, clamped inside concave shapes (B307)
                 const sf = polyArea(m.pts) * ftPerUnit * ftPerUnit;
                 return <g key={m.id}><polygon points={m.pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke="#0e7490" strokeWidth={ls(2)} /><text x={c.x} y={c.y} fontSize={ls(12)} fontWeight="700" fill="#0e7490" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f2(ftToAcres(sf))} ac` : "set scale"}</text></g>;
@@ -616,6 +639,20 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               })()}
               {/* align ref markers */}
               {align && [align.A1, align.A2].map((p, i) => p && <circle key={i} cx={p.x} cy={p.y} r={ls(5)} fill="none" stroke="#c2410c" strokeWidth={ls(2)} />)}
+              {/* Seeded align: number the moving sheet's detected seam endpoints at their current
+                  position so the user knows which end is "first"/"second" — otherwise clicking the
+                  matching points in reverse order silently flips the sheet 180°. */}
+              {align && align.seeded && (() => {
+                const s = placed.find((x) => x.id === align.sheetId);
+                if (!s || !align.b1 || !align.b2) return null;
+                return [align.b1, align.b2].map((bp, i) => {
+                  const w = fwd(s.M, bp);
+                  return <g key={"seed" + i}>
+                    <circle cx={w.x} cy={w.y} r={ls(6)} fill="none" stroke="#2563eb" strokeWidth={ls(2)} />
+                    <text x={w.x} y={w.y - ls(9)} fontSize={ls(16)} textAnchor="middle" fill="#2563eb" fontWeight="700" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(4) }}>{i + 1}</text>
+                  </g>;
+                });
+              })()}
             </g>
           </svg>
           {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
@@ -679,7 +716,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
               <div style={{ display: "flex", gap: 6 }}>
                 {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
-                <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>
+                <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => removeSheet(s.id)}>Remove</button>
               </div>
             </div>
             );
@@ -688,7 +725,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
               <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
-              {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f0(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
+              {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f1(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>One calibration applies to the whole stitched plan (shared scale). Measures cross seams in world units.</div>

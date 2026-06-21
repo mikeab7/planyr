@@ -1,5 +1,25 @@
 ## ✅ Done
-<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
+<!-- 2026-06-21: bug sweep of the drawing STITCH tool (owner: "find all the bugs you can on the drawing
+     stitch tool"). Branch `claude/drawing-stitch-bugs-g5h119`. Minted **B341–B345** (highest real B#
+     across both files was B340 — the 2038/2543/3340/5263 hits are CSS hex colours, not IDs). All five
+     filed AND fixed + headless-verified the same session per STANDING RULE #1. Build green, 850 unit
+     tests green, lazy chunks intact; new harness `ui-audit/verify-stitch-bugs.mjs` (9/9) + the existing
+     `verify-b335-b339.mjs` (13/13, no regression). -->
+
+### B341 — Stitcher tray hides a file whose grouping failed (its pages become unreachable) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; minted **B341**)*
+`[x]` **Fixed + verified 2026-06-21.** The background read→group (B335) sets a file's `groups` to `[]` on any read exception. The tray's grouped view rendered `p.groups.map(...)` → **zero entries**, so a file that failed to group showed nothing and the user had no way to add its pages (the "all pages" toggle was their only escape, with no hint it was needed). Now a file is shown in grouped mode only when its read produced **≥1 logical sheet** (`hasGroups`); an empty/failed group result falls back to the raw per-page list for that file (groupSheets always yields ≥1 run for a readable page, so empty == failure). `Stitcher.jsx` `trayItems`/`anyGroups`.
+
+### B342 — Removing the world-frame (index-0) stitch sheet strands a leftover un-aligned sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; minted **B342**)*
+`[x]` **Fixed + verified 2026-06-21.** The first placed sheet is the world frame (`aligned:true`); the Align button + "Not aligned" chip are gated on `i > 0`. Removing the frame promoted a still-`aligned:false` sheet to index 0, where it **lost its Align button yet stayed measurement-blocked** (`measureOverUnaligned`) — an unrecoverable stuck state (measuring errored "Align that sheet…" with no Align affordance). New `removeSheet` helper promotes the new first sheet to the frame (`aligned:true`) on removal, restoring the "index-0 is the frame" invariant. Also guarded `onDown`'s align path against a sheet removed mid-align (was a `sheet.M` null deref). Headless: add frame + un-aligned sheet → remove frame → survivor is framed, no stranded "Not aligned".
+
+### B343 — Stitcher ± zoom buttons anchor on the world origin, not the viewport centre `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21; minted **B343**)*
+`[x]` **Fixed + verified 2026-06-21.** The wheel zoom is cursor-anchored (shared `zoomAround`, B329) but the ± buttons just scaled `view.zoom` with pan untouched, so content slid toward the top-left corner on every click (cf. the single-sheet B290). New `zoomBtn(factor)` routes the ± buttons through `zoomAround` about the **viewport centre**. Headless confirmed a fixed point's offset from centre scales ~1.2× per click.
+
+### B344 — Stitcher distance read-outs round to whole feet (inconsistent with area's 2-dp acres) `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21; minted **B344** — the stitch counterpart of B296)*
+`[x]` **Fixed + verified 2026-06-21.** B296 gave the single-sheet tool one-decimal linear feet, but the Stitcher's on-canvas distance label and the "Distance" takeoff total still used whole-foot `f0` (a 150.6 ft line read "151 ft"). Added `f1` and used it for both. Headless confirmed a decimal-foot read-out.
+
+### B345 — Seeded auto-stitch fallback gives no endpoint-order cue (reverse clicks flip the sheet 180°) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; minted **B345**)*
+`[x]` **Fixed + verified 2026-06-21.** When auto-stitch (B337) can't place a sheet but knows its seam side, manual Align is **pre-seeded** with the moving sheet's two seam endpoints (`detectedEndpointsFor`) and the user clicks the two matching points on a placed sheet. Nothing showed WHICH seed was "first" vs "second", so clicking the matching points in reverse order silently rotated the sheet 180° via `solveM`. The seeded flow now draws **numbered markers (1, 2)** at the moving sheet's seed endpoints (its current position), so the click order is unambiguous. Additive render only; no geometry change.
      crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
      when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge
      time; B25431/B3340 here are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND implemented +
