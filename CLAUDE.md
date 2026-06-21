@@ -313,12 +313,12 @@ server/                   # placeholder README only — NOT built or deployed; b
   `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
   to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
   **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **Scanned-sheet OCR — BUILT (B343, owner-requested).** A scanned / image-only drawing (no text
+- **Scanned-sheet OCR — BUILT (B349, owner-requested).** A scanned / image-only drawing (no text
   layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
   (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
   so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
   up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
-  pixels never leave the browser). 7 unit tests + a LIVE headless run (V90, `verify-b343-ocr.mjs`).
+  pixels never leave the browser). 7 unit tests + a LIVE headless run (V90, `verify-b349-ocr.mjs`).
 - **Remaining CV tails are deferred behind seams → B340** (Later/Roadmap): graphic scale-bar reading,
   the geometric edge-line stitch fallback, legend symbol-union. The common case (vector + now scanned
   via OCR) is shipped. 30 unit tests; headless-verified end-to-end (V87, `ui-audit/verify-b335-b339.mjs`, 13/13).
@@ -434,7 +434,7 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   align); **automatic match-line detection — BUILT (B337)**: drop a set → it auto-groups
   (B335) + auto-stitches from match-line labels + auto-calibrates (B339) + crops title
   blocks (B338); the 2-point manual Align stays the safety net (pre-seeded when a seam is
-  detected). **Scanned sheets read via OCR too (B343).** The remaining CV tails (scale-bar,
+  detected). **Scanned sheets read via OCR too (B349).** The remaining CV tails (scale-bar,
   geometric edge-match, legend symbol-union) → B340. Near-automatic once DWG conversion lands.
 - Revision compare: add a revision to a discipline set and compare the two
   (overlay/diff) — confirm against the existing overlay/version-compare item.

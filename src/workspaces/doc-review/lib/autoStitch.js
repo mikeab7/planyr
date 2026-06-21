@@ -51,11 +51,20 @@ export function buildAdjacency(sheets) {
       if (!ml.target) continue;
       const b = byNum.get(normNum(ml.target));
       if (!b || b.id === a.id) continue;
-      // Prefer B's own declared side back to A; else assume the opposite of A's side.
+      // For two sheets that share a seam, the geometry is fixed: B sits on the OPPOSITE edge of
+      // the side A points to (A says "B is on my right" ⇒ B's left edge meets A's right edge).
+      // So the opposite side is the source of truth, not B's own label.
+      const geomSide = oppositeSide(ml.side);
+      if (!geomSide) continue; // A's side unreadable (bare match line) → no usable seam here
+      // B348 — CONTRADICTION guard. If B also names A but on a side that is NOT that opposite
+      // (e.g. both sheets claim the seam is on their "right"), the two reads disagree about how
+      // they fit together — a sign one label was mis-read. Stitching anyway would overlap/mirror
+      // the sheet; per "a wrong stitch is worse than an unstitched one," drop the edge and let the
+      // sheet fall to the manual-Align safety net instead of auto-guessing.
       const back = (b.matchLines || []).find((m) => normNum(m.target) === normNum(a.sheetNumber));
-      const bSide = (back && back.side) || oppositeSide(ml.side);
-      add(a, b, ml.side, bSide);
-      add(b, a, bSide, ml.side);
+      if (back && back.side && back.side !== geomSide) continue;
+      add(a, b, ml.side, geomSide);
+      add(b, a, geomSide, ml.side);
     }
   }
   return adj;
@@ -69,6 +78,16 @@ function pickAnchor(sheets, adj) {
 }
 
 const ID = { A: 1, B: 0, e: 0, f: 0 };
+
+// B348 — sheets in one real plan set are the SAME plot size, so a seam-to-seam fit should place a
+// neighbor at ~1× scale (the anchor is identity, both endpoints are page points). A similarity fit
+// from two endpoints, though, will happily RESCALE a sheet to make the seams meet — so a half-size
+// detail page (or a portrait sheet mis-grouped with landscape ones) gets silently shrunk/blown up
+// to fit. Reject a placement whose implied scale strays past this tolerance and leave the sheet
+// UNPLACED (→ manual Align), rather than auto-stitch it at the wrong size.
+export const MAX_STITCH_SCALE = 1.25; // ±25% — comfortably past plot-rounding, well short of a half/double-size sheet
+const scaleOf = (M) => Math.hypot(M.A, M.B);
+const scaleInBand = (M) => { const s = scaleOf(M); return s >= 1 / MAX_STITCH_SCALE && s <= MAX_STITCH_SCALE; };
 
 /* Place a group of sheets on one world frame from their match-line seams. Each `sheet` =
  * { id, sheetNumber, drawingArea, matchLines, scale? }. Returns
@@ -95,7 +114,9 @@ export function autoPlaceGroup(sheets = []) {
       if (!aEnds || !bEnds) continue;
       const wA1 = fwd(Ma, aEnds[0]), wA2 = fwd(Ma, aEnds[1]);
       if (alignBaselinesDegenerate(bEnds[0], bEnds[1], wA1, wA2)) continue;
-      placements.set(b.id, solveM(bEnds[0], bEnds[1], wA1, wA2));
+      const Mb = solveM(bEnds[0], bEnds[1], wA1, wA2);
+      if (!scaleInBand(Mb)) continue; // B348 — size mismatch ⇒ would rescale wrongly; leave for manual Align
+      placements.set(b.id, Mb);
       seen.add(b.id);
       queue.push(b);
     }
