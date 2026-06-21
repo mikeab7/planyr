@@ -22,6 +22,12 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
+     gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
+     BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
+     a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
+     B303–B307, then the Mapillary proxy B308/B309). -->
+
 <!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
      ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
      batch (Doc Review markup editing) had ALSO taken B303–B307 while this was in flight (both saw B302 as

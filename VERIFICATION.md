@@ -60,6 +60,10 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V78 — Parcel click-vs-drag + "Select parcels" toggle (B310 / B311) ✅ (fully self-verified headless — no signed-in check needed)
+- **Added** 2026-06-20 · **Cadence** once (acceptance) · **Last checked** 2026-06-20 ✅ (headless Chromium-1228 on the built app, `vite preview`, logged-out, seeded one locked parcel) · **Next check** — none required (pure planner-canvas interaction; no auth or cloud path). An optional eyeball on planyr.io: in the Site planner, grab a lot and drag — the map pans and nothing gets selected; a plain click still selects it.
+- **✅ Self-verified 2026-06-20 (`ui-audit/verify-b310-b311.mjs`, 7/7 checks, 0 page JS errors):** **B310** a deselected→**click selects** the parcel (stroke→#c2410c / width 3); a **95px drag pans and does NOT select** (stroke stays #5b6650 / width 2; the parcel's on-screen box shifted +95px — it panned). **B311** the toolbar toggle defaults **ON** (`aria-pressed=true`); flipping it **OFF** makes a click no longer select; flipping back **ON** restores click-to-select; the **OFF state persists across a full page reload** (saved per project in the Site Model `settings`). Screenshots `ui-audit/screens/b310-click-selected.png`, `b310-drag-panned.png`. lint 0 · 712 tests · build green; `SitePlannerApp` lazy chunk intact.
+
 ### V77 — Street-imagery (Mapillary) layer served via the server-side proxy for all visitors (B308) ✅ client-side self-verified headless; ⏳ one LIVE confirm on planyr.io Production
 - **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium on the built app, `vite preview`, logged-out — the client side) · **Next check** — the LIVE confirm below, on planyr.io Production after the next deploy (the owner has already set the `MAPILLARY_TOKEN` secret).
 - **Why a live check is needed:** the proxy is a Cloudflare **Pages Function** — it runs ONLY in the Cloudflare runtime, not under `vite preview`/the sandbox. So the "imagery actually renders" half can only be confirmed on the deployed site. Everything client-side IS self-verified (below).
