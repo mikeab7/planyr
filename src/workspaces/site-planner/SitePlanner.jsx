@@ -51,6 +51,7 @@ import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurnit
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
 import { jpegToPdf } from "./lib/imagePdf.js";
+import { createHistoryStack } from "./lib/history.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -1285,11 +1286,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
-  // Undo/redo history (snapshots of the editable state, stored by reference).
+  // Live mirror of the drawn-layer state for the undo/redo stack. Assigned during
+  // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
+  // current state. A passive-effect mirror lagged a paint behind, so undo right
+  // after a drag-move intermittently snapshotted or compared a stale state — the
+  // building wouldn't fully snap back, or undo appeared to do nothing (B310).
   const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
-  const pastRef = useRef([]);
-  const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds }; });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -1392,35 +1395,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
+  // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
+  // compares against the live state we pass in (stateRef.current), so undo/redo
+  // can't act on a stale baseline (B310). One stack instance, kept across renders.
+  const histRef = useRef(null);
+  if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
-  const pushHistory = () => {
-    pastRef.current.push(stateRef.current);
-    if (pastRef.current.length > 80) pastRef.current.shift();
-    futureRef.current = [];
-    touchHist();
-  };
+  const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
-  const undo = () => {
-    let prev = null;
-    while (pastRef.current.length) {
-      const cand = pastRef.current.pop();
-      if (histKey(cand) !== histKey(stateRef.current)) { prev = cand; break; }
-    }
-    if (!prev) return;
-    futureRef.current.push(stateRef.current);
-    applySnapshot(prev);
+  const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
+  const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
+  // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
+  // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
+  // pushHistory pushed, so an interrupted move leaves no half-recorded command
+  // on the stack (B310). No-op for any drag that didn't stash a canceler.
+  const cancelActiveMove = () => {
+    const d = drag.current;
+    if (!d || !d.canceler) return false;
+    histRef.current.drop();
+    applySnapshot(d.canceler);
     touchHist();
-  };
-  const redo = () => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(stateRef.current);
-    applySnapshot(next);
-    touchHist();
+    return true;
   };
 
   /* ------------ size tracking ------------ */
@@ -1600,6 +1599,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const abortGesture = (pid = capturePidRef.current) => {
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
     capturePidRef.current = null;
+    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B310); no-op otherwise
     drag.current = null;
     setPanning(false);
     setMarquee(null);
@@ -2186,7 +2186,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
     };
-    drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig };
+    drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
@@ -3684,7 +3684,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const members = assemblyOf(id).map((m) => m.points
       ? { id: m.id, points: m.points }
       : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members };
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
@@ -3698,7 +3698,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSel({ kind: "parcel", id });
     if (pc.locked) return;             // locked parcel: select only, don't move
     pushHistory();
-    drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
+    drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
@@ -5448,8 +5448,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const plannerToolbar = (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2 }}>
-        <button className="dbtn" style={dIcon} onClick={undo} disabled={!pastRef.current.length} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
-        <button className="dbtn" style={dIcon} onClick={redo} disabled={!futureRef.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+        <button className="dbtn" style={dIcon} onClick={undo} disabled={!histRef.current.canUndo()} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
+        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
       <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}

@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V78 — Undo (Ctrl+Z) reliably reverts a building move in one step (B310) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **chromium-1194** on the built app, `vite preview`, logged-out — the planner canvas + undo are browser-only, no auth path) · **Next check** — none required (auth-independent client logic).
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b310.mjs`, 9/9 checks, 0 JS errors, screenshot `ui-audit/screens/b310-undo.png`):** seed a one-building plan, drag the building 300px → **one Ctrl+Z snaps it fully back to the pre-drag spot (Δ=0.0px — a full revert, not the reported partial/no-op)**; **Ctrl+Shift+Z** redoes it; two separate moves take **two** undos (one each, in order); **Esc mid-drag** cancels the move (building returns to pre-drag) and leaves **no dangling half-command** on the stack. External Houston GIS hosts are CORS-blocked by the sandbox proxy (environmental network noise, filtered) — no app JS errors.
+- **Why fully done logged-out:** the undo/redo stack + the drag-move handlers live entirely in the Site Planner client (`lib/history.js` + `SitePlanner.jsx`), with no auth or cloud dependency. Backed by **11 unit tests** (`test/history.test.js`) including a deterministic repro of the stale-baseline failure mode that caused the bug.
+
 ### V77 — Street-imagery (Mapillary) layer served via the server-side proxy for all visitors (B308) ✅ client-side self-verified headless; ⏳ one LIVE confirm on planyr.io Production
 - **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium on the built app, `vite preview`, logged-out — the client side) · **Next check** — the LIVE confirm below, on planyr.io Production after the next deploy (the owner has already set the `MAPILLARY_TOKEN` secret).
 - **Why a live check is needed:** the proxy is a Cloudflare **Pages Function** — it runs ONLY in the Cloudflare runtime, not under `vite preview`/the sandbox. So the "imagery actually renders" half can only be confirmed on the deployed site. Everything client-side IS self-verified (below).
