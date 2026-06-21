@@ -40,6 +40,143 @@
 - **Verified — lint 0 · 788 tests · build green** (`planAutosave` unit tests cover: load echo ⇒ consume only; edit-in-window ⇒ mirror+dirty, no debounce-save; edit-out-of-window ⇒ mirror+dirty+save; blank/disabled ⇒ nothing).
 > **Dedup:** net-new; interacts with B19 (suspendSave) + B44 (dirty-gated flush), both preserved. Not covered by any open item.
 
+<!-- ✅ DONE 2026-06-21 (branch claude/ecstatic-faraday-qoc8vf, commit 32a1b8a). The B316 umbrella +
+     B317–B320 shipped together as one chain: light / dark / system theming. Token system (data-theme
+     on <html> + CSS vars in src/index.css, mirrored to JS for the SVG canvas in shared/theme/
+     palette.js), ThemeProvider (localStorage source-of-truth, System via matchMedia live listener) +
+     FOUC pre-paint script + a 3-way Light/Dark/System switch in AppHeader. Full palette; chrome now
+     themes WITH the app (retired warm cream + always-dark chrome + ember). Dark canvas (grid/parcel/
+     selection) + Markup mat darkens while the sheet stays white. Status dark variants (--status-*),
+     ProjectLibrary drift removed, text-hierarchy standing rule added to CLAUDE.md. Verified headless
+     in BOTH themes across all 3 workspaces (ui-audit/theme-check.mjs); build green, lint 0 errors,
+     562 tests. Original Open blocks preserved below, flipped to [x]. -->
+
+<!-- 2026-06-20: owner-dropped (chat) as "NEW-3" — light/dark/system theming. Minted **B316**
+     (highest B# across BOTH BACKLOG.md + BACKLOG-DONE.md was B272 → next free is B316).
+     DEDUPE: the owner's note said "NEW-3 supersedes the earlier light/dark NEW-3 stub if it was
+     already filed — fold into one." Checked BOTH files: **no prior light/dark theme stub exists**
+     (the only "theme" hits are the county-resolution *topic* and BrandMark's already-theme-aware
+     `surface` prop + the unrelated "themed loader" animation). So there was nothing to fold — this
+     is the single canonical theming item. RECORDED here so a future session doesn't re-hunt for a stub.
+     DEPENDENCIES (referenced by the spec, NOT yet filed in this backlog): "NEW-1" = a `profiles`
+     row for cross-device prefs (the theme choice mirrors there); "NEW-2" = an account dropdown
+     (the theme control lives there, or in Settings). Build B316 AFTER both — or land the control in
+     Settings if NEW-2 slips. localStorage is the source-of-truth on load regardless, so the profiles
+     mirror is an additive NEW-1 follow-on, not a hard prerequisite for local theming.
+     SCOPE = foundation-scale (see the build-plan note in the item): ~886 hardcoded hex literals across
+     ~30 files + 9 local `PAL` objects + inline styles + index.css literals + the Scheduler iframe — a
+     real multi-pass migration, not a one-session drop-in. Filed-with-a-plan per the "too large to
+     finish this run" carve-out, NOT shipped this session; raised plainly in chat. -->
+
+### B316 — Light / dark / system theme with cool-gray light palette `[AppHeader / theming]` (feature) — foundation-scale  *(owner-dropped 2026-06-20; arrived as "NEW-3"; minted **B316** — next free after B272)*
+`[x]` Add a theme selector with three modes — **Light**, **Dark**, **System** (`prefers-color-scheme`). App is currently hard-locked to one look; this adds the switch. **Both modes are net-new full surface palettes** (owner decision 2026-06-20, see below): Light = cool gray-white surfaces; Dark = a genuine dark-*surface* mode (dark content panels), **retiring** today's warm cream/paper work area.
+> **✓ DECISION (owner, 2026-06-20) — "build a true dark mode":** the app today is **not all-dark** — content surfaces are a warm **cream/paper** ("drafting") palette (`body #efeadf`, panels `#f6f3ec`, ink `#26231e`) under **dark graphite chrome** (top bars + rail, `#14110e`/`#191613`). Asked whether "keep the existing dark unchanged" meant preserve today's cream-content + dark-chrome look, or build a real dark-*surface* mode, the owner chose the latter: build a **genuine dark-surface** Dark mode (dark content panels) and **retire the cream**, alongside the cool-gray Light. **Consequence for scope:** *both* themes are net-new surface palettes — the only "existing dark" that survives is the dark **chrome** (bars/rail); the dark **content-surface** values (dark equivalents of surface-page / surface-raised / borders / text) **don't exist yet and must be designed**, and every one of the ~886 color spots needs a proper two-way (light↔dark) mapping, not a one-way "add light." This increases effort vs. preserving the current look and reinforces the multi-pass-foundation plan below.
+
+> **🔁 UPDATE 2026-06-21 — design RESOLVED + decomposed into B317–B320 (building this session).** The owner ran the theming design through a ChatGPT visual pass; the returned spec settles every open question here. Implemented as four sibling children of this umbrella: **B317** (infrastructure), **B318** (full palette + theme-aware chrome), **B319** (work-surface canvas/sheet), **B320** (contrast + status). B316 stays as the umbrella/record. **Canonical visual reference: `planyr-theming-mockup.html`** — match its *rendered* result, not just raw hexes. ⚠ Owner named that file as the reference but it is **not in the repo** as of this update — request a copy to keep in-repo + diff against. **Two assumptions in THIS item are now reversed/resolved:** (1) ~~"the dark chrome survives unchanged in both themes"~~ → **chrome now themes WITH the app** (light theme = light chrome, dark theme = dark chrome); a permanently-dark bar in an otherwise-white app forces constant pupil readjustment — worst case for eye strain (see B318). (2) the net-new dark surface palette **and** the two-value accent-text question are now **fully specified** in B318. Retire the warm cream, the old always-dark warm chrome (`#14110e`/`#191613`), and the ember accent (`#e8590c`).
+
+**Mechanics (from the owner's spec):**
+- Drive theming off `data-theme="light|dark"` on `<html>`. All colors as CSS variables, both themes fully defined.
+- **System** resolves via `prefers-color-scheme` and must update **live mid-session** — attach a `matchMedia('(prefers-color-scheme: dark)')` change listener.
+- Persist the choice (light/dark/system) in **localStorage as source-of-truth on load**; mirror to the `profiles` row (NEW-1) for cross-device. localStorage wins on first paint to avoid a network round-trip.
+- **FOUC gotcha (do this FIRST):** an inline script in `index.html <head>` that reads the stored choice (or system pref) and sets `data-theme` **before React mounts** — otherwise every load flashes the wrong theme. ("FOUC" = flash of un-themed content.)
+- Theme control lives in the **account dropdown (NEW-2)** or **Settings** — consolidate, don't duplicate.
+- Files likely touched: `index.html` (inline pre-paint script), a `ThemeProvider`/context, the token stylesheet (`src/index.css`), the account dropdown (NEW-2), the `profiles` mirror via the NEW-1 hook.
+
+**Light-mode surface tokens (cool gray-white — owner-verified legible):**
+
+| Token | Light value | Dark value |
+|---|---|---|
+| surface-page | `#F3F5F8` | existing locked dark |
+| surface-raised (cards) | `#FFFFFF` | existing locked dark |
+| border-default | `#E1E5EB` | existing |
+| border-strong (hover) | `#CDD3DC` | existing |
+| text-primary | `#1B1E26` | existing |
+| text-secondary (muted) | `#565E6E` | existing |
+| text-tertiary (hints) | `#8B92A1` | existing |
+
+> ⚠ **Per the decision above, "Dark value = existing" for the *surface* rows is now a net-new true-dark surface palette to be designed** (dark page / dark cards / dark borders / light-on-dark text), NOT the current cream. Only the dark **chrome** (bars/rail) pre-exists. The owner's Light column is fixed; the Dark surface column needs its cool-neutral dark equivalents specced as part of the build.
+
+**Accent pair model:** each module accent is **two tokens** — a **fill/brand** value (unchanged, locked hexes — these already live in `src/shared/ui/moduleAccent.js` as `MODULE_ACCENT`) and an **on-light text** value (tuned, AA-passing as foreground). The `-text` token is theme-dependent.
+
+| Module | fill (both modes) | text — light mode | text — dark mode |
+|---|---|---|---|
+| Site | `#1D9E75` | `#0F6E56` | `#5DCAA5` |
+| Schedule | `#7F77DD` | `#534AB7` | `#AFA9EC` |
+| Markup | `#EF9F27` | `#8A5410` | `#EF9F27` |
+
+- **On-fill text rule (both modes):** text/icons **on** an accent fill — Site & Schedule fills carry **white** (`#FFFFFF`); **Markup (amber) fill carries dark text** (`#412402`). White-on-amber is unreadable; enforce wherever a status/tab chip uses the amber fill.
+- **Usage rule:** accent-as-**fill** (tab band, active indicator, status-chip bg) → **fill** token. Accent-as-**foreground** (colored text, thin icons, links) → **`-text`** token, never the fill token.
+- **Edge case — status palette:** the locked status tokens (Pursuit / Active / On Hold / Complete / Dead) need the same discipline. For each status color used as text/icon on a light surface, **derive programmatically** the nearest variant that clears **AA ≥ 4.5** as foreground on `#FFFFFF`/`#F3F5F8`; keep originals as fills with the same on-fill rule. **Flag any status color whose foreground variant can't reach 4.5** for review (don't hand-pick).
+- **Constraint (unchanged):** module accents stay confined to the **top tab row only** — light mode doesn't change that.
+
+> **Build plan / scope (grounds the "foundation-scale" tag) — REUSE, don't rebuild:**
+> The app has **no central theming layer today**: ~**886 hardcoded hex literals across ~30 files**, **9 local `PAL` objects** (`SitePlanner.jsx`, `MapFinder.jsx`, `AuthPanel.jsx`, `ParcelDrawing.jsx`, `DocReview.jsx`, `Stitcher.jsx`, `ProjectLibrary.jsx`, `ProjectFilesDrawer.jsx`, `ReviewsBar.jsx`), inline styles throughout, plus literals inside `src/index.css`. `MODULE_ACCENT` (`moduleAccent.js`) is already the single source for the **fill** colors → extend it with the `-text` counterparts rather than re-listing hexes. `BrandMark` already takes a `surface="dark|light"` prop (theme-aware) → just feed it the active theme. The Scheduler is an **iframe** (`public/sequence/index.html`) with its **own** colors → needs its own token sheet or a postMessage theme bridge (separate surface).
+> Recommended sequence: **(1)** define the full token set for both themes in `:root` / `[data-theme]`; **(2)** FOUC inline script; **(3)** `ThemeProvider` + `matchMedia` live listener + localStorage persistence; **(4)** migrate the 9 PALs + inline literals + `index.css` literals to consume tokens (the bulk — do it per-workspace, verifying each surface); **(5)** AA-derive the status palette; **(6)** theme the Scheduler iframe; **(7)** wire the control into NEW-2/Settings + the NEW-1 cross-device mirror. A shell-only/partial theme that leaves the canvas/map/doc-review hardcoded would be a **misleading half** (per the "finish the job" rule) — so this ships as a deliberate multi-pass foundation, ideally after NEW-1 + NEW-2 land.
+
+<!-- 2026-06-21: owner-dropped (chat, via a ChatGPT design pass) the RESOLVED build of the
+     light/dark/system theme as four items "NEW-1..NEW-4" — the executable decomposition of the
+     umbrella **B316** (design now settled). Minted **B317–B320** (highest B# across BOTH files was
+     B316 → next free B317). NOT duplicates of B316: B316 stays as umbrella/record with an UPDATE
+     note pointing here; the resolved design lives in these children. Canonical visual reference =
+     `planyr-theming-mockup.html` (match its RENDERED result, not just hexes). ⚠ Owner named that
+     mockup file but it is NOT in the repo as of filing — request a copy to keep in-repo + diff
+     against at verification. "Ship together" — all four merge as one chain this session. -->
+
+### B317 — Light / Dark / System theme infrastructure `[Global / theming]` (feature) — child of B316; build FIRST  *(owner-dropped 2026-06-21 via ChatGPT spec; arrived as "NEW-1"; minted **B317**)*
+`[x]` Build the theming foundation every module inherits. **Ships together with B318–B320; build B317 first (they depend on it).**
+- **Token system:** CSS custom properties driven by `data-theme="light|dark"` on `<html>`. Components reference **tokens only**, never raw hex. **Extend** the existing locked token set (`:root` vars in `src/index.css` + the per-file `PAL` objects) rather than starting fresh — repoint them at tokens.
+- **Three modes:** Light, Dark, System. **System** follows the OS via `window.matchMedia('(prefers-color-scheme: dark)')` and must **live-update** when the OS flips — attach a `change` listener, don't read once at load.
+- **Persistence:** store the choice in `localStorage['planyr.theme']`; **default System** on first run.
+- **No theme flash (FOUC):** apply the resolved theme in a tiny inline `<head>` script **before first paint**, so the page never flashes the wrong colors before React boots.
+- **Switch UI:** three-way control in Settings and/or the **row-1 settings menu in `AppHeader`**.
+- Files: new `ThemeProvider`/context, the global token stylesheet (`src/index.css`), `AppHeader`, `index.html` (pre-paint script).
+> Lineage: the **infrastructure half of B316**. Finalizes B316's FOUC/ThemeProvider/matchMedia/localStorage mechanics. localStorage is source-of-truth on load; the `profiles` cross-device mirror stays a later additive follow-on, not a prerequisite.
+
+### B318 — Full theme palette + theme-aware chrome `[Global / AppHeader]` (feature) — depends on B317; child of B316  *(owner-dropped 2026-06-21 via ChatGPT spec; arrived as "NEW-2"; minted **B318**)*
+`[x]` Replace the retired warm-cream work surface **and** the old always-dark chrome. **Chrome now themes WITH the app** — this deliberately **reverses** B316's "dark chrome in both themes" assumption: a dark bar in an otherwise-white app (bright office) forces constant pupil readjustment, the worst case for eye strain. **Light theme → light chrome; Dark theme → dark chrome.** Depends on B317.
+
+**Surfaces:**
+
+| Token | Light (fixed) | Dark (new) |
+|---|---|---|
+| surface-page | `#F3F5F8` | `#14161B` |
+| surface-raised | `#FFFFFF` | `#1D2027` |
+| border-default | `#E1E5EB` | `#2A2E37` |
+| border-strong | `#CDD3DC` | `#3A3F4B` |
+| text-primary | `#1B1E26` | `#E8EBF0` |
+| text-secondary | `#353B49` | `#CAD0DA` |
+| text-tertiary | `#4B5263` | `#A4ABB8` |
+
+**Chrome (themes with app):**
+
+| Role | Light | Dark |
+|---|---|---|
+| chrome-bg | `#EAEEF3` | `#111319` |
+| chrome-bg-elev | `#FFFFFF` | `#171A21` |
+| chrome-divider | `#D7DDE5` | `#262A33` |
+| chrome-text | `#1B1E26` | `#ECEFF4` |
+| chrome-muted | `#353B49` | `#A6ADBA` |
+| chrome-tab-inactive | `#454C5C` | `#C2C8D2` |
+| save-badge | `#0F6E56` | `#7FD8B8` |
+
+- **Module fills (fixed, both themes):** Site `#1D9E75`, Schedule `#7F77DD`, Markup `#EF9F27`. **On-fill text:** white for Site/Schedule; **dark `#412402` for Markup** — never white on amber.
+- **Active-tab accent TEXT swaps by theme** (tabs sit on chrome): light chrome → `#0F6E56` / `#534AB7` / `#8A5410`; dark chrome → `#5DCAA5` / `#AFA9EC` / `#EF9F27`. (Resolves the two-value accent-text question: dark-on-light set = light chrome; light-on-dark set = dark chrome.)
+- **Accents only in the module-tab row** (active tab text + 2px underline) — never a work-surface fill.
+- **Retire** the old warm chrome (`#14110e`/`#191613`) and the **ember** accent (`#e8590c`). NB `src/index.css :root` hardcodes `--chrome/--chrome-line/--chrome-ink/--chrome-muted/--accent` to warm/ember + a `rgba(232,89,12,…)` focus ring, and `Shell.jsx`/`AppHeader.jsx` hardcode `#14110e`/`#2e2a23`/`#c9c3b4` — all move to per-theme tokens.
+
+### B319 — Work-surface theme behaviors: canvas + Markup sheet `[Site, Markup]` (feature) — depends on B317/B318; child of B316  *(owner-dropped 2026-06-21 via ChatGPT spec; arrived as "NEW-3"; minted **B319**)*
+`[x]` The drafting canvas and the document viewer need their own dark behavior, distinct from panel surfaces. Depends on B317/B318.
+- **Site canvas dark tokens:** `canvas-bg #0E1014`, `grid-minor rgba(232,235,240,0.05)`, `grid-major rgba(232,235,240,0.10)`; lift **parcel stroke to `#2FBE90`** on dark.
+- **Drafting/selection accent dark variant:** the selected-element + dimension-line **red-orange is a work-surface color, NOT a module accent** — the "accents don't change" rule doesn't apply: light `#C2410C` → dark **`#F26B3A`** (`#C2410C` too dim on the dark canvas).
+- **Markup in Dark:** the **mat** (around the drawing, `#cfc8ba` today at `DocReview.jsx:539` + `Stitcher.jsx:343`) darkens to **`#0E1014`**; the **drawing sheet stays white** — it's the **immutable backdrop**, and inverting a construction sheet misrepresents it. Direct application of the standing immutable-backdrop principle, not a one-off.
+- Files: Site Planner canvas renderer (`SitePlanner.jsx`); Markup viewer mat/sheet container (`DocReview.jsx`, `Stitcher.jsx`).
+
+### B320 — Contrast + text-hierarchy pass `[Global / theming]` (task) — depends on B317/B318; child of B316  *(owner-dropped 2026-06-21 via ChatGPT spec; arrived as "NEW-4"; minted **B320**)*
+`[x]` Apply the dark text ramp (B318) and lock the rule behind it. Depends on B317/B318.
+- **Standing rule (also added to `CLAUDE.md`):** build text hierarchy through **weight, size, and uppercase letter-spacing — never by fading text toward the background.** Low-contrast gray body/label text is an eye-strain problem in bright offices and is **disallowed**. Subtle grays stay correct **only** for borders, the drafting grid, and the semantic "Complete" status badge.
+- **Status badges need dark-surface variants.** The canonical `STATUS_TOKENS` (`src/shared/ui/statusTokens.js`: pursuit `#378ADD`, active `#639922`, onhold `#BA7517`, complete `#888780`, dead `#E24B4A`) are tuned for white cards; saturated values go muddy on `#1D2027`. Add a lighter dark-mode variant per status (mockup direction: Active → `#2FBE90`, Complete → `#8B92A1`). NB a drifted duplicate `STATUS_COLOR` lives in `ProjectLibrary.jsx:13` — reconcile while here.
+- **Verify all body text clears WCAG AA (≥ 4.5:1)** against its surface in **both** themes; flag any accent/status that fails and propose the fix rather than shipping it silent.
+
 ### B312 — Auto-filing reads the title block with plain code first; AI only as a fallback `[Document Review / Files]` (feature) — owner direction on B299  *(owner 2026-06-20: "a ton of this could be done without an LLM… is this gonna cost tokens?"; minted **B312** — concurrent `main` consumed B300–B311)*
 `[x]` **Built + tested + shipped this session.** Re-architected auto-filing (B299) to **"plain code first, AI only as fallback"** so the common case is **free, instant, and needs no cloud or API key** — exactly the owner's point that reading a title block, picking the latest date, and recognizing "ALTA survey" is ordinary code, not an LLM job.
 - **Tier 1 — deterministic, in the browser, $0 (the default now):** for any PDF with an embedded text layer (most CAD-exported vector drawings), read the text with the existing `extractPageText` (pdf.js, the same reader B267 uses) and parse the filing fields with pure code:
@@ -143,6 +280,7 @@
 ### B301 — Measuring over a not-yet-aligned sheet silently uses the composite scale → wrong quantities `[Doc Review / Stitch]` (bug)  *(arrived as "NEW-2" 2026-06-20 owner chat; first filed B289 then renumbered **B301**; batch B300–B302)*
 `[x]` **Done 2026-06-20 (branch `claude/admiring-hypatia-xjv8a1`).** Repro: add a second sheet (it drops at identity scale, offset to the right) and draw a Distance/Area over it **before** pressing Align — the measurement applied the single composite calibration (ft per world unit, defined by sheet 1), so if that sheet's real scale differed the reading was **silently wrong** (and even at a shared scale its position/rotation could be off). **Fix:** each placed sheet now carries an **`aligned`** flag — the first sheet *is* the world frame (auto-aligned `true`); every later sheet starts `false` and flips to `true` only when its Align completes (B300's commit path). Unaligned sheets are **flagged visually** — an amber dashed "⚠ Not aligned — click Align" overlay on the canvas, plus a "⚠ Not aligned — measurements may be off" chip + amber-emphasized Align button in the Placed-sheets list. Committing a Distance/Area whose points fall over an unaligned sheet (**`measureOverUnaligned`** / `sheetContains` in `lib/stitchGeom.js`) raises a **warning banner** ("Heads up: that measurement is over a sheet that isn't aligned yet — Align it first…"). **Warn, not block** (the app's "surface it loudly, let the user decide" principle). The flag is persisted in the stitch snapshot and restored on load — older saves default their non-base sheets to aligned, so nothing already-saved is falsely flagged.
 - **Verified:** unit tests for `sheetContains` + `measureOverUnaligned` (warns only over an `aligned:false` sheet; never over the base or with no sheets) and **headless**: a fresh 2nd sheet shows the canvas overlay + the panel chip, a measurement over it shows the warning, and a successful Align clears both. lint 0 · build green.
+- **↑ Superseded by B316 (2026-06-21, owner call "don't let it measure on uncalibrated things"):** the **warn** became a **hard block** — a Distance/Area point over an un-aligned sheet is now refused at click time (`blockedOverUnaligned`, nothing commits), and the chip reads "Not aligned — Align before measuring." `measureOverUnaligned`/`aligned`-state unchanged. See B316 / V83.
 
 ### B302 — Degenerate 2-point Area (0 sf) and 2-point Perimeter (single segment) are committable `[Doc Review / Markup]` (bug)  *(arrived as "NEW-3" 2026-06-20 owner chat; first filed B290 then renumbered **B302**; batch B300–B302)*
 `[x]` **Done 2026-06-20 (branch `claude/admiring-hypatia-xjv8a1`).** Repro (numerically verified): `finishDraft` committed Area/Perimeter at ≥2 points, but a real polygon needs ≥3 — a 2-point Area saved as **0 sf** (shoelace) and a 2-point Perimeter drew closed yet measured only the single segment (10 ft for a 10-unit span at 1 ft/u, not the 20 ft a closed loop implies), leaving meaningless zero/half entries in the takeoff list. **Fix:** added **`MIN_MEASURE_PTS` + `canCommitMeasure(kind,n)`** to `lib/takeoff.js` (area/perimeter ≥3, distance 2, count 1 — matching what `polyArea`/`pathLength` actually need) and gated **both** finish paths on it — Enter/`finishDraft` and (after merging main's B291 phantom-point fix) double-click/`onDbl` — so a 2-point Area/Perimeter is a no-op (the draft is cleared) whichever way you finish, consistent with the existing count min-point guard. Other kinds (distance/rect/cloud/calibrate) are unaffected.

@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Shell from "./app/Shell.jsx";
+import { ThemeProvider } from "./shared/theme/ThemeProvider.jsx";
 import { installChunkReloadGuard } from "./app/chunkReload.js";
 import { installClientErrorTelemetry } from "./shared/telemetry/clientErrors.js";
 import "./index.css";
@@ -19,6 +20,8 @@ installChunkReloadGuard();
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <Shell />
+    <ThemeProvider>
+      <Shell />
+    </ThemeProvider>
   </React.StrictMode>
 );
