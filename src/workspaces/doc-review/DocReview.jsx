@@ -20,7 +20,7 @@ import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
-import { screenToWorld, zoomAround, fitView, shouldPan } from "../../shared/viewport/viewportTransform.js";
+import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -138,6 +138,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
+  const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
@@ -542,6 +545,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const r = wrap.getBoundingClientRect();
     return screenToWorld(v, { x: e.clientX - r.left, y: e.clientY - r.top });
   };
+  // Viewport-relative screen point (for two-finger pinch midpoint math). (B331)
+  const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => (v ? pinchZoom(v, pinchRef.current.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
+    pinchRef.current = { mid, dist };
+  };
 
   const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
 
@@ -562,6 +576,19 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   const onDown = (e) => {
     if (!pageBase || !view) return;
+    // Two-finger touch pinch (B331): track touch pointers; a 2nd touch starts a pinch and takes
+    // over from any pan/draw in progress. Gated on pointerType==='touch' → mouse/trackpad untouched.
+    if (e.pointerType === "touch") {
+      pointersRef.current.set(e.pointerId, vpPoint(e));
+      if (pointersRef.current.size === 2) {
+        const [a, b] = [...pointersRef.current.values()];
+        pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+        touchPinchedRef.current = true;
+        panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
+        e.preventDefault();
+        return;
+      }
+    }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
     // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
@@ -604,6 +631,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onMove = (e) => {
+    if (pinchRef.current && e.pointerType === "touch") { // two-finger pinch in progress (B331)
+      if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+      applyPinch();
+      return;
+    }
     if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B329)
       const d = panRef.current;
       setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
@@ -622,6 +654,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onUp = (e) => {
+    if (e.pointerType === "touch") { // wind down a touch pointer / pinch (B331)
+      pointersRef.current.delete(e.pointerId);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (pointersRef.current.size > 0) return;            // fingers remain — wait for full lift
+      if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
+    }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
@@ -642,7 +681,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
   // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
-  const onCancel = () => { panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); };
+  const onCancel = (e) => {
+    if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
+  };
 
   const finishDraft = () => {
     if (!draft) return;

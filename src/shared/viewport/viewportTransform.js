@@ -69,3 +69,21 @@ export function shouldPan({ button = 0, spaceHeld = false, tool = "select", onOb
   if (tool === "select") return !onObject;
   return false;
 }
+
+/* ---- two-finger touch pinch (B331) ---- */
+// Midpoint + distance between two screen points (viewport-relative). A pinch gesture is
+// described by its midpoint moving + the finger distance changing frame to frame.
+export const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/* Apply one frame of a two-finger pinch. Zoom by `factor` (= currentFingerDist /
+ * previousFingerDist) about the gesture's PREVIOUS midpoint (so the sheet under the
+ * fingers stays under them), then translate so that anchored world point follows the
+ * fingers to the CURRENT midpoint — i.e. a pinch both zooms AND pans, like every map.
+ * `prevMid`/`currMid` are viewport-relative screen points. This is the touch counterpart
+ * of `zoomAround` (which the wheel/trackpad-pinch path already uses). */
+export function pinchZoom(v, prevMid, currMid, factor, min = 0.02, max = 8) {
+  const w = screenToWorld(v, prevMid);          // world point under the fingers last frame
+  const scale = clampNum(v.scale * factor, min, max);
+  return { scale, tx: currMid.x - w.x * scale, ty: currMid.y - w.y * scale };
+}

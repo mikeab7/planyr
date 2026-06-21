@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   worldToScreen, screenToWorld, zoomAround, panBy, fitView, shouldPan, clampNum,
+  midpoint, distance, pinchZoom,
 } from "../src/shared/viewport/viewportTransform.js";
 
 describe("viewport transform — world<->screen round trip", () => {
@@ -97,5 +98,41 @@ describe("clampNum", () => {
     expect(clampNum(5, 0, 3)).toBe(3);
     expect(clampNum(-1, 0, 3)).toBe(0);
     expect(clampNum(2, 0, 3)).toBe(2);
+  });
+});
+
+describe("two-finger pinch (B331)", () => {
+  it("midpoint + distance", () => {
+    expect(midpoint({ x: 0, y: 0 }, { x: 10, y: 20 })).toEqual({ x: 5, y: 10 });
+    expect(distance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+  });
+
+  it("pinching apart by 2× zooms in 2× about the fingers", () => {
+    const v = { scale: 1, tx: 0, ty: 0 };
+    const mid = { x: 200, y: 150 };
+    const nv = pinchZoom(v, mid, mid, 2); // fingers spread to 2× distance, midpoint unchanged
+    expect(nv.scale).toBe(2);
+    // the world point under the midpoint stays under the midpoint
+    const before = screenToWorld(v, mid), after = screenToWorld(nv, mid);
+    expect(after.x).toBeCloseTo(before.x, 9);
+    expect(after.y).toBeCloseTo(before.y, 9);
+  });
+
+  it("a pinch that also slides pans by the midpoint movement", () => {
+    const v = { scale: 2, tx: 30, ty: 40 };
+    const prevMid = { x: 100, y: 100 }, currMid = { x: 160, y: 130 };
+    const anchorWorld = screenToWorld(v, prevMid); // world point under the fingers last frame
+    const nv = pinchZoom(v, prevMid, currMid, 1); // no zoom (factor 1), pure two-finger pan
+    expect(nv.scale).toBe(2);
+    // that same world point now sits under the NEW midpoint (the fingers carried it there)
+    const at = worldToScreen(nv, anchorWorld);
+    expect(at.x).toBeCloseTo(currMid.x, 9);
+    expect(at.y).toBeCloseTo(currMid.y, 9);
+  });
+
+  it("respects the scale clamp", () => {
+    const v = { scale: 5, tx: 0, ty: 0 };
+    const mid = { x: 50, y: 50 };
+    expect(pinchZoom(v, mid, mid, 4, 0.05, 8).scale).toBe(8); // 5*4 clamps to 8
   });
 });

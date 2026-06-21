@@ -22,7 +22,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
-import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
+import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -1290,6 +1290,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const pointersRef = useRef(new Map()); // live touch pointers → svg-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence (B331)
+  // Viewport-relative screen point for the pinch midpoint math (the SVG fills the canvas wrapper).
+  const vpPoint = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
+  // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, pinchRef.current.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    pinchRef.current = { mid, dist };
+  };
+  // Pinch runs on the CAPTURE phase so a touch landing on a parcel/building (which has its own
+  // pointer handler) is still caught. Gated on pointerType==='touch' — mouse/trackpad never enter.
+  // A 2nd touch starts the pinch (stopPropagation so the bg/element handlers don't also fire) and
+  // tears down the 1st finger's in-progress drag (revert a half-move, B315). (B331)
+  const onPinchDown = (e) => {
+    if (e.pointerType !== "touch") return;
+    pointersRef.current.set(e.pointerId, vpPoint(e));
+    if (pointersRef.current.size === 2) {
+      e.stopPropagation();
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      touchPinchedRef.current = true;
+      if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
+      capturePidRef.current = null; cancelActiveMove(); drag.current = null;
+      setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
+    }
+  };
+  const onPinchMove = (e) => {
+    if (!pinchRef.current || e.pointerType !== "touch") return;
+    e.stopPropagation();
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+    applyPinch();
+  };
+  const onPinchUp = (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPinchedRef.current) e.stopPropagation(); // suppress the bubble handlers for the whole pinch sequence
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+  };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
@@ -1619,6 +1664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarquee(null);
     setMkRect(null);
     setDraftRect(null);
+    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // clear any two-finger pinch (B331)
   };
   // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
   // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
@@ -5634,6 +5680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
+            onPointerDownCapture={onPinchDown} onPointerMoveCapture={onPinchMove} onPointerUpCapture={onPinchUp} onPointerCancelCapture={onPinchUp}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
