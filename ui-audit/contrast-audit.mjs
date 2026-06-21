@@ -1,4 +1,4 @@
-/* Programmatic WCAG contrast audit for the Planyr theme tokens (B321).
+/* Programmatic WCAG contrast audit for the Planyr theme tokens (B341).
  *
  * Parses the REAL token values from src/index.css (light :root + dark
  * [data-theme="dark"]), resolves var() aliases and composites rgba() over its
@@ -11,7 +11,7 @@
  * Run: node ui-audit/contrast-audit.mjs   (exit 1 if any pair fails its floor)
  *
  * This is the "run a programmatic check across every defined token pair rather
- * than eyeballing" deliverable from the B321 contrast-regression audit, and a
+ * than eyeballing" deliverable from the B341 contrast-regression audit, and a
  * standing guard so a future palette edit can't silently re-introduce a
  * low-contrast pair.
  */
@@ -120,7 +120,7 @@ const PAIRS = [
   ["--accent-markup-text", "--chrome-bg", "Markup tab text · chrome", T],
   ["--accent-markup-text", "--chrome-bg-elev", "Markup tab text · chrome-elev", T],
   // Module accent TEXT on a light card (breadcrumb "current"/"New project" labels use
-  // the -text token after the B321 fix — verifies accent-as-foreground is legible).
+  // the -text token after the B341 fix — verifies accent-as-foreground is legible).
   ["--accent-site-text", "--surface-raised", "Site accent text · card", T],
   ["--accent-schedule-text", "--surface-raised", "Schedule accent text · card", T],
   ["--accent-markup-text", "--surface-raised", "Markup accent text · card", T],

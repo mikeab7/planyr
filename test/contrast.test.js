@@ -1,4 +1,4 @@
-/* WCAG contrast guard (B321) — every defined theme-token pair must clear its floor
+/* WCAG contrast guard (B341) — every defined theme-token pair must clear its floor
  * (4.5:1 normal text · 3:1 large/graphic) in BOTH light and dark, parsed from the real
  * src/index.css. Documented exceptions (locked brand fills, owner-exempt subtle borders)
  * are allowed as WARN and listed explicitly. This is the programmatic check that the

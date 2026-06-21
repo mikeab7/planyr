@@ -10,7 +10,7 @@ import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } fr
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
 
-// Badge label colors are chrome tokens (themes with the app, B321): the bright
+// Badge label colors are chrome tokens (themes with the app, B341): the bright
 // dark-chrome hexes (#86efac / #fbbf24 / #9b9482) were illegible on the light bar.
 const BADGE = {
   saving:  { text: "Saving…", color: "var(--warn-text)", dot: "#f59e0b" },

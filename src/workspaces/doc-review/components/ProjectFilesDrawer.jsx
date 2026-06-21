@@ -26,7 +26,7 @@
  *    array (see shared/files/uploadQueue.js), not two separate lists.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, upsertFileFacts, listFileFacts, DISCIPLINES } from "../lib/reviewStore.js";
+import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, upsertFileFacts, listFileFacts, markReviewPlaced, DISCIPLINES } from "../lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
@@ -285,7 +285,15 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                           )}
                         </div>
                         {f.unfiled && <RefileRow projects={projects} value={refileSel[f.id]} onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />}
-                        {showPlan && <PlacePlan plan={placePlan.plan} onGo={() => { onPlaceOnMap?.(reviews.find((x) => x.id === f.id) || f, placePlan.plan); setPlacePlan(null); onClose?.(); }} onDismiss={() => setPlacePlan(null)} />}
+                        {showPlan && <PlacePlan plan={placePlan.plan} onGo={async () => {
+                          const r = reviews.find((x) => x.id === f.id) || f;
+                          // Record the Filed → On-map transition so the badge reflects it on
+                          // reopen (NEW-3); optimistically flip it locally too. Best-effort —
+                          // the handoff to the map proceeds regardless.
+                          setReviews((rs) => rs.map((x) => (x.id === f.id ? { ...x, placed: true } : x)));
+                          try { await markReviewPlaced(f.id); } catch (_) { /* non-fatal */ }
+                          onPlaceOnMap?.(r, placePlan.plan); setPlacePlan(null); onClose?.();
+                        }} onDismiss={() => setPlacePlan(null)} />}
                       </div>
                     );
                   })}

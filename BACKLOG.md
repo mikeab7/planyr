@@ -22,6 +22,104 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups,
+     stitches, crops, and calibrates itself" (the headline auto-assembly tranche). FIRST filed B325–B329,
+     but a VERY hot `main` (PR #238 viewport/rail B329–B331 + #240 file-class B326–B328 + #241 pan-crash
+     B325, all merged while this integrated) consumed B325–B334 — so to avoid two items sharing a number
+     this batch renumbered B325–B329 → **B335–B339** (+ **B340** for the deferred tails); highest B# across
+     both files was B334 at merge time. Per STANDING RULE #1: filed here AND implemented + headless-verified
+     the SAME session (branch `claude/loving-newton-t7gzpq`); the shipped [x] blocks live in BACKLOG-DONE.md.
+     DEDUP (owner flagged two CLAUDE.md roadmap lines being pulled forward — FOLD, don't duplicate):
+       • B336 (NEW-2) FOLDS the auto-filing roadmap detail "read its title block." NOT a duplicate of the
+         shipped filing reader (B312 `titleBlockParse.js`/`localRead.js` + B299 server) — those read a
+         JOINED string for filing fields. B336 is the POSITIONAL superset grouping/stitching need (per-item
+         x/y, title-block BAND, sheet TITLE, stated SCALE via B267 `parseSheetScale`, match-line labels with
+         position+orientation). EXTENDS + REUSES both, no second reader.
+       • B337 (NEW-3) IS the roadmap line "automatic match-line detection later," now specified — folded,
+         not a new parallel item. Builds on the existing `solveM()` (`stitchGeom.js`, B300); keeps the
+         2-point manual Align as the safety net.
+       • B339 (NEW-5) — the SINGLE-SHEET half already ships (B267 `autoDetectScales`); B339's net-new part
+         is the STITCHER/grouped-composite half + the graphic scale-bar fallback. Reuses `overlayScale.js`.
+       • B335 (grouping) + B338 (crop + merged legend) are net-new.
+     SHIPPED + headless-verified this session (V87, `ui-audit/verify-b335-b339.mjs`, 13/13, 0 page errors;
+     30 new unit tests; full suite green) — full [x] blocks in BACKLOG-DONE.md. The CV/heavy-dep TAILS
+     behind the seams (scanned-sheet OCR, graphic scale-bar, geometric edge-line stitch, legend symbol-
+     union) are filed together as **B340** in 🕓 Later / Roadmap (genuine can't-now: heavy deps / computer-
+     vision / not headless-verifiable — the manual-Align safety net + text-layer path cover the common
+     case today). NB: renumber touched only THIS batch's refs; main's B325 (pan-crash) / B329 (viewport)
+     / B326–B328 (file-class) left intact. -->
+
+<!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
+     navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314, but a
+     VERY hot `main` consumed the numbers repeatedly while this integrated — B313–B319 (multi-tab/
+     stale-save, undo, stitch-block, theming), B320–B324 (theming contrast pass + the Doc-Review
+     file-storage batch), then B325 (Stitcher pan-crash) — so this batch renumbered B313/B314 → B320/B321
+     → B325/B329 → finally **B329/B330**, plus **B331** for the touchscreen-pinch follow-up. (V80→**V85**;
+     main reached V84.) Built +
+     verified; merging via **PR #238 → main** (branch claude/gifted-heisenberg-a6zlvt), which folds in the
+     latest `main` (theming CSS vars + the file-storage changes). Code/tests/harnesses swept to B329/B330
+     (main's own B313/B314 + B322/B323 refs left intact); the two dedicated harnesses were renamed to
+     feature names (`verify-markup-viewport` / `verify-markup-rail`) so a future renumber can't strand
+     them. Deduped: B329 is NET-NEW vs the shipped scroll-based **B288–B290** (it swaps in the Site map's
+     TRANSFORM model + one shared engine); B330 net-new (no item moved the Markup tools off the header). -->
+
+### B329 — Markup canvas pan + zoom parity with the Site map (one shared viewport engine) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; filed B313 → B320 → renumbered **B329** as a hot `main` twice took the number)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** One shared viewport engine (`src/shared/viewport/viewportTransform.js`: `worldToScreen`/`screenToWorld`/`zoomAround`/`panBy`/`fitView`/`shouldPan`) now drives the Site map, the Markup canvas, AND the Stitcher. The Markup viewer was re-architected scroll-box → transform (`view={scale,tx,ty}`): **free pan in any direction** (the old scroll box couldn't slide past a fit-width sheet — the "only scrolls vertically" repro), cursor-anchored zoom, **Bluebeam pan/tool collision** (middle-mouse always pans; Space-hold pans; Select on empty pans, on an object selects/moves; a drawing tool draws), **view-transform-only** (markups stay page-unit, calibration untouched), and a perf path that rescales the existing bitmap during a zoom and re-rasterises crisply (debounced) on settle. The Site map + Stitcher migrated their pan/zoom math to the same engine, **byte-identical** (unit-tested) — verified unchanged. Trackpad pinch (ctrl+wheel) routes through the wheel path; touchscreen two-finger pinch is **B331** (follow-up).
+> **Verified (V84):** 43/43 headless — `verify-markup-viewport.mjs` 13/13 (free pan L/R/down, cursor-anchored zoom 0.1px drift, calibrated measurement reads identical feet through zoom+pan + stays calibrated, middle-mouse pans-without-drawing, draw+select-move, sheet-switch keeps zoom), `verify-siteplanner-viewport.mjs` 6/6 (Site map unchanged), `verify-docreview-viewer.mjs` 13/13 (B288–B296 still green) + viewportTransform unit tests. Eligible to move to BACKLOG-DONE on merge.
+
+### B330 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; filed B314 → B321 → renumbered **B330**)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** New shared, presentational rail `src/shared/ui/ToolRail.jsx`; Markup adopts it — the 10 drawing/measure tools + zoom (In/Out/Fit/Page + a % readout) moved off `AppHeader` row 2 into a right-side icon rail, flush to the canvas, active highlight on the Markup accent **#EF9F27**, Select default; the Takeoff panel is now collapsible beside it. Row 2 keeps Open/Stitch/Library/filename + Undo/Redo (never empty). Site Planner keeps its own inlined rail for now (can adopt the shared one later). **V84:** `verify-markup-rail.mjs` 11/11 headless + no regression. Eligible to move to BACKLOG-DONE on merge.
+
+### B331 — Touchscreen two-finger pinch-zoom on the Markup canvas + the Site map `[Doc Review / Markup + Site Planner]` (feature)  *(owner-requested 2026-06-21 right after B329/B330; minted **B331** — next free after B324)*
+`[x]` **Built + verified (2026-06-21), on branch `claude/gifted-heisenberg-a6zlvt` — ready to ship.** One shared pinch helper now drives both canvases: `viewportTransform.js` gains `midpoint`/`distance`/`pinchZoom(v, prevMid, currMid, factor)` — the touch counterpart of `zoomAround` (zoom by the finger-distance ratio about the gesture's previous midpoint, then translate so that anchored point follows the fingers to the new midpoint, so a pinch both zooms AND pans). The Markup canvas (`DocReview.jsx`) wires it bubble-phase (its children are `pointerEvents:none`, so the gesture reaches the host); the Site map (`SitePlanner.jsx`) wires it **capture-phase** + `stopPropagation` (touches land on the SVG `<rect>` children which carry their own handlers, so the pinch must intercept first). Both paths are **gated on `pointerType==='touch'` + exactly 2 active pointers**, so the verified mouse/trackpad/wheel (ctrl+wheel) path is byte-for-byte untouched; **view-transform only** — stored geometry/calibration never move. **Verified (V88):** `verify-pinch.mjs` 5/5 (REAL trusted multitouch via CDP `Input.dispatchTouchEvent` on a `hasTouch` context — Site map spread/pinch 1.25→4.71→1.53 px/ft, Markup canvas 603→2009→670 px, 0 errors) + all mouse-path regressions green on the same build (`verify-markup-viewport` 13/13, `verify-siteplanner-viewport` 6/6, `verify-markup-rail` 11/11, `verify-docreview-viewer` 13/13, the merged Stitcher set `verify-b335-b339` 13/13); +4 unit tests (850 total); lint 0; build green; lazy chunks intact. Eligible to move to BACKLOG-DONE on merge.
+<!-- 2026-06-21: coworker-chat batch NEW-1..NEW-3 (+ a B40 amendment, folded into B40 below, NOT a new
+     item) — Document Review file-classification + canvas-memory + on-map-badge bugs. Minted **B326/B327/
+     B328** — FIRST filed B321/B322/B323 (B320 was the max at filing time), but a concurrent `main` batch
+     (#239, Doc Review FILE-STORAGE — the comment just below) had ALSO taken **B321–B324**, then #241 took
+     **B325** (the stitcher pan-crash, now in BACKLOG-DONE.md), while this was in flight — so to clear the
+     collisions this batch renumbered to the next clear band after B325 (the rules forbid two items sharing
+     a number). Shipping via **PR #240 → `main`**.
+     **Deduped — all net-new, INCLUDING vs main's adjacent B321–B324 file-storage batch:**
+       • B326 (CAD→reference) — a one-line classification gap in B180's `fileFacts.js`; NOT B180/B182,
+         and NOT main's B321 (Drive-delete orphan) — different concern (classification vs storage I/O).
+       • B327 (canvas pixel budget) — NOT the B288–B296 zoom/pan batch nor B265/B247 (render fidelity),
+         and NOT main's B322 (Open-PDF→Drive routing) — that's the storage backend, this is canvas memory.
+       • B328 (dead Filed/On-map badge) — a plumbing bug in B180's drawer (listReviews dropped `placed`);
+         NOT B180/B181/B182, and NOT main's B323 (keyless-source guard) — different field, different path.
+     Per STANDING RULE #1 filed AND fixed the same session (branch `claude/modest-turing-wixo1y`):
+     lint 0 · **802 tests** (12 new across fileFacts/renderBudget/fileIndex) · build green; doc-review
+     lazy chunk split still holds. B327/B40 also headless-verified (V85). Eligible to move to
+     BACKLOG-DONE.md on a future pass. -->
+
+### B326 — "CAD" discipline is misclassified as reference, so CAD drawings can't be placed on the map `[Doc Review / Files]` (bug)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B326** — first filed B321, renumbered as concurrent `main` #239 took B321–B324 then #241 took B325)*
+`[x]` **Repro:** file a drawing under the **CAD** discipline → in Project Files it gets the "reference" tag, no "Place on map" button, and it lands in "Reference docs" instead of "On-the-map docs". CAD is the most placeable class of all (it's literally the drawings). **Cause:** `shared/files/fileFacts.js` `SPATIAL_DISCIPLINES` omitted "CAD", so it fell through to the `DOC_CLASS.REFERENCE` default (intentional only for genuinely-ambiguous cases like "Other"). **Fixed this session (branch `claude/modest-turing-wixo1y`):** added "CAD" to `SPATIAL_DISCIPLINES` so it classifies spatial (gets the Place-on-map action + the spatial saved-views); "Other" still defaults to reference. New unit test alongside the existing `classifyDocClass` tests. lint 0 · 802 tests · build green. Shipping via PR #240 → `main`.
+
+### B327 — Canvas memory budget isn't enforced at high zoom; a large sheet can allocate ~500 MB and OOM the tab `[Doc Review / Markup]` (bug)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B327** — first filed B322, renumbered past main #239's B321–B324 + #241's B325)*
+`[x]` **Repro (numerically verified + headless-confirmed):** an E-size sheet (2448×1584 pt) at 600% zoom allocated a ~140 MP / ~533 MB RGBA backing store — far past the "≤ ~24 MP" the code claimed. **Cause:** `lib/pdf.js` `backingScale` floored the density at 1× (`Math.max(1, …)`), which DEFEATED the budget once the CSS area (base×scale) alone passed ~24 MP — a 1× backing store was already over budget and kept growing with zoom → out-of-memory tab crash, not graceful degradation. **Fixed this session (branch `claude/modest-turing-wixo1y`):** extracted the budget math to a pure, unit-testable `lib/renderBudget.js` and let the device-pixel density drop BELOW 1× when needed, so total backing pixels stay ≤ ~24 MP at ANY zoom (a slightly soft raster on a huge sheet at 600% beats an OOM crash). The CSS box stays exactly base×scale, so the markup overlay + zoom-anchor math are untouched (no geometry change). New `test/renderBudget.test.js` proves ≤24 MP holds for scales 0.5–6 × dpr 1–3; headless `ui-audit/verify-b322-b40.mjs` reads a real 6090×3940 = 24.0 MP canvas at the 600% max (V85). Builds on B247/B265. lint 0 · 802 tests · build green. Shipping via PR #240 → `main`.
+
+### B328 — Project Files "Filed / On-map" badge can never show "On-map" `[Doc Review / Files]` (bug, minor)  *(arrived as coworker-chat "NEW-3" 2026-06-21; minted **B328** — first filed B323, renumbered past main #239's B321–B324 + #241's B325)*
+`[x]` **Repro:** every file in the drawer showed "○ filed", never "● on map", even for a placed spatial drawing. **Cause:** `fileState` returns ON_MAP only when `isSpatial(f) && f.placed`, but the lightweight `listReviews` query never selected `placed` (and nothing wrote it), so `f.placed` was always falsy. **Fixed this session (branch `claude/modest-turing-wixo1y`):** (a) `listReviews` now pulls just the flag out of the data jsonb (`placed:data->placed`, not the heavy payload; falls back to the core columns on any error → degrades to "filed", never regresses); (b) `toFileFact` parses it whether it arrives as a JSON boolean or text; (c) new `reviewStore.markReviewPlaced(id)` is the write half, called from the drawer's "Place on map" confirm so a placed file flips to On-map on reopen; (d) `fileIndex.mergeFactsIntoReviews` now OR-ins `placed` so a facts-index row without `placement.placed` can't silently un-place a placed review. New tests in `fileFacts.test.js` + `test/fileIndex.test.js`. Note: the full auto-placement backend (B182) is still unbuilt — this makes the badge LIVE for the manual placement flow that exists today; B182 will set the same flag at true completion. lint 0 · 802 tests · build green. Shipping via PR #240 → `main`.
+
+<!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
+     "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across BACKLOG.md +
+     BACKLOG-DONE.md was B315; the B25431 / B3340 hits in BACKLOG-DONE.md are CSS hex colours, not IDs).
+     Per STANDING RULE #1: filed here AND fixed + verified the SAME session (branch
+     `claude/bold-bohr-hohz2x`); full [x] blocks live in BACKLOG-DONE.md.
+       • B321 (NEW-1) — deleteReview orphaned the Drive copy. PRIMARY ("no Drive delete anywhere") was
+         ALREADY shipped under the B207 Drive wiring (`deleteFromDrive` + the driveKeys loop); the RESIDUAL
+         (loadReview→null left keys=[] → nothing cleaned) is fixed via a local-mirror fallback. FIXED.
+       • B322 (NEW-2) — "Open PDF…" + every Stitcher sheet uploaded to Supabase only. Routed through the
+         shared Drive-first/Supabase-fallback `storeSource` (the same path filing uses); driveKey now
+         persisted + read back; lifts the 50 MB Supabase cap off big drawings on the happy path. FIXED.
+       • B323 (NEW-3) — a keyless source saved mid-upload became unfetchable on a quick reload. buildSnapshot
+         now persists a source only once it's really stored (`isStoredSource`). FIXED.
+       • B324 (NEW-4) — a genuine edit inside the post-open suspend window wasn't flagged dirty → never
+         reached the cloud. Pure `planAutosave` gate: load-echo skipped, real edits mirror+dirty+flush. FIXED.
+     Deduped — NEW-2/3/4 are net-new (NOT the viewer batch B288–B296 nor the stitch-guard batch B300–B302,
+     which never touched the storage backend choice or the autosave gating); B321 = the residual on top of
+     the already-shipped B207 Drive delete (distinct from B38(a) upsert re-file orphaning). lint 0 · 788
+     tests (8 new in test/docPersistence.test.js) · build green · doc-review lazy chunk intact. -->
+
 ### B316 — Hard-block (not just warn) measuring over a not-yet-aligned stitch sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-20: "don't let it measure on uncalibrated things" — tightens the shipped B301; first filed B303, renumbered **B316** — a hot `main` consumed B303–B315)*
 `[x]` B301 shipped a **soft warning** when a Distance/Area landed over a sheet that hadn't been aligned yet — but it still **committed** the measurement, so a silently-wrong length/area could land in the takeoff. Owner asked for a hard block. **Fixed + shipped to `main` this session (branch `claude/awesome-feynman-i7wypf`):** a distance/area point on an un-aligned sheet (`measureOverUnaligned`) is now **refused at click time** — "Align that sheet before measuring on it — its scale isn't set yet…" — so no measurement over an un-aligned sheet can be created. Calibrate stays exempt (it's the act of *setting* the scale). The right-panel chip now reads "Not aligned — Align before measuring" (was "measurements may be off"). Reuses B301's `aligned`-state + `measureOverUnaligned`; new `Stitcher.jsx` `blockedOverUnaligned`. Verified headless (`ui-audit/verify-b300-b302.mjs`: block banner shown + 0 committed lines) · lint 0 · 743 tests · build green.
 
@@ -930,6 +1028,7 @@ Systematic read-through of the whole codebase (5 parallel audits, each finding v
 
 ### B40 — Superseded PDF render tasks are never cancelled `[Document Review]` (bug) — perf, high
 `[x]` 🔧 fixed 2026-06-15 (branch `chore/audit-safe-fixes-b39-b45`): `renderPageToCanvas` now exposes its `RenderTask` (an `onTask` callback); `render()` keeps it in a ref, `cancel()`s the prior one before each render and on unmount, and swallows `RenderingCancelledException`. `renderPageToCanvas` creates `page.render(...)` and only awaits its promise; `render()` discards the stale *result* via the `renderTok` token but never calls `task.cancel()`. Rapid page/zoom changes pile up overlapping renders and can hit PDF.js's "cannot use the same canvas during multiple render operations" (throw/torn output). Fix: return the `RenderTask`, keep a ref, `cancel()` before starting a new one and on unmount; treat `RenderingCancelledException` as a no-op.
+> **Amendment — residual same-canvas race, fixed 2026-06-21 (branch `claude/modest-turing-wixo1y`).** (Folded in from a coworker-chat note, not a new item.) The B40 fix had a hole: `renderTaskRef.current` is only populated AFTER `await pdf.getPage()` inside `renderPageToCanvas`, so during render #1's getPage await, render #2 starts, finds `renderTaskRef.current` still null (nothing to cancel), and both proceed to `page.render()` on the same canvas — the exact "Cannot use the same canvas during multiple render operations" error B40 targeted, swallowed, leaving the canvas on a superseded sheet. **Fix:** `renderPageToCanvas` now takes an `isStale` predicate and checks it right BEFORE `page.render()`; `DocReview.jsx` passes `() => tok !== renderTok.current`, so a render superseded mid-getPage bails (returns null) before it touches the canvas — only the newest render draws. Verified: lint 0 · 802 tests · build green; headless `ui-audit/verify-b322-b40.mjs` shows 0 same-canvas errors across rapid switches (V85). Shipping via PR #240 → `main` (with the B326–B328 batch).
 
 ### B41 — Global keydown effects have no deps array → re-subscribe on every render (hot path) `[Document Review]` (bug) — perf, high
 `[x]` 🔧 fixed 2026-06-15 (branch `chore/audit-safe-fixes-b39-b45`): both now bind the `keydown` listener ONCE (`[]` deps) and dispatch through an `onKeyRef` refreshed each render, so the handler keeps live closures without re-subscribing on every render. DocReview.jsx and Stitcher.jsx register their `keydown` listener in an effect with no dependency array (the `}); // eslint-disable-line` pattern), so the handler is removed+re-added after *every* render — and `onPointerMove`→`setCursor` re-renders dozens of times/second while drawing. Fix: register once with `[]` and read `draft`/`sel`/handlers from refs inside `onKey`.
@@ -1440,6 +1539,14 @@ Original spec:
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B340 — Auto-assembly CV/OCR tails behind the B335–B339 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B335–B339 batch; minted **B340** — a hot `main` took B325–B334)*
+`[ ]` The B335–B339 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. Four tails are deferred behind clean injectable seams because each is heavy-dependency or computer-vision work that **can't be headless-verified in the sandbox**, and the manual-Align safety net + text-layer path already cover the common case:
+  1. **Scanned-sheet OCR** — the `ocr` seam in `doc-review/lib/sheetRead.js` is wired (a no-text page calls it); fill it with **Tesseract.js in a Web Worker** so an image-only sheet still groups/stitches. Deferred: ~2 MB wasm dep + training data fetch, and no scanned fixture to verify against here.
+  2. **Graphic scale-bar reading (B339 tail)** — when there's no stated scale text, measure the drawn scale bar to set `ftPerUnit`. Needs vector-graphics/CV analysis, not text.
+  3. **Geometric edge-line match (B337 middle fallback)** — when match-line *labels* are missing, match the cut geometry across two sheets' edges. Today, label-less sheets correctly drop to the 2-point manual Align **pre-seeded** with detected seam endpoints (the spec's final safety net, already wired) — this is the CV step between labels and manual.
+  4. **Legend symbol-union (B338 tail)** — extract each sheet's graphical legend entries and union them into the pinned Composite key (today the key lists the grouped plan + auto-scale; the crop + pinned panel ship). Needs symbol/vector extraction.
+> Each is gated behind a seam exactly like the app's other not-yet-provisioned heavy compute (the AI title-block reader, the APS converter). Pick up when there's a way to verify (a scanned sample set; a CV pass we can headless-check). Coupled to the ★ north-star "map → drawings → latest set."
 
 ### B256 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B256**)*
 `[ ]` `cascadeDates`/`rollupParentDates` re-filter the task list repeatedly on each edit; `depLines` calls `tasks.indexOf` inside its loop; `rolledHealthMap`/`progressMap` recurse with `.filter`. Fine at the current ~180 tasks; will start to feel laggy past ~500. Fix: build an `id → index` map and a `parent → children[]` map once per recompute and reuse them — behaviour-preserving. **Verify** every task's start/end/duration is byte-identical before/after on the real production dataset. Gated by board size → Later until a board actually grows that large.

@@ -41,7 +41,7 @@ const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--
 const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
 
 // Light / Dark / System theme options. The picker now lives inside the row-1 Settings
-// gear popover (B322) rather than sitting open in the header — decluttered, but still one
+// gear popover (B342) rather than sitting open in the header — decluttered, but still one
 // click and reachable signed-out. Pure local theme switch (reads/sets the ThemeProvider,
 // whose matchMedia "System" listener is independent of where this control mounts). (B317)
 const THEME_OPTS = [
@@ -57,7 +57,7 @@ const settingsPanel = {
 };
 
 // Settings gear (row-1 right zone) → popover hosting the display-theme picker. Always
-// present, signed in or out, so the theme switch never depends on the account menu. (B322)
+// present, signed in or out, so the theme switch never depends on the account menu. (B342)
 function SettingsMenu({ mode, setMode }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
@@ -261,7 +261,7 @@ export default function AppHeader({
   }, []);
 
   // The breadcrumb uses `accent` as foreground TEXT ("current" / "New project"), so it
-  // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B321/B318).
+  // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B341/B318).
   const accent = ACCENT_TEXT[module] || "var(--accent)";
 
   // When fullscreen, render only a floating exit button; the header collapses

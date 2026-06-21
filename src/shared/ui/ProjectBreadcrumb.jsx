@@ -26,7 +26,7 @@ import AnchoredMenu from "./AnchoredMenu.jsx";
 import { listProjects, filterProjects, relTime } from "../projects/projects.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
-// chrome tokens, not the retired warm-dark hexes (white-on-light was the B321 bug).
+// chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
 const MUTED = "var(--chrome-muted)";
 const LINE = "var(--chrome-divider)";
 const INK = "var(--chrome-text)";
@@ -71,7 +71,7 @@ const divider = { height: 1, background: "var(--border-default)", margin: "6px 4
 
 export default function ProjectBreadcrumb({
   currentProject,
-  accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B321)
+  accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B341)
   onDashboard,
   onSelectProject,
   onNewProject,

@@ -20,7 +20,7 @@ import {
 } from "../lib/coverage.js";
 
 // This panel rides on the themed var(--surface-overlay) container, so its text must
-// be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B321).
+// be theme tokens — the old warm cream-era hexes were dark-on-dark in dark mode (B341).
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
 const STATUS = {

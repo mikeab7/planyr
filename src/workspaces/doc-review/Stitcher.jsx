@@ -13,12 +13,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
-import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
+import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
+import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
+import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
+import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
@@ -45,6 +48,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B304)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
+  const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
+  const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
+  const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
+  const [notice, setNotice] = useState("");                // transient auto-stitch result line
   const drag = useRef(null);
 
   /* ---- undo / redo (B303) — measures + the composite calibration ---- */
@@ -128,13 +136,29 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         const miss = pdfsRef.current.find((p) => p.missing && sameName(p.name, f.name));
         if (miss) { await bindSource(miss.srcId, doc, f); continue; }
         const srcId = newSourceId();
-        setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, oversize: false, missing: false }]);
-        uploadSource(srcId, f, meta.projectId, meta.discipline).then((r) =>
-          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, oversize: !!r.oversize } : x)))
-        ).catch(() => {}); // best-effort upload; don't leak an unhandled rejection
+        setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, driveKey: null, oversize: false, missing: false, groups: null }]);
+        readGroupsFor(srcId, doc); // B335/B336: read each page + collapse into logical sheets (background)
+        // Store Drive-first, Supabase-fallback (B322) — the same path filing uses, so stitched
+        // sheets live in Drive and aren't bound by Supabase's 50 MB cap. A sheet stays keyless
+        // in state until this resolves; buildSnapshot won't persist a keyless source (B323).
+        storeSource(srcId, f, { projectId: meta.projectId, discipline: meta.discipline, fileName: f.name }).then((r) =>
+          setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
+        ).catch(() => {}); // best-effort store; don't leak an unhandled rejection
       }
     } catch (_) { setErr("One of those files wasn't a readable PDF."); }
     finally { setBusy(false); }
+  };
+
+  // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
+  // the background after a drop — read-only, so it can't clobber the placement state; on any
+  // failure the file just falls back to the raw per-page tray (never blocks adding sheets).
+  const readGroupsFor = async (srcId, doc) => {
+    setReading(true);
+    try {
+      const { groups } = await readAndGroup(doc);
+      setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups } : x)));
+    } catch (_) { setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, groups: [] } : x))); }
+    finally { setReading(false); }
   };
 
   // Fill in a source's bytes after a re-drop, and re-render any sheets placed from it.
@@ -163,9 +187,72 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - r.left - view.panX) / view.zoom, y: (e.clientY - r.top - view.panY) / view.zoom }; };
+  /* Add a whole LOGICAL sheet at once (B335): render every page in the group, AUTO-STITCH them
+   * from their match-line seams (B337), AUTO-CALIBRATE from the stated scale (B339), and tag the
+   * title-block band so the composite can crop it (B338). A single-page logical sheet just drops
+   * one page. Sheets the seam graph can't reach stay aligned:false → the manual-Align safety net,
+   * pre-seeded with their detected seam endpoints. The drawing-area edge is the seam reference. */
+  const addGroup = async (pdf, group) => {
+    if (loadingRef.current) return;
+    setBusy(true); setNotice("");
+    try {
+      const built = [];
+      for (const pg of group.pages) {
+        const img = await renderPageToImage(pdf.doc, pg.pageNum, 2);
+        const da = pg.drawingArea && pg.drawingArea.w ? pg.drawingArea : { x: 0, y: 0, w: img.baseW, h: img.baseH };
+        built.push({
+          id: uid(), srcId: pdf.srcId, pageNum: pg.pageNum,
+          name: `${pdf.name.replace(/\.pdf$/i, "")} · ${pg.sheetNumber || "p" + pg.pageNum}`,
+          href: img.href, baseW: img.baseW, baseH: img.baseH,
+          drawingArea: da, sheetNumber: pg.sheetNumber || "", matchLines: pg.matchLines || [], missing: false,
+        });
+      }
+      const { placements, unplaced } = autoPlaceGroup(built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines })));
+      const existing = placedRef.current;
+      const GAP = 40;
+      const right = existing.length ? Math.max(...existing.map((s) => sheetBBox(s).maxX)) : 0;
+      // World bbox of the auto-placed members, so the whole group slots to the right of existing
+      // content with its internal layout preserved (a single translation, scale untouched).
+      const placedSheets = built.filter((s) => placements.has(s.id));
+      let minX = Infinity, minY = Infinity, maxX = -Infinity;
+      for (const s of placedSheets) { const bb = sheetBBox({ baseW: s.baseW, baseH: s.baseH, M: placements.get(s.id) }); minX = Math.min(minX, bb.minX); minY = Math.min(minY, bb.minY); maxX = Math.max(maxX, bb.maxX); }
+      if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 0; }
+      const dx = right + GAP - minX, dy = 40 - minY;
+      const crop = group.kind === "group";
+      const newSheets = placedSheets.map((s) => {
+        const M0 = placements.get(s.id);
+        return { ...s, M: { A: M0.A, B: M0.B, e: M0.e + dx, f: M0.f + dy }, aligned: true, grouped: crop, groupLabel: group.label };
+      });
+      // Unplaced members (no readable seam): drop them to the right, needing manual Align.
+      let off = right + GAP + (maxX - minX) + GAP;
+      for (const s of built.filter((s) => !placements.has(s.id))) {
+        newSheets.push({ ...s, M: { ...ID, e: off }, aligned: false, grouped: false, groupLabel: group.label });
+        off += s.baseW + GAP;
+      }
+      setPlaced((arr) => [...arr, ...newSheets]);
+      // Auto-calibrate the composite from the group's stated scale, once (B339).
+      let calMsg = "";
+      if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
+      setNotice(unplaced.length
+        ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.`
+        : built.length > 1 ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.` : "");
+    } finally { setBusy(false); }
+  };
 
-  const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
+  // Screen<->world via the shared viewport engine (B329); { zoom, panX, panY } == { scale, tx, ty }.
+  const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
+
+  // Start a manual Align. When the sheet's own match-line seam was detected (B336) but it
+  // couldn't be auto-placed, PRE-SEED the moving sheet's two seam endpoints so the user only
+  // clicks the two matching points on a placed sheet — half the clicks (B337 fallback chain).
+  const startAlign = (sheetId) => {
+    setTool("pan"); setDraft(null); setErr("");
+    const s = placed.find((x) => x.id === sheetId);
+    const ml = s && (s.matchLines || []).find((m) => m.side);
+    const ends = ml && s.drawingArea ? detectedEndpointsFor(s.drawingArea, ml.side) : null;
+    if (ends) setAlign({ sheetId, step: 0, seeded: true, b1: ends[0], b2: ends[1] });
+    else setAlign({ sheetId, step: 0 });
+  };
 
   // Hard-block a measurement that lands over a sheet that hasn't been aligned yet — its scale
   // isn't set until Align runs, so the length/area would be SILENTLY WRONG. Refuse the point
@@ -185,6 +272,20 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const w = toWorld(e);
     if (align) {
       const sheet = placed.find((s) => s.id === align.sheetId);
+      if (align.seeded) {
+        // The moving sheet's seam endpoints (b1,b2) are already known — just collect the two
+        // matching points on a placed sheet, then solve.
+        if (align.step === 0) { setAlign({ ...align, step: 1, A1: w }); return; }
+        const A2 = w;
+        if (alignBaselinesDegenerate(align.b1, align.b2, align.A1, A2)) {
+          setErr("Those two points are too close together — pick two points farther apart.");
+          setAlign({ sheetId: align.sheetId, step: 0, seeded: true, b1: align.b1, b2: align.b2 });
+          return;
+        }
+        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M: solveM(align.b1, align.b2, align.A1, A2), aligned: true } : s)));
+        setAlign(null); setErr("");
+        return;
+      }
       if (align.step === 0) setAlign({ ...align, step: 1, A1: w });
       else if (align.step === 1) setAlign({ ...align, step: 2, b1: inv(sheet.M, w) });
       else if (align.step === 2) setAlign({ ...align, step: 3, A2: w });
@@ -218,7 +319,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   };
   const onMove = (e) => {
     setCursor(toWorld(e));
-    if (drag.current) { setView((v) => ({ ...v, panX: drag.current.panX + (e.clientX - drag.current.sx), panY: drag.current.panY + (e.clientY - drag.current.sy) })); }
+    // Capture the drag origin into a local NOW, then close over it (panTo). This setView updater
+    // runs in React's render phase, which for a continuous event (pointermove) can be deferred a
+    // tick — and a discrete event in between (pointerup, pointercancel, or the blur/visibility
+    // abort below) may null drag.current first. Reading the ref *inside* the deferred updater
+    // then dereferenced null → the whole stitcher crashed (B325: "reading 'panX'"). The captured
+    // `d` keeps the pan correct even if the gesture is aborted mid-flight.
+    const d = drag.current;
+    if (d) setView((v) => panTo(v, d, e.clientX, e.clientY));
   };
   const onUp = (e) => { if (drag.current) { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} } };
   // NEW-1 — recover from a pan whose gesture was interrupted (browser pointercancel, window
@@ -233,7 +341,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     document.addEventListener("visibilitychange", onVis);
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
-  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
+  const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
   // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
   // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
@@ -244,7 +352,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
     setErr("");
-    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.zoom + view.panX, y: ((pts[0].y + pts[1].y) / 2) * view.zoom + view.panY, value: "" });
+    const mid = worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+    setCalInput({ pts, x: mid.x, y: mid.y, value: "" });
   };
   // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
   const commitCalibrate = () => {
@@ -284,9 +393,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     title: (meta.title || "").trim() || composeTitle(meta),
     project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
-    sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
+    sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [] })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -303,7 +412,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setReviewId(newReviewId());
     setMeta(newMeta());
     setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
-    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null);
+    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null); setNotice(""); setShowAllPages(false);
     clearHistory();
     pdfsRef.current = []; placedRef.current = [];
   };
@@ -323,11 +432,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       const srcEntries = [];
       for (const src of rec.sources || []) {
         let doc = null, missing = true;
-        if (!src.oversize && src.storageKey) {
-          const buf = await downloadSource(src.storageKey);
+        if (!src.oversize) {
+          // Read-back prefers Google Drive (the file's home), falls back to Supabase Storage
+          // so a pre-Drive sheet — or any Drive miss — still opens (B322, fallback-safe).
+          let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+          if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
           if (buf) { doc = await loadPdf(buf); missing = false; }
         }
-        srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, oversize: !!src.oversize, missing });
+        srcEntries.push({ srcId: src.srcId, name: src.name, size: src.size || 0, doc, numPages: doc ? doc.numPages : 0, blob: null, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize, missing });
       }
       if (tok !== loadTok.current) return; // a newer load started — don't overwrite its sources (B52)
       suspendSave(); // re-park across this load's async commits (B19)
@@ -341,7 +453,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         // First placed sheet is always the world frame; older saves predate the `aligned`
         // flag, so treat the rest as aligned (they were saved with a real transform) — only
         // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B301)
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false });
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [] });
         idx++;
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
@@ -380,12 +492,27 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return t;
   }, { distFt: 0, areaSf: 0 });
 
-  const tray = pdfs.flatMap((p) => Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":" + (i + 1), pdf: p, page: i + 1 })));
+  // The composite "key" (B338): the distinct grouped plans currently on the canvas (one merged
+  // entry per group, not one title block per sheet). Pinned as a panel so it stays readable at
+  // any zoom instead of being baked into the raster.
+  const composite = [...new Map(placed.filter((s) => s.groupLabel).map((s) => [s.groupLabel, s])).values()];
+
+  // The tray shows LOGICAL sheets (B335) once a file has been read+grouped: one entry per
+  // group/single, click to add the whole thing auto-stitched. "Show all pages" (or a file still
+  // being read) falls back to the raw per-page list — the safety net that never went away.
+  const trayItems = pdfs.flatMap((p) => {
+    const useGroups = !showAllPages && Array.isArray(p.groups);
+    if (useGroups) return p.groups.map((g, gi) => ({ key: p.srcId + ":g" + gi, pdf: p, group: g }));
+    return Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":p" + (i + 1), pdf: p, page: i + 1 }));
+  });
+  const anyGroups = pdfs.some((p) => Array.isArray(p.groups));
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
   const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
-  const alignMsg = align && ["Click reference point #1 (on a placed sheet)", "Click the SAME point on the sheet being aligned", "Click reference point #2", "Click the matching point #2 on the sheet"][align.step];
+  const alignMsg = align && (align.seeded
+    ? ["Seam detected — click where its FIRST end lands on the placed sheet", "Click where its SECOND end lands"][align.step]
+    : ["Click reference point #1 (on a placed sheet)", "Click the SAME point on the sheet being aligned", "Click reference point #2", "Click the matching point #2 on the sheet"][align.step]);
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
@@ -409,16 +536,30 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
         <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
+        <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
         <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* tray */}
-        <div style={{ flex: "none", width: 150, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
-          <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Available sheets</div>
-          {tray.length === 0 && <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>Open or drop PDFs to list their sheets here.</div>}
-          {tray.map((t) => (
+        <div style={{ flex: "none", width: 168, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{showAllPages || !anyGroups ? "Sheets" : "Logical sheets"}</div>
+            {anyGroups && <button onClick={() => setShowAllPages((v) => !v)} style={{ fontSize: 10, color: PAL.accent, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>{showAllPages ? "grouped" : "all pages"}</button>}
+          </div>
+          {reading && <div style={{ fontSize: 10.5, color: PAL.accent, marginBottom: 6 }}>Reading sheets…</div>}
+          {trayItems.length === 0 && !reading && <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5 }}>Open or drop a PDF set — it’ll group the pages into logical sheets here.</div>}
+          {trayItems.map((t) => t.group ? (
+            <button key={t.key} onClick={() => addGroup(t.pdf, t.group)} title={`${t.group.label} — ${t.pdf.name}`}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "#c7b88f" : PAL.line}`, background: t.group.kind === "group" ? "#fbf7ec" : "#fff", color: PAL.ink }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+                <span style={{ flex: "none", fontWeight: 700, color: t.group.kind === "group" ? "#8a6d1f" : PAL.muted }}>{t.group.kind === "group" ? "▣" : "+"}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: t.group.kind === "group" ? 650 : 400 }}>{t.group.title}</span>
+              </div>
+              {t.group.kind === "group" && <div style={{ fontSize: 9.5, color: PAL.muted, marginTop: 1 }}>{t.group.sheetRange} · {t.group.pages.length} sheets · auto-stitch</div>}
+            </button>
+          ) : (
             <button key={t.key} onClick={() => addSheet(t.pdf, t.page)} title={t.pdf.name}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               + {t.pdf.name.replace(/\.pdf$/i, "")} · p{t.page}
@@ -442,8 +583,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
                   </g>;
                 }
+                // B338 — on a grouped composite, clip each sheet to its drawing area so the
+                // title-block band is hidden and the drawing areas butt cleanly. Fail open: only
+                // when a band was actually detected (drawingArea smaller than the full page).
+                const da = s.drawingArea;
+                const cropped = cropBlocks && s.grouped && da && (da.w < s.baseW - 1 || da.h < s.baseH - 1);
+                const clipId = "tbclip-" + s.id;
                 return <g key={s.id} transform={xf}>
+                  {cropped && <clipPath id={clipId}><rect x={da.x} y={da.y} width={da.w} height={da.h} /></clipPath>}
                   <image href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
+                    clipPath={cropped ? `url(#${clipId})` : undefined}
                     opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />
                   {unaligned && <>
                     <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={ls(2.5)} strokeDasharray={`${ls(12)} ${ls(8)}`} pointerEvents="none" />
@@ -492,7 +641,30 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {align && " · Esc to cancel"}
             </div>
           )}
-          {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: "#5a554a", fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Stitch sheets into one plan</div><div style={{ fontSize: 12.5 }}>Open/drop PDFs → add a sheet → add the next and Align it with two matching points.</div></div></div>}
+          {/* Pinned composite KEY (B338): one merged entry per grouped plan + the auto-set scale,
+              floated over the canvas so it stays readable at any zoom (not baked into the raster). */}
+          {composite.length > 0 && legendOpen && (
+            <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 210, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>Composite key</span>
+                <button onClick={() => setLegendOpen(false)} title="Hide" style={{ border: "none", background: "none", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </div>
+              {composite.map((s) => (
+                <div key={s.groupLabel} style={{ fontSize: 11.5, color: PAL.ink, padding: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.groupLabel}>{s.groupLabel}</div>
+              ))}
+              <div style={{ fontSize: 10.5, color: ftPerUnit ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
+                {ftPerUnit ? `Scale set · ${f0(1 / ftPerUnit)} units/ft` : "Scale not set — use Calibrate once"}
+              </div>
+            </div>
+          )}
+          {composite.length > 0 && !legendOpen && (
+            <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key</button>
+          )}
+          {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
+          {notice && (
+            <div style={{ position: "absolute", top: 10, right: 10, zIndex: 4, maxWidth: 320, background: "rgba(25,22,19,0.92)", color: "#fff", padding: "7px 12px", borderRadius: 8, fontSize: 11.5, fontFamily: "system-ui, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", cursor: "pointer" }} onClick={() => setNotice("")} title="Dismiss">{notice}</div>
+          )}
+          {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: "#5a554a", fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Drop a whole set — it stitches itself</div><div style={{ fontSize: 12.5 }}>Drop a multi-page PDF → it groups the pages into logical sheets → click a grouped plan to add it auto-stitched, cropped, and scaled. Manual add &amp; Align stay as the safety net.</div></div></div>}
         </div>
 
         {/* right panel: placed sheets + takeoff */}
@@ -524,7 +696,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           )}
         </div>
       </div>
-      {(busy || err) && <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid var(--chrome-divider)", color: err ? "#fbbf24" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>{err || "Rendering…"}</div>}
+      {(busy || err) && <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid var(--chrome-divider)", color: err ? "var(--warn-text)" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>{err || "Rendering…"}</div>}
     </div>
   );
 }

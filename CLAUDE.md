@@ -297,6 +297,27 @@ server/                   # placeholder README only — NOT built or deployed; b
   to light it up:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` (server-side) +
   `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
 
+### Document Review — drop a set → auto-group, auto-stitch, crop, auto-calibrate (B335–B339) — LIVE
+- **The headline UX.** Drop a multi-page PDF set into the Stitcher and it now assembles itself
+  instead of making you add + align each page by hand. The pages are read, **grouped into logical
+  sheets** ("Grading Plan · C-5–C-7 · 3 sheets"), and clicking a grouped plan **auto-stitches**
+  every page, **crops** the title blocks so drawings butt cleanly, and **auto-calibrates** from
+  the sheet's stated scale. An "all pages" toggle + the 2-point manual Align remain the safety net.
+- **Shared positional reader (B336)** — pure `src/shared/files/sheetMeta.js` (+ pdf.js
+  `extractPageItems`): per page it finds the title-block band, sheet title, stated scale (reuses
+  B267 `parseSheetScale`), and every match-line label with position + orientation. REUSES the B312
+  filing parsers (`titleBlockParse`) — a positional superset, not a second reader. Glue +
+  read→group pipeline + per-group calibration in `doc-review/lib/sheetRead.js`, with a **dormant
+  injectable OCR seam** for scanned pages.
+- **Grouping (B335)** `src/shared/files/sheetGroups.js`; **auto-stitch (B337)**
+  `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
+  to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
+  **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
+- **CV/heavy-dep tails are deferred behind seams → B340** (Later/Roadmap): scanned-sheet OCR
+  (Tesseract.js), graphic scale-bar reading, the geometric edge-line stitch fallback, legend
+  symbol-union. The common case (CAD vector PDFs with a text layer) is fully shipped. 30 unit
+  tests; headless-verified end-to-end (V84, `ui-audit/verify-b325-b329.mjs`, 13/13).
+
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
   has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens
@@ -313,10 +334,10 @@ server/                   # placeholder README only — NOT built or deployed; b
   below its floor — so a palette edit can't silently re-introduce a low-contrast pair. Text/icon ON
   the global accent fill uses **`--on-accent`** (white in light, near-black in dark — the dark accent
   is too light for white); saving/unsaved/offline labels use **`--warn-text`** (AA amber). The common
-  trap (the B321 regression): a chrome-region component that **hardcodes a color instead of a token**
+  trap (the B341 regression): a chrome-region component that **hardcodes a color instead of a token**
   reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
   lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
-  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B322)
+  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline
@@ -405,13 +426,18 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   (drop → read title block → file into Drive), which is the backend feature already
   on the roadmap. Two different things, two timelines.
 - Multi-sheet stitcher: assisted alignment (built — `Stitcher.jsx`, 2-point pairwise
-  align); automatic match-line detection later; near-automatic once DWG conversion lands.
+  align); **automatic match-line detection — BUILT (B337)**: drop a set → it auto-groups
+  (B335) + auto-stitches from match-line labels + auto-calibrates (B339) + crops title
+  blocks (B338); the 2-point manual Align stays the safety net (pre-seeded when a seam is
+  detected). The CV/OCR tails (scanned-sheet OCR, scale-bar, geometric edge-match) → B340.
+  Near-automatic once DWG conversion lands.
 - Revision compare: add a revision to a discipline set and compare the two
   (overlay/diff) — confirm against the existing overlay/version-compare item.
 - ★ North-star: "map → drawings → latest set" — from the Site Planner map, click a
   project → Drawings → pick a discipline (e.g., Landscaping) → see the latest
   revision's full set, already stitched. Depends on the filing system + file index,
-  the stitcher, and project nav on the map. The convergence point; build once those exist.
+  the stitcher (the **auto-group + auto-stitch** half is now built — B335–B339), and
+  project nav on the map. The convergence point; build once those exist.
 
 ## KNOWN ISSUES
 - Houston utilities ride on the City's `geogimstest` **TEST** host — works, but could

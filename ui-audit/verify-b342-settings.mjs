@@ -1,8 +1,8 @@
-/* B322 — verify the display-theme picker moved from the open header into a row-1
+/* B342 — verify the display-theme picker moved from the open header into a row-1
  * Settings gear popover, still works (flips data-theme live), and is reachable signed
  * OUT. Asserts: the old inline segmented control is gone; a Settings gear exists; the
  * popover offers Light/Dark/System; choosing one flips <html data-theme>.
- * Run: node ui-audit/verify-b322-settings.mjs   (vite preview on :4173)
+ * Run: node ui-audit/verify-b342-settings.mjs   (vite preview on :4173)
  */
 import { chromium } from "playwright";
 
@@ -57,7 +57,7 @@ ok("selecting Light sets data-theme=light", (await page.evaluate(() => document.
 // 6) This whole flow ran while signed OUT (the Sign in pill is present).
 ok("reachable while signed out", (await page.locator('button[title="Sign in or create an account"]').count()) === 1);
 
-await page.screenshot({ path: new URL("./screens/b322-settings-popover.png", import.meta.url).pathname });
+await page.screenshot({ path: new URL("./screens/b342-settings-popover.png", import.meta.url).pathname });
 await ctx.close();
 await browser.close();
 

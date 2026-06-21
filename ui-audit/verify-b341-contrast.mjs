@@ -1,4 +1,4 @@
-/* B321 — live contrast verification of the chrome elements that regressed after the
+/* B341 — live contrast verification of the chrome elements that regressed after the
  * scheme change (user-name pill, Dashboard/Map breadcrumb toggle, module tabs). Reads
  * the REAL computed text color + effective background of each element in a headless
  * browser and asserts WCAG AA, in BOTH light and dark themes. Also saves screenshots.
@@ -6,7 +6,7 @@
  * Build with dummy Supabase env first so the "Sign in" pill (same `pill` style as the
  * signed-in user-name pill) renders:
  *   VITE_SUPABASE_URL=https://demo.supabase.co VITE_SUPABASE_ANON_KEY=demo npm run build
- *   npx vite preview --port 4173 &   then   node ui-audit/verify-b321-contrast.mjs
+ *   npx vite preview --port 4173 &   then   node ui-audit/verify-b341-contrast.mjs
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -68,8 +68,8 @@ for (const theme of ["light", "dark"]) {
     if (!ok) failures++;
     console.log(`  ${ok ? "✓" : "✗"} ${String(r.ratio).padStart(6)} (≥${r.floor})  ${r.label}  ["${r.text}"]`);
   }
-  await page.screenshot({ path: OUT + `b321-chrome-${theme}.png` });
-  console.log(`  saved b321-chrome-${theme}.png`);
+  await page.screenshot({ path: OUT + `b341-chrome-${theme}.png` });
+  console.log(`  saved b341-chrome-${theme}.png`);
   await ctx.close();
 }
 await browser.close();

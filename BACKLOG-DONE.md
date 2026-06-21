@@ -1,17 +1,89 @@
 ## ✅ Done
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
+     crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
+     when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge
+     time; B25431/B3340 here are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND implemented +
+     headless-verified the same session per STANDING RULE #1 (branch `claude/loving-newton-t7gzpq`). The
+     CV/heavy-dep tails (OCR, scale-bar, geometric edge-match, legend symbol-union) are tracked as B340 in
+     Later/Roadmap. Renumber touched only this batch — main's B325 (pan-crash) / B326–B328 (file-class) /
+     B329 (viewport) refs left intact. -->
+
+### B336 — Sheet-metadata reader: title block, scale, match-line labels `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-2"; minted **B336**)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/loving-newton-t7gzpq`).** The shared positional reader the whole batch consumes. New `extractPageItems` (pdf.js) keeps each text run's x/y; pure `src/shared/files/sheetMeta.js` finds the **title-block band** (text-density on the right/bottom edge), the **sheet title** (largest wordy line in the band, label/data rows skipped), the **stated scale** (reuses B267 `parseSheetScale`), and every **MATCH-LINE label** with its position + orientation (page-edge → vertical/horizontal cut). Reuses B312's `titleBlockParse` for discipline/number/revision/date — no second/parallel reader; surfaces a `confidence` instead of guessing. `doc-review/lib/sheetRead.js` glues pdf.js → reader → grouping with a **dormant injectable OCR seam** for scanned pages (→ B340). **12 + 6 unit tests** (`test/sheetMeta.test.js`, `test/sheetRead.test.js`).
+> **Dedup:** folded the CLAUDE.md roadmap "read its title block" (auto-filing) — extends the shipped filing readers with the positional layer they lacked, doesn't duplicate them.
+
+### B335 — Drop a whole set → auto-group pages into logical sheets (collapsed list) `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-1"; minted **B335**)*
+`[x]` **Shipped + verified 2026-06-21.** Pure `src/shared/files/sheetGroups.js` collapses consecutive pages that share a plan type (discipline + `item`) AND a contiguous sheet-number run into logical sheets ("Grading Plan · C-5–C-7 · 3 sheets"); cover/general-notes stay standalone; conservative (under-groups rather than mis-merges). The Stitcher tray now shows **logical sheets** (read+grouped in the background after a drop), with an **"all pages"** safety-net toggle and a "Reading sheets…" state. Clicking a grouped plan adds every page at once (auto-stitched, B337). **7 unit tests** (`test/sheetGroups.test.js`); headless V87 confirmed a 4-page set → 2 logical entries.
+
+### B337 — Automatic match-line stitching `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-3"; minted **B337**)*
+`[x]` **Shipped + verified 2026-06-21.** Pure `doc-review/lib/autoStitch.js` builds the seam graph from B336's match-line labels and places each sheet by feeding the shared seam's two endpoints into the **existing `solveM()`** similarity fit (`stitchGeom.js`, B300) — BFS from the most-connected anchor, the whole group then slotted to the right of existing content. A label-less sheet stays **unplaced** and drops to the 2-point manual Align **pre-seeded** with its detected seam endpoints (half the clicks); manual Align remains the safety net. **5 unit tests** (`test/autoStitch.test.js`); headless V87 confirmed 3 sheets auto-stitch with **coincident seams** (Δx ≈ 0.78·width, not the old +40 gap).
+> **Dedup:** this WAS the roadmap's "automatic match-line detection later," now specified — folded, built on `solveM`. The geometric edge-line middle-fallback (when labels are missing) is deferred → B340.
+
+### B338 — Crop title blocks + single merged legend on stitched plans `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-4"; minted **B338**)*
+`[x]` **Shipped + verified 2026-06-21.** On a grouped composite each sheet is **clipped to its drawing area** (the B336 title-block band hidden) so the drawings butt cleanly, with a **"Crop blocks"** toggle. One **pinned "Composite key"** panel lists the group merged + the auto-set scale — rendered as an overlay (not baked into the raster) so it stays readable at any zoom. Grouping/crop metadata now rides the saved stitch (additive, back-compatible) so a reload keeps the cropped composite + key. Headless V87 confirmed 3 clipPaths + the pinned key + the toggle. The graphical legend **symbol-union** is deferred → B340.
+
+### B339 — Auto-calibrate from the sheet's stated scale `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-5"; minted **B339**)*
+`[x]` **Shipped + verified 2026-06-21.** When a grouped plan is added, `groupCalibration` (`doc-review/lib/sheetRead.js`) reads the group's stated scale and sets the composite `ftPerUnit` automatically — gated on a standard plot size (`detectSheet`) so a resized/half-size sheet can't mis-scale the set; manual Calibrate still overrides. Reuses `overlayScale.js` (`parseSheetScale`/`ftPerPointForScale`). Headless V87 confirmed the composite auto-calibrated from "1\"=40'" (takeoff "Calibrated", key "Scale set").
+> **Dedup:** the SINGLE-SHEET half already shipped (B267 `autoDetectScales`); this added the stitcher/grouped-composite half. The graphic scale-bar fallback is deferred → B340.
+
+<!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
+     "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across both files was
+     B315 — B25431 / B3340 in this file are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND fixed
+     + verified the same session per STANDING RULE #1 (branch `claude/bold-bohr-hohz2x`).
+     Dedup before filing:
+       • NEW-1 (B321): the PRIMARY claim ("there is no Drive delete anywhere") was ALREADY shipped under
+         the B207 Drive wiring — `deleteReview` already removes `sources[].driveKey` via `deleteFromDrive`.
+         So B321 is only the RESIDUAL the brief flagged: loadReview→null (network) left keys=[] → nothing
+         cleaned. Distinct from B38(a) (re-file orphaning on upsert).
+       • NEW-2/3/4 (B322/B323/B324): net-new. NOT duplicates of the single-sheet VIEWER batch B288–B296
+         (zoom/pan/markup interaction) nor the STITCH-guard batch B300–B302 (align/measure-commit) — those
+         never touched which storage backend a source goes to, nor the autosave gating. -->
+### B321 — `deleteReview` orphans the Drive copy when the cloud record can't be read `[Doc Review / Files]` (bug)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B321**)*
+`[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** Deleting a review no longer leaves source bytes orphaned in Google Drive (or Supabase Storage) when the cloud record read misses.
+- **Already shipped (B207 Drive wiring):** the brief's primary point — "there is no Drive delete anywhere in the code" — was already addressed: `deleteReview` removes every `sources[].driveKey` through `deleteFromDrive` (a `DELETE /api/files?key=…`) alongside the Supabase `BUCKET.remove(keys)`.
+- **Residual fix (this session):** if `loadReview(id)` returns `null` (a transient network miss), `sources` was `[]`, so **neither** the Supabase objects **nor** the Drive objects were removed. `deleteReview` now falls back to the synchronous **local mirror** (`readDraft(uid, id)`, which carries the same `sources[]` incl. `storageKey` + `driveKey`) to recover the file list, so cleanup still runs. Best-effort and in parallel; it never blocks the row delete, and the legacy `<uid>/<id>/` folder sweep is unchanged.
+- **Verified — lint 0 · 788 tests · build green** (8 new in `test/docPersistence.test.js`); doc-review lazy chunk intact. The storage path is auth-gated (cloud + Drive), so the unit tests assert the graceful-degrade contract; a signed-in delete-with-Drive is the live check (logged in VERIFICATION).
+> **Dedup:** primary already done under B207; this is the loadReview-null residual. Distinct from B38(a) (upsert re-file orphaning).
+
+### B322 — "Open PDF…" and every Stitcher sheet upload to Supabase only, never Drive `[Doc Review / Stitch + Files]` (bug)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B322**)*
+`[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** Interactively-opened single sheets and **all** stitched sheets now go through the **same Drive-first / Supabase-fallback path** as filing, instead of Supabase-only.
+- **One shared storage policy:** added `reviewStore.storeSource(srcId, blob, { projectId, discipline, fileName })` — push to Google Drive (the primary home); only if Drive doesn't take it, fall back to Supabase Storage. `fileNewReview` was refactored to call it too, so there's a single source of truth for "where a source's bytes live" (no more two slightly-different copies of the policy).
+- **Call sites:** `DocReview.openFile` and `Stitcher.openFiles` now call `storeSource` (were `uploadSource` → Supabase only) and persist `driveKey`; both `buildSnapshot`s carry `driveKey`; `Stitcher.loadStitch` reads back Drive-first then Supabase (`DocReview.fetchSourceBytes` already did). 
+- **Why it matters:** (a) these files now live in Drive like filed ones (the "Drive is the primary file home" direction); (b) they **bypass Supabase's 50 MB per-file cap on the happy path** — an E-size sheet or a large multi-sheet set that used to silently flag `oversize` ("re-drop on load") now stores in Drive; (c) stitched sheets carry a `driveKey`, so a stitched set can read its sheets back from Drive.
+- **Verified — lint 0 · 788 tests · build green** (`storeSource` degrade-path test); doc-review lazy chunk intact. The full Drive round-trip needs the (not-yet-deployed) Drive backend + sign-in, so it's the live check; the fallback to Supabase keeps today's behaviour until Drive is on.
+> **Dedup:** net-new; the viewer (B288–B296) and stitch-guard (B300–B302) batches never touched the storage backend choice. Pairs with B321 (Drive delete) and B323 (keyless-source window).
+
+### B323 — A source saved with a null key during the upload window becomes unfetchable on a quick reload `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-3" 2026-06-21; minted **B323**)*
+`[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** A file opened and then reloaded **before its upload resolved** no longer strands the backdrop with a pointer the loader can't fetch.
+- **Cause:** `openFile`/`openFiles` set the source into state immediately with `storageKey:null` (and no `driveKey`), which made it an autosave dep; the debounce + the synchronous local mirror could capture that **keyless** source before the upload's `.then(setSource w/ key)` ran. A reload in that window saved a record pointing at a source with no key → `fetchSourceBytes` couldn't fetch it → a permanent "re-open it to view", even though the bytes may have landed.
+- **Fix:** `buildSnapshot` now persists a source only when it's actually stored — `isStoredSource(s) = !!(s.storageKey || s.driveKey || s.oversize)`. While a just-opened/added file is still uploading (keyless), it's **omitted** from the saved `sources`, so a mid-upload reload can't save a broken pointer; the markups still save, and once the upload resolves the source is persisted normally (its key change re-triggers autosave). Applied to both the single-sheet and the per-sheet Stitcher snapshots. (`oversize` still counts as "stored" → the existing graceful "re-drop on load" path is unchanged.)
+- **Verified — lint 0 · 788 tests · build green** (`isStoredSource` unit tests: keyed/drive/oversize ⇒ persistable; keyless/absent ⇒ not); doc-review lazy chunk intact.
+> **Dedup:** net-new; shares the `isStoredSource` predicate with B322's snapshots. Backdrop-only loss (markups were always safe).
+
+### B324 — A genuine edit made within the post-open suspend window isn't flagged dirty → never reaches the cloud `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-4" 2026-06-21; minted **B324**)*
+`[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** An edit made right after opening/resuming a review (inside the ~1.5 s programmatic-load window) is now mirrored, flagged dirty, and reaches the cloud.
+- **Cause:** the autosave effect early-returned for the whole suspend window (B19), skipping **both** the local mirror **and** `dirtyRef=true`. The unmount/hide flush gates its cloud upsert on `dirtyRef`, so an edit in that window never reached the cloud (lost cross-device, or entirely on a tab crash before flush). The window is armed at load-start, so it usually elapsed harmlessly during a large PDF's fetch — it bit on small/cached PDFs.
+- **Fix:** the per-tick decision is now a pure, unit-tested `lib/autosavePlan.js → planAutosave({enabled, empty, loadEcho, suspended})`. The programmatic-load **echo** is identified precisely by a `loadEchoRef` flag (armed by `suspendSave`, consumed on the echo tick) rather than by the blunt time window, so it's still skipped — but a **genuine edit**, even inside the window, now **mirrors + flags dirty** (so it's recoverable on-device AND flushes to the cloud); only its **debounced cloud re-save** stays suppressed while suspended, preserving B19's "don't re-stamp the just-loaded snapshot" intent (and B44's "no re-upsert of unchanged data on a mode toggle").
+- **Verified — lint 0 · 788 tests · build green** (`planAutosave` unit tests cover: load echo ⇒ consume only; edit-in-window ⇒ mirror+dirty, no debounce-save; edit-out-of-window ⇒ mirror+dirty+save; blank/disabled ⇒ nothing).
+> **Dedup:** net-new; interacts with B19 (suspendSave) + B44 (dirty-gated flush), both preserved. Not covered by any open item.
+
+### B325 — Stitcher pan crash: "Cannot read properties of null (reading 'panX')" when a pan is interrupted `[Doc Review / Stitch]` (bug)  *(owner-reported 2026-06-21: "its broken, i was on the stitcher and it broke"; minted **B325** — a hot `main` had reached B324)*
+`[x]` **Fixed + shipped 2026-06-21 (branch `claude/awesome-feynman-i7wypf`).** The pan handler's `setView` updater read `drag.current` **inside** the deferred updater. That updater runs in React's render phase, which for a continuous `pointermove` can be deferred a tick; a discrete event in between — `pointerup`, `pointercancel`, or the **B270** blur/visibility gesture-abort — nulls `drag.current` first. Reading the ref then dereferenced null and threw in the render phase → the Document Review **error boundary** caught it ("hit an error and couldn't load") and the whole stitcher went down. A real user hits this by tab-switching / losing focus / a pointer-cancel mid-pan. **Fix:** capture the drag origin into a local and close over it via a pure `panTo()` helper in `lib/stitchGeom.js`, so an aborted gesture can't crash the deferred updater. **Verified:** 4 unit tests (`test/stitchGeom.test.js` — math, null-ref-survival, + a teeth test that the OLD ref-reading pattern throws `/panX/`) and a headless harness (`ui-audit/verify-b325-pan.mjs`: a normal pan moves the world; 12 mid-pan aborts → no error boundary, 0 `panX` errors; pan still works after). lint 0 · build green. VERIFICATION **V84**.
 
 <!-- 2026-06-21: owner-dropped (coworker chat, "Backlog mode") a pair — NEW-1 contrast regression
-     + full-app audit, NEW-2 move the theme picker into Settings. Minted **B321 / B322** (highest B#
-     across BOTH files was B320 → next free B321). Filed AND fixed AND verified the SAME session per
-     STANDING RULE #1; recorded straight here (done), not left in Open. Sequence honored: B321 first
-     (legible in both themes) THEN B322 (relocate). DEDUPE: net-new. B321 is the *follow-up* to B320
+     + full-app audit, NEW-2 move the theme picker into Settings. First filed B321/B322, **renumbered
+     to B341 / B342 on merge** — a concurrent `main` landed a Doc-Review Drive batch B321–B324 + the
+     B325–B340 stitcher/file/pinch work while this was in flight, so the real next-free was B341.
+     Filed AND fixed AND verified the SAME session per STANDING RULE #1; recorded straight here (done),
+     not left in Open. Sequence honored: B341 first
+     (legible in both themes) THEN B342 (relocate). DEDUPE: net-new. B341 is the *follow-up* to B320
      (which shipped the dark text ramp) — B320 migrated index.css + AppHeader + palette.js + the PAL
      objects but MISSED the inline hardcoded colors in the chrome-region components, which is the
-     regression B321 closes; not a duplicate. B322 supersedes the B316/B317 note "theme control lives
+     regression B341 closes; not a duplicate. B342 supersedes the B316/B317 note "theme control lives
      in the account dropdown or Settings" by landing it in a row-1 Settings gear (reachable signed-out,
      which the account dropdown is not). No other open item touches contrast or the theme control. -->
 
-### B321 — Contrast regression from the scheme change; full-app audit `[Site / shared / theming]` (bug)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-1"; minted **B321** — next free after B320)*
+### B341 — Contrast regression from the scheme change; full-app audit `[Site / shared / theming]` (bug)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-1"; first filed B321, renumbered **B341** — concurrent `main` consumed B321–B340)*
 `[x]` **Fixed + audited + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** After the
 B316–B320 scheme change, several chrome elements rendered too light to read. **Root cause:** B318 flipped
 the chrome from always-dark to **themes-with-the-app** (light theme → light chrome), and migrated
@@ -26,7 +98,7 @@ toggle** — were exactly this class, so the fix audited the **whole tree**, not
   then grepped every consumer of the retired hexes; built a **programmatic WCAG checker over every
   defined token pair** in both themes (`ui-audit/contrast-audit.mjs`, parses the real `index.css`) +
   a **live headless probe** that reads the computed text/bg of the actual chrome elements
-  (`ui-audit/verify-b321-contrast.mjs`).
+  (`ui-audit/verify-b341-contrast.mjs`).
 - **Token system itself was sound** — every actionable pair clears AA in both themes; the only WARNs
   are documented exceptions (locked Site/Schedule brand fills, only ever used as ≥3:1 underline +
   unused `--on-accent-*` text tokens; the amber Markup underline whose state is also carried by its
@@ -59,9 +131,9 @@ toggle** — were exactly this class, so the fix audited the **whole tree**, not
   accents stayed confined to the tab row (no accent bled into body areas).
 - **Verified:** lint 0 errors · **783 tests** (3 new) · build green · doc-review + SitePlannerApp lazy
   chunks intact · headless **both themes** all chrome elements clear WCAG AA (**V84**); screenshots
-  `ui-audit/screens/b321-chrome-{light,dark}.png` + `theme-markup-{light,dark}.png`.
+  `ui-audit/screens/b341-chrome-{light,dark}.png` + `theme-markup-{light,dark}.png`.
 
-### B322 — Move the display-theme picker (Light / Dark / System) out of the open header into Settings `[shared / theming]` (task)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-2"; minted **B322**)*
+### B342 — Move the display-theme picker (Light / Dark / System) out of the open header into Settings `[shared / theming]` (task)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-2"; first filed B322, renumbered **B342** — concurrent `main` consumed B321–B340)*
 `[x]` **Done + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** The Light / Dark / System
 control used to sit open in `AppHeader` row 1 as a 3-button segmented control. It now lives behind a
 **Settings gear (⚙) in row 1** that opens an `AnchoredMenu` popover ("DISPLAY THEME" → Light "Always
@@ -76,9 +148,9 @@ light" / Dark "Always dark" / System "Match your computer", active row checked).
   depends on the signed-in account dropdown (and the sandbox self-tests run logged-out). The only
   header consumer of the old control was AppHeader itself — confirmed nothing else depended on it.
 - **Verified:** lint 0 · 783 tests · build green · headless logged-out (**V84**,
-  `ui-audit/verify-b322-settings.mjs`): segmented control gone, gear opens the popover, choosing Dark →
+  `ui-audit/verify-b342-settings.mjs`): segmented control gone, gear opens the popover, choosing Dark →
   `data-theme="dark"` + persisted, back to Light → `data-theme="light"`; screenshot
-  `ui-audit/screens/b322-settings-popover.png`.
+  `ui-audit/screens/b342-settings-popover.png`.
 
 <!-- ✅ DONE 2026-06-21 (branch claude/ecstatic-faraday-qoc8vf, commit 32a1b8a). The B316 umbrella +
      B317–B320 shipped together as one chain: light / dark / system theming. Token system (data-theme

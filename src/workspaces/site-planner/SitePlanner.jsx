@@ -22,6 +22,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -1289,6 +1290,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
+  const pointersRef = useRef(new Map()); // live touch pointers → svg-relative {x,y} (B331)
+  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
+  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence (B331)
+  // Viewport-relative screen point for the pinch midpoint math (the SVG fills the canvas wrapper).
+  const vpPoint = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
+  // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
+  const applyPinch = () => {
+    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    const [a, b] = [...pointersRef.current.values()];
+    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
+    const factor = dist / pinchRef.current.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, pinchRef.current.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    pinchRef.current = { mid, dist };
+  };
+  // Pinch runs on the CAPTURE phase so a touch landing on a parcel/building (which has its own
+  // pointer handler) is still caught. Gated on pointerType==='touch' — mouse/trackpad never enter.
+  // A 2nd touch starts the pinch (stopPropagation so the bg/element handlers don't also fire) and
+  // tears down the 1st finger's in-progress drag (revert a half-move, B315). (B331)
+  const onPinchDown = (e) => {
+    if (e.pointerType !== "touch") return;
+    pointersRef.current.set(e.pointerId, vpPoint(e));
+    if (pointersRef.current.size === 2) {
+      e.stopPropagation();
+      const [a, b] = [...pointersRef.current.values()];
+      pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      touchPinchedRef.current = true;
+      if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
+      capturePidRef.current = null; cancelActiveMove(); drag.current = null;
+      setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
+    }
+  };
+  const onPinchMove = (e) => {
+    if (!pinchRef.current || e.pointerType !== "touch") return;
+    e.stopPropagation();
+    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
+    applyPinch();
+  };
+  const onPinchUp = (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPinchedRef.current) e.stopPropagation(); // suppress the bubble handlers for the whole pinch sequence
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) pinchRef.current = null;
+    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+  };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
@@ -1447,10 +1493,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, []);
 
   /* ------------ coordinate transforms ------------ */
-  const f2p = useCallback((p) => ({ x: p.x * view.ppf + view.offX, y: p.y * view.ppf + view.offY }), [view]);
+  // Feet<->screen via the shared viewport engine (B329). { ppf, offX, offY } maps to the
+  // engine's { scale, tx, ty }; the math is identical to the old inline form (unit-tested).
+  const f2p = useCallback((p) => worldToScreen({ scale: view.ppf, tx: view.offX, ty: view.offY }, p), [view]);
   const p2f = useCallback((cx, cy) => {
     const r = svgRef.current.getBoundingClientRect();
-    return { x: (cx - r.left - view.offX) / view.ppf, y: (cy - r.top - view.offY) / view.ppf };
+    return screenToWorld({ scale: view.ppf, tx: view.offX, ty: view.offY }, { x: cx - r.left, y: cy - r.top });
   }, [view]);
   const snap = useCallback((v) => {
     const gs = Number.isFinite(settings.gridSize) && settings.gridSize > 0 ? settings.gridSize : 10; // guard a bad grid → never NaN coords
@@ -1592,10 +1640,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = wrap.getBoundingClientRect(); // SVG fills the wrapper, so same rect
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       setView((v) => {
-        const fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf;
-        const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-        const ppf = Math.max(0.02, Math.min(8, v.ppf * factor));
-        return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf };
+        const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, e.deltaY < 0 ? 1.12 : 1 / 1.12, mx, my, 0.02, 8);
+        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
       });
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
@@ -1618,6 +1664,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarquee(null);
     setMkRect(null);
     setDraftRect(null);
+    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // clear any two-finger pinch (B331)
   };
   // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
   // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
@@ -5633,6 +5680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             onPointerDownCapture={onCanvasVtxDownCapture} onContextMenuCapture={onCanvasVtxContextCapture} onPointerMoveCapture={onCanvasVtxMoveCapture}
+            onPointerDownCapture={onPinchDown} onPointerMoveCapture={onPinchMove} onPointerUpCapture={onPinchUp} onPointerCancelCapture={onPinchUp}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
@@ -6465,7 +6513,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* zoom controls (bottom-right, above the scale bar) */}
           {(() => {
             const zb = { width: 30, height: 30, display: "grid", placeItems: "center", border: `1px solid ${PAL.panelLine}`, background: "var(--surface-overlay)", color: PAL.ink, cursor: "pointer", fontSize: 16, fontWeight: 600 };
-            const zoomBy = (f) => setView((v) => { const mx = size.w / 2, my = size.h / 2, fx = (mx - v.offX) / v.ppf, fy = (my - v.offY) / v.ppf, ppf = Math.max(0.02, Math.min(8, v.ppf * f)); return { ppf, offX: mx - fx * ppf, offY: my - fy * ppf }; });
+            const zoomBy = (f) => setView((v) => { const nv = zoomAround({ scale: v.ppf, tx: v.offX, ty: v.offY }, f, size.w / 2, size.h / 2, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
             return (
               <div data-export="skip" style={{ position: "absolute", right: 14, bottom: 100, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: 6 }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
@@ -6600,7 +6648,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
 
-          {/* status bar — chrome (themes with the app, B318/B321) */}
+          {/* status bar — chrome (themes with the app, B318/B341) */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", padding: "0 16px", height: 30, fontSize: 11.5, color: PAL.chromeMuted, background: PAL.chrome, backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderTop: `1px solid ${PAL.chromeLine}`, zIndex: 5 }}>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 124, fontVariantNumeric: "tabular-nums", color: PAL.chromeInk }}>{cursor ? `${f0(cursor.x)}′, ${f0(cursor.y)}′` : "—"}</span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 96 }}>{underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : `${Math.round(view.ppf * 100) / 100} px/ft`}</span>
