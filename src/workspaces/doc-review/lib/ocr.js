@@ -47,20 +47,24 @@ export function extractWords(data) {
 
 /* Convert Tesseract words (pixel bboxes on a `scale`× canvas) into positioned page-unit items —
  * the exact shape `extractPageItems` returns, so `readSheetMeta` treats them identically. Drops
- * blank + low-confidence words. Pure + unit-tested. */
+ * blank, low-confidence, NON-FINITE, and inverted/zero boxes (OCR can emit any of these on a noisy
+ * scan; a single NaN coordinate would otherwise poison the whole reader — cf. B348). Pure. */
 export function wordsToItems(words, scale, pageW, pageH, minConfidence = 45) {
-  const s = scale || 1;
+  const s = (Number.isFinite(scale) && scale > 0) ? scale : 1; // guard 0 / NaN / negative scale
   const items = [];
   for (const w of words || []) {
-    const str = (w.text || "").trim();
+    if (!w) continue;
+    const str = (w.text != null ? String(w.text) : "").trim();
     if (!str) continue;
-    if (w.confidence != null && w.confidence < minConfidence) continue;
+    const conf = w.confidence;
+    if (Number.isFinite(conf) && conf < minConfidence) continue; // a finite low score → drop (missing/NaN conf is kept)
     const b = w.bbox || {};
-    const x0 = b.x0 ?? 0, y0 = b.y0 ?? 0, x1 = b.x1 ?? 0, y1 = b.y1 ?? 0;
-    if (x1 <= x0 || y1 <= y0) continue;
+    const { x0, y0, x1, y1 } = b;
+    if (![x0, y0, x1, y1].every(Number.isFinite)) continue; // NaN/Infinity box → drop (never a NaN item)
+    if (x1 <= x0 || y1 <= y0) continue;                      // inverted / zero-area box → drop
     items.push({ str, x: x0 / s, y: y0 / s, w: (x1 - x0) / s, h: (y1 - y0) / s, ocr: true });
   }
-  return { items, width: pageW, height: pageH };
+  return { items, width: Number.isFinite(pageW) ? pageW : 0, height: Number.isFinite(pageH) ? pageH : 0 };
 }
 
 // Lazily render a PDF page to an OCR canvas (real pdf.js, imported only when OCR actually runs).

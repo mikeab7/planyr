@@ -34,21 +34,10 @@ catch (e) { loaded = false; console.log("  ⚠ couldn't load tesseract.js from j
 check(loaded, "tesseract.js engine loads from jsDelivr in the browser");
 
 if (loaded) {
-  console.log("\nReal OCR of a 'scanned' title block + match line (this takes ~10–20s):");
-  const result = await page.evaluate(async (V) => {
-    // 1) Draw a scanned-looking sheet: white page, black title-block text on the right, a match
-    //    line in the drawing area. No text layer — just pixels, like a scan.
+  console.log("\nReal OCR — clean read + degraded-input stress (one worker, ~40–60s):");
+  const R = await page.evaluate(async (V) => {
     const SC = 2, W = 1224, H = 792;
-    const cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC;
-    const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
-    g.fillStyle = "#000"; g.textBaseline = "top";
-    const T = (t, x, y, px) => { g.font = `${px * SC}px Arial`; g.fillText(t, x * SC, y * SC); };
-    T("GRADING PLAN", 980, 120, 26);
-    T("SHEET NO. C-5", 980, 175, 20);
-    T("SCALE: 1\"=40'", 980, 215, 20);
-    T("MATCH LINE - SEE SHEET C-6", 690, 380, 18);
-
-    // 2) Real Tesseract, pinned to the SAME jsDelivr assets ocr.js uses.
+    // ONE worker, reused across cases (matches ocr.js's single-worker session).
     const T9 = window.Tesseract;
     const worker = await T9.createWorker("eng", T9.OEM.LSTM_ONLY, {
       workerPath: `https://cdn.jsdelivr.net/npm/tesseract.js@${V}/dist/worker.min.js`,
@@ -57,26 +46,60 @@ if (loaded) {
       gzip: true,
     });
     await worker.setParameters({ tessedit_pageseg_mode: T9.PSM.SPARSE_TEXT });
-    const { data } = await worker.recognize(cv, {}, { blocks: true });
-    await worker.terminate();
 
-    // 3) The SAME conversion ocr.js does: words (canvas px) → page-unit items.
-    const words = data.words && data.words.length ? data.words : (() => {
-      const out = []; for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) for (const w of l.words || []) out.push(w); return out;
-    })();
-    const items = words.filter((w) => (w.text || "").trim() && (w.confidence == null || w.confidence >= 45))
-      .map((w) => ({ str: w.text.trim(), x: w.bbox.x0 / SC, y: w.bbox.y0 / SC, w: (w.bbox.x1 - w.bbox.x0) / SC, h: (w.bbox.y1 - w.bbox.y0) / SC }));
-    const text = items.map((i) => i.str).join(" ");
-    return { text, n: items.length, sample: items.slice(0, 3) };
+    // The SAME conversion ocr.js does (incl. the non-finite/inverted/low-conf guards).
+    const toText = (data, sc) => {
+      const words = data.words && data.words.length ? data.words : (() => {
+        const out = []; for (const b of data.blocks || []) for (const p of (b.paragraphs || [])) for (const l of (p.lines || [])) for (const w of (l.words || [])) out.push(w); return out;
+      })();
+      const items = words.filter((w) => {
+        const s = (w.text || "").trim(); if (!s) return false;
+        if (Number.isFinite(w.confidence) && w.confidence < 45) return false;
+        const b = w.bbox || {}; if (![b.x0, b.y0, b.x1, b.y1].every(Number.isFinite)) return false;
+        return b.x1 > b.x0 && b.y1 > b.y0;
+      }).map((w) => w.text.trim());
+      return { text: items.join(" "), n: items.length };
+    };
+    const ocr = async (draw) => {
+      const cv = document.createElement("canvas"); cv.width = W * SC; cv.height = H * SC;
+      const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+      g.fillStyle = "#000"; g.textBaseline = "top"; draw(g, SC);
+      const { data } = await worker.recognize(cv, {}, { blocks: true });
+      return toText(data, SC);
+    };
+
+    // Case 1 — clean scan (title block + match line).
+    const clean = await ocr((g, sc) => {
+      const T = (t, x, y, px) => { g.font = `${px * sc}px Arial`; g.fillText(t, x * sc, y * sc); };
+      T("GRADING PLAN", 980, 120, 26); T("SHEET NO. C-5", 980, 175, 20);
+      T("SCALE: 1\"=40'", 980, 215, 20); T("MATCH LINE - SEE SHEET C-6", 690, 380, 18);
+    });
+    // Case 2 — blank page (no text). Must NOT hallucinate a sheet number.
+    const blank = await ocr(() => {});
+    // Case 3 — pure noise (random speckles, no text). Must NOT hallucinate a sheet number.
+    const noise = await ocr((g, sc) => { for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(0,0,0,${Math.random()})`; g.fillRect(Math.random() * W * sc, Math.random() * H * sc, 2, 2); } });
+
+    let crashed = false;
+    try { await ocr((g, sc) => { g.font = `${10 * sc}px Arial`; g.fillText("DRAINAGE PLAN C-9", 60, 60); }); } catch (e) { crashed = true; }
+
+    await worker.terminate();
+    return { clean, blank, noise, crashed };
   }, V);
 
-  console.log("   OCR read:", JSON.stringify(result.text).slice(0, 160));
-  const t = result.text.toUpperCase().replace(/\s+/g, " ");
-  check(result.n > 0, `Tesseract returned positioned words (${result.n})`);
-  check(/C[-\s]?5/.test(t), "read the sheet number C-5");
-  check(/GRADING/.test(t), "read the plan title (GRADING)");
-  check(/40/.test(t) && /SCALE|=/.test(t), "read the scale callout (…=40')");
-  check(/C[-\s]?6/.test(t), "read the match-line target C-6");
+  const up = (s) => (s || "").toUpperCase().replace(/\s+/g, " ");
+  // Clean read (acceptance)
+  console.log("   clean:", JSON.stringify(R.clean.text).slice(0, 150));
+  const t = up(R.clean.text);
+  check(R.clean.n > 0, `clean scan → positioned words (${R.clean.n})`);
+  check(/C[-\s]?5/.test(t), "clean: read the sheet number C-5");
+  check(/GRADING/.test(t), "clean: read the plan title (GRADING)");
+  check(/40/.test(t) && /SCALE|=/.test(t), "clean: read the scale callout (…=40')");
+  check(/C[-\s]?6/.test(t), "clean: read the match-line target C-6");
+  // Stress: no hallucination on blank / noise (the dangerous failure — a confident wrong read)
+  console.log("   blank:", JSON.stringify(R.blank.text).slice(0, 80), "| noise:", JSON.stringify(R.noise.text).slice(0, 80));
+  check(!/SHEET\s*NO|C-?5|GRADING/.test(up(R.blank.text)), `blank page → no hallucinated sheet/title (got ${R.blank.n} words)`);
+  check(!/SHEET\s*NO|C-?5|GRADING/.test(up(R.noise.text)), `pure noise → no hallucinated sheet/title (got ${R.noise.n} words)`);
+  check(!R.crashed, "a small-font degraded render is handled without throwing");
 }
 
 await browser.close();
