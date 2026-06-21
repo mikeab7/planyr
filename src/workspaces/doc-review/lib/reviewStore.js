@@ -151,7 +151,10 @@ export async function deleteReview(id) {
   // Remove the source files (by their stored keys, so any path scheme is covered),
   // then the row. RLS scopes both stores to the owner.
   try {
-    const rec = await loadReview(id);
+    // Prefer the cloud record; if the network read misses, fall back to the local mirror so
+    // we can still clean up Storage + Drive instead of orphaning bytes (B316/NEW-1).
+    let rec = await loadReview(id);
+    if (!rec && uid) rec = readDraft(uid, id);
     const srcs = (rec && rec.sources) || [];
     const keys = srcs.map((s) => s.storageKey).filter(Boolean);
     if (keys.length) await supabase.storage.from(BUCKET).remove(keys);
@@ -305,25 +308,46 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   // Use the drawing's own date when auto-filing supplies one (YYYY-MM-DD); else today.
   const filedDate = (typeof docDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(docDate)) ? docDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
   const itemLabel = item || (fileName || "Document").replace(/\.pdf$/i, "");
-  // 1) Try Google Drive (the primary home).
-  const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
-  // 2) Only if Drive didn't store it, fall back to Supabase Storage — so the file is
-  //    always stored somewhere (Drive ok → no duplicate; Drive down → Supabase safety net).
-  const up = drive.ok ? { ok: true, storageKey: null, oversize: false } : await uploadSource(srcId, blob, projectId, discipline);
+  // Store the bytes Drive-first, Supabase-fallback (the one shared policy — see storeSource).
+  const stored = blob
+    ? await storeSource(srcId, blob, { projectId, discipline, fileName })
+    : { ok: false, storageKey: null, driveKey: null, oversize: false, driveError: null, driveSkipped: true };
   // Unstored only if NEITHER backend took it (and it wasn't merely oversize for Supabase).
-  const uploadFailed = !drive.ok && !up.ok && !up.oversize;
+  const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
     id, kind: "single", title: composeTitle({ project, item: itemLabel, docDate: filedDate }),
     project, projectId, discipline, item: itemLabel, revision: "", docDate: filedDate,
-    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: up.storageKey || null, oversize: !!up.oversize, driveKey: drive.ok ? drive.driveKey : null }],
+    sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: stored.storageKey, oversize: stored.oversize, driveKey: stored.driveKey }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: !!up.oversize, name: fileName || "document.pdf",
-    driveError: !drive.ok && !drive.skipped ? drive.error : null };
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, name: fileName || "document.pdf",
+    driveError: stored.driveError };
 }
 
 /* --------------------------- source PDFs (Storage) -------------------------- */
+
+// A source is safe to PERSIST only once its bytes are actually stored somewhere — it has a
+// Drive key, a Supabase Storage key, or is known-oversize (which the loader turns into a
+// "re-drop" placeholder). Persisting a still-uploading (keyless) source would save a pointer
+// the loader can't fetch → a permanent "re-open it to view" even though the bytes may have
+// landed; buildSnapshot filters by this so a quick reload mid-upload can't strand a backdrop
+// (B318/NEW-3).
+export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.oversize));
+
+/* Store ONE interactively-opened source PDF (the "Open PDF…" single sheet and every Stitcher
+ * sheet) the same way filing does: Google Drive is the primary home, Supabase Storage the
+ * fallback — so these files (a) live in Drive like filed ones and (b) bypass Supabase's 50 MB
+ * per-file cap on the happy path (the cap otherwise silently flagged big E-size drawings
+ * "oversize"). Returns { ok, storageKey, driveKey, oversize, driveError, driveSkipped }.
+ * Never throws. (B317/NEW-2.) */
+export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName } = {}) {
+  const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
+  if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, driveError: null, driveSkipped: false };
+  const up = await uploadSource(srcId, blob, projectId, discipline);
+  return { ok: up.ok, storageKey: up.storageKey || null, driveKey: null, oversize: !!up.oversize,
+    driveError: drive.skipped ? null : (drive.error || null), driveSkipped: !!drive.skipped };
+}
 
 // Upload one source PDF. Returns { ok, oversize, storageKey, error }. A file over
 // the free-tier cap is NOT uploaded (oversize:true, no key) so the caller can still
