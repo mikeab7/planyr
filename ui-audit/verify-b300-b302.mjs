@@ -5,7 +5,7 @@
  *   B302 (single Markup): a 2-point Area can't be committed; a 3-point Area can.
  *   B301 (Stitch): a freshly-added 2nd sheet is flagged "Not aligned"; a valid Align clears
  *                  the flag.
- *   B312 (Stitch): measuring over that un-aligned sheet is BLOCKED (nothing committed) — the
+ *   B313 (Stitch): measuring over that un-aligned sheet is BLOCKED (nothing committed) — the
  *                  owner-tightened follow-up to B301 (was a soft warning).
  *   B300 (Stitch): a degenerate Align (two coincident points on the moving sheet) is
  *                  rejected with the "too close together" banner and leaves the sheet
@@ -133,8 +133,8 @@ let txt = await bodyTxt();
 check(/Not aligned — click/.test(txt), "canvas shows the 'Not aligned — click \"Align\"' overlay");
 check(/Not aligned — Align before measuring/.test(txt), "right-panel chip flags the 2nd sheet isn't aligned");
 
-/* ---------------- B312 — measuring over the unaligned sheet is BLOCKED (not just warned) ---------------- */
-console.log("\nB312 — measuring over the unaligned sheet is blocked (nothing committed):");
+/* ---------------- B313 — measuring over the unaligned sheet is BLOCKED (not just warned) ---------------- */
+console.log("\nB313 — measuring over the unaligned sheet is blocked (nothing committed):");
 const distLines = () => page.evaluate(() => document.querySelectorAll('svg line[stroke="#0e7490"]').length);
 await page.locator('div[style] button:has-text("Distance"), button:has-text("Distance")').first().click({ timeout: 8000 });
 await sleep(200);
