@@ -27,6 +27,9 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl } = 
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
   useEffect(() => {
     const onMsg = (e) => {
+      // Same-origin embedded iframe only — ignore messages from any other window so a
+      // cross-origin page can't spoof the scheduler's project list into the breadcrumb.
+      if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-seq" || m.type !== "planar:nav-state") return;
       setProjects(Array.isArray(m.projects) ? m.projects : []);
