@@ -1,4 +1,4 @@
-/* Self-verification for B310 — Undo (Ctrl+Z) after moving a building.
+/* Self-verification for B313 — Undo (Ctrl+Z) after moving a building.
  * Seeds a single-building plan, boots the planner logged-out, drags the building
  * on the SVG canvas, and checks that ONE Ctrl+Z snaps it ALL the way back to its
  * pre-drag position (the reported bug: undo did nothing / only partially reverted).
@@ -103,10 +103,10 @@ await undo(); await page.waitForTimeout(150);
 const afterEscUndo = await bld();
 log(d(afterEscUndo, o3) < 8, `after a cancelled drag, undo leaves the building put (no dangling half-command; Δ=${d(afterEscUndo, o3).toFixed(1)}px)`);
 
-await page.screenshot({ path: OUT + "b310-undo.png" });
+await page.screenshot({ path: OUT + "b313-undo.png" });
 console.log(errors.length ? `page errors:\n${errors.slice(0, 8).join("\n")}` : "(no page errors)");
 if (errors.length) fail++;
 await ctx.close();
 await browser.close();
-console.log(fail === 0 ? "\n✓ ALL B310 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
+console.log(fail === 0 ? "\n✓ ALL B313 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 process.exit(fail === 0 ? 0 : 1);

@@ -8,7 +8,7 @@
  * undo/redo) so the stack + dedup logic is unit-testable in isolation, and so the
  * live current state is passed in EXPLICITLY at the moment of each command rather
  * than read from a ref that lagged a render behind — the cause of undo behaving
- * unreliably right after a drag-move (B310: snapshot/baseline taken stale).
+ * unreliably right after a drag-move (B313: snapshot/baseline taken stale).
  *
  * A "transaction" is one push (before a mutation) → many live changes → one undo
  * frame. A drag-move pushes ONCE at drag-start, mutates freely during the drag,

@@ -20,7 +20,7 @@ describe("history stack (site-planner undo/redo)", () => {
     expect(posOf(reverted)).toEqual({ x: 0, y: 0 });
   });
 
-  it("B310 repro: undo reading a STALE current snapshots/compares wrong → 'does nothing' or partial revert", () => {
+  it("B313 repro: undo reading a STALE current snapshots/compares wrong → 'does nothing' or partial revert", () => {
     // The bug: the old code read the live state from a ref updated in a passive
     // effect, so undo()'s baseline could lag a render. Simulate that here: the
     // building has actually moved to (100,40), but the stale baseline still says (0,0).

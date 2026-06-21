@@ -262,8 +262,20 @@ server/                   # placeholder README only — NOT built or deployed; b
   needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
   hasn't run yet, so saving never regresses.
 
-### Document Review — auto-filing backend (B299, new) — BUILT + WIRED, gated dormant
-- **Drop a drawing → it files itself.** A server-side **title-block read** (`server/filing/`,
+### Document Review — auto-filing: PLAIN CODE first, AI fallback (B299 + B312) — LIVE (Tier 1 on by default)
+- **Tier 1 (B312, LIVE, default-on, FREE):** the common case is **plain code in the browser, no
+  tokens, no cloud, no key.** For any PDF with an embedded text layer (most CAD vector drawings),
+  `extractPageText` (pdf.js, reused from B267) → pure parsers in `src/shared/files/`:
+  `titleBlockParse.js` (discipline keyword table incl. **ALTA**, latest-date, sheet #, revision) +
+  `matchProject.js` (`matchProjectInText` searches the sheet text for each named project's
+  name/parcel/job#, reusing the "never auto-guess" decision) → `doc-review/lib/localRead.js`
+  (`localTitleBlockRead`). The provider exposes `autofileReady = true` so the drawer auto-files
+  out of the box: **confident match → auto-route; else → today's behavior** (active project /
+  holding tray). 53 unit tests; real-sheet accuracy = **V79**.
+- **Tier 2 (B299, AI fallback, gated dormant):** `autofile` (`lib/autofiling.js`) is local-first and
+  only reaches the AI when Tier 1 finds **no text** (a scanned/image-only sheet) **and**
+  `VITE_AUTOFILE_ENABLED` is on. So tokens are spent only on the hard minority. The server-side
+  **title-block read** (`server/filing/`,
   Cloud Run — the key must never reach the browser, so it's `/server` compute, not Supabase)
   reads a dropped PDF with the Claude API, **matches it to a named project** (parcel / job # /
   address / name, **never auto-guesses**), and returns a **filing decision** (auto-route +

@@ -98,6 +98,13 @@ const DOGEAR_D = 60; // dog-ear projection out from the dock face
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
 const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
+// B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
+// low-travel pointer-up counts as a real click that selects it. So panning across parcels no
+// longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
+// time window lets a slow, precise click that drifts a pixel or two still select, while any
+// real drag pans. This is the hand-rolled fallback the standard map engines use internally.
+const PARCEL_CLICK_SLOP_PX = 5;   // max pointer travel (px) to still count as a click, not a pan
+const PARCEL_CLICK_MS = 400;      // max press duration (ms) to still count as a click
 
 const PAL = {
   paper: "#f4f1ea",
@@ -750,6 +757,7 @@ const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? 
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
+  parcelSelect: true,   // B311: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -1290,7 +1298,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
   // current state. A passive-effect mirror lagged a paint behind, so undo right
   // after a drag-move intermittently snapshotted or compared a stale state — the
-  // building wouldn't fully snap back, or undo appeared to do nothing (B310).
+  // building wouldn't fully snap back, or undo appeared to do nothing (B313).
   const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
   stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
@@ -1397,7 +1405,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
   // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
   // compares against the live state we pass in (stateRef.current), so undo/redo
-  // can't act on a stale baseline (B310). One stack instance, kept across renders.
+  // can't act on a stale baseline (B313). One stack instance, kept across renders.
   const histRef = useRef(null);
   if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
@@ -1412,7 +1420,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
   // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
   // pushHistory pushed, so an interrupted move leaves no half-recorded command
-  // on the stack (B310). No-op for any drag that didn't stash a canceler.
+  // on the stack (B313). No-op for any drag that didn't stash a canceler.
   const cancelActiveMove = () => {
     const d = drag.current;
     if (!d || !d.canceler) return false;
@@ -1599,7 +1607,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const abortGesture = (pid = capturePidRef.current) => {
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
     capturePidRef.current = null;
-    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B310); no-op otherwise
+    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B313); no-op otherwise
     drag.current = null;
     setPanning(false);
     setMarquee(null);
@@ -2778,6 +2786,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
+    // B310: a press that began on a LOCKED parcel pans the canvas; if the pointer barely moved
+    // and the press was brief, it was a deliberate click → select that parcel (any larger
+    // movement was a pan and leaves the selection untouched).
+    if (d && d.mode === "pan" && d.tapParcel != null
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setSel({ kind: "parcel", id: d.tapParcel });
+    }
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
@@ -3690,15 +3706,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (tool !== "select") return;
-    e.stopPropagation();
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
-    if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
-    if (e.shiftKey) { toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
-    setSel({ kind: "parcel", id });
-    if (pc.locked) return;             // locked parcel: select only, don't move
-    pushHistory();
-    drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current };
+    if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge (works regardless of the select toggle)
+    // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
+    // stop propagation: let the press fall through to the background pan (no select, no move),
+    // exactly as if the click had landed on empty canvas.
+    if (!settings.parcelSelect) return;
+    if (e.shiftKey) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
+    e.stopPropagation();
+    if (!pc.locked) {
+      // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
+      // grabs it to drag (like an element). The pan-instead-of-select fix below is for the
+      // LOCKED default that every county-pulled / drawn lot carries.
+      setSel({ kind: "parcel", id });
+      pushHistory();
+      drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B313 Esc/abort-mid-drag revert
+      capturePidRef.current = e.pointerId;
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    // B310: a press on a LOCKED parcel starts a PAN, not a select — selecting on pointer-down
+    // is exactly what turned panning across parcels into a constant accidental select. Tag the
+    // pan with the parcel id + the press origin so a genuine CLICK (tiny travel, brief — tested
+    // in onUp) still selects it; any real drag pans and never selects.
+    setPanning(true);
+    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapParcel: id, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+    capturePidRef.current = e.pointerId;
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
@@ -5457,6 +5491,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
         {settings.snap ? `Snap ${settings.gridSize}′ on` : "Snap off"}
       </button>
+      {parcels.length > 0 && (
+        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+          onClick={() => {
+            const turningOff = settings.parcelSelect;
+            setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
+            if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
+          }}
+          title="Select parcels — ON: click a lot to select it (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
+        </button>
+      )}
       {tool === "select" && (() => {
         const canG = multi.length > 1, canU = !!selectedGroupId();
         if (!canG && !canU) return null;

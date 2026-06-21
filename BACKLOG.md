@@ -22,18 +22,27 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
+     gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
+     BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
+     a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
+     B303–B307, then the Mapillary proxy B308/B309). -->
+
 <!-- 2026-06-21: coworker-chat item "NEW-1" — Undo (Ctrl+Z) unreliable after moving a building.
-     Minted **B310** (next free B# across both files after B309). Deduped: related to but NOT a duplicate
-     of the done B32 (no-op-edit stack pollution) — B310 is the stale-baseline race, a different cause;
-     no Open item covered undo-after-move. Per STANDING RULE #1 filed AND fixed + headless-verified this
-     session (branch `claude/ecstatic-ritchie-ihzkym`); full [x] block is in BACKLOG-DONE.md. Root cause
-     (confirmed, not guessed): the move transaction boundary was already correct (one push at drag-start);
-     the bug was `stateRef` (snapshot source + undo's dedup baseline) being updated in a passive effect, so
-     it lagged a paint and undo could act on a stale state → revert nothing / partially. Fix: assign
-     stateRef during render + extract a pure, unit-tested `lib/history.js` (live state passed in explicitly)
-     + Esc/abort-mid-drag now cancels the move cleanly. Kept as ONE item (the race affects all undo; redo +
-     multi-select already work as separate transactions, so no split). lint 0 · 733 tests · build green ·
-     `ui-audit/verify-b310.mjs` 9/9 (one Ctrl+Z fully reverts, Δ=0.0px). -->
+     Minted **B313** — my first filing was B310, but concurrent `main` took B310/B311 (parcel click-vs-drag
+     + select-parcels toggle) and B312 (auto-filing local read) while this was in flight, so it renumbered
+     to the next free B# **B313** (the rules forbid sharing a number). Deduped: related to but NOT a
+     duplicate of the done B32 (no-op-edit stack pollution) — B313 is the stale-baseline race, a different
+     cause; no Open item covered undo-after-move. Per STANDING RULE #1 filed AND fixed + headless-verified
+     this session (branch `claude/ecstatic-ritchie-ihzkym`); full [x] block is in BACKLOG-DONE.md. Root
+     cause (confirmed, not guessed): the move transaction boundary was already correct (one push at
+     drag-start); the bug was `stateRef` (snapshot source + undo's dedup baseline) being updated in a
+     passive effect, so it lagged a paint and undo could act on a stale state → revert nothing / partially.
+     Fix: assign stateRef during render + extract a pure, unit-tested `lib/history.js` (live state passed in
+     explicitly) + Esc/abort-mid-drag now cancels the move cleanly. Kept as ONE item (the race affects all
+     undo; redo + multi-select already work as separate transactions, so no split). lint 0 · full suite
+     green (11 new in test/history.test.js) · build green · `ui-audit/verify-b313.mjs` 9/9 (one Ctrl+Z fully
+     reverts, Δ=0.0px). -->
 
 <!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
      ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
