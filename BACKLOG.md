@@ -23,27 +23,47 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
-     navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314 (the
-     highest B# across both files was B312 when filed), but a very hot `main` then consumed B313–B319
-     while this was in flight — multi-tab/stale-save **B313/B314**, undo-fix **B315**, stitch hard-block
-     **B316**, theming **B317–B319** — so to avoid a duplicate ID this batch renumbered to the next clear
-     pair **B320–B321** (V80→**V84** likewise). Built + verified + SHIPPED via **PR #238 → main** (branch
-     claude/gifted-heisenberg-a6zlvt), which also merged the latest `main` (theming CSS vars) into the
-     re-architected files. The code/tests were authored as B313/B314; the inline comments + harnesses were
-     swept to B320/B321 to match (main's own B313/B314 refs left intact). Deduped: B320 is NET-NEW vs the
-     shipped scroll-based **B288–B290** (it swaps in the Site map's TRANSFORM model + one shared engine);
-     B321 is net-new (no item moved the Markup tools off the header). Follow-up **B322** (touchscreen
-     two-finger pinch) filed below. -->
+     navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314, but a
+     VERY hot `main` consumed the numbers TWICE while this integrated — first B313–B319 (multi-tab/
+     stale-save, undo, stitch-block, theming), then B320–B324 (a theming contrast pass + the Doc-Review
+     file-storage batch) — so this batch renumbered B313/B314 → B320/B321 → finally **B325/B326**, plus
+     **B327** for the touchscreen-pinch follow-up. (V80→**V84** survived — main's V is still V83.) Built +
+     verified; merging via **PR #238 → main** (branch claude/gifted-heisenberg-a6zlvt), which folds in the
+     latest `main` (theming CSS vars + the file-storage changes). Code/tests/harnesses swept to B325/B326
+     (main's own B313/B314 + B322/B323 refs left intact); the two dedicated harnesses were renamed to
+     feature names (`verify-markup-viewport` / `verify-markup-rail`) so a future renumber can't strand
+     them. Deduped: B325 is NET-NEW vs the shipped scroll-based **B288–B290** (it swaps in the Site map's
+     TRANSFORM model + one shared engine); B326 net-new (no item moved the Markup tools off the header). -->
 
-### B320 — Markup canvas pan + zoom parity with the Site map (one shared viewport engine) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; filed B313 → renumbered **B320** after a hot `main` took B313–B319)*
-`[x]` **SHIPPED via PR #238 → `main` (2026-06-21).** One shared viewport engine (`src/shared/viewport/viewportTransform.js`: `worldToScreen`/`screenToWorld`/`zoomAround`/`panBy`/`fitView`/`shouldPan`) now drives the Site map, the Markup canvas, AND the Stitcher. The Markup viewer was re-architected scroll-box → transform (`view={scale,tx,ty}`): **free pan in any direction** (the old scroll box couldn't slide past a fit-width sheet — the "only scrolls vertically" repro), cursor-anchored zoom, **Bluebeam pan/tool collision** (middle-mouse always pans; Space-hold pans; Select on empty pans, on an object selects/moves; a drawing tool draws), **view-transform-only** (markups stay page-unit, calibration untouched), and a perf path that rescales the existing bitmap during a zoom and re-rasterises crisply (debounced) on settle. The Site map + Stitcher migrated their pan/zoom math to the same engine, **byte-identical** (unit-tested) — verified unchanged. Trackpad pinch (ctrl+wheel) routes through the wheel path; touchscreen two-finger pinch is **B322** (follow-up).
-> **Verified (V84):** 43/43 headless — `verify-b320.mjs` 13/13 (free pan L/R/down, cursor-anchored zoom 0.1px drift, calibrated measurement reads identical feet through zoom+pan + stays calibrated, middle-mouse pans-without-drawing, draw+select-move, sheet-switch keeps zoom), `verify-siteplanner-viewport.mjs` 6/6 (Site map unchanged), `verify-docreview-viewer.mjs` 13/13 (B288–B296 still green) + viewportTransform unit tests. Eligible to move to BACKLOG-DONE.
+### B325 — Markup canvas pan + zoom parity with the Site map (one shared viewport engine) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; filed B313 → B320 → renumbered **B325** as a hot `main` twice took the number)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** One shared viewport engine (`src/shared/viewport/viewportTransform.js`: `worldToScreen`/`screenToWorld`/`zoomAround`/`panBy`/`fitView`/`shouldPan`) now drives the Site map, the Markup canvas, AND the Stitcher. The Markup viewer was re-architected scroll-box → transform (`view={scale,tx,ty}`): **free pan in any direction** (the old scroll box couldn't slide past a fit-width sheet — the "only scrolls vertically" repro), cursor-anchored zoom, **Bluebeam pan/tool collision** (middle-mouse always pans; Space-hold pans; Select on empty pans, on an object selects/moves; a drawing tool draws), **view-transform-only** (markups stay page-unit, calibration untouched), and a perf path that rescales the existing bitmap during a zoom and re-rasterises crisply (debounced) on settle. The Site map + Stitcher migrated their pan/zoom math to the same engine, **byte-identical** (unit-tested) — verified unchanged. Trackpad pinch (ctrl+wheel) routes through the wheel path; touchscreen two-finger pinch is **B327** (follow-up).
+> **Verified (V84):** 43/43 headless — `verify-markup-viewport.mjs` 13/13 (free pan L/R/down, cursor-anchored zoom 0.1px drift, calibrated measurement reads identical feet through zoom+pan + stays calibrated, middle-mouse pans-without-drawing, draw+select-move, sheet-switch keeps zoom), `verify-siteplanner-viewport.mjs` 6/6 (Site map unchanged), `verify-docreview-viewer.mjs` 13/13 (B288–B296 still green) + viewportTransform unit tests. Eligible to move to BACKLOG-DONE on merge.
 
-### B321 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; filed B314 → renumbered **B321** after a hot `main` took B313–B319)*
-`[x]` **SHIPPED via PR #238 → `main` (2026-06-21).** New shared, presentational rail `src/shared/ui/ToolRail.jsx`; Markup adopts it — the 10 drawing/measure tools + zoom (In/Out/Fit/Page + a % readout) moved off `AppHeader` row 2 into a right-side icon rail, flush to the canvas, active highlight on the Markup accent **#EF9F27**, Select default; the Takeoff panel is now collapsible beside it. Row 2 keeps Open/Stitch/Library/filename + Undo/Redo (never empty). Site Planner keeps its own inlined rail for now (can adopt the shared one later). **V84:** `verify-b321.mjs` 11/11 headless + no regression. Eligible to move to BACKLOG-DONE.
+### B326 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; filed B314 → B321 → renumbered **B326**)*
+`[x]` **Merging via PR #238 → `main` (2026-06-21).** New shared, presentational rail `src/shared/ui/ToolRail.jsx`; Markup adopts it — the 10 drawing/measure tools + zoom (In/Out/Fit/Page + a % readout) moved off `AppHeader` row 2 into a right-side icon rail, flush to the canvas, active highlight on the Markup accent **#EF9F27**, Select default; the Takeoff panel is now collapsible beside it. Row 2 keeps Open/Stitch/Library/filename + Undo/Redo (never empty). Site Planner keeps its own inlined rail for now (can adopt the shared one later). **V84:** `verify-markup-rail.mjs` 11/11 headless + no regression. Eligible to move to BACKLOG-DONE on merge.
 
-### B322 — Touchscreen two-finger pinch-zoom on the Markup canvas + the Site map `[Doc Review / Markup + Site Planner]` (feature)  *(owner-requested 2026-06-21 right after B320/B321; minted **B322** — next free after B321)*
-`[ ]` **Follow-up to B320.** Desktop trackpad pinch already zooms (it arrives as ctrl+wheel → the existing wheel path). What's missing: a **two-finger pinch on a touchscreen**, which fires as two simultaneous `touch` pointers (not a wheel), so neither the Markup canvas nor the Site map zooms on it today (both match — neither had it). **Plan:** add a small shared pinch helper to `viewportTransform.js` (zoom by the finger-distance ratio about the pinch midpoint, which also pans as the midpoint moves) and wire a 2-pointer path into each module's pointer handlers, **gated on `pointerType==='touch'` + exactly 2 active pointers** so the verified mouse/trackpad path is untouched. Files: `viewportTransform.js`, `DocReview.jsx`, `SitePlanner.jsx` pointer handlers.
+### B327 — Touchscreen two-finger pinch-zoom on the Markup canvas + the Site map `[Doc Review / Markup + Site Planner]` (feature)  *(owner-requested 2026-06-21 right after B325/B326; minted **B327** — next free after B324)*
+`[ ]` **Follow-up to B325.** Desktop trackpad pinch already zooms (it arrives as ctrl+wheel → the existing wheel path). What's missing: a **two-finger pinch on a touchscreen**, which fires as two simultaneous `touch` pointers (not a wheel), so neither the Markup canvas nor the Site map zooms on it today (both match — neither had it). **Plan:** add a small shared pinch helper to `viewportTransform.js` (zoom by the finger-distance ratio about the pinch midpoint, which also pans as the midpoint moves) and wire a 2-pointer path into each module's pointer handlers, **gated on `pointerType==='touch'` + exactly 2 active pointers** so the verified mouse/trackpad path is untouched. Files: `viewportTransform.js`, `DocReview.jsx`, `SitePlanner.jsx` pointer handlers.
+
+<!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
+     "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across BACKLOG.md +
+     BACKLOG-DONE.md was B315; the B25431 / B3340 hits in BACKLOG-DONE.md are CSS hex colours, not IDs).
+     Per STANDING RULE #1: filed here AND fixed + verified the SAME session (branch
+     `claude/bold-bohr-hohz2x`); full [x] blocks live in BACKLOG-DONE.md.
+       • B321 (NEW-1) — deleteReview orphaned the Drive copy. PRIMARY ("no Drive delete anywhere") was
+         ALREADY shipped under the B207 Drive wiring (`deleteFromDrive` + the driveKeys loop); the RESIDUAL
+         (loadReview→null left keys=[] → nothing cleaned) is fixed via a local-mirror fallback. FIXED.
+       • B322 (NEW-2) — "Open PDF…" + every Stitcher sheet uploaded to Supabase only. Routed through the
+         shared Drive-first/Supabase-fallback `storeSource` (the same path filing uses); driveKey now
+         persisted + read back; lifts the 50 MB Supabase cap off big drawings on the happy path. FIXED.
+       • B323 (NEW-3) — a keyless source saved mid-upload became unfetchable on a quick reload. buildSnapshot
+         now persists a source only once it's really stored (`isStoredSource`). FIXED.
+       • B324 (NEW-4) — a genuine edit inside the post-open suspend window wasn't flagged dirty → never
+         reached the cloud. Pure `planAutosave` gate: load-echo skipped, real edits mirror+dirty+flush. FIXED.
+     Deduped — NEW-2/3/4 are net-new (NOT the viewer batch B288–B296 nor the stitch-guard batch B300–B302,
+     which never touched the storage backend choice or the autosave gating); B321 = the residual on top of
+     the already-shipped B207 Drive delete (distinct from B38(a) upsert re-file orphaning). lint 0 · 788
+     tests (8 new in test/docPersistence.test.js) · build green · doc-review lazy chunk intact. -->
 
 ### B316 — Hard-block (not just warn) measuring over a not-yet-aligned stitch sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-20: "don't let it measure on uncalibrated things" — tightens the shipped B301; first filed B303, renumbered **B316** — a hot `main` consumed B303–B315)*
 `[x]` B301 shipped a **soft warning** when a Distance/Area landed over a sheet that hadn't been aligned yet — but it still **committed** the measurement, so a silently-wrong length/area could land in the takeoff. Owner asked for a hard block. **Fixed + shipped to `main` this session (branch `claude/awesome-feynman-i7wypf`):** a distance/area point on an un-aligned sheet (`measureOverUnaligned`) is now **refused at click time** — "Align that sheet before measuring on it — its scale isn't set yet…" — so no measurement over an un-aligned sheet can be created. Calibrate stays exempt (it's the act of *setting* the scale). The right-panel chip now reads "Not aligned — Align before measuring" (was "measurements may be off"). Reuses B301's `aligned`-state + `measureOverUnaligned`; new `Stitcher.jsx` `blockedOverUnaligned`. Verified headless (`ui-audit/verify-b300-b302.mjs`: block banner shown + 0 committed lines) · lint 0 · 743 tests · build green.
