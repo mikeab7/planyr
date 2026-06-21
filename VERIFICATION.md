@@ -60,6 +60,10 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V83 — Stitch: measuring over an un-aligned sheet is now BLOCKED, not just warned (B316) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out, generated 2-page Letter PDF) · **Next check** — none (pure Stitch-canvas behavior; no auth/cloud path). Owner call: "don't let it measure on uncalibrated things."
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b300-b302.mjs`, all checks pass, 0 page errors):** a Distance drawn over a not-yet-aligned 2nd sheet is **refused** — the block banner "Align that sheet before measuring on it" appears and **0** distance lines are committed (B301 had shown a soft warning but still committed the measurement). The B300 degenerate-align reject + B302 ≥3-pt Area guards still pass; a valid Align still clears the flag. lint **0** · **743 tests** · build green.
+
 ### V82 — Undo (Ctrl+Z) reliably reverts a building move in one step (B315) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **chromium-1194** on the built app, `vite preview`, logged-out — the planner canvas + undo are browser-only, no auth path) · **Next check** — none required (auth-independent client logic).
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-b315.mjs`, 9/9 checks, 0 JS errors, screenshot `ui-audit/screens/b315-undo.png`):** seed a one-building plan, drag the building 300px → **one Ctrl+Z snaps it fully back to the pre-drag spot (Δ=0.0px — a full revert, not the reported partial/no-op)**; **Ctrl+Shift+Z** redoes it; two separate moves take **two** undos (one each, in order); **Esc mid-drag** cancels the move (building returns to pre-drag) and leaves **no dangling half-command** on the stack. External Houston GIS hosts are CORS-blocked by the sandbox proxy (environmental network noise, filtered) — no app JS errors.

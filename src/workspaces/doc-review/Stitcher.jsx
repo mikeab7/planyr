@@ -167,10 +167,17 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
 
-  // Warn (don't block) when a measurement lands over a sheet that hasn't been aligned yet —
-  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B301).
-  const warnIfOverUnaligned = (pts) => {
-    if (measureOverUnaligned(placed, pts)) setErr("Heads up: that measurement is over a sheet that isn’t aligned yet — Align it first, or its length/area may be wrong.");
+  // Hard-block a measurement that lands over a sheet that hasn't been aligned yet — its scale
+  // isn't set until Align runs, so the length/area would be SILENTLY WRONG. Refuse the point
+  // and tell the user to Align first. (B301 warned but still committed; B313 blocks outright —
+  // owner call: never measure on an un-aligned / un-scaled sheet.) Calibrate is exempt: that's
+  // the act of SETTING the scale, not reading one off.
+  const blockedOverUnaligned = (pts) => {
+    if (measureOverUnaligned(placed, pts)) {
+      setErr("Align that sheet before measuring on it — its scale isn't set yet, so the length/area would be wrong.");
+      return true;
+    }
+    return false;
   };
 
   const onDown = (e) => {
@@ -199,9 +206,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
+    // B313 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
+    // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
+    if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
     if (tool === "calibrate" || tool === "distance") {
       if (!draft) setDraft({ kind: tool, pts: [w] });
-      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); warnIfOverUnaligned(pts); } setDraft(null); }
+      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); } setDraft(null); }
       return;
     }
     if (tool === "area") setDraft((d) => (d && d.kind === "area" ? { ...d, pts: [...d.pts, w] } : { kind: "area", pts: [w] }));
@@ -224,7 +234,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
-  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); warnIfOverUnaligned(draft.pts); } setDraft(null); };
+  // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
+  // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
+  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
 
   // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
   // world midpoint maps to screen px via the current pan/zoom. (B304)
@@ -492,7 +504,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             return (
             <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
-              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — measurements may be off</div>}
+              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
               <div style={{ display: "flex", gap: 6 }}>
                 {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
                 <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>

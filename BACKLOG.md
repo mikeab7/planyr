@@ -22,6 +22,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B316 — Hard-block (not just warn) measuring over a not-yet-aligned stitch sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-20: "don't let it measure on uncalibrated things" — tightens the shipped B301; first filed B303, renumbered **B316** — a hot `main` consumed B303–B315)*
+`[x]` B301 shipped a **soft warning** when a Distance/Area landed over a sheet that hadn't been aligned yet — but it still **committed** the measurement, so a silently-wrong length/area could land in the takeoff. Owner asked for a hard block. **Fixed + shipped to `main` this session (branch `claude/awesome-feynman-i7wypf`):** a distance/area point on an un-aligned sheet (`measureOverUnaligned`) is now **refused at click time** — "Align that sheet before measuring on it — its scale isn't set yet…" — so no measurement over an un-aligned sheet can be created. Calibrate stays exempt (it's the act of *setting* the scale). The right-panel chip now reads "Not aligned — Align before measuring" (was "measurements may be off"). Reuses B301's `aligned`-state + `measureOverUnaligned`; new `Stitcher.jsx` `blockedOverUnaligned`. Verified headless (`ui-audit/verify-b300-b302.mjs`: block banner shown + 0 committed lines) · lint 0 · 743 tests · build green.
+
 <!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
      gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
      BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
