@@ -223,6 +223,22 @@ describe("load pipeline — corrupt cloud/seed data must not crash the whole loa
   });
 });
 
+describe("rebuildHealthMaps — corrupt custom-status settings must not crash render", () => {
+  it("survives non-array / null / garbage custom statuses and bad overrides", () => {
+    for (const custom of [null, "nope", 5, {}, [null], [undefined], ["x"], [{}], [{ k: null }]]) {
+      expect(() => E.rebuildHealthMaps(custom, {})).not.toThrow();
+    }
+    for (const ov of [null, "nope", 5, []]) expect(() => E.rebuildHealthMaps([], ov)).not.toThrow();
+  });
+  it("applies a valid custom status and label override, base statuses intact", () => {
+    const { HEALTH, HK } = E.rebuildHealthMaps([{ k: "blocked", label: "Blocked", dot: "#000", bar: "#eee" }], { gray: "Backlog" });
+    expect(HK).toContain("blocked");
+    expect(HEALTH.blocked.label).toBe("Blocked");
+    expect(HEALTH.gray.label).toBe("Backlog");
+    expect(HEALTH.green.label).toBe("Complete"); // untouched built-in
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   it("addBD coerces + bounds its step count (MAX_BD_STEPS)", () => {
@@ -258,5 +274,9 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("the Scheduler shell wrapper validates message origin too", () => {
     const sjsx = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");
     expect(sjsx).toMatch(/if \(e\.origin !== window\.location\.origin\) return;/);
+  });
+  it("rebuildHEALTH guards corrupt custom-status settings", () => {
+    expect(src).toMatch(/\(Array\.isArray\(custom\) \? custom : \[\]\)\.forEach/);
+    expect(src).toMatch(/skip a null\/garbage custom status/);
   });
 });

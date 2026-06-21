@@ -376,11 +376,17 @@ const rebuildHEALTH = (custom = [], labelOverrides = {}) => {
   HEALTH = {...BASE_HEALTH};
   HK     = [...BASE_HK];
   HDARK  = {...BASE_HDARK};
+  // Defensive: this runs in an effect on every settings change, so corrupt settings
+  // (a non-array customHealth, a null custom entry, or non-object overrides) must be
+  // skipped — a throw here is uncaught in the effect and breaks the app.
   // Apply label overrides to built-ins
-  Object.entries(labelOverrides).forEach(([k, label]) => {
-    if (HEALTH[k]) HEALTH[k] = {...HEALTH[k], label};
-  });
-  custom.forEach(ch => {
+  if (labelOverrides && typeof labelOverrides === "object") {
+    Object.entries(labelOverrides).forEach(([k, label]) => {
+      if (HEALTH[k]) HEALTH[k] = {...HEALTH[k], label};
+    });
+  }
+  (Array.isArray(custom) ? custom : []).forEach(ch => {
+    if (!ch || typeof ch !== "object" || ch.k == null) return;   // skip a null/garbage custom status
     HEALTH[ch.k] = {label:ch.label, dot:ch.dot, border:"none", bar:ch.bar, ganttBar:ch.dot, ganttStyle:"solid"};
     HDARK[ch.k]  = ch.dark || ch.dot;
     if (!HK.includes(ch.k)) HK.push(ch.k);
