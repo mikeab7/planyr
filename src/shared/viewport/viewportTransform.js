@@ -21,13 +21,29 @@
  * host; only the math + the pan/tool collision rule live here.
  */
 
-export const clampNum = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+// Clamp to [lo,hi]. Finite-SAFE on purpose: a NaN input (e.g. a 0/0 pinch ratio
+// from two fingers landing on the same pixel) returns `lo` instead of poisoning the
+// result with NaN. This is the single chokepoint that guarantees `scale` is always a
+// finite, in-range number — which in turn keeps every screenToWorld coordinate finite,
+// so a measured markup can never serialize to `null` (JSON.stringify turns NaN→null)
+// and silently lose a user's work. ±Infinity already clamp correctly via Math.min/max.
+export const clampNum = (n, lo, hi) => (Number.isNaN(+n) ? lo : Math.max(lo, Math.min(hi, +n)));
+
+// Coerce a screen-space scalar (a pointer/anchor coord or a pan delta) to a finite
+// number. Pointer coords are always finite in practice; this just guarantees a stray
+// NaN anchor (null bounding rect, mid-mount) can't leak into tx/ty and poison the view.
+const fin0 = (n) => (Number.isFinite(n) ? n : 0);
 
 // world point -> screen pixels (relative to the viewport's top-left).
 export const worldToScreen = (v, p) => ({ x: p.x * v.scale + v.tx, y: p.y * v.scale + v.ty });
 
 // screen pixels (relative to the viewport's top-left) -> world point.
-export const screenToWorld = (v, p) => ({ x: (p.x - v.tx) / v.scale, y: (p.y - v.ty) / v.scale });
+// `v.scale || 1` is a no-op for any real view (a valid scale is a nonzero finite
+// number) but stops a degenerate scale of 0 / NaN from dividing a coordinate to
+// Infinity / NaN — which would corrupt to `null` on save. Defense in depth: our own
+// emit functions already keep scale finite & ≥ min, so this only ever guards a
+// hand-built or not-yet-initialized view.
+export const screenToWorld = (v, p) => ({ x: (p.x - v.tx) / (v.scale || 1), y: (p.y - v.ty) / (v.scale || 1) });
 
 /* Zoom by `factor` about a screen-space anchor (ax,ay), holding the world point
  * currently under that anchor fixed — the cursor-anchored zoom both canvases use.
@@ -35,23 +51,28 @@ export const screenToWorld = (v, p) => ({ x: (p.x - v.tx) / v.scale, y: (p.y - v
  * clamped to [min,max]; when the clamp bites, the anchored world point still stays
  * put (we re-derive the offset from the clamped scale). */
 export function zoomAround(v, factor, ax, ay, min = 0.02, max = 8) {
-  const w = screenToWorld(v, { x: ax, y: ay });
+  const x = fin0(ax), y = fin0(ay);
+  const w = screenToWorld(v, { x, y });
   const scale = clampNum(v.scale * factor, min, max);
-  return { scale, tx: ax - w.x * scale, ty: ay - w.y * scale };
+  return { scale, tx: x - w.x * scale, ty: y - w.y * scale };
 }
 
 // Pan by a screen-pixel delta (a drag). Scale is unchanged.
-export const panBy = (v, dx, dy) => ({ scale: v.scale, tx: v.tx + dx, ty: v.ty + dy });
+export const panBy = (v, dx, dy) => ({ scale: v.scale, tx: v.tx + fin0(dx), ty: v.ty + fin0(dy) });
 
 /* Fit a world-space box (boxW×boxH world units) inside a viewport (vw×vh px) with
  * `pad` px of margin, centred. mode 'width' fits the width only (height may overflow);
  * 'page' fits the whole box (min of the two). Returns a fresh view. */
 export function fitView(boxW, boxH, vw, vh, { pad = 12, min = 0.02, max = 8, mode = "page" } = {}) {
-  const safeW = Math.max(1, boxW), safeH = Math.max(1, boxH);
-  const sw = (vw - pad * 2) / safeW;
-  const sh = (vh - pad * 2) / safeH;
+  // Sanitize every input to a finite, sane value so a NaN/Infinity box or viewport
+  // (a half-measured sheet, a 0×0 container mid-mount) can't emit a NaN view.
+  const fin = (n, d) => (Number.isFinite(n) ? n : d);
+  const safeW = Math.max(1, fin(boxW, 1)), safeH = Math.max(1, fin(boxH, 1));
+  const W = Math.max(0, fin(vw, 0)), H = Math.max(0, fin(vh, 0));
+  const sw = (W - pad * 2) / safeW;
+  const sh = (H - pad * 2) / safeH;
   const scale = clampNum(mode === "width" ? sw : Math.min(sw, sh), min, max);
-  return { scale, tx: (vw - safeW * scale) / 2, ty: (vh - safeH * scale) / 2 };
+  return { scale, tx: (W - safeW * scale) / 2, ty: (H - safeH * scale) / 2 };
 }
 
 /* Bluebeam pan/tool collision rule — given a pointerdown, should it start a PAN
@@ -83,7 +104,8 @@ export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
  * `prevMid`/`currMid` are viewport-relative screen points. This is the touch counterpart
  * of `zoomAround` (which the wheel/trackpad-pinch path already uses). */
 export function pinchZoom(v, prevMid, currMid, factor, min = 0.02, max = 8) {
-  const w = screenToWorld(v, prevMid);          // world point under the fingers last frame
+  const w = screenToWorld(v, { x: fin0(prevMid.x), y: fin0(prevMid.y) }); // world point under the fingers last frame
+  const cx = fin0(currMid.x), cy = fin0(currMid.y);
   const scale = clampNum(v.scale * factor, min, max);
-  return { scale, tx: currMid.x - w.x * scale, ty: currMid.y - w.y * scale };
+  return { scale, tx: cx - w.x * scale, ty: cy - w.y * scale };
 }
