@@ -101,7 +101,7 @@ export function latestDate(text) {
  * doubt we return "" and let the sheet stay generically labeled (never fabricate). */
 export function parseSheetNumber(text) {
   const s = (text || "").toString();
-  // B348 — accept a 3-digit major (C-100, A101) to match parseSheetCode (sheetGroups) and the
+  // B350 — accept a 3-digit major (C-100, A101) to match parseSheetCode (sheetGroups) and the
   // match-line SHEET_REF (sheetMeta). The cap was \d{1,2}, so a set numbered past 99 read its
   // sheet number as "" — and a sheet with no number can't be grouped OR auto-stitched (its
   // match-line neighbors never find it in the byNumber index). Still LABEL-anchored ("SHEET NO."),

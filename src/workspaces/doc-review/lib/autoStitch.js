@@ -56,7 +56,7 @@ export function buildAdjacency(sheets) {
       // So the opposite side is the source of truth, not B's own label.
       const geomSide = oppositeSide(ml.side);
       if (!geomSide) continue; // A's side unreadable (bare match line) → no usable seam here
-      // B348 — CONTRADICTION guard. If B also names A but on a side that is NOT that opposite
+      // B350 — CONTRADICTION guard. If B also names A but on a side that is NOT that opposite
       // (e.g. both sheets claim the seam is on their "right"), the two reads disagree about how
       // they fit together — a sign one label was mis-read. Stitching anyway would overlap/mirror
       // the sheet; per "a wrong stitch is worse than an unstitched one," drop the edge and let the
@@ -79,7 +79,7 @@ function pickAnchor(sheets, adj) {
 
 const ID = { A: 1, B: 0, e: 0, f: 0 };
 
-// B348 — sheets in one real plan set are the SAME plot size, so a seam-to-seam fit should place a
+// B350 — sheets in one real plan set are the SAME plot size, so a seam-to-seam fit should place a
 // neighbor at ~1× scale (the anchor is identity, both endpoints are page points). A similarity fit
 // from two endpoints, though, will happily RESCALE a sheet to make the seams meet — so a half-size
 // detail page (or a portrait sheet mis-grouped with landscape ones) gets silently shrunk/blown up
@@ -115,7 +115,7 @@ export function autoPlaceGroup(sheets = []) {
       const wA1 = fwd(Ma, aEnds[0]), wA2 = fwd(Ma, aEnds[1]);
       if (alignBaselinesDegenerate(bEnds[0], bEnds[1], wA1, wA2)) continue;
       const Mb = solveM(bEnds[0], bEnds[1], wA1, wA2);
-      if (!scaleInBand(Mb)) continue; // B348 — size mismatch ⇒ would rescale wrongly; leave for manual Align
+      if (!scaleInBand(Mb)) continue; // B350 — size mismatch ⇒ would rescale wrongly; leave for manual Align
       placements.set(b.id, Mb);
       seen.add(b.id);
       queue.push(b);
