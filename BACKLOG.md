@@ -210,7 +210,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      items; JSON re-import already ships as Export JSON). RELATED: **B131** (overlay-in-print toggle,
      done) is PRESERVED — the `printOverlay` checkbox still gates the placed overlay in the export;
      **B50** (export/print robustness) is partly SUPERSEDED for the print path (the old "don't strand
-     a blank Preparing… window" guard is moot — there's no window now). **B159/B160** are the
+     a blank Preparing… window" guard is moot — there's no window now). **B355/B160** are the
      *Scheduler* Gantt PDF/Print export (a different module), not this. Filed AND shipped this same
      session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION **V60**). -->
 
@@ -329,12 +329,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      (B208), and the no-silent-failure contract (B209) are BUILT + tested now, with the Drive backend
      (B207) scaffolded behind them. Code in server/storage/ (walled off from the public Pages build); see
      server/storage/README.md for the exact env/credentials the Drive backend needs from Cowork. -->
-
-### B207 — Google Drive storage backend behind the adapter `[Server]` (feature)  *(arrived as "NEW-2"; provisionally B204, renumbered **B207** — `main` took B203–B205)*
-`[~]` Drive as one adapter backend against a **Workspace Drive on planyr.io**: store/fetch/list/move/rename **bytes only**. This is the **substrate beneath auto-filing, NOT a redefinition of it** — auto-filing's own spec (title-block read → match project + aliases → rename/route into the folder structure → "needs filing" holding area for no-match / low-confidence, **never auto-guess** → queryable index of file facts) stays authoritative and **writes through this backend**. The **index records live in Supabase Postgres, not Drive.**
-- **✅ Shipped this session (scaffold):** `server/storage/backends/driveBackend.js` — the full backend contract, with every op returning a clear **"Drive isn't connected yet"** failure (never a throw, never a false success) until credentials arrive. The expected Drive REST `client` interface is documented inline (a fill-in, not a rebuild). Decisions baked in per spec: OAuth app **Internal** (Workspace user type → skips Google verification + the 7-day refresh-token expiry); scope **`drive.file`** (least privilege — app only touches files it creates, which still show in the owner's Drive for manual drag-to-email; broader Drive scope is a flagged decision, not a default); **credentials + refresh token server-side ONLY** (never the frontend build, never a `VITE_` var, never committed, never on the public Cloudflare Pages deploy — same isolation as the APS key). Moving storage to Drive **removes the Supabase 50 MB-per-file ceiling.**
-- **⏳ Blocked on the owner's manual setup (in progress via Cowork):** the Workspace OAuth app + the `GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN / PLANYR_DRIVE_ROOT_FOLDER` env values (see `server/storage/README.md`). Once provided: write the thin Drive REST `client`, swap the in-memory `idMap` store for a Supabase-Postgres one, set `PLANYR_STORAGE_BACKEND=drive`. No app changes.
-> **Cross-link:** the auto-filing item (title-block read → match → route → index) writes through this backend; this is its storage substrate, not a competing spec. Also unblocks the >50 MB drawings the Supabase free tier rejects.
 
 ### B207 — Google Drive storage backend behind the adapter `[Server]` (feature)  *(arrived as "NEW-2"; provisionally B204, renumbered **B207** — `main` took B203–B205)*
 `[~]` Drive as one adapter backend against a **Workspace Drive on planyr.io**: store/fetch/list/move/rename **bytes only**. This is the **substrate beneath auto-filing, NOT a redefinition of it** — auto-filing's own spec (title-block read → match project + aliases → rename/route into the folder structure → "needs filing" holding area for no-match / low-confidence, **never auto-guess** → queryable index of file facts) stays authoritative and **writes through this backend**. The **index records live in Supabase Postgres, not Drive.**
@@ -678,7 +672,7 @@ product switcher) already shipped for the *planner* context bar and explicitly l
 physical row is a later polish," so **B104** is that remaining polish for the *map* view
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
-### B159 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)
+### B355 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)  *(renumbered from a colliding B159 → B355, 2026-06-21; the surviving B159 is the Task-names visibility toggle)*
 
 - [ ] Add a **time scale selector** to the PDF/Print Exhibit export sidebar, controlling the density of the Gantt chart's time axis in the exported output.
 - Options: **Days · Weeks · Months · Quarters** — matching common schedule exhibit conventions.
@@ -694,10 +688,10 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - [ ] Add a control to the PDF/Print Exhibit export sidebar that lets the user adjust how much of the total page width the Gantt chart occupies vs. the task name/info columns.
 - Recommended implementation: a **horizontal split slider** or a **numeric percentage field** (e.g., "Gantt width: 60%") that shifts the column-to-chart ratio.
 - Preview updates in real time as the user drags/adjusts.
-- **Interacts with B159 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
+- **Interacts with B355 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
 - Export-only; live schedule layout unaffected.
 
-<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B159 (related but distinct control). -->
+<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B355 (related but distinct control). -->
 
 ---
 
