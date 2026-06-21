@@ -3,8 +3,10 @@
  * Drives the REAL built app (logged-out; the stitch/markup core is browser-only) with a
  * generated minimal 2-page PDF — no owner sample needed. Asserts:
  *   B302 (single Markup): a 2-point Area can't be committed; a 3-point Area can.
- *   B301 (Stitch): a freshly-added 2nd sheet is flagged "Not aligned"; measuring over it
- *                  warns; a valid Align clears the flag.
+ *   B301 (Stitch): a freshly-added 2nd sheet is flagged "Not aligned"; a valid Align clears
+ *                  the flag.
+ *   B310 (Stitch): measuring over that un-aligned sheet is BLOCKED (nothing committed) — the
+ *                  owner-tightened follow-up to B301 (was a soft warning).
  *   B300 (Stitch): a degenerate Align (two coincident points on the moving sheet) is
  *                  rejected with the "too close together" banner and leaves the sheet
  *                  un-aligned (not flung) — then a real Align still succeeds.
@@ -115,7 +117,7 @@ check(polyAfter3 === 1, `3-point Area commits (committed polygons = ${polyAfter3
 
 /* ---------------- switch to Stitch, place two sheets ---------------- */
 console.log("\nB301 — a freshly added 2nd sheet is flagged 'Not aligned':");
-await page.locator('button:has-text("Stitch sheets")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 }); // "Stitch ▸" (renamed from "Stitch sheets ▸")
 await sleep(700);
 await page.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
 await sleep(1500); // render both tray pages
@@ -129,18 +131,22 @@ check(imgs.length === 2, `two sheets placed on the canvas (images = ${imgs.lengt
 const bodyTxt = () => page.evaluate(() => document.body.innerText);
 let txt = await bodyTxt();
 check(/Not aligned — click/.test(txt), "canvas shows the 'Not aligned — click \"Align\"' overlay");
-check(/Not aligned — measurements may be off/.test(txt), "right-panel chip warns the 2nd sheet isn't aligned");
+check(/Not aligned — Align before measuring/.test(txt), "right-panel chip flags the 2nd sheet isn't aligned");
 
-/* ---------------- B301 — measuring over the unaligned sheet warns ---------------- */
-console.log("\nB301 — measuring over the unaligned sheet warns:");
+/* ---------------- B310 — measuring over the unaligned sheet is BLOCKED (not just warned) ---------------- */
+console.log("\nB310 — measuring over the unaligned sheet is blocked (nothing committed):");
+const distLines = () => page.evaluate(() => document.querySelectorAll('svg line[stroke="#0e7490"]').length);
 await page.locator('div[style] button:has-text("Distance"), button:has-text("Distance")').first().click({ timeout: 8000 });
 await sleep(200);
 const moving = imgs[1];
+const linesBefore = await distLines();
 await clickAt(moving.cx - 40, moving.cy - 30);
 await clickAt(moving.cx + 40, moving.cy + 30);
 await sleep(300);
 txt = await bodyTxt();
-check(/isn’t aligned yet|isn't aligned yet|aligned yet/.test(txt), "a measurement over the unaligned sheet shows the warning banner");
+const linesAfter = await distLines();
+check(/before measuring on it/.test(txt), "measuring over the unaligned sheet shows the BLOCK banner ('Align that sheet before measuring on it')");
+check(linesAfter === linesBefore, `the measurement was NOT committed (distance lines ${linesBefore} → ${linesAfter}, want unchanged)`);
 
 /* ---------------- B300 — a degenerate Align is rejected, sheet untouched ---------------- */
 console.log("\nB300 — degenerate Align (coincident points) is rejected, sheet not flung:");
@@ -164,7 +170,7 @@ txt = await bodyTxt();
 check(/too close together/.test(txt), "degenerate Align shows the 'too close together' banner");
 const afterDegen = await matrices();
 check(JSON.stringify(before[1]) === JSON.stringify(afterDegen[1]), "the 2nd sheet's transform is UNCHANGED (not flung off-canvas)");
-check(/Not aligned — measurements may be off/.test(txt), "the 2nd sheet is still flagged not-aligned after rejection");
+check(/Not aligned — Align before measuring/.test(txt), "the 2nd sheet is still flagged not-aligned after rejection");
 
 /* ---------------- B300/B301 — a real Align then succeeds and clears the flag ---------------- */
 console.log("\nB300/B301 — a valid Align then succeeds and clears the flag:");

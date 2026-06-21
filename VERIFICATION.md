@@ -60,6 +60,10 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V78 — Stitch: measuring over an un-aligned sheet is now BLOCKED, not just warned (B310) ✅ (self-verified headless — fully done, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out, generated 2-page Letter PDF) · **Next check** — none (pure Stitch-canvas behavior; no auth/cloud path). Owner call: "don't let it measure on uncalibrated things."
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b300-b302.mjs`, all checks pass, 0 page errors):** a Distance drawn over a not-yet-aligned 2nd sheet is **refused** — the block banner "Align that sheet before measuring on it" appears and **0** distance lines are committed (B301 had shown a soft warning but still committed the measurement). The B300 degenerate-align reject + B302 ≥3-pt Area guards still pass; a valid Align still clears the flag. lint **0** · **722 tests** · build green.
+
 ### V77 — Street-imagery (Mapillary) layer served via the server-side proxy for all visitors (B308) ✅ client-side self-verified headless; ⏳ one LIVE confirm on planyr.io Production
 - **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium on the built app, `vite preview`, logged-out — the client side) · **Next check** — the LIVE confirm below, on planyr.io Production after the next deploy (the owner has already set the `MAPILLARY_TOKEN` secret).
 - **Why a live check is needed:** the proxy is a Cloudflare **Pages Function** — it runs ONLY in the Cloudflare runtime, not under `vite preview`/the sandbox. So the "imagery actually renders" half can only be confirmed on the deployed site. Everything client-side IS self-verified (below).
