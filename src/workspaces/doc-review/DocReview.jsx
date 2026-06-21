@@ -290,8 +290,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
     try {
-      const d = await renderPageToCanvas(pdf, page, canvas, scale, (task) => { renderTaskRef.current = task; });
-      if (tok !== renderTok.current) return; // a newer render superseded this
+      // isStale lets renderPageToCanvas bail BEFORE page.render() if a newer render started
+      // while it awaited getPage — otherwise both would draw on the one canvas (B40 race).
+      const d = await renderPageToCanvas(pdf, page, canvas, scale,
+        (task) => { renderTaskRef.current = task; }, () => tok !== renderTok.current);
+      if (!d || tok !== renderTok.current) return; // null = superseded mid-getPage; or a newer render won
       setDims(d);
     } catch (e) {
       if (e && e.name === "RenderingCancelledException") return; // expected when superseded/unmounted
