@@ -159,10 +159,17 @@ export function measureLabel(m, ftPerUnit) {
 }
 
 /* Roll up all measurements (across the supplied list) into yield-style totals,
- * using each markup's sheet calibration. Skips uncalibrated length/area items. */
+ * using each markup's sheet calibration. Skips uncalibrated length/area items.
+ * B351-adjacent: only MEASUREMENT markups count. The caller passes the whole markup
+ * list (measures + redline shapes + text notes), so a non-measure kind must be skipped
+ * outright — otherwise a redline cloud / text note on an UNcalibrated sheet fell into
+ * measureValue's generic branch (calibrated:false) and inflated `uncal`, making the panel
+ * falsely warn "N measurement(s) on uncalibrated sheets are excluded" when zero were made. */
+const MEASURE_KINDS = new Set(Object.keys(MIN_MEASURE_PTS));
 export function rollup(markups, calByPage) {
   let areaSf = 0, perimFt = 0, distFt = 0, count = 0, uncal = 0;
   for (const m of markups) {
+    if (!m || !MEASURE_KINDS.has(m.kind)) continue; // redline shapes / text notes aren't measurements
     const ftPerUnit = calByPage[m.page];
     const v = measureValue(m, ftPerUnit);
     if (v.kind === "count") { count += v.count; continue; }
