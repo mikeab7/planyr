@@ -137,11 +137,25 @@ export async function loadReview(id) {
 // the core columns if the library migration hasn't run yet (so the picker still works).
 export async function listReviews() {
   if (!supabase || !(await currentUid())) return [];
+  // `placed:data->placed` pulls just the on-map flag out of the data jsonb (NOT the whole
+  // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). On any error
+  // we fall back to the core columns — the badge degrades to "filed", never regresses.
   let res = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at")
+    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
     .order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
   return res.error || !res.data ? [] : res.data;
+}
+
+// Mark a review as placed on the map at least once (NEW-3) — the write half of the
+// Filed → On-map transition the drawer's "Place on map" action triggers. Stores `placed`
+// in the review's data jsonb (so listReviews' `data->placed` surfaces it); idempotent.
+export async function markReviewPlaced(id) {
+  if (!(await cloudReady())) return { ok: false, error: "Sign in to place documents." };
+  const rec = await loadReview(id);
+  if (!rec) return { ok: false, error: "Review not found." };
+  if (rec.placed) return { ok: true }; // already on the map — nothing to write
+  return upsertReview({ ...rec, placed: true, placedAt: Date.now(), updatedAt: Date.now() });
 }
 
 export async function deleteReview(id) {

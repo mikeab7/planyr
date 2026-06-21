@@ -60,6 +60,10 @@ export function mergeFactsIntoReviews(reviews = [], factsRows = []) {
   }
   return reviews.map((rev) => {
     const fact = byReview.get(rev.id);
-    return fact ? { ...rev, ...factsRowToPatch(fact) } : rev;
+    if (!fact) return rev;
+    const patch = factsRowToPatch(fact);
+    // `placed` is true if EITHER the review's own data or the index says so — an index row
+    // without placement.placed must not downgrade a review already placed on the map (NEW-3).
+    return { ...rev, ...patch, placed: !!rev.placed || !!patch.placed };
   });
 }

@@ -11,6 +11,12 @@ describe("fileFacts — document class (B180/NEW-1)", () => {
     expect(classifyDocClass("Survey", "ALTA Survey")).toBe(DOC_CLASS.SPATIAL);
     expect(classifyDocClass("Geotech", "Boring logs")).toBe(DOC_CLASS.REFERENCE);
   });
+  it("classifies CAD as spatial — it IS the drawings (NEW-1)", () => {
+    expect(classifyDocClass("CAD", "Overall site plan")).toBe(DOC_CLASS.SPATIAL);
+    expect(isSpatial(toFileFact({ id: "c1", discipline: "CAD", item: "Plan" }))).toBe(true);
+    // "Other" still defaults to reference (only CAD was promoted, not the ambiguous bucket).
+    expect(classifyDocClass("Other", "Unlabeled drawing")).toBe(DOC_CLASS.REFERENCE);
+  });
   it("treats a title commitment as BOTH (reference doc + spatial schedules)", () => {
     expect(classifyDocClass("Other", "Title Commitment")).toBe(DOC_CLASS.BOTH);
     expect(classifyDocClass("Survey", "Schedule B exceptions")).toBe(DOC_CLASS.BOTH);
@@ -39,6 +45,15 @@ describe("fileFacts — normalization + file state", () => {
     expect(fileState({ docClass: DOC_CLASS.SPATIAL, placed: true })).toBe(FILE_STATE.ON_MAP);
     expect(fileState({ docClass: DOC_CLASS.SPATIAL, placed: false })).toBe(FILE_STATE.FILED);
     expect(fileState({ docClass: DOC_CLASS.REFERENCE, placed: true })).toBe(FILE_STATE.FILED);
+  });
+  it("parses the `placed` flag from a list row whether it's a JSON bool or text (NEW-3)", () => {
+    // listReviews surfaces it via `data->placed`, which can arrive as either.
+    expect(toFileFact({ id: "a", discipline: "CAD", placed: true }).placed).toBe(true);
+    expect(toFileFact({ id: "b", discipline: "CAD", placed: "true" }).placed).toBe(true);
+    expect(toFileFact({ id: "c", discipline: "CAD", placed: false }).placed).toBe(false);
+    expect(toFileFact({ id: "d", discipline: "CAD" }).placed).toBe(false); // absent → not on map
+    // End to end: a placed CAD drawing now reads as on-map (the dead-badge bug).
+    expect(fileState(toFileFact({ id: "e", discipline: "CAD", placed: true }))).toBe(FILE_STATE.ON_MAP);
   });
 });
 
