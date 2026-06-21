@@ -83,7 +83,7 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl, onGoDashboard, onNewProject, docIntent = null } = {}) {
+export default function DocReview({ shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null } = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -562,11 +562,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const vpPoint = (e) => { const r = wrapRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint. (B331)
   const applyPinch = () => {
-    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
+    // between scheduling this update and React running the updater, so reading pinchRef.current
+    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
+    const p = pinchRef.current;
+    if (!p || pointersRef.current.size < 2) return;
     const [a, b] = [...pointersRef.current.values()];
     const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / pinchRef.current.dist;
-    setView((v) => (v ? pinchZoom(v, pinchRef.current.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
+    const factor = dist / p.dist;
+    setView((v) => (v ? pinchZoom(v, p.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
     pinchRef.current = { mid, dist };
   };
   // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
@@ -951,6 +955,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
           </button>
         }
         authControl={authControl}
+        accountActive={accountActive}
         toolbarContent={
           <>
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
