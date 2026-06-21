@@ -650,12 +650,33 @@ const rollupParentDates = tasks => {
   tasks.forEach(t => { map[t.id] = {...t}; });
   const parentIds = new Set(tasks.filter(t => t.parentId !== null).map(t => t.parentId));
   if (!parentIds.size) return tasks;
+  // Index children by parent ONCE. parentId never changes during rollup (only dates do),
+  // so re-deriving the child list every pass with Object.values(map).filter was O(parents×n)
+  // per pass — an O(n²·depth) blow-up that froze deeply-nested schedules (~11s at 1000 levels).
+  // A Map keyed by the raw parentId value preserves the original strict-equality grouping.
+  const childIdsByParent = new Map();
+  tasks.forEach(t => {
+    const p = t.parentId;
+    if (p === null || p === undefined) return;
+    if (!childIdsByParent.has(p)) childIdsByParent.set(p, []);
+    childIdsByParent.get(p).push(t.id);
+  });
+  // Process parents deepest-first so a parent's children are already final when it's
+  // read → the convergence loop settles in a single pass instead of O(depth) passes
+  // (the while-loop stays as the correctness backstop). depthOf walks parentId upward
+  // with a seen-set so a parentId cycle can't loop forever.
+  const depthOf = id => {
+    let d = 0, cur = id; const seen = new Set();
+    while (cur !== null && cur !== undefined && map[cur] && !seen.has(cur)) { seen.add(cur); cur = map[cur].parentId; d++; }
+    return d;
+  };
+  const ordered = [...parentIds].sort((a, b) => depthOf(b) - depthOf(a));
   let changed = true;
   while (changed) {
     changed = false;
-    parentIds.forEach(pid => {
+    ordered.forEach(pid => {
       if (!map[pid]) return;   // orphaned parentId (points to a deleted/missing task) — skip, don't crash
-      const children = Object.values(map).filter(t => t.parentId === pid);
+      const children = (childIdsByParent.get(pid) || []).map(id => map[id]).filter(Boolean);
       if (!children.length) return;
       // Ignore children with empty start/end so a blank new task doesn't drag the parent dates to ""
       const validStarts = children.map(t => t.start).filter(Boolean);
@@ -8323,7 +8344,10 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const pd=s=>new Date(s+"T12:00:00"), fd=d=>d.toISOString().slice(0,10);
   const allTasks=projects.flatMap(p=>p.tasks);
   if(!allTasks.length) return "";
-  const dates=allTasks.flatMap(t=>[t.start,t.end]).filter(Boolean).sort();
+  // Drop empty AND unparseable dates so a single bad value (imported/hand-edited) can't
+  // poison the min/max → NaN geometry across the whole exhibit.
+  const dates=allTasks.flatMap(t=>[t.start,t.end]).filter(d=>d&&!isNaN(pd(d))).sort();
+  if(!dates.length) return "";
   const minD=dates[0], maxD=dates[dates.length-1];
   const totalDays=Math.ceil((pd(maxD)-pd(minD))/86400000)+2;
   const ppd=ganttW/totalDays;
@@ -8354,7 +8378,8 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       (() => {
         const indent=depth*8, nameX=4+indent;
         const maxCh=Math.floor((LABEL_W-nameX-4)/5.2);
-        const nameStr=t.name.length>maxCh?t.name.slice(0,maxCh-1)+"…":t.name;
+        const nm=t.name==null?"":String(t.name);   // a nameless task must not crash the exhibit (was: t.name.length on undefined)
+        const nameStr=nm.length>maxCh?nm.slice(0,maxCh-1)+"…":nm;
         const fw=depth===0?"bold":depth===1?"600":"normal", fs=depth===0?9:depth===1?8.5:8;
         return `<text x="${nameX}" y="${y+ROW_H*0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>
 <line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y+ROW_H}" stroke="#e0e0e0" stroke-width="0.5"/>`;

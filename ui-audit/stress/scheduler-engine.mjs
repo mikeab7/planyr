@@ -131,12 +131,25 @@ export const rollupParentDates = tasks => {
   tasks.forEach(t => { map[t.id] = {...t}; });
   const parentIds = new Set(tasks.filter(t => t.parentId !== null).map(t => t.parentId));
   if (!parentIds.size) return tasks;
+  const childIdsByParent = new Map();
+  tasks.forEach(t => {
+    const p = t.parentId;
+    if (p === null || p === undefined) return;
+    if (!childIdsByParent.has(p)) childIdsByParent.set(p, []);
+    childIdsByParent.get(p).push(t.id);
+  });
+  const depthOf = id => {
+    let d = 0, cur = id; const seen = new Set();
+    while (cur !== null && cur !== undefined && map[cur] && !seen.has(cur)) { seen.add(cur); cur = map[cur].parentId; d++; }
+    return d;
+  };
+  const ordered = [...parentIds].sort((a, b) => depthOf(b) - depthOf(a));
   let changed = true;
   while (changed) {
     changed = false;
-    parentIds.forEach(pid => {
+    ordered.forEach(pid => {
       if (!map[pid]) return;
-      const children = Object.values(map).filter(t => t.parentId === pid);
+      const children = (childIdsByParent.get(pid) || []).map(id => map[id]).filter(Boolean);
       if (!children.length) return;
       const validStarts = children.map(t => t.start).filter(Boolean);
       const validEnds   = children.map(t => t.end  ).filter(Boolean);

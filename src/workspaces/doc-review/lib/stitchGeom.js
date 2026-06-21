@@ -33,7 +33,7 @@ export function sheetBBox(s) {
 // far off-canvas at huge scale — silently, with no undo. Callers must reject the alignment
 // when this is true (mirrors DocReview's calibrate "line too short" guard).
 export const MIN_ALIGN_BASE = 1; // page/world units — far below any real two-point baseline
-// B341 — a NON-FINITE endpoint (NaN/Infinity from a bad PDF read or a mis-built drawingArea) must
+// B348 — a NON-FINITE endpoint (NaN/Infinity from a bad PDF read or a mis-built drawingArea) must
 // also be rejected. `Math.hypot(NaN,…) < 1` is `NaN < 1` → false, so a NaN baseline used to slip
 // PAST the length guard, reach solveM, and produce a NaN matrix that silently poisons the sheet's
 // transform and the whole composite's bbox (every Math.min/max over it goes NaN). Treat any

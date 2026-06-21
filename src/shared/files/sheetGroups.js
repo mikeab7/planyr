@@ -29,7 +29,7 @@ export function parseSheetCode(s) {
 // Two codes are consecutive when they share a prefix and step by exactly 1 IN THE SAME NUMBERING
 // LEVEL: plain majors (C-5→C-6) or sub-sheets within one major (C-2.01→C-2.02). Different prefixes,
 // a gap, or a level/major change start a new logical sheet.
-// B341 — base this on the parsed major/minor, NOT the packed `ordinal` (major*100+minor). The
+// B348 — base this on the parsed major/minor, NOT the packed `ordinal` (major*100+minor). The
 // ordinal hack made codes consecutive ACROSS a major boundary (C-1.99 ordinal 199 → C-2.00 ordinal
 // 200) and could even collide two different codes onto the same ordinal — both wrong merges. Plan
 // sets don't run sub-sheet numbers past a major rollover, so compare the levels explicitly.
