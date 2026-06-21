@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V84 — Stitcher pan no longer crashes when a gesture is interrupted mid-pan (B321) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — pan is browser-only, no auth path) · **Next check** — none (auth-independent client logic).
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b321-pan.mjs`, all checks pass, 0 page errors):** a normal pan moves the world transform (`translate(40 40)` → `translate(160 130)`); **12 mid-pan aborts** (window blur + visibilitychange + pointercancel, each interleaved with pointer moves) raise **no error boundary** ("hit an error and couldn't load") and **0** `panX` page errors; pan still works afterward. Backed by **4 unit tests** (`test/stitchGeom.test.js` → `panTo`): the math, that a captured origin survives the drag ref being nulled mid-gesture, and a teeth test that the OLD pattern (reading `drag.current` in the deferred updater) throws `/panX/`.
+- **Why fully done logged-out:** the pan handler + the `panTo` helper live entirely in the Stitcher client (`Stitcher.jsx` + `lib/stitchGeom.js`), no auth or cloud dependency.
+
 ### V83 — Stitch: measuring over an un-aligned sheet is now BLOCKED, not just warned (B316) ✅ (self-verified headless — fully done, no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out, generated 2-page Letter PDF) · **Next check** — none (pure Stitch-canvas behavior; no auth/cloud path). Owner call: "don't let it measure on uncalibrated things."
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-b300-b302.mjs`, all checks pass, 0 page errors):** a Distance drawn over a not-yet-aligned 2nd sheet is **refused** — the block banner "Align that sheet before measuring on it" appears and **0** distance lines are committed (B301 had shown a soft warning but still committed the measurement). The B300 degenerate-align reject + B302 ≥3-pt Area guards still pass; a valid Align still clears the flag. lint **0** · **743 tests** · build green.
