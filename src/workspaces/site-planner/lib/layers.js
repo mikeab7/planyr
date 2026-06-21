@@ -15,7 +15,7 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
-import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
+import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
 } from "./layerRequest.js";
@@ -98,13 +98,13 @@ export const EVIDENCE = {
   mapillary: {
     // NEW-3/B285: plain-language name; the "Mapillary" brand is demoted to a small
     // source/attribution note (`source`) since the brand wasn't recognized.
-    // NEW-4/B286: `needsSetup` marks it as NOT part of the default working set — it
-    // does nothing until a free access token is provided, so the picker treats a
-    // tokenless instance as "needs setup" (gray, sorted down), never a generic failure.
+    // B308: served for every visitor via the same-origin /api/mapillary proxy (token
+    // held server-side), so it works with NO per-user token — `needsSetup` is gone.
+    // If the proxy has no token (e.g. a preview deploy) the layer degrades gracefully.
     kind: "mapillary", label: "Poles & hydrants from street imagery",
-    sublabel: "Detected in crowdsourced street-level photos. Needs a free access token.",
-    source: "Mapillary", needsSetup: true, opacity: 0.95,
-    note: "Pole & fire-hydrant detections pulled from crowdsourced street-level photos. Loads at zoom ≥ 16.",
+    sublabel: "Detected in crowdsourced street-level photos.",
+    source: "Mapillary", opacity: 0.95,
+    note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
   },
   hifld_tx: {
     kind: "esriFeature", label: "Transmission lines (HIFLD)",
@@ -355,10 +355,10 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         const lyr = overpassLayer(cfg.query, report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "mapillary") {
-        // No token isn't a failure — the layer just isn't set up. Report a quiet
-        // "unconfigured" status (a gray "needs setup" dot, not the alarming red
-        // "failed") and don't fire the error toast (NEW-4/B286).
-        if (!mapillaryToken()) { refs[k] = null; onStatus && onStatus(k, "unconfigured", "Not configured — add a free access token to enable this layer."); return; }
+        // B308: served via the same-origin /api/mapillary proxy (token held server-side),
+        // so the layer loads for every visitor with NO per-user token. mapillaryLayer
+        // reports a quiet "unconfigured" (gray) only if the proxy itself has no server
+        // token (e.g. a preview deploy) — never a hard failure, never an error toast.
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else {

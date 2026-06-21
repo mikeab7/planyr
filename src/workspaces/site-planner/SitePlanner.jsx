@@ -51,6 +51,7 @@ import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurnit
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp } from "./lib/printSheet.js";
 import { jpegToPdf } from "./lib/imagePdf.js";
+import { createHistoryStack } from "./lib/history.js";
 
 /* Geographic basemap under the planner canvas. The planner stays a feet-based
  * SVG (so every metric, setback and stall count is computed from true feet and
@@ -97,6 +98,13 @@ const DOGEAR_D = 60; // dog-ear projection out from the dock face
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
 const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
+// B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
+// low-travel pointer-up counts as a real click that selects it. So panning across parcels no
+// longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
+// time window lets a slow, precise click that drifts a pixel or two still select, while any
+// real drag pans. This is the hand-rolled fallback the standard map engines use internally.
+const PARCEL_CLICK_SLOP_PX = 5;   // max pointer travel (px) to still count as a click, not a pan
+const PARCEL_CLICK_MS = 400;      // max press duration (ms) to still count as a click
 
 const PAL = {
   paper: "#f4f1ea",
@@ -749,6 +757,7 @@ const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? 
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
+  parcelSelect: true,   // B311: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -1285,11 +1294,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
 
-  // Undo/redo history (snapshots of the editable state, stored by reference).
+  // Live mirror of the drawn-layer state for the undo/redo stack. Assigned during
+  // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
+  // current state. A passive-effect mirror lagged a paint behind, so undo right
+  // after a drag-move intermittently snapshotted or compared a stale state — the
+  // building wouldn't fully snap back, or undo appeared to do nothing (B315).
   const stateRef = useRef({ parcels: [], els: [], measures: [], callouts: [], markups: [], underlay: null, sheetOverlays: [], deletedIds: [] });
-  const pastRef = useRef([]);
-  const futureRef = useRef([]);
-  useEffect(() => { stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds }; });
+  stateRef.current = { parcels, els, measures, callouts, markups, underlay, sheetOverlays, deletedIds };
   // A site with no parcels / elements / measures / callouts / aerial is "blank".
   // We don't want unedited blank sites cluttering the list, so we never persist
   // them, and drop their record on leave (but only un-located blank-planner
@@ -1307,6 +1318,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // True when a cloud write was REJECTED because another session advanced this project since
+  // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
+  // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
+  // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
+  // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
+  // other session's change (mergeSiteContent), then re-pushes the combined result.
+  const [cloudConflict, setCloudConflict] = useState(false);
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -1328,7 +1346,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
       else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
@@ -1337,7 +1355,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const retryCloudSave = () => {
     if (!siteId) return;
     setSaveStatus("saving");
-    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudSaveFailed(!c.ok); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
@@ -1392,35 +1410,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     "|" + (s.underlay ? `${s.underlay.x},${s.underlay.y},${s.underlay.ftPerPx},${s.underlay.ftPerPxY},${s.underlay.opacity},${s.underlay.locked},${s.underlay.src?.length}` : "none") +
     "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${Math.round(o.x)},${Math.round(o.y)},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1}`).join(";") || "no");
+  // Pure snapshot stack (lib/history.js) — dedups no-op frames (B32) and always
+  // compares against the live state we pass in (stateRef.current), so undo/redo
+  // can't act on a stale baseline (B315). One stack instance, kept across renders.
+  const histRef = useRef(null);
+  if (!histRef.current) histRef.current = createHistoryStack({ keyOf: histKey });
   const [, bumpHist] = useState(0);
   const touchHist = () => bumpHist((n) => n + 1); // re-render so undo/redo enabled state updates
-  const pushHistory = () => {
-    pastRef.current.push(stateRef.current);
-    if (pastRef.current.length > 80) pastRef.current.shift();
-    futureRef.current = [];
-    touchHist();
-  };
+  const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
-  const undo = () => {
-    let prev = null;
-    while (pastRef.current.length) {
-      const cand = pastRef.current.pop();
-      if (histKey(cand) !== histKey(stateRef.current)) { prev = cand; break; }
-    }
-    if (!prev) return;
-    futureRef.current.push(stateRef.current);
-    applySnapshot(prev);
+  const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
+  const redo = () => { const next = histRef.current.redo(stateRef.current); if (next) { applySnapshot(next); touchHist(); } };
+  // Cancel an in-progress drag-move (Esc / lost focus mid-drag): restore the
+  // pre-drag snapshot stashed on drag.current at drag-start and drop the frame
+  // pushHistory pushed, so an interrupted move leaves no half-recorded command
+  // on the stack (B315). No-op for any drag that didn't stash a canceler.
+  const cancelActiveMove = () => {
+    const d = drag.current;
+    if (!d || !d.canceler) return false;
+    histRef.current.drop();
+    applySnapshot(d.canceler);
     touchHist();
-  };
-  const redo = () => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(stateRef.current);
-    applySnapshot(next);
-    touchHist();
+    return true;
   };
 
   /* ------------ size tracking ------------ */
@@ -1600,6 +1614,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const abortGesture = (pid = capturePidRef.current) => {
     if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} }
     capturePidRef.current = null;
+    cancelActiveMove(); // a drag-move torn down without a clean pointer-up reverts to pre-drag (B315); no-op otherwise
     drag.current = null;
     setPanning(false);
     setMarquee(null);
@@ -2186,7 +2201,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
     };
-    drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig };
+    drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const selMarkup = sel?.kind === "markup" ? markups.find((m) => m.id === sel.id) : null;
@@ -2778,6 +2793,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
+    // B310: a press that began on a LOCKED parcel pans the canvas; if the pointer barely moved
+    // and the press was brief, it was a deliberate click → select that parcel (any larger
+    // movement was a pan and leaves the selection untouched).
+    if (d && d.mode === "pan" && d.tapParcel != null
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX
+        && Date.now() - d.downT <= PARCEL_CLICK_MS) {
+      setSel({ kind: "parcel", id: d.tapParcel });
+    }
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
@@ -3684,21 +3707,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const members = assemblyOf(id).map((m) => m.points
       ? { id: m.id, points: m.points }
       : { id: m.id, cx: m.cx, cy: m.cy, w: m.w, h: m.h });
-    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members };
+    drag.current = { mode: "move", kind: "el", id, fx: fp.x, fy: fp.y, members, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
   };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
     if (tool !== "select") return;
-    e.stopPropagation();
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
-    if (alignFor) { alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge
-    if (e.shiftKey) { toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
-    setSel({ kind: "parcel", id });
-    if (pc.locked) return;             // locked parcel: select only, don't move
-    pushHistory();
-    drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points };
+    if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge (works regardless of the select toggle)
+    // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
+    // stop propagation: let the press fall through to the background pan (no select, no move),
+    // exactly as if the click had landed on empty canvas.
+    if (!settings.parcelSelect) return;
+    if (e.shiftKey) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // Shift-click: multi-select to merge
+    e.stopPropagation();
+    if (!pc.locked) {
+      // Unlocked = the user deliberately unlocked this parcel to reshape/move it, so a press
+      // grabs it to drag (like an element). The pan-instead-of-select fix below is for the
+      // LOCKED default that every county-pulled / drawn lot carries.
+      setSel({ kind: "parcel", id });
+      pushHistory();
+      drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current }; // canceler: B315 Esc/abort-mid-drag revert
+      capturePidRef.current = e.pointerId;
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    // B310: a press on a LOCKED parcel starts a PAN, not a select — selecting on pointer-down
+    // is exactly what turned panning across parcels into a constant accidental select. Tag the
+    // pan with the parcel id + the press origin so a genuine CLICK (tiny travel, brief — tested
+    // in onUp) still selects it; any real drag pans and never selects.
+    setPanning(true);
+    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapParcel: id, downX: e.clientX, downY: e.clientY, downT: Date.now() };
+    capturePidRef.current = e.pointerId;
     svgRef.current.setPointerCapture(e.pointerId);
   };
 
@@ -5448,8 +5489,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const plannerToolbar = (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 2, background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2 }}>
-        <button className="dbtn" style={dIcon} onClick={undo} disabled={!pastRef.current.length} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
-        <button className="dbtn" style={dIcon} onClick={redo} disabled={!futureRef.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+        <button className="dbtn" style={dIcon} onClick={undo} disabled={!histRef.current.canUndo()} aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>
+        <button className="dbtn" style={dIcon} onClick={redo} disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>
         <button className="dbtn" style={dIcon} onClick={fit} disabled={!parcels.length && !els.length && !markups.length && !callouts.length && !underlay} aria-label="Zoom to fit" title="Zoom to fit">⤢</button>
       </div>
       <button className="dbtn" aria-pressed={settings.snap} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.snap ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
@@ -5457,6 +5498,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.snap ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.snap ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
         {settings.snap ? `Snap ${settings.gridSize}′ on` : "Snap off"}
       </button>
+      {parcels.length > 0 && (
+        <button className="dbtn" aria-pressed={settings.parcelSelect} style={{ ...dGhost, display: "flex", alignItems: "center", gap: 7, color: settings.parcelSelect ? "#fff" : PAL.chromeMuted, fontWeight: 600 }}
+          onClick={() => {
+            const turningOff = settings.parcelSelect;
+            setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
+            if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
+          }}
+          title="Select parcels — ON: click a lot to select it (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "#5a5446", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
+          {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
+        </button>
+      )}
       {tool === "select" && (() => {
         const canG = multi.length > 1, canU = !!selectedGroupId();
         if (!canG && !canU) return null;
@@ -5502,7 +5555,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const cloudActive = isCloudActive();
     const connOk = cloud?.state === "connected";
     if (saveStatus === "saving") return "saving";
-    if (cloudSaveFailed) return "error";
+    if (cloudSaveFailed || cloudConflict) return "error";
     if (cloudActive && !connOk) return "offline";
     return cloudActive ? "synced" : "local";
   })();
@@ -5540,6 +5593,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
+      {cloudConflict && (
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 660, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>⟳ This project was <b>changed in another session</b>. Your edit is saved on this device — <b>reload</b> to merge in the latest before saving, so nothing gets overwritten.</span>
+          <button onClick={() => window.location.reload()} title="Reload to get the latest version, then your change merges in" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
+          <button onClick={() => setCloudConflict(false)} title="Dismiss (your edit stays on this device; reload later to reconcile)" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
       {cloudSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
