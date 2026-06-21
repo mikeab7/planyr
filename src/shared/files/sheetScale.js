@@ -1,6 +1,6 @@
 /* Stated-scale parser (B267) — pure, browser-free, unit-tested.
  *
- * Relocated to shared/files/ (B356) so the ONE title-block reader (titleBlockParse.readTitleBlockText)
+ * Relocated to shared/files/ (B360) so the ONE title-block reader (titleBlockParse.readTitleBlockText)
  * and the positional reader (sheetMeta.readSheetMeta) can both surface `scale` without the shared
  * layer reaching back into a workspace. The Site Planner overlay re-exports it from here
  * (overlayScale.js) so its existing callers and the scale conversions (ftPerPointForScale) are
@@ -42,7 +42,7 @@ export function parseSheetScale(text) {
   //    fraction/mixed = feet'-inches"). Require a fraction so a bare 1"=50' falls to (3) engineer.
   //    (?<!\d) + a ≤2-digit mixed whole part so a number printed just before the scale — a date is
   //    the common one, "…10/24/2025  1/8\"=1'-0\"" — can't be swallowed into the paper-inch token
-  //    ("2025 1/8" read as a mixed number, failing the sanity range and defeating the read). (B356)
+  //    ("2025 1/8" read as a mixed number, failing the sanity range and defeating the read). (B360)
   const arch = t.match(/(?<!\d)(\d{1,2}\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+)\s*"\s*=\s*(\d+)\s*'(?:\s*-?\s*(\d+(?:\s+\d+\s*\/\s*\d+)?)\s*")?/);
   if (arch) {
     const paperIn = fracToNum(arch[1]);

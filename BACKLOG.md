@@ -22,7 +22,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B356 — Title-block intelligence: UNIFY the two readers + tune (V79 filing + V67 scale) `[Doc Review]` (task)  *(empirical corpus tuning BLOCKED on Drive re-auth; unblocked groundwork shipped + one real bug fixed, 2026-06-21)*
+### B360 — Title-block intelligence: UNIFY the two readers + tune (V79 filing + V67 scale) `[Doc Review]` (task)  *(empirical corpus tuning BLOCKED on Drive re-auth; unblocked groundwork shipped + one real bug fixed, 2026-06-21. Filed B356 but renumbered **B360** — `main` #268 consumed B356–B359 (header redesign + the theming-bug B356) while this was in flight; B360 is the real next free across both files.)*
 `[~]` **Partially shipped (2026-06-21), branch `claude/bold-cori-okbxu5`. The headline — empirical corpus tuning — is BLOCKED and needs owner action; the unblocked unification + a real scale-reader bug fix + the scoring harness shipped.**
 
 **⛔ BLOCKER (owner action):** the Claude Code **Google Drive connector is still on the wrong account.** Five independent reads all returned empty — `search_files` for Jacintoport/Bergstrom/Mesa/Kennedy, `list_recent_files`, a bare `mimeType contains 'pdf'`, and `owner = 'me'` — so the connector sees **no** files. The training corpus is at **michael@planyr.io › My Drive › Planyr › Training Files** (~23 files); the connector must be **(re)authorized to michael@planyr.io** before the V79/V67 real-sheet scoring can run. Until then the ~9 text PDFs can't be read, so the "score reader vs. filename ground truth → add a unit test per real miss" loop can't start. (Did not spin — confirmed dead, then did the unblocked work.)

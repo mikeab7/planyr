@@ -29,7 +29,7 @@ export async function extractPageText(pdf, pageNum) {
 }
 
 /* Pull the first `maxPages` pages' embedded text as one joined string — the title block / cover
- * identifies the project & set (the filing read, B312). The ONE embedded-text reader (B356):
+ * identifies the project & set (the filing read, B312). The ONE embedded-text reader (B360):
  * localRead's own first-pages loop folded into here so the doc-review workspace has a single
  * extractor. Accepts a File/Blob/ArrayBuffer (loads + destroys its own pdf) OR an already-loaded
  * pdf (reads it, leaves the caller's pdf open). Returns "" for a scanned/no-text set. */

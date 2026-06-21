@@ -49,7 +49,7 @@ describe("parseSheetScale — Document Review stated-scale auto-calibration (B26
     expect(ftPerPointForScale(r.ftPerInch)).toBeCloseTo(16 / 72, 6);
   });
 
-  it("reads an architectural scale even when a number (a date) is printed right before it (B356)", () => {
+  it("reads an architectural scale even when a number (a date) is printed right before it (B360)", () => {
     // Regression: the mixed-number alternative used to swallow the date's trailing digits + the
     // fraction ("2025  1/8" read as a mixed number ≈ 2025"), fail the sanity range, and — since
     // .match returns only the first hit — never try the real "1/8". A date next to the scale is

@@ -8,7 +8,7 @@ import {
   SYNTHETIC_FIXTURES,
 } from "../ui-audit/lib/filingScore.mjs";
 
-/* The scoring harness (B356) is a dev tool, but its ground-truth-from-filename parser and its
+/* The scoring harness (B360) is a dev tool, but its ground-truth-from-filename parser and its
  * field comparison are pure logic worth locking into CI so a future tuning session trusts the
  * scorecard. (The REAL accuracy numbers come from the owner's corpus once Drive is re-authed;
  * these fixtures are synthetic and only prove the engine.) */

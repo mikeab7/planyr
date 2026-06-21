@@ -63,7 +63,7 @@ describe("readTitleBlockText — the deterministic field bundle", () => {
     expect(readTitleBlockText("").hasText).toBe(false);
     expect(readTitleBlockText("   ").hasText).toBe(false);
   });
-  it("surfaces the stated scale in the same pass (one reader — B356)", () => {
+  it("surfaces the stated scale in the same pass (one reader — B360)", () => {
     // ONE reader: filing fields + the Markup auto-calibration scale come from a single read.
     const civil = readTitleBlockText("OVERALL GRADING PLAN  SHEET C-3  06/30/2025  SCALE: 1\"=40'");
     expect(civil.scale).toMatchObject({ ftPerInch: 40, form: "engineer" });

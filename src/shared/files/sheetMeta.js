@@ -196,7 +196,7 @@ export function readSheetMeta(page = {}) {
   }
   const lines = reconstructLines(items);
   const band = detectTitleBlock(items, dims);
-  const scale = fields.scale; // one parse pass — readTitleBlockText already read the stated scale (B356)
+  const scale = fields.scale; // one parse pass — readTitleBlockText already read the stated scale (B360)
   const matchLines = parseMatchLines(lines, dims);
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   const sheetTitle = readSheetTitle(lines, band, item);

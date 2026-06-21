@@ -103,7 +103,7 @@ export function parseScaleNote(text) {
 }
 
 /* The richer STATED-scale parser (engineer / architectural / ratio / NTS) moved to
- * shared/files/sheetScale.js (B356) so the shared title-block readers can own it without the
+ * shared/files/sheetScale.js (B360) so the shared title-block readers can own it without the
  * shared layer importing back into this workspace. Re-exported here so the overlay's existing
  * callers (and test/sheetScale.test.js) keep importing `parseSheetScale` from overlayScale.js
  * unchanged, and the scale↔feet-per-point conversion (ftPerPointForScale) stays alongside it. */

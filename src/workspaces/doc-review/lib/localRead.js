@@ -15,7 +15,7 @@ import { readTitleBlockText } from "../../../shared/files/titleBlockParse.js";
 import { matchProjectInText } from "../../../shared/files/matchProject.js";
 
 // Read the first couple of pages' text — the title block / cover identifies the project & set.
-// The extractor itself is pdf.js `firstPagesText` (the ONE embedded-text reader, B356); pdf.js is
+// The extractor itself is pdf.js `firstPagesText` (the ONE embedded-text reader, B360); pdf.js is
 // imported lazily (it pulls a Vite-only worker URL) so this module loads anywhere and pdf.js only
 // spins up when a file is actually read.
 async function firstPagesText(file, maxPages = 2) {

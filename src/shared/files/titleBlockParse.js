@@ -9,7 +9,7 @@
  * out. It does NOT touch pdf.js (that's localRead.js) so it's trivially unit-testable. Project
  * identification is matchProject.js's job (it searches the same text for the known projects).
  *
- * ONE reader (B356): the stated `scale` is now read in the SAME pass (shared/files/sheetScale.js),
+ * ONE reader (B360): the stated `scale` is now read in the SAME pass (shared/files/sheetScale.js),
  * so filing and Markup auto-calibration consume a single field bundle instead of two parallel
  * reads. The POSITIONAL superset (sheetMeta.readSheetMeta) layers sheet-title + match-line geometry
  * on top of this for grouping/stitching — it calls readTitleBlockText, never re-parses.

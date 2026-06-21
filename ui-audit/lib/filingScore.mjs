@@ -1,4 +1,4 @@
-/* Title-block scoring harness (B356) — pure, dependency-free, NOT in the app bundle.
+/* Title-block scoring harness (B360) — pure, dependency-free, NOT in the app bundle.
  *
  * The handoff's tuning task (V79 filing + V67 scale): for each training PDF, read its embedded
  * text, run the REAL readers (readTitleBlockText + matchProjectInText + parseSheetScale), and
