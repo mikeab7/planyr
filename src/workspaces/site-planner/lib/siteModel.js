@@ -15,7 +15,7 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 6;
+export const SITE_MODEL_VERSION = 7;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -40,9 +40,9 @@ const LEGACY_STATUS = "active";          // pre-feature records (no status yet)
 const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
-// an explicit status, so the version bump (→6 for the B276 delete-tombstones) doesn't
-// disturb it. (saveSite re-normalizes through this, so the status it reads back is the explicit
-// one when a status was passed in.)
+// an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
+// bump-out sizing + bonded-rotation repair) doesn't disturb it. (saveSite re-normalizes
+// through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
 // expected (e.g. `parcels` as a string), which then throws on `.reduce`/`.map` and blanks the app.
@@ -52,6 +52,58 @@ const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 // Cap on retained delete-tombstones (B276). Each is just an id string, so this is generous
 // headroom — a real plan deletes a handful of items, never thousands.
 const MAX_TOMBSTONES = 5000;
+
+/* ---- Bonded-child rotation invariant (B363) ----
+ * Every box element bonded to a host building (`attachedTo` set) is axis-aligned to that
+ * host at a FIXED quarter-turn offset (0/90/180/270): sidewalks, truck courts, and corner
+ * bump-outs share the host's angle; side-parking rows and wall trailers sit at a +90/180/270
+ * turn. So a bonded child's angle is a DERIVED value — host.rot + its quarter-turn offset —
+ * never an independent one. If a child's stored angle has drifted off that (the host was
+ * re-angled by a path that didn't carry the child — e.g. Jacintoport: host 0°, all four
+ * children 359.035°), it is repaired below. */
+const norm360 = (a) => ((a % 360) + 360) % 360;
+// The quarter turn (0/90/180/270) a child sits at relative to its host — its fixed offset
+// with any sub-90° drift rounded away.
+export const quarterOffset = (childRot, hostRot) => norm360(Math.round(norm360(childRot - hostRot) / 90) * 90);
+// The angle a bonded child SHOULD have: host angle + its quarter-turn offset.
+export const bondedChildRot = (childRot, hostRot) => norm360(hostRot + quarterOffset(childRot, hostRot));
+
+// One-time repair: re-anchor any drifted bonded child to its host's CURRENT frame. A child
+// placed when the host was at angle θ keeps θ in both its angle and its position; if the host
+// later moved to host.rot without carrying the child, BOTH are stale by the same delta. So we
+// rotate the child's centre about the host centre by that delta AND snap its angle to
+// host.rot + offset. Idempotent (a correctly-bonded child re-anchors to itself, delta 0) and
+// safe — a bonded box child is only ever at a quarter turn, so any other angle is drift, not
+// intent. Points-based children carry geometry in their points (no single rot/centre) → skipped.
+function normalizeBondedRotations(list) {
+  const els = arr(list);
+  if (els.length < 2) return els;
+  const byId = new Map();
+  for (const e of els) if (e && e.id != null) byId.set(e.id, e);
+  let changed = false;
+  const out = els.map((e) => {
+    if (!e || e.attachedTo == null || e.points ||
+        typeof e.rot !== "number" || typeof e.cx !== "number" || typeof e.cy !== "number") return e;
+    const host = byId.get(e.attachedTo);
+    if (!host || host.points ||
+        typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    const offset = quarterOffset(e.rot, host.rot);
+    const wantRot = norm360(host.rot + offset);
+    // delta = how far the host has moved since the child was placed (the stale skew), as a
+    // signed angle in (−180, 180].
+    const delta = ((norm360(host.rot - norm360(e.rot - offset)) + 180) % 360) - 180;
+    if (Math.abs(delta) < 1e-6) {
+      if (Math.abs(norm360(e.rot) - wantRot) < 1e-6) return e;
+      changed = true;
+      return { ...e, rot: wantRot };
+    }
+    const rad = (delta * Math.PI) / 180, cs = Math.cos(rad), sn = Math.sin(rad);
+    const dx = e.cx - host.cx, dy = e.cy - host.cy;
+    changed = true;
+    return { ...e, cx: host.cx + dx * cs - dy * sn, cy: host.cy + dx * sn + dy * cs, rot: wantRot };
+  });
+  return changed ? out : els;
+}
 
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
@@ -84,8 +136,9 @@ export function createSiteModel(p = {}) {
     // page,pageCount,intrinsic:{w,h},src(local raster dataURL),markups:[],createdAt,updatedAt}.
     parcelDrawings: arr(p.parcelDrawings),
     settings: obj(p.settings),
-    // drawn layout + shapes (kept flat; selectors classify markups)
-    els: Array.isArray(p.els) ? p.els : arr(p.elements),
+    // drawn layout + shapes (kept flat; selectors classify markups). Bonded children are
+    // re-anchored to their host's angle (B363) — idempotent, only touches drifted records.
+    els: normalizeBondedRotations(Array.isArray(p.els) ? p.els : arr(p.elements)),
     markups: arr(p.markups),
     measures: arr(p.measures),
     callouts: arr(p.callouts),
