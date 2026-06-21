@@ -455,22 +455,30 @@ const barLabelText = (t, field, withYear) => {
 // Initialize with defaults
 HOLIDAY_SET = buildHolidaySet(DEFAULT_HOLIDAYS);
 
+// Hard ceiling on business-day iteration. Any real construction/development
+// schedule task is far under this (~3,800 working years); the cap exists only so a
+// garbage/fat-fingered duration (no upper clamp on the input) can never freeze the
+// tab in a per-day loop, and so a far-future bad date can't spin difBD for seconds.
+const MAX_BD_STEPS = 1_000_000;
 const addBD = (s, n) => {
   if (!s) return s;
-  if (n === 0) return s;
+  n = Math.trunc(Number(n));                 // coerce + drop fractions (2.5d must not advance 3 BDs)
+  if (!Number.isFinite(n) || n === 0) return s;  // NaN/±Infinity → no-op (was: Infinity → infinite loop / crash)
   const d = pd(s);
-  let rem = Math.abs(n);
+  if (isNaN(d)) return s;                     // invalid date string → no-op (was: fd() threw "Invalid time value")
+  let rem = Math.min(Math.abs(n), MAX_BD_STEPS);
   const dir = n > 0 ? 1 : -1;
   while (rem > 0) { d.setDate(d.getDate() + dir); if (d.getDay() !== 0 && d.getDay() !== 6 && !HOLIDAY_SET.has(fd(d))) rem--; }
   return fd(d);
 };
 const difBD = (a, b) => {
   const s = pd(a), e = pd(b);
+  if (isNaN(s) || isNaN(e)) return 0;         // invalid date string → 0 (was: crash / runaway loop)
   if (+s === +e) return 0;
   const dir = e > s ? 1 : -1;
-  let count = 0;
+  let count = 0, steps = MAX_BD_STEPS;
   const cur = new Date(s);
-  while (dir === 1 ? cur < e : cur > e) { cur.setDate(cur.getDate() + dir); if (cur.getDay() !== 0 && cur.getDay() !== 6 && !HOLIDAY_SET.has(fd(cur))) count++; }
+  while ((dir === 1 ? cur < e : cur > e) && steps-- > 0) { cur.setDate(cur.getDate() + dir); if (cur.getDay() !== 0 && cur.getDay() !== 6 && !HOLIDAY_SET.has(fd(cur))) count++; }
   return count * dir;
 };
 // ── MS-Project predecessor helpers ────────────────────────
@@ -646,6 +654,7 @@ const rollupParentDates = tasks => {
   while (changed) {
     changed = false;
     parentIds.forEach(pid => {
+      if (!map[pid]) return;   // orphaned parentId (points to a deleted/missing task) — skip, don't crash
       const children = Object.values(map).filter(t => t.parentId === pid);
       if (!children.length) return;
       // Ignore children with empty start/end so a blank new task doesn't drag the parent dates to ""
@@ -685,15 +694,21 @@ const computeDisplayHealth = (task, settings) => {
 const fmtD = s => { if (!s) return ""; const [y,m,d] = s.split('-'); return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
 const toShortDate = s => { if (!s) return ""; const [y,m,d] = s.split("-"); return `${+m}/${+d}/${y.slice(2)}`; };
 const parseFlexDate = s => {
-  if (!s) return null; s = s.trim();
+  if (!s) return null; s = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const parts = s.split(/[\/\-\.]/);
   if (parts.length < 2) return null;
   const m = parseInt(parts[0], 10), d = parseInt(parts[1], 10);
-  let y = parts[2] !== undefined ? parseInt(parts[2], 10) : new Date().getFullYear();
+  let y = (parts[2] !== undefined && parts[2] !== "") ? parseInt(parts[2], 10) : new Date().getFullYear();
+  if (!Number.isFinite(m) || !Number.isFinite(d) || !Number.isFinite(y)) return null;  // reject "-5/-5" → "NaN-NaN-05"
   if (y < 100) y += 2000;
   if (m < 1 || m > 12 || d < 1 || d > 31 || y < 2000) return null;
-  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const iso = `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  // Reject impossible calendar dates (e.g. 2/31) — silently rolling Feb 31 → Mar 3 is
+  // worse than rejecting the edit (a wrong date beats a refused one is NOT our rule here).
+  const chk = new Date(iso + "T12:00:00");
+  if (isNaN(chk) || chk.getMonth() + 1 !== m || chk.getDate() !== d) return null;
+  return iso;
 };
 
 // Fix #1: helper – pick a sensible default start for a new task
@@ -5805,7 +5820,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const applyUpdate = (id, col, val) => {
     if (col==="start"||col==="end") { const p=parseFlexDate(val); if(p) updateTask(id,{[col]:p}); }
     else if (col==="percentComplete") updateTask(id,{percentComplete:Math.max(0,Math.min(100,parseInt(val)||0))});
-    else if (col==="duration") updateTask(id,{duration:Math.max(0,parseInt(val)||0)});
+    else if (col==="duration") updateTask(id,{duration:Math.max(0,Math.min(100000,parseInt(val)||0))});  // upper clamp: no real schedule needs >100k working days; stops a fat-fingered freeze
     else if (col==="predecessors") {
       // Fix #16: strip self-references — a task can't be its own predecessor
       const parsed = parsePreds(val);
