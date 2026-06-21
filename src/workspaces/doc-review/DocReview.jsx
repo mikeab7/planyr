@@ -556,6 +556,13 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     setView((v) => (v ? pinchZoom(v, pinchRef.current.mid, mid, factor, VIEW_MIN, VIEW_MAX) : v));
     pinchRef.current = { mid, dist };
   };
+  // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
+  // first two), else end it. Called on every finger add/remove so a 3rd finger or a partial lift
+  // re-anchors the gesture instead of zoom-jumping off a stale pair. (B331)
+  const reseedPinch = () => {
+    const pts = [...pointersRef.current.values()];
+    pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
+  };
 
   const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
 
@@ -580,9 +587,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // over from any pan/draw in progress. Gated on pointerType==='touch' → mouse/trackpad untouched.
     if (e.pointerType === "touch") {
       pointersRef.current.set(e.pointerId, vpPoint(e));
-      if (pointersRef.current.size === 2) {
-        const [a, b] = [...pointersRef.current.values()];
-        pinchRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      if (pointersRef.current.size >= 2) { // 2nd finger starts a pinch; a 3rd+ finger is absorbed (never draws/pans)
+        reseedPinch();
         touchPinchedRef.current = true;
         panRef.current = null; dragRef.current = null; setDraft(null); setDragPreview(null); setPanning(false);
         e.preventDefault();
@@ -657,7 +663,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     if (e.pointerType === "touch") { // wind down a touch pointer / pinch (B331)
       pointersRef.current.delete(e.pointerId);
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
-      if (pointersRef.current.size < 2) pinchRef.current = null;
+      reseedPinch(); // re-baseline (or end) the pinch to whatever fingers remain — a lift never jumps
       if (pointersRef.current.size > 0) return;            // fingers remain — wait for full lift
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
@@ -683,7 +689,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   // behind a frozen grab cursor (cf. B271, the origin/main frozen-cursor lockout).
   const onCancel = (e) => {
     if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
-    if (pointersRef.current.size < 2) pinchRef.current = null;
+    reseedPinch();
     if (pointersRef.current.size === 0) touchPinchedRef.current = false;
     panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
   };
