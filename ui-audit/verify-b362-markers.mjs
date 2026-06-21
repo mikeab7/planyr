@@ -87,13 +87,41 @@ async function run() {
   const wp = svgW(pursuit), wa = svgW(active), wo = svgW(onhold), wc = svgW(complete);
   ok("Size tiers Pursuit > Active > On-hold > Complete", wp > wa && wa > wo && wo > wc, `${wp} > ${wa} > ${wo} > ${wc}`);
 
-  // 4 — white halo + glyphs
+  // 4 — white halo + glyphs (structural, robust to coordinate nudges)
   const hasHalo = (m) => m && /fill="#fff" stroke="#fff"/.test(m.html);
   ok("Every pin has a white halo underlay", [pursuit, active, onhold, complete].every(hasHalo));
-  ok("Pursuit shows a flag glyph", !!pursuit && pursuit.html.includes("12,12.4"));
-  ok("Active shows a pulse glyph", !!active && active.html.includes("polyline points=\"7.5,19"));
+  ok("Pursuit shows a flag glyph", !!pursuit && pursuit.html.includes('stroke-width="1.5"'));
+  ok("Active shows a pulse glyph", !!active && active.html.includes("<polyline") && active.html.includes('stroke-width="1.6"'));
   ok("On-hold shows a pause glyph (two bars)", !!onhold && (onhold.html.match(/<rect/g) || []).length >= 2);
-  ok("Complete shows a check glyph", !!complete && complete.html.includes("12.5,22.3"));
+  ok("Complete shows a check glyph", !!complete && complete.html.includes("<polyline") && complete.html.includes('stroke-width="2"'));
+
+  // 4b — glyph CENTERING: measure each glyph's bounding box (getBBox, in viewBox units)
+  // and confirm its center sits on the marker head center (~14,16). The flag is the
+  // asymmetric one most at risk of looking off-center.
+  const centering = await page.evaluate((FILLS) => {
+    const out = {};
+    for (const svg of document.querySelectorAll(".leaflet-marker-icon svg")) {
+      const html = svg.innerHTML.toLowerCase();
+      const status = Object.keys(FILLS).find((k) => html.includes(FILLS[k].toLowerCase()));
+      if (!status) continue;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, found = false;
+      for (const el of svg.querySelectorAll("path,polyline,rect")) {
+        let bb; try { bb = el.getBBox(); } catch { continue; }
+        if (bb.width >= 15) continue;            // skip the two body paths (~18 wide; glyphs ≤13)
+        if (bb.width === 0 && bb.height === 0) continue;
+        found = true;
+        minX = Math.min(minX, bb.x); maxX = Math.max(maxX, bb.x + bb.width);
+        minY = Math.min(minY, bb.y); maxY = Math.max(maxY, bb.y + bb.height);
+      }
+      if (found) out[status] = { cx: +((minX + maxX) / 2).toFixed(2), cy: +((minY + maxY) / 2).toFixed(2) };
+    }
+    return out;
+  }, FILLS);
+  for (const st of ["pursuit", "active", "onhold", "complete"]) {
+    const c = centering[st];
+    const centered = c && Math.abs(c.cx - 14) <= 1.2 && Math.abs(c.cy - 16) <= 2;
+    ok(`${st} glyph centered on the head (~14,16)`, !!centered, c ? `center ${c.cx},${c.cy}` : "no glyph bbox");
+  }
 
   // 5 — z-order by importance (same lat → pure zIndexOffset)
   ok("Pursuit renders above Complete (z-order)", !!(pursuit && complete) && pursuit.zIndex > complete.zIndex, `${pursuit?.zIndex} > ${complete?.zIndex}`);

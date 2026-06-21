@@ -92,29 +92,34 @@ const REMOVE_CURSOR =
  * deliberately NOT used here — they belong to the tab row. */
 
 // The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
-// never raster). Keyed off the token `shape`. Drawn inside the 0..28 × 0..36 viewBox,
-// centered on the building body (~14,19). B362.
-function statusGlyph(shape) {
+// never raster). Keyed off the token `shape`, and drawn CENTERED on (cx,cy) — each
+// glyph's bounding box is balanced about that point so it sits dead-center in the
+// marker head regardless of the body shape. B362.
+function statusGlyph(shape, cx, cy) {
+  const n = (v) => +v.toFixed(2);
   switch (shape) {
-    case "flag":  // Pursuit — a planted flag (the eye-magnet stage).
-      return `<path d="M12,25 L12,12.4" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>` +
-             `<path d="M12,12.8 L19.3,15 L12,17.3 Z" fill="#fff"/>`;
-    case "pulse": // Active build — an activity/heartbeat line.
-      return `<polyline points="7.5,19 10.4,19 12.5,14.6 15.5,23.4 17.6,19 20.5,19" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
-    case "pause": // On hold — two bars.
-      return `<rect x="10.8" y="14.6" width="2.6" height="9.8" rx="1" fill="#fff"/><rect x="14.6" y="14.6" width="2.6" height="9.8" rx="1" fill="#fff"/>`;
-    case "check": // Complete.
-      return `<polyline points="9,18.5 12.5,22.3 19.6,13.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-    case "x":     // Dead (only shown when explicitly surfaced).
-      return `<path d="M10.5,15 L17.5,22.5 M17.5,15 L10.5,22.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`;
+    case "flag": {  // Pursuit — a planted flag (pole left, pennant balanced right).
+      const px = n(cx - 2.5);
+      return `<path d="M${px},${n(cy + 5.5)} L${px},${n(cy - 5.8)}" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>` +
+             `<path d="M${px},${n(cy - 5.3)} L${n(cx + 3.5)},${n(cy - 3.1)} L${px},${n(cy - 0.9)} Z" fill="#fff"/>`;
+    }
+    case "pulse":   // Active build — an activity/heartbeat line.
+      return `<polyline points="${n(cx - 6.5)},${cy} ${n(cx - 3.5)},${cy} ${n(cx - 1.5)},${n(cy - 4.4)} ${n(cx + 1.5)},${n(cy + 4.4)} ${n(cx + 3.5)},${cy} ${n(cx + 6.5)},${cy}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "pause":   // On hold — two bars.
+      return `<rect x="${n(cx - 3.3)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/><rect x="${n(cx + 0.7)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/>`;
+    case "check":   // Complete.
+      return `<polyline points="${n(cx - 5)},${n(cy - 0.3)} ${n(cx - 1.6)},${n(cy + 3.4)} ${n(cx + 5.4)},${n(cy - 4.4)}" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "x":       // Dead (only shown when explicitly surfaced).
+      return `<path d="M${n(cx - 3.4)},${n(cy - 3.4)} L${n(cx + 3.4)},${n(cy + 3.4)} M${n(cx + 3.4)},${n(cy - 3.4)} L${n(cx - 3.4)},${n(cy + 3.4)}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`;
     default: return "";
   }
 }
 
-/* Status map pin (B161 shape, B362 hierarchy redesign): the gabled "Planyr site"
- * silhouette, kept constant across states so it always reads as a site — only the
- * FILL color, white halo, size tier, glyph, and opacity vary, and they vary WITH
- * importance (Pursuit loudest → Complete recessive; see statusTokens.js).
+/* Status map pin (B362): a FLAT-TOP shield "Planyr site" marker (flat top edge,
+ * tapering to a point at the bottom that lands on the exact spot), kept constant
+ * across states so it always reads as a site — only the FILL color, white halo, size
+ * tier, glyph, and opacity vary, and they vary WITH importance (Pursuit loudest →
+ * Complete recessive; see statusTokens.js).
  *  • White HALO only (a fattened white copy under the body) — no drop-shadow, which
  *    flashes on re-render and costs perf; the halo is what guarantees legibility over
  *    both bright (tan/developed) and dark (water/forest) tiles.
@@ -132,7 +137,11 @@ function buildingPinIcon(status, active) {
   const w = +(28 * vs).toFixed(1), h = +(36 * vs).toFixed(1);
   const op = t.mapOpacity ?? 1;
   const halo = t.halo || 2;
-  const body = "M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z";
+  // Flat-top shield: flat top edge (5,10)–(23,10), straight sides to y=22, then a clean
+  // taper to the point at (14,35) that lands on the geographic spot. The glyph centers
+  // on the head zone x[5,23] × y[10,22] → (14,16).
+  const body = "M14,35 L5,22 L5,10 L23,10 L23,22 Z";
+  const GX = 14, GY = 16;
   let shapeSvg;
   if (t.mapHollow) {
     // Lost/passed deal: a faint hollow outline (only ever shown when filtered to Dead).
@@ -144,7 +153,7 @@ function buildingPinIcon(status, active) {
       // white halo underlay (round joins → uniform outer ring), then the colored body
       `<path d="${body}" fill="#fff" stroke="#fff" stroke-width="${halo * 2}" stroke-linejoin="round"/>` +
       `<path d="${body}" fill="${t.color}" stroke="${darken(t.color, 0.28)}" stroke-width="0.75" stroke-linejoin="round"/>` +
-      statusGlyph(t.shape);
+      statusGlyph(t.shape, GX, GY);
   }
   // SVG bottom-aligned + horizontally centered in the fixed box → the pin tip sits at
   // the box's bottom-center, which is the icon anchor (the geographic point), for EVERY
