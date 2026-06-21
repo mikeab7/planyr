@@ -210,6 +210,13 @@ server/                   # placeholder README only — NOT built or deployed; b
 - Phase 4 — cloud save/load: logged-in users' data lives in the cloud and syncs
   across devices. No migration of old browser-stored sites (few enough to recreate
   by hand — intentional).
+- User profiles (B297/B298) — first/last name captured at signup now persist to a
+  queryable **`public.profiles`** table (one row per `auth.uid()`, private-by-default
+  RLS, a `handle_new_user` signup trigger that copies names from the signup metadata,
+  plus a backfill for existing users). The header pill shows the user's **name** (never
+  blank: First Last → first → last → metadata → email) and opens an **account dropdown**
+  (Profile / Settings / Sign out). Reuses the existing anon client + session — no new
+  keys. Migration: `src/workspaces/site-planner/db/profiles.sql` (run once, idempotent).
 
 ### Multi-workspace foundation (new)
 - Monorepo restructure landed via **PR #3** (the new clean `main`): the shell, the
@@ -254,6 +261,29 @@ server/                   # placeholder README only — NOT built or deployed; b
   `src/workspaces/doc-review/db/project_library.sql` (adds the index columns; status
   needs no DB change). `upsertReview`/`listReviews` fall back to the core columns if it
   hasn't run yet, so saving never regresses.
+
+### Document Review — auto-filing backend (B299, new) — BUILT + WIRED, gated dormant
+- **Drop a drawing → it files itself.** A server-side **title-block read** (`server/filing/`,
+  Cloud Run — the key must never reach the browser, so it's `/server` compute, not Supabase)
+  reads a dropped PDF with the Claude API, **matches it to a named project** (parcel / job # /
+  address / name, **never auto-guesses**), and returns a **filing decision** (auto-route +
+  auto-name, or "needs filing" → the one-click-confirm holding area) **plus placement facts**
+  captured in the **same read** ("Place on map" without reopening the file).
+- **Reader** mirrors the client `titleReader.js` request shape but calls the Messages API over
+  **raw `fetch`** (injectable, like `server/convert/aps.js`) so the image is dependency-free.
+  **Matcher** is pure + transparent (lists the signal it matched on). HTTP `POST /file` (PDF
+  bytes + `X-Planyr-Projects` base64 header) / `GET /health`, honest status codes, no silent
+  failures. `Dockerfile` + `README.md` alongside.
+- **File-facts index lives in Supabase Postgres, NOT /server** (`doc-review/db/file_facts.sql`,
+  `public.file_facts`, RLS like `doc_reviews`) — one small row per filed drawing so the library
+  answers "project → discipline → latest set" without re-reading the PDF. Client: the real index
+  provider `doc-review/lib/autofiling.js` fills the `capturePlacementFacts` seam (B181) +
+  `autofile`; `lib/fileIndex.js` + `reviewStore.upsertFileFacts/listFileFacts` persist/merge it.
+- **Gated dormant, like APS/Drive:** `backendReady` reflects `VITE_AUTOFILE_ENABLED`; the
+  same-origin proxy `functions/api/file.js` 503s until `DOC_FILING_URL` is set. Off by default
+  → the drawer files manually exactly as before (a 404/503 is a graceful skip). **Owner deploy
+  to light it up:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` (server-side) +
+  `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
 
 ## KEY DECISIONS (must persist)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
@@ -379,15 +409,21 @@ conflate them.
      a LibreDWG failure with APS off returns an explicit error, never a silent success).
      Code: `server/convert/` (B238). LibreDWG needs a real container (native binary +
      filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
+   - **Auto-filing title-block read + project match** — `server/filing/` (B299): reads a
+     dropped drawing's title block with the Claude API (key **server-side only**), matches it
+     to a named project (**never auto-guesses**), and returns a filing decision + placement
+     facts. Dormant behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED`
+     until provisioned (a not-yet-deployed proxy 503s → the drawer files manually, no
+     regression). The same-origin proxy is `functions/api/file.js`.
    - **Google Drive auto-filing + bytes I/O** — the storage adapter (`server/storage/`,
      B206–B209) that auto-filing writes through; the queryable **file-facts index lives in
-     Supabase Postgres**, not on `/server`. (The one-time Google OAuth *consent* callback is
-     a thin same-origin Cloudflare Pages Function, `functions/api/auth/google/*`; the heavy
-     compute is Cloud Run.)
+     Supabase Postgres** (`doc-review/db/file_facts.sql`), not on `/server`. (The one-time
+     Google OAuth *consent* callback is a thin same-origin Cloudflare Pages Function,
+     `functions/api/auth/google/*`; the heavy compute is Cloud Run.)
 
-   **All third-party secrets stay server-side only** — the APS key, the Google credentials,
-   and the Supabase **service-role** key — **walled off from the public Cloudflare Pages
-   deploy**. The only Supabase key that reaches the frontend is the RLS-protected **anon**
+   **All third-party secrets stay server-side only** — the APS key, the **Anthropic read key**
+   (auto-filing), the Google credentials, and the Supabase **service-role** key — **walled off
+   from the public Cloudflare Pages deploy**. The only Supabase key that reaches the frontend is the RLS-protected **anon**
    key. `/server` is **additive compute layered onto** the permanent Supabase data home,
    reached over the network in the backend tranche — never bundled into the browser build.
 
@@ -511,6 +547,30 @@ create policy "Users update own sites" on public.sites for update to authenticat
 create policy "Users delete own sites" on public.sites for delete to authenticated using ((select auth.uid()) = user_id);
 ```
 No anon policy, no admin/cross-user policy (deferred by decision).
+
+**User profiles (`lib/profile.js`, `shared/profile/useProfile.js`, `db/profiles.sql`; B297/B298).**
+Names captured at signup live in a queryable `public.profiles` table (one row per
+`auth.uid()`) — NOT just auth `user_metadata` — so they're the scalable foundation for the
+B2B direction (org/role/prefs later). `signUp` still seeds `options.data` (first/last/org);
+a **`handle_new_user` SECURITY DEFINER trigger** on `auth.users insert` copies those into
+`profiles` (trigger route avoids the client follow-up-insert race), and a one-time backfill
+seeds rows for pre-existing users. RLS is the same own-row private-by-default shape as
+`public.sites` (`auth.uid() = id`; select/insert/update; no delete — `on delete cascade`).
+`profile.js` = pure I/O (`loadProfile`/`saveProfile`, reuses the anon client + session, no
+new keys); `useProfile(user)` = the hook → `{ profile, loading, displayName, firstName, org,
+initial, reload, save }` with a never-blank display chain (First Last → first → last →
+metadata → email; pure `displayNameFor`/`firstNameFor`/`initialFor`, unit-tested). The Shell
+pill reads it and opens an account dropdown (`AnchoredMenu` portal); `AuthPanel` is a tabbed
+Profile/Settings panel (Profile edits name/org → `profiles`; Settings hosts Change password,
+reusing `updatePassword`). Run `db/profiles.sql` once in the SQL editor (idempotent).
+```sql
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  first_name text, last_name text, org text,
+  updated_at timestamptz not null default now() );
+-- RLS: 3 own-row policies (select/insert/update) keyed on auth.uid() = id.
+-- Trigger handle_new_user() inserts the row from raw_user_meta_data on signup; + backfill.
+```
 
 ## Document Review persistence (`src/workspaces/doc-review/lib/reviewStore.js`, `usePersistence.js`)
 Reuses the SAME Supabase client/session (imports `site-planner/lib/supabase.js` +

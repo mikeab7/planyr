@@ -203,18 +203,19 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
       {groupHead("evidence", "Utility evidence", onCount(EVIDENCE))}
       {!collapsed.evidence && groupRows(Object.entries(EVIDENCE), "evidence")}
+      {/* B308: the layer works for everyone via the same-origin proxy (no token needed).
+          The box is now an OPTIONAL power-user override — paste your own token to query
+          Mapillary directly from this device instead of going through Planyr. */}
       {!collapsed.evidence && overlays.mapillary?.on && (
         <div style={{ marginBottom: 5 }}>
-          {!tok && (
-            <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, lineHeight: 1.4, marginBottom: 3 }}>
-              Not configured — add a free access token to enable this layer:
-            </div>
-          )}
-          <input type="password" value={tok} placeholder="Access token (MLY|…)" autoComplete="off"
+          <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginBottom: 3 }}>
+            Works automatically — no token needed. <i>(Advanced)</i> use your own Mapillary token instead:
+          </div>
+          <input type="password" value={tok} placeholder="Your own token (optional, MLY|…)" autoComplete="off"
             onChange={(e) => { setTok(e.target.value); setMapillaryToken(e.target.value.trim()); }}
-            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${tok ? LINE : "#b45309"}`, borderRadius: 6, color: INK }} />
+            style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", fontSize: 11, fontFamily: "ui-monospace, monospace", border: `1px solid ${LINE}`, borderRadius: 6, color: INK }} />
           <div style={{ fontSize: 10, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>
-            {tok ? "Stored on this device only." : "Free at mapillary.com/dashboard/developers — or set VITE_MAPILLARY_TOKEN at build. Source: Mapillary."}
+            {tok ? "Using your token on this device only." : "Leave blank to use Planyr's built-in access. Source: Mapillary."}
           </div>
         </div>
       )}

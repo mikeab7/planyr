@@ -1,12 +1,12 @@
-/* Multi-tab presence (B298) — detect when the SAME Planyr project is open in another tab of
+/* Multi-tab presence (B313) — detect when the SAME Planyr project is open in another tab of
  * the same browser, so the app can warn that editing in two tabs can conflict. Built on
  * BroadcastChannel (a same-origin, same-browser message bus between tabs).
  *
  * Scope + relationship to other safety nets:
  *   - Same-browser only. Cross-DEVICE / cross-browser conflicts are caught server-side by the
- *     optimistic-concurrency guard (B297), not here.
+ *     optimistic-concurrency guard (B312), not here.
  *   - This is the VISIBLE companion to B127 (which already made two same-browser tabs silently
- *     converge): B298 surfaces the situation so the user isn't surprised.
+ *     converge): B313 surfaces the situation so the user isn't surprised.
  *
  * The pure helpers (summarizePresence / pruneStale) are React- and DOM-free so the protocol is
  * unit-tested without a browser; createMultiTabPresence is a thin BroadcastChannel wrapper that

@@ -8,7 +8,7 @@ import { supabase } from "./supabase.js";
 import { casUpsert, isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
-// compare-and-swap that REJECTS a stale write instead of silently clobbering (B297).
+// compare-and-swap that REJECTS a stale write instead of silently clobbering (B312).
 // Populated by cloudList; advanced on every successful write; cleared on delete / user
 // switch. Module-scope = naturally per-tab. Until the `version` column is migrated in,
 // every write degrades to a plain upsert (today's behaviour) and this stays empty.
@@ -46,7 +46,7 @@ export async function cloudUpsert(uid, model) {
     updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
     data: m,
   };
-  // Optimistic concurrency (B297): a conditional write guarded by the version we last synced.
+  // Optimistic concurrency (B312): a conditional write guarded by the version we last synced.
   // A stale write (another session advanced the row) is REJECTED as a conflict, not applied —
   // the caller surfaces a loud "reload before saving" prompt instead of a silent overwrite.
   const r = await casUpsert(supabase, "sites", { uid, id: m.id, row, expected: siteVersions[m.id] });
@@ -72,7 +72,7 @@ export async function cloudDelete(uid, id) {
 
 // Every site row for the signed-in user (RLS returns only their own). Returns the
 // array of serialized Site Models (the `data` column), and records each row's `version`
-// so the next save can compare-and-swap against it (B297).
+// so the next save can compare-and-swap against it (B312).
 export async function cloudList(uid) {
   if (!supabase || !uid) return [];
   let { data, error } = await supabase.from("sites").select("data, version").order("updated_at", { ascending: false });

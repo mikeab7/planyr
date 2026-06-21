@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -71,6 +71,15 @@ export default function AnchoredMenu({
       window.removeEventListener("scroll", place, true);
     };
   }, [open, placement, gap, width, anchorRef]);
+
+  // Escape closes the menu — a shared affordance for every AnchoredMenu consumer
+  // (account dropdown, project breadcrumb, rail flyouts).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 

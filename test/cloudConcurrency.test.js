@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { interpretCas, interpretInsert, isMissingVersionColumn, casUpsert } from "../src/shared/cloud/optimisticUpsert.js";
 
-// B297 — optimistic concurrency: a save carries the version it last synced; the DB applies it
+// B312 — optimistic concurrency: a save carries the version it last synced; the DB applies it
 // only if the stored version still matches, else the write is REJECTED as a conflict (no silent
 // clobber). Until the `version` column is migrated in, writes degrade to a plain upsert.
 

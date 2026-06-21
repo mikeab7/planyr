@@ -11,7 +11,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadPdf, renderPageToImage } from "./lib/pdf.js";
-import { dist, polyArea, pathLength } from "./lib/takeoff.js";
+import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
+import { parseFeet } from "./lib/parseLength.js";
+import { inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned } from "./lib/stitchGeom.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectLibrary from "./components/ProjectLibrary.jsx";
@@ -23,22 +25,8 @@ const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
-
-// page-units → world, and inverse
-const fwd = (M, p) => ({ x: M.A * p.x - M.B * p.y + M.e, y: M.B * p.x + M.A * p.y + M.f });
-const inv = (M, w) => { const det = M.A * M.A + M.B * M.B || 1; const dx = w.x - M.e, dy = w.y - M.f; return { x: (M.A * dx + M.B * dy) / det, y: (-M.B * dx + M.A * dy) / det }; };
-// similarity transform mapping b1→A1, b2→A2 (page-units → world)
-function solveM(b1, b2, A1, A2) {
-  const vb = { x: b2.x - b1.x, y: b2.y - b1.y }, vA = { x: A2.x - A1.x, y: A2.y - A1.y };
-  const lb = Math.hypot(vb.x, vb.y) || 1, scale = Math.hypot(vA.x, vA.y) / lb;
-  const theta = Math.atan2(vA.y, vA.x) - Math.atan2(vb.y, vb.x);
-  const A = scale * Math.cos(theta), B = scale * Math.sin(theta);
-  return { A, B, e: A1.x - (A * b1.x - B * b1.y), f: A1.y - (B * b1.x + A * b1.y) };
-}
-function sheetBBox(s) {
-  const c = [{ x: 0, y: 0 }, { x: s.baseW, y: 0 }, { x: s.baseW, y: s.baseH }, { x: 0, y: s.baseH }].map((p) => fwd(s.M, p));
-  return { minX: Math.min(...c.map((p) => p.x)), maxX: Math.max(...c.map((p) => p.x)), minY: Math.min(...c.map((p) => p.y)), maxY: Math.max(...c.map((p) => p.y)) };
-}
+// Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B300/B301 alignment guards) lives
+// in lib/stitchGeom.js so it can be unit-tested away from the component.
 
 const f0 = (n) => Math.round(n).toLocaleString();
 const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -54,9 +42,45 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [cursor, setCursor] = useState(null);    // world cursor
   const [measures, setMeasures] = useState([]);  // {id,kind,pts:[world]}
   const [ftPerUnit, setFtPerUnit] = useState(0); // composite calibration (ft per world unit)
+  const [calInput, setCalInput] = useState(null); // inline Calibrate entry { pts:[world], x, y (screen px), value } (B304)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const drag = useRef(null);
+
+  /* ---- undo / redo (B303) — measures + the composite calibration ---- */
+  const editRef = useRef({ measures: [], ftPerUnit: 0 });
+  useEffect(() => { editRef.current = { measures, ftPerUnit }; });
+  const pastRef = useRef([]);
+  const futureRef = useRef([]);
+  const [, bumpHist] = useState(0);
+  const touchHist = () => bumpHist((n) => n + 1);
+  const histKey = (s) => JSON.stringify({ m: s.measures, f: s.ftPerUnit });
+  const pushHistory = () => {
+    pastRef.current.push(editRef.current);
+    if (pastRef.current.length > 80) pastRef.current.shift();
+    futureRef.current = [];
+    touchHist();
+  };
+  const clearHistory = () => { pastRef.current = []; futureRef.current = []; touchHist(); };
+  const applySnapshot = (s) => { setMeasures(s.measures || []); setFtPerUnit(s.ftPerUnit || 0); setDraft(null); setCalInput(null); };
+  const undo = () => {
+    let prev = null;
+    while (pastRef.current.length) { const c = pastRef.current.pop(); if (histKey(c) !== histKey(editRef.current)) { prev = c; break; } }
+    if (!prev) return;
+    futureRef.current.push(editRef.current); applySnapshot(prev); touchHist();
+  };
+  const redo = () => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(editRef.current); applySnapshot(next); touchHist();
+  };
+  const canUndo = pastRef.current.length > 0;
+  const canRedo = futureRef.current.length > 0;
+  const removeLastVertex = () => {
+    if (!draft || !draft.pts || draft.pts.length === 0) return false;
+    setDraft((d) => { if (!d) return d; const pts = d.pts.slice(0, -1); return pts.length ? { ...d, pts } : null; });
+    return true;
+  };
 
   // --- cloud persistence (stitched-set review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
@@ -131,7 +155,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       setPlaced((arr) => {
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
-        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false }];
+        // The first sheet IS the world frame (auto-aligned). Every later sheet drops at
+        // identity scale offset to the right and must be Aligned before its measurements
+        // can be trusted — track that per sheet so we can flag + warn until it is (B301).
+        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0 }];
       });
     } finally { setBusy(false); }
   };
@@ -140,7 +167,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
 
+  // Warn (don't block) when a measurement lands over a sheet that hasn't been aligned yet —
+  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B301).
+  const warnIfOverUnaligned = (pts) => {
+    if (measureOverUnaligned(placed, pts)) setErr("Heads up: that measurement is over a sheet that isn’t aligned yet — Align it first, or its length/area may be wrong.");
+  };
+
   const onDown = (e) => {
+    if (calInput) return; // finish the inline Calibrate entry first
     const w = toWorld(e);
     if (align) {
       const sheet = placed.find((s) => s.id === align.sheetId);
@@ -149,16 +183,25 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       else if (align.step === 2) setAlign({ ...align, step: 3, A2: w });
       else {
         const b2 = inv(sheet.M, w);
+        // B300 — reject a degenerate alignment (the two points on either sheet landed on
+        // ~the same spot): solveM would divide by a ~0 baseline and fling the sheet far away
+        // at huge scale, silently and with no undo. Leave the sheet untouched and restart
+        // this alignment (mirrors the Calibrate "line too short" guard).
+        if (alignBaselinesDegenerate(align.b1, b2, align.A1, align.A2)) {
+          setErr("Those two points are too close together — pick two points farther apart, then click the matching points again.");
+          setAlign({ sheetId: align.sheetId, step: 0 });
+          return;
+        }
         const M = solveM(align.b1, b2, align.A1, align.A2);
-        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M } : s)));
-        setAlign(null);
+        setPlaced((arr) => arr.map((s) => (s.id === align.sheetId ? { ...s, M, aligned: true } : s)));
+        setAlign(null); setErr("");
       }
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
     if (tool === "calibrate" || tool === "distance") {
       if (!draft) setDraft({ kind: tool, pts: [w] });
-      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); setDraft(null); }
+      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); warnIfOverUnaligned(pts); } setDraft(null); }
       return;
     }
     if (tool === "area") setDraft((d) => (d && d.kind === "area" ? { ...d, pts: [...d.pts, w] } : { kind: "area", pts: [w] }));
@@ -181,20 +224,42 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const z = Math.max(0.05, Math.min(8, v.zoom * f)); return { zoom: z, panX: mx - ((mx - v.panX) * z) / v.zoom, panY: my - ((my - v.panY) * z) / v.zoom }; }); };
-  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); setDraft(null); };
+  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); warnIfOverUnaligned(draft.pts); } setDraft(null); };
 
+  // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
+  // world midpoint maps to screen px via the current pan/zoom. (B304)
   const doCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
-    const v = window.prompt("Real length of that line (feet):"); const ft = parseFloat(v);
-    if (isFinite(ft) && ft > 0) { setFtPerUnit(ft / u); setErr(""); }
+    setErr("");
+    setCalInput({ pts, x: ((pts[0].x + pts[1].x) / 2) * view.zoom + view.panX, y: ((pts[0].y + pts[1].y) / 2) * view.zoom + view.panY, value: "" });
+  };
+  // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
+  const commitCalibrate = () => {
+    if (!calInput) return;
+    const r = parseFeet(calInput.value);
+    if (r.empty) { setCalInput(null); setErr(""); return; }
+    if (!r.ok) { setErr(r.message); return; }
+    const u = dist(calInput.pts[0], calInput.pts[1]);
+    pushHistory();
+    setFtPerUnit(r.ft / u);
+    setCalInput(null); setErr("");
   };
 
   // Bind the window keydown listener ONCE; refresh the handler via a ref so it keeps
   // live closures (finishArea reads the current draft) without re-subscribing on every
   // render — onPointerMove re-renders constantly while drawing (B41).
   const onKeyRef = useRef(null);
-  onKeyRef.current = (e) => { if (e.key === "Enter") finishArea(); else if (e.key === "Escape") { setDraft(null); setAlign(null); } };
+  onKeyRef.current = (e) => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; }
+    if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
+    if (mod) return;
+    if (e.key === "Enter") finishArea();
+    else if (e.key === "Escape") { setDraft(null); setAlign(null); setCalInput(null); }
+    else if ((e.key === "Delete" || e.key === "Backspace") && removeLastVertex()) e.preventDefault();
+  };
   useEffect(() => {
     const onKey = (e) => onKeyRef.current && onKeyRef.current(e);
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
@@ -209,7 +274,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -226,7 +291,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setReviewId(newReviewId());
     setMeta(newMeta());
     setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
-    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr("");
+    setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null);
+    clearHistory();
     pdfsRef.current = []; placedRef.current = [];
   };
 
@@ -240,7 +306,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);
-      setAlign(null); setDraft(null); setTool("pan");
+      setAlign(null); setDraft(null); setTool("pan"); setCalInput(null); clearHistory();
       // Re-fetch each source PDF; render placed sheets back from the bytes + saved M.
       const srcEntries = [];
       for (const src of rec.sources || []) {
@@ -255,11 +321,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       suspendSave(); // re-park across this load's async commits (B19)
       setPdfs(srcEntries); pdfsRef.current = srcEntries;
       const out = [];
+      let idx = 0;
       for (const s of st.placed || []) {
         const e = srcEntries.find((x) => x.srcId === s.srcId);
         let href = null, baseW = s.baseW, baseH = s.baseH, missing = true;
         if (e && e.doc) { const img = await renderPageToImage(e.doc, s.pageNum, 2); if (tok !== loadTok.current) return; href = img.href; baseW = img.baseW; baseH = img.baseH; missing = false; }
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing });
+        // First placed sheet is always the world frame; older saves predate the `aligned`
+        // flag, so treat the rest as aligned (they were saved with a real transform) — only
+        // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B301)
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false });
+        idx++;
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
       suspendSave(); // re-park before the final commit so a slow load's setPlaced isn't re-saved (B19)
@@ -300,7 +371,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const tray = pdfs.flatMap((p) => Array.from({ length: p.numPages }, (_, i) => ({ key: p.srcId + ":" + (i + 1), pdf: p, page: i + 1 })));
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
-  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+  const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const alignMsg = align && ["Click reference point #1 (on a placed sheet)", "Click the SAME point on the sheet being aligned", "Click reference point #2", "Click the matching point #2 on the sheet"][align.step];
 
   return (
@@ -318,6 +390,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           <button key={id} style={btn(tool === id && !align)} onClick={() => { setTool(id); setDraft(null); setAlign(null); }}>{lbl}</button>
         ))}
         <div style={{ flex: 1 }} />
+        <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
+        <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
+        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.05, v.zoom / 1.2) }))}>−</button>
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
@@ -347,6 +422,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <g transform={G}>
               {placed.map((s) => {
                 const aligning = align && align.sheetId === s.id;
+                const unaligned = s.aligned === false && !aligning; // not yet aligned — flag it (B301)
                 const xf = `matrix(${s.M.A} ${s.M.B} ${-s.M.B} ${s.M.A} ${s.M.e} ${s.M.f})`;
                 if (!s.href) { // source bytes unavailable (too large / not yet re-dropped) — placeholder
                   return <g key={s.id} transform={xf} opacity={aligning ? 0.6 : 1}>
@@ -354,13 +430,19 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <text x={s.baseW / 2} y={s.baseH / 2} fontSize={ls(22)} textAnchor="middle" fill="#b3361b" fontWeight="700">Re-drop “{s.name}”</text>
                   </g>;
                 }
-                return <image key={s.id} href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
-                  transform={xf} opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />;
+                return <g key={s.id} transform={xf}>
+                  <image href={s.href} x={0} y={0} width={s.baseW} height={s.baseH} preserveAspectRatio="none"
+                    opacity={aligning ? 0.6 : 1} style={{ outline: aligning ? "2px solid #c2410c" : "none" }} />
+                  {unaligned && <>
+                    <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={ls(2.5)} strokeDasharray={`${ls(12)} ${ls(8)}`} pointerEvents="none" />
+                    <text x={s.baseW / 2} y={ls(30)} fontSize={ls(22)} textAnchor="middle" fill="#b45309" fontWeight="700" pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(5) }}>⚠ Not aligned — click “Align”</text>
+                  </>}
+                </g>;
               })}
               {/* measures (world coords) */}
               {measures.map((m) => {
                 if (m.kind === "distance") { const a = m.pts[0], b = m.pts[1]; const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; return <g key={m.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0e7490" strokeWidth={ls(2)} /><text x={mid.x} y={mid.y - ls(4)} fontSize={ls(12)} fontWeight="700" fill="#0e7490" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f0(dist(a, b) * ftPerUnit)} ft` : "set scale"}</text></g>; }
-                const c = m.pts.reduce((p, q) => ({ x: p.x + q.x / m.pts.length, y: p.y + q.y / m.pts.length }), { x: 0, y: 0 });
+                const c = centroidOf(m.pts); // area-weighted centroid, clamped inside concave shapes (B307)
                 const sf = polyArea(m.pts) * ftPerUnit * ftPerUnit;
                 return <g key={m.id}><polygon points={m.pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke="#0e7490" strokeWidth={ls(2)} /><text x={c.x} y={c.y} fontSize={ls(12)} fontWeight="700" fill="#0e7490" textAnchor="middle" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{ftPerUnit ? `${f2(ftToAcres(sf))} ac` : "set scale"}</text></g>;
               })}
@@ -375,7 +457,24 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {align && [align.A1, align.A2].map((p, i) => p && <circle key={i} cx={p.x} cy={p.y} r={ls(5)} fill="none" stroke="#c2410c" strokeWidth={ls(2)} />)}
             </g>
           </svg>
-          {(align || tool !== "pan") && (
+          {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
+          {calInput && (
+            <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
+                <input autoFocus value={calInput.value}
+                  onChange={(e) => { const v = e.target.value; setCalInput((c) => (c ? { ...c, value: v } : c)); if (err) setErr(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitCalibrate(); } else if (e.key === "Escape") { e.preventDefault(); setCalInput(null); setErr(""); } }}
+                  placeholder={`120  or  38'-7"`}
+                  style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontFamily: "inherit", padding: "3px 6px", border: `1px solid ${err ? "#dc2626" : PAL.line}`, borderRadius: 5, outline: "none" }} />
+                <button onMouseDown={(e) => e.preventDefault()} onClick={commitCalibrate} style={{ ...btn(true), padding: "3px 9px", fontSize: 11.5 }}>Set</button>
+              </div>
+              <div style={{ fontSize: 10.5, marginTop: 4, color: err ? "#dc2626" : PAL.muted, lineHeight: 1.35 }}>
+                {err || "Feet, or feet-inches. Enter to set · Esc to cancel."}
+              </div>
+            </div>
+          )}
+          {(align || tool !== "pan") && !calInput && (
             <div style={{ position: "absolute", left: "50%", bottom: 14, transform: "translateX(-50%)", background: align ? PAL.accent : "rgba(25,22,19,0.9)", color: "#fff", padding: "7px 14px", borderRadius: 99, fontSize: 12, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,0.3)" }}>
               {align ? alignMsg : tool === "calibrate" ? "Click two points a known distance apart" : tool === "distance" ? "Click two points" : "Click a region; double-click / Enter to close"}
               {align && " · Esc to cancel"}
@@ -387,15 +486,20 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         {/* right panel: placed sheets + takeoff */}
         <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
-          {placed.map((s, i) => (
-            <div key={s.id} style={{ border: `1px solid ${align && align.sheetId === s.id ? PAL.accent : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6 }}>
+          {placed.map((s, i) => {
+            const isAligning = align && align.sheetId === s.id;
+            const needsAlign = i > 0 && s.aligned === false; // not aligned yet (B301)
+            return (
+            <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
+              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — measurements may be off</div>}
               <div style={{ display: "flex", gap: 6 }}>
-                {i > 0 && <button style={{ ...btn(align && align.sheetId === s.id), padding: "3px 8px", fontSize: 11 }} onClick={() => startAlign(s.id)}>Align</button>}
+                {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
                 <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {placed.length > 0 && (
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>

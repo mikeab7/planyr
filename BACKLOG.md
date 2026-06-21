@@ -22,6 +22,48 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
+     gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
+     BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
+     a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
+     B303–B307, then the Mapillary proxy B308/B309). -->
+
+<!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
+     ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
+     batch (Doc Review markup editing) had ALSO taken B303–B307 while this was in flight (both saw B302 as
+     the max, both blind) — so to clear the collision this batch yielded to the larger, already-shipped
+     Doc Review claim and renumbered to **B308/B309**. **B308 (the proxy) is BUILT + SHIPPED** 2026-06-21
+     (branch claude/busy-allen-ofgy9l) — full [x] block in BACKLOG-DONE.md. The owner set the
+     MAPILLARY_TOKEN secret in Cloudflare Pages Production, so the LIVE "imagery renders" confirm just
+     needs the next Production deploy (logged in VERIFICATION). **B309 stays Open (`[~]` partial)** — B308
+     already reframed the client paste-box as an optional override; the final VITE_MAPILLARY_TOKEN-path
+     removal waits until B308 is confirmed live so we never drop the only working path before it's proven. -->
+
+### B309 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B308  *(arrived as coworker-chat "NEW-2" 2026-06-20; first filed B304 then renumbered **B309** — concurrent `main`'s Doc Review batch took B303–B307)*
+`[~]` **Partly done via B308 (2026-06-21).** The same-origin proxy is now the DEFAULT path and the in-app `MLY|…` box is already reframed as an **optional power-user override** (no token entry required). **Remaining, only AFTER B308 is confirmed live on Production:** drop the now-dead `VITE_MAPILLARY_TOKEN` read in `evidenceLayers.mapillaryToken()` (a baked VITE var would re-expose a token — the audit finding), and make the final call on the override box (keep as advanced, or remove). Held until B308's live confirm so the only working path isn't removed before the proxy is proven.
+> **Dedup:** the cleanup half of B308; strictly **depends on B308 verified live**. Net-new.
+
+<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-3 — Document Review STITCH + MARKUP safety
+     guards. Minted **B300–B302** (highest B# across both files was B299 after concurrent `main`'s
+     B288–B299 batches landed; my first-filed B288–B290 collided with main's single-sheet-viewer
+     B288–B296, then a second filing at B299–B301 collided with main's auto-filing **B299** (PR #222),
+     so renumbered to the next clear band **B300–B302** — the rules forbid two items sharing a number).
+     **Filed AND fixed + headless-verified + pushed THIS session** (branch
+     `claude/admiring-hypatia-xjv8a1`), per Standing Rule #1 — full [x] blocks live in BACKLOG-DONE.md:
+       • B300 (NEW-1) — Stitcher Align had no degenerate-baseline guard; coincident clicks flung the
+         sheet because solveM's `Math.hypot(vb)||1` masked a zero baseline → extreme transform. FIXED.
+       • B301 (NEW-2) — measuring over a not-yet-aligned sheet silently used the composite (sheet-1)
+         scale. FIXED — per-sheet `aligned` state + visual flag + a warn-on-measure banner.
+       • B302 (NEW-3) — a 2-point Area (0 sf) / 2-point Perimeter (single segment) was committable via
+         Enter AND double-click. FIXED — both finish paths now need ≥3 pts via `canCommitMeasure`.
+     Deduped — all net-new: NOT duplicates of main's single-sheet-viewer **B288–B296** (zoom/pan/markup-
+     edit on the SAME DocReview.jsx, a different concern — the stitcher + the measure-commit guards are
+     untouched there) nor its auto-filing **B299** (server-side title-block read), nor B181/B182/B183
+     (the *map* placement cascade) or B130/B131 (parking). B300/B301 added a pure `lib/stitchGeom.js`
+     (extracted from Stitcher.jsx so the transform math is unit-testable); B302 extended `lib/takeoff.js`
+     and tightened main's B291 double-click finish to the same ≥3 gate. lint 0 · build green · headless
+     `ui-audit/verify-b300-b302.mjs` 14/14 (chromium-1228, per main's V72 note). -->
+
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-9 — Document Review SINGLE-SHEET (Markup) viewer
      interaction: zoom/pan/navigation + drawing correctness + markup editing. Minted **B288–B296**
      (renumbered from a first-filed B273–B281: by merge time concurrent `main` had consumed B273–B281
@@ -125,6 +167,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 - **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
 - **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
 - **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
+- **⚠ FINDING (Cowork live, 2026-06-20):** the Cloudflare **branch preview is un-secreted** — it does NOT bake in `VITE_SUPABASE_URL`/`ANON_KEY`, so it comes up **"Cloud off"** (a telemetry probe fired from the preview did NOT write to `client_errors`, while the same probe on planyr.io did). So flow (1) ("app comes up Cloud on") would FAIL against a branch preview and look like a harness bug, not an env bug. **Owner decision before building B278:** (a) add the two `VITE_SUPABASE_*` vars to the Cloudflare Pages **preview** env (the anon key is browser-safe — RLS-protected), OR (b) point B278 at a deploy that already has the env (production planyr.io, or a dedicated staging). Detail in `COWORK-RESULT-2026-06-20-telemetry-live-and-partB-findings.md`.
 > **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
 
 ### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
@@ -143,12 +186,12 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
      overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
-     under concurrent `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
-     (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275 — was
-     renumbered to **B297** (optimistic concurrency / reject stale saves) + **B298** (multi-tab warning)
-     once `main`'s numbering reached B296. ⚠ B297 needs ONE owner step to activate: run
-     src/workspaces/site-planner/db/optimistic_concurrency.sql in the Supabase SQL editor (merge-safe +
-     dormant until then; then a signed-in two-session check — VERIFICATION V74). -->
+     under a very hot `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
+     (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275, briefly
+     B297/B298 — was renumbered to **B312** (optimistic concurrency / reject stale saves) + **B313**
+     (multi-tab warning) once `main`'s numbering reached B311. ✅ The B312 migration
+     (src/workspaces/site-planner/db/optimistic_concurrency.sql) was RUN by the owner 2026-06-20, so the
+     guard goes active on deploy; remaining is one signed-in two-session check — VERIFICATION V79. -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
@@ -530,7 +573,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > - **B142 + B143 (DONE) — the direct precedent.** B142 already set `pointerEvents="all"` on the **text/callout box** so its whole interior selects even with no fill (explicitly "to match Doc Review's shape-aware hit test"); B143 finished the Bluebeam-style text editing (Enter = newline, click-away/Esc to finish, via a `pointerEvents:"all"` click-out catcher). So **text-box selection + editing is already done on the Site Planner side — do NOT redo it here.** Increment 1 is the same fix applied to the shape markups B142 didn't cover. B141 likewise added measurement vertex-editing "consistent with Doc Review's shape-aware select."
 > - **B33 (DONE)** is the reference hit-test — Increment 1 brought the other two surfaces up to its rectangle behaviour; the shared-`hitTest` tranche generalizes B33 rather than replacing it.
 > - **B146 (DONE)** already introduced (a) the **transparent fat hit-stroke** for grabbing a thin line and (b) the shared inline **`numEdit`** on-canvas editor that replaced `window.prompt`. Reuse (a) for open-path markups here.
-> - **Owner "no dialog boxes" rule (KEY DECISIONS, 2026-06-17):** while threading text/measure selection, note that **Doc Review still creates text + calibration via `window.prompt`** (`DocReview.jsx`) and **ParcelDrawing calibrates via `window.prompt`** — these violate the rule and should be converted to the inline `numEdit`/`<textarea>` pattern as part of the text/measure work (fold in here, don't file separately).
+> - **Owner "no dialog boxes" rule (KEY DECISIONS, 2026-06-17):** Doc Review's **Text** tool is inline (B293) and **Calibrate** (Doc Review + Stitcher) is now inline with validation (**B304**) — no more `window.prompt` in those flows. **Only remaining:** **ParcelDrawing's calibrate** (`window.prompt`) → convert to the inline `numEdit` pattern; fold in here, don't file separately.
 > - **Distinct from B149/B121 (LOD + label collision):** those govern what's *drawn* at a given zoom; this governs what's *selectable* when clicked. Keep separate.
 
 ### B156 — Hover highlight on the markup under the cursor (pre-click affordance) `[Document Review + Site Planner / UI]` (feature)  *(arrived as "NEW-2"; minted B156 — next free ID after B155)*

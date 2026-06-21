@@ -1,4 +1,4 @@
-/* Optimistic-concurrency upsert (B297) — a reusable compare-and-swap over a Supabase table
+/* Optimistic-concurrency upsert (B312) — a reusable compare-and-swap over a Supabase table
  * keyed by (user_id, id) with an integer `version` column. Used by BOTH the Site Planner
  * (public.sites) and Document Review (public.doc_reviews) so the conflict semantics are
  * identical and the primitive is ready for the DEFERRED multi-user team-workspace feature.

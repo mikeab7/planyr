@@ -117,9 +117,9 @@ function ModuleTab({ m, isActive, onClick }) {
   );
 }
 
-// B298 — track whether the same project is open in another same-browser tab (BroadcastChannel),
+// B313 — track whether the same project is open in another same-browser tab (BroadcastChannel),
 // so the header can warn that editing in two tabs can conflict. Degrades to "no peers" where
-// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B297.
+// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B312.
 function useMultiTab(projectId) {
   const [state, setState] = useState({ otherCount: 0, sameProjectTabs: 0, conflictRisk: false });
   const ref = useRef(null);
@@ -158,7 +158,7 @@ export default function AppHeader({
   homeLabel,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
-  const multiTab = useMultiTab(currentProject ? currentProject.id : null); // B298 — same-project-in-another-tab warning
+  const multiTab = useMultiTab(currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning
 
   useEffect(() => {
     const handle = (e) => {
@@ -293,7 +293,7 @@ export default function AppHeader({
         </div>
       </div>
     </header>
-    {/* B298 — non-blocking warning when the SAME project is open in another same-browser tab.
+    {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
     {multiTab.conflictRisk && (
       <div role="status" style={{ position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>

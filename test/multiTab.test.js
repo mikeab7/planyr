@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { summarizePresence, pruneStale, createMultiTabPresence } from "../src/shared/presence/multiTab.js";
 
-// B298 — detect the same project open in another same-browser tab so we can warn about it.
+// B313 — detect the same project open in another same-browser tab so we can warn about it.
 
 describe("summarizePresence — banner state from this tab's POV", () => {
   const now = 1000;
