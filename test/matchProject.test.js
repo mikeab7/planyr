@@ -8,11 +8,22 @@ const projects = [
 ];
 
 describe("matchProjectInText — deterministic project match by searching the sheet text (B312)", () => {
-  it("matches when the project name is printed on the sheet", () => {
-    const m = matchProjectInText("ALTA SURVEY OF KATY GRAND — BUILDING 1, HARRIS COUNTY", projects);
+  it("matches a distinctive name on its own, or a generic name corroborated by a parcel/job#", () => {
+    // A distinctive name (rare/long token) files on a single mention.
+    expect(matchProjectInText("CYPRESS LOGISTICS PARK — PHASE 1 SITE PLAN", projects).projectId).toBe("g2");
+    // A generic name ("Katy Grand") needs corroboration — a real survey prints the name AND its
+    // parcel, which combine via noisy-or. (A generic name ALONE no longer auto-files — next test.)
+    const m = matchProjectInText("ALTA SURVEY OF KATY GRAND — BUILDING 1  APPRAISAL ACCOUNT 1234567-000-001", projects);
     expect(m.matched).toBeTruthy();
     expect(m.projectId).toBe("g1");
     expect(m.needsFiling).toBe(false);
+  });
+  it("a GENERIC name mentioned once, with nothing to corroborate it, HOLDS (never auto-guess; B360)", () => {
+    // "Katy Grand" is two common words; a single coincidental mention (the Katy / Grand Parkway area)
+    // must NOT auto-file — it needs a second signal or the name repeated in a real title block.
+    const m = matchProjectInText("DETENTION POND NEAR THE KATY GRAND PARKWAY INTERCHANGE", projects);
+    expect(m.matched).toBeNull();
+    expect(m.needsFiling).toBe(true);
   });
   it("matches on a printed parcel/account number (exact, strong)", () => {
     const m = matchProjectInText("APPRAISAL ACCOUNT 1234567-000-001  GRADING PLAN", projects);

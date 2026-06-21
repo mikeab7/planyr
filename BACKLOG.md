@@ -22,6 +22,12 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
+`[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
+- **Tier-2 AI/OCR** (B299 `server/filing/` + B352 OCR) — server-side title-block read for scanned sheets. Owner deploy: `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. The proxy 503s until then (graceful skip) — purely additive, no regression.
+- **DWG → DXF** (B238 `server/convert/`, LibreDWG → APS) — so a `.dwg` drop can be read at all.
+Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision + deploy + verify the read on a real scanned set and a real `.dwg`. Until then the text path covers the common case and the rest holds safely.
+
 ### B360 — Title-block intelligence: unify the readers, expand the discipline taxonomy, tune on the real corpus (V79 filing + V67 scale) `[Doc Review]` (task)  *(2026-06-21; filed B356, renumbered **B360** — `main` #268 took B356–B359 while in flight)*
 `[x]` **Done + tuned on the owner's real drawings — merging via PR #270 (branch `claude/bold-cori-okbxu5`).** The Drive connector was re-authed to michael@planyr.io mid-session, so the empirical tuning ran here (no second session needed). 1078 tests, lint 0, build green, lazy chunks intact.
 
