@@ -28,7 +28,7 @@ import { screenToWorld, zoomAround, fitView, shouldPan } from "../../shared/view
 // lastConsumedNavToken. (NEW-1)
 let lastConsumedDocToken = null;
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
@@ -47,7 +47,7 @@ const TOOLS = [
 ];
 const MEASURE = new Set(["distance", "perimeter", "area", "count"]);
 
-// Rail icons for the Markup tools + zoom controls (B314). 16×16, stroke = currentColor so a
+// Rail icons for the Markup tools + zoom controls (B321). 16×16, stroke = currentColor so a
 // button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
 const MK_ICONS = {
   select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
@@ -110,7 +110,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [fileName, setFileName] = useState("");
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  // Viewport transform (B313): ONE shared pan/zoom model with the Site map. `view` is
+  // Viewport transform (B320): ONE shared pan/zoom model with the Site map. `view` is
   // { scale, tx, ty } — pixels per page-unit + the page origin's position in the viewport —
   // so the sheet pans freely in any direction (not trapped inside a scroll box). `renderScale`
   // is the resolution the canvas bitmap was last rasterised at; it's decoupled from view.scale
@@ -130,14 +130,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [cursor, setCursor] = useState(null);       // page-unit cursor for live preview
   const [sel, setSel] = useState(null);             // selected markup id
   const [fitMode, setFitMode] = useState("width");  // 'width' | 'page' — how a fit (scale===0) is computed (B295)
-  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B313)
+  const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B320)
   const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
-  const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B313)
+  const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B320)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
-  const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B313)
+  const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B320)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
@@ -150,7 +150,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const [signedIn, setSignedIn] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B314)
+  const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B321)
   // The project the header breadcrumb points at in Markup (B191). Follows the open
   // review's project; picking another project here browses its files in place (it does
   // NOT re-file the open review — browsing ≠ filing).
@@ -270,7 +270,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
-      setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // fit the new backdrop (B313)
+      setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // fit the new backdrop (B320)
       setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B303)
       // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
       // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
@@ -293,7 +293,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     } finally { setBusy(false); }
   };
 
-  /* ---- prepare page + fit (B313) ---- */
+  /* ---- prepare page + fit (B320) ---- */
   const VIEW_MIN = 0.05, VIEW_MAX = 6; // px-per-page-unit clamp for the viewport
   // When the page or a load changes: refresh the page's base (scale-1) size, and — only on a
   // fresh open/reset/load (view === null) — fit the sheet to the viewport. Switching sheets
@@ -320,7 +320,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
 
   // Re-rasterise crisply once a zoom gesture settles: debounce view.scale → renderScale, so a
   // smooth zoom rescales the already-drawn bitmap during the gesture (cheap) and only redraws
-  // the PDF at full resolution when it stops. Panning (tx/ty only) never re-rasters. (B313)
+  // the PDF at full resolution when it stops. Panning (tx/ty only) never re-rasters. (B320)
   useEffect(() => {
     if (!view || view.scale === renderScale) return;
     const id = setTimeout(() => setRenderScale(view.scale), 140);
@@ -357,7 +357,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
   }, []);
 
-  /* ---- zoom/pan viewport — the shared engine (B313) ---- */
+  /* ---- zoom/pan viewport — the shared engine (B320) ---- */
   // Zoom about a screen anchor (the cursor for wheel/pinch; the viewport centre for ± / null).
   // zoomAround holds the page point under the anchor fixed; the bitmap rescales now, re-rasters
   // on settle. Reads the live view from the ref so the once-bound wheel handler isn't stale.
@@ -369,7 +369,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const ay = clientY == null ? r.height / 2 : clientY - r.top;
     setView(zoomAround(v, factor, ax, ay, VIEW_MIN, VIEW_MAX));
   };
-  // Fit the current sheet to the viewport (Fit = width, Fit page = the whole sheet). (B295/B313)
+  // Fit the current sheet to the viewport (Fit = width, Fit page = the whole sheet). (B295/B320)
   const fitNow = (mode) => {
     setFitMode(mode);
     const base = pageBase, wrap = wrapRef.current;
@@ -381,7 +381,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
   // and so it attaches exactly when the viewport mounts. Plain wheel, Ctrl/Cmd+wheel, and
-  // trackpad pinch all arrive here as wheel events and all zoom toward the cursor. (B313)
+  // trackpad pinch all arrive here as wheel events and all zoom toward the cursor. (B320)
   const wheelCleanup = useRef(null);
   const attachWrap = useCallback((node) => {
     if (wheelCleanup.current) { wheelCleanup.current(); wheelCleanup.current = null; }
@@ -439,7 +439,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
-    setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B313)
+    setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B320)
   };
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
@@ -561,7 +561,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     // pans instead (Bluebeam). hitTest is cheap + math-based, so probe it up front for the rule.
     const hitId = tool === "select" ? hitTest(p) : null;
     // Bluebeam pan/tool collision (shared rule): middle-mouse / Space / Pan tool / Select-on-
-    // empty → pan; Select-on-object → select/move; a drawing tool → draw, never pan. (B313)
+    // empty → pan; Select-on-object → select/move; a drawing tool → draw, never pan. (B320)
     if (shouldPan({ button: e.button, spaceHeld, tool, onObject: !!hitId })) {
       e.preventDefault();
       if (tool === "select") setSel(null); // a pan starting on empty canvas also clears the selection
@@ -597,7 +597,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   };
 
   const onMove = (e) => {
-    if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B313)
+    if (panRef.current) { // panning: move the sheet with the drag, free in any direction (B320)
       const d = panRef.current;
       setView((v) => (v ? { scale: v.scale, tx: d.tx0 + (e.clientX - d.sx), ty: d.ty0 + (e.clientY - d.sy) } : v));
       return;
@@ -750,7 +750,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, []);
 
-  const zoom = (f) => doZoom(f, null, null); // ± buttons zoom about the viewport centre (B290/B313)
+  const zoom = (f) => doZoom(f, null, null); // ± buttons zoom about the viewport centre (B290/B320)
   const totals = rollup(markups, calByPage);
 
   /* ---------------- render ---------------- */
@@ -764,7 +764,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
   const tbDiv = { width: 1, height: 18, background: "rgba(255,255,255,0.12)", margin: "0 2px", flex: "none" };
   const curTool = TOOLS.find((t) => t.id === tool);
 
-  // Right-side tool rail (B314): the drawing/measure tools + zoom controls, Bluebeam-style.
+  // Right-side tool rail (B321): the drawing/measure tools + zoom controls, Bluebeam-style.
   const railItems = [
     ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
     { kind: "spacer" },
@@ -859,7 +859,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
         currentProject={markupProject}
         onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
         onNewProject={onNewProject}
-        saveState={status === "saving" ? "saving" : status === "unsaved" ? "error" : (signedIn ? "synced" : "local")}
+        saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
         centerContent={
           // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.
@@ -884,7 +884,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             <button style={chromeBtn()} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
-            {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B314).
+            {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B321).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
             {pdfRef.current && <>
               <span style={tbDiv} />
@@ -898,7 +898,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       {redrop && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fef3c7", color: "#92400e", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {redrop}</span>
-          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "#fff", color: "#92400e" }}>Re-open file…</button>
+          <button onClick={() => fileRef.current?.click()} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d6a64a", background: "var(--surface-raised)", color: "#92400e" }}>Re-open file…</button>
         </div>
       )}
 
@@ -923,10 +923,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       ) : (
         <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
           {/* sheet list */}
-          <div style={{ flex: "none", width: 116, background: "#fff", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ flex: "none", width: 116, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, padding: "8px 8px 6px" }}>
-              {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "#fff", color: on ? PAL.ink : "#cfc8ba" }); return (
+              {(() => { const pg = (on) => ({ flex: 1, padding: "4px 0", borderRadius: 6, cursor: on ? "pointer" : "default", fontFamily: "inherit", fontSize: 13, fontWeight: 700, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: on ? PAL.ink : "var(--text-tertiary)" }); return (
                 <>
                   <button style={pg(page > 1)} disabled={page <= 1} onClick={() => goToPage(page - 1)} title="Previous sheet (←)">‹</button>
                   <span style={{ flex: "none", fontSize: 10.5, color: PAL.muted, fontWeight: 700, minWidth: 40, textAlign: "center" }}>{page} / {numPages}</span>
@@ -940,21 +940,21 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
                 <button key={n} ref={n === page ? activeSheetRef : null} onClick={() => goToPage(n)}
                   title={calInfo[n]?.label ? `Scale ${calInfo[n].label}${calInfo[n].src === "auto" ? " — from sheet, verify" : ""}` : undefined}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-                    border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "#fbf3ee" : "#fff", color: PAL.ink }}>
+                    border: `1px solid ${n === page ? PAL.accent : PAL.line}`, background: n === page ? "var(--hover-ghost)" : "var(--surface-raised)", color: PAL.ink }}>
                   Sheet {n}{calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : ""}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* canvas + overlay — a transform viewport (B313). The sheet is a page-sized box
+          {/* canvas + overlay — a transform viewport (B320). The sheet is a page-sized box
               positioned by translate(tx,ty) and sized by view.scale, so it pans freely in any
               direction and zooms toward the cursor (no scroll box). The wheel + pointer handlers
               live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
           <div ref={attachWrap}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
-            style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "#cfc8ba", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
+            style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
             {pageBase && view && (
               <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
@@ -995,12 +995,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
             )}
           </div>
 
-          {/* tool rail (B314) — drawing/measure tools + zoom, flush to the canvas */}
+          {/* tool rail (B321) — drawing/measure tools + zoom, flush to the canvas */}
           <ToolRail items={railItems} accent={MODULE_ACCENT["doc-review"]} data-testid="markup-rail" />
 
-          {/* takeoff — collapsible (B314); a thin re-open tab when hidden */}
+          {/* takeoff — collapsible (B321); a thin re-open tab when hidden */}
           {takeoffOpen ? (
-          <div style={{ flex: "none", width: 246, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+          <div style={{ flex: "none", width: 246, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink }}>Takeoff</div>
               <button onClick={() => setTakeoffOpen(false)} title="Hide the takeoff panel" style={{ flex: "none", cursor: "pointer", border: "none", background: "transparent", color: PAL.muted, fontSize: 14, fontWeight: 700, lineHeight: 1, padding: "2px 4px", fontFamily: "inherit" }}>▸</button>

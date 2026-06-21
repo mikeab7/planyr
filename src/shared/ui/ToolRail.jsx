@@ -1,4 +1,4 @@
-/* Shared vertical tool rail (B314) — a Bluebeam-style icon rail. Presentational + generic:
+/* Shared vertical tool rail (B321) — a Bluebeam-style icon rail. Presentational + generic:
  * the host passes a flat `items` list and an accent colour; the rail owns the dark chrome,
  * the active-tool highlight, scrolling, and layout. Used by the Document Review ("Markup")
  * workspace now; available for the Site Planner to adopt later (it currently inlines its own

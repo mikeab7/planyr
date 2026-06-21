@@ -55,7 +55,7 @@ export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, se
   const cssW = Math.floor(base.width * scale), cssH = Math.floor(base.height * scale); // on-screen size (scale only)
   // When the caller drives display size itself (the Markup transform viewport sizes the
   // canvas to 100% of a CSS-scaled page box so a zoom gesture can rescale the already-
-  // rendered bitmap without re-rasterising), skip setting the canvas's own CSS box. (B313)
+  // rendered bitmap without re-rasterising), skip setting the canvas's own CSS box. (B320)
   if (setCssSize) {
     canvas.style.width = cssW + "px";          // map the dense bitmap into the logical box → crisp
     canvas.style.height = cssH + "px";

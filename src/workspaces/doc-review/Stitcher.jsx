@@ -21,7 +21,7 @@ import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, uploadSource, downloadSource, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
-const PAL = { paper: "#efeadf", ink: "#2c2a26", muted: "#8a8473", line: "#e7e2d6", accent: "#c2410c", chrome: "#191613", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c" };
+const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
@@ -164,15 +164,22 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     } finally { setBusy(false); }
   };
 
-  // Screen<->world via the shared viewport engine (B313); { zoom, panX, panY } == { scale, tx, ty }.
+  // Screen<->world via the shared viewport engine (B320); { zoom, panX, panY } == { scale, tx, ty }.
   const toWorld = (e) => { const r = svgRef.current.getBoundingClientRect(); return screenToWorld({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: e.clientX - r.left, y: e.clientY - r.top }); };
 
   const startAlign = (sheetId) => { setTool("pan"); setDraft(null); setAlign({ sheetId, step: 0 }); setErr(""); };
 
-  // Warn (don't block) when a measurement lands over a sheet that hasn't been aligned yet —
-  // its scale/position can't be trusted until Align runs, so the reading may be wrong (B301).
-  const warnIfOverUnaligned = (pts) => {
-    if (measureOverUnaligned(placed, pts)) setErr("Heads up: that measurement is over a sheet that isn’t aligned yet — Align it first, or its length/area may be wrong.");
+  // Hard-block a measurement that lands over a sheet that hasn't been aligned yet — its scale
+  // isn't set until Align runs, so the length/area would be SILENTLY WRONG. Refuse the point
+  // and tell the user to Align first. (B301 warned but still committed; B313 blocks outright —
+  // owner call: never measure on an un-aligned / un-scaled sheet.) Calibrate is exempt: that's
+  // the act of SETTING the scale, not reading one off.
+  const blockedOverUnaligned = (pts) => {
+    if (measureOverUnaligned(placed, pts)) {
+      setErr("Align that sheet before measuring on it — its scale isn't set yet, so the length/area would be wrong.");
+      return true;
+    }
+    return false;
   };
 
   const onDown = (e) => {
@@ -201,9 +208,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       return;
     }
     if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
+    // B313 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
+    // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
+    if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
     if (tool === "calibrate" || tool === "distance") {
       if (!draft) setDraft({ kind: tool, pts: [w] });
-      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); warnIfOverUnaligned(pts); } setDraft(null); }
+      else { const pts = [draft.pts[0], w]; if (tool === "calibrate") doCalibrate(pts); else { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "distance", pts }]); } setDraft(null); }
       return;
     }
     if (tool === "area") setDraft((d) => (d && d.kind === "area" ? { ...d, pts: [...d.pts, w] } : { kind: "area", pts: [w] }));
@@ -226,7 +236,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return () => { window.removeEventListener("blur", recover); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const onWheel = (e) => { e.preventDefault(); const r = svgRef.current.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; setView((v) => { const nv = zoomAround({ scale: v.zoom, tx: v.panX, ty: v.panY }, e.deltaY < 0 ? 1.15 : 1 / 1.15, mx, my, 0.05, 8); return { zoom: nv.scale, panX: nv.tx, panY: nv.ty }; }); };
-  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); warnIfOverUnaligned(draft.pts); } setDraft(null); };
+  // Area points are blocked at click-time (onDown) when over an un-aligned sheet, so a
+  // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
+  const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
 
   // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
   // world midpoint maps to screen px via the current pan/zoom. (B304)
@@ -418,7 +430,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         </div>
 
         {/* world canvas */}
-        <div style={{ flex: 1, minWidth: 0, position: "relative", background: "#cfc8ba" }}>
+        <div style={{ flex: 1, minWidth: 0, position: "relative", background: "var(--canvas-mat)" }}>
           <svg ref={svgRef} width="100%" height="100%" style={{ display: "block", cursor: align ? "crosshair" : tool === "pan" ? "grab" : "crosshair", touchAction: "none" }}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={finishArea}
             onWheel={onWheel} onMouseDown={(e) => e.preventDefault()}>
@@ -495,7 +507,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             return (
             <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
               <div style={{ fontSize: 11, color: PAL.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>{i + 1}. {s.name}</div>
-              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — measurements may be off</div>}
+              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
               <div style={{ display: "flex", gap: 6 }}>
                 {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
                 <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => setPlaced((arr) => arr.filter((x) => x.id !== s.id))}>Remove</button>

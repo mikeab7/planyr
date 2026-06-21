@@ -23,51 +23,53 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
-     navigation + tool placement, brought to parity with the Site Planner. Minted **B313–B314** (highest
-     B# across BOTH files was B312 — the plain-code-first auto-filing item, merged via PR #234; the three
-     higher "B#"-looking strings in the files are false positives — `SB2038` a bill number, `#2B3340` and
-     `#B25431` hex colors, not IDs).
-     Deduped before filing:
-       • B313 (pan/zoom parity) — RELATED to the shipped single-sheet-viewer batch **B288–B290**
-         (wheel/pinch zoom · drag-pan · cursor-anchored ±, PR #220) but NET-NEW, a re-architecture not a
-         dup. B288–B290 pan/zoom the Markup canvas through the SCROLL container (scrollLeft/Top on an
-         overflow:auto wrapper); by construction that can only pan where the sheet OVERFLOWS, so at
-         fit-width there's no horizontal scroll extent and the viewport "only scrolls vertically" — the
-         exact repro. B313 swaps in the Site map's TRANSFORM model (pan offset + zoom scale, free pan in
-         all directions regardless of fit) + Bluebeam pan/tool collision + cursor-anchored zoom, and
-         explicitly asks for ONE shared implementation with the Site map. NB the Site map's pan/zoom is
-         INLINED in SitePlanner.jsx (view={ppf,offX,offY} ~L883; f2p/p2f ~L1446; wheel-anchor ~L1578;
-         pan ~L1840), not yet a shared hook — so "share one" means extracting it first. ARCHITECTURALLY
-         SIGNIFICANT: touches the mature ~8.5k-line Site Planner core + re-architects the Markup canvas
-         render/projection. See the owner-steer note on the item.
-       • B314 (right-side tool rail) — NET-NEW; no open/done item moves the Markup tools off AppHeader
-         row 2. The Site Planner's vertical rail it should match is ALSO inlined in SitePlanner.jsx
-         (~L6610–6752) + coupled to its tool/menu state, not a standalone component — so "reuse the rail"
-         means extracting a shared rail component first. Distinct from B117/B118/B127 (Site-rail
-         scroll/clipping fixes, a different surface). -->
+     navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314 (the
+     highest B# across both files was B312 when filed), but a very hot `main` then consumed B313–B319
+     while this was in flight — multi-tab/stale-save **B313/B314**, undo-fix **B315**, stitch hard-block
+     **B316**, theming **B317–B319** — so to avoid a duplicate ID this batch renumbered to the next clear
+     pair **B320–B321** (V80→**V84** likewise). Built + verified + SHIPPED via **PR #238 → main** (branch
+     claude/gifted-heisenberg-a6zlvt), which also merged the latest `main` (theming CSS vars) into the
+     re-architected files. The code/tests were authored as B313/B314; the inline comments + harnesses were
+     swept to B320/B321 to match (main's own B313/B314 refs left intact). Deduped: B320 is NET-NEW vs the
+     shipped scroll-based **B288–B290** (it swaps in the Site map's TRANSFORM model + one shared engine);
+     B321 is net-new (no item moved the Markup tools off the header). Follow-up **B322** (touchscreen
+     two-finger pinch) filed below. -->
 
-### B313 — Markup canvas pan + zoom parity with the Site map (one shared viewport controller) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B313**)*
-> ✅ **BUILT + VERIFIED — 2026-06-21, branch `claude/gifted-heisenberg-a6zlvt`.** One shared viewport engine (`src/shared/viewport/viewportTransform.js`) now drives the Site map, the Markup canvas, and the Stitcher; the Markup viewer was re-architected scroll→transform (free pan in any direction, cursor-anchored zoom, Bluebeam pan/tool rules, deferred-crisp re-raster). 43/43 headless checks green (verify-b313 13/13, Site-map guard 6/6, viewer suite 13/13, +viewportTransform unit tests); the Site map verified **unchanged** (math byte-identical). **Pending merge to `main`** (owner go-live). Move to BACKLOG-DONE on merge.
-`[x]` **Repro:** in Markup the document viewport only scrolls vertically; there's no click-drag panning in any direction, and zoom doesn't behave like the Site Planner map. **Expected:** the Markup canvas adopts the SAME viewport navigation model as the Site map — free pan in all directions and cursor-anchored zoom (zoom toward the pointer, not the canvas centre).
-> **Approach — reuse, don't reimplement.** The Site map already has the viewport transform (the pan-offset + zoom-scale math that maps real-world coords → screen px). Extract it into a shared hook/controller if it isn't already (today it's inlined in `SitePlanner.jsx`: `view={ppf,offX,offY}`, `f2p`/`p2f`, the wheel-anchor block, the pan handler) and mount it on the Markup canvas. Do NOT write a second pan/zoom implementation — the two modules share one.
-> **Pan/tool collision (the main design call) — Bluebeam conventions:** middle-mouse drag → always pans (any tool); Space-hold → temporary hand-pan; left-drag on empty canvas with Select → pans; left-drag on an object → selects/moves it; left-drag with a drawing tool active (Distance/Area/Rect/Cloud/…) → draws, never pans.
-> **Gotchas:** (1) REPLACE the existing vertical-scroll container — don't layer pan on top of it or they'll fight; this supersedes the scroll-based B288–B290 pan/zoom. (2) View transform ONLY — must not touch stored geometry or calibration; measurements (page-unit coords on the editable layers) stay registered to the immutable PDF backdrop through every transform; Sheet 1's "not calibrated" state and the calibration scale must be untouched by zoom. (3) Performance — don't re-rasterize the PDF on every zoom tick; scale the already-rendered canvas during the gesture, then re-render crisply at full devicePixelRatio once zoom settles (debounced), mirroring the map's tile redraw; keep heavy work in the existing Web Worker. (4) Trackpad pinch + touch pinch route into the same zoom path as the wheel.
-> **Files likely touched:** the Markup viewer/canvas (`DocReview.jsx`), a shared viewport hook (extracted from the Site map), pointer/wheel/keyboard handlers.
-> **Dedup / scope:** RELATED to shipped **B288–B290** (scroll-based wheel-zoom + drag-pan + cursor-anchored ±, PR #220) but net-new — those pan via the scroll container, which can't slide past a fit-width sheet (hence "only scrolls vertically"); B313 swaps in the Site map's transform model and shares one controller. ⚠ **Owner-steer:** doing it the prescribed "one shared engine" way first extracts pan/zoom out of the mature ~8.5k-line `SitePlanner.jsx` AND re-architects the Markup canvas (scroll→transform) — architecturally significant, real regression risk to the Site Planner core. Confirm scope/sequencing before the core extraction (contained Markup-side upgrade first vs. full shared-engine refactor).
+### B320 — Markup canvas pan + zoom parity with the Site map (one shared viewport engine) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-21; filed B313 → renumbered **B320** after a hot `main` took B313–B319)*
+`[x]` **SHIPPED via PR #238 → `main` (2026-06-21).** One shared viewport engine (`src/shared/viewport/viewportTransform.js`: `worldToScreen`/`screenToWorld`/`zoomAround`/`panBy`/`fitView`/`shouldPan`) now drives the Site map, the Markup canvas, AND the Stitcher. The Markup viewer was re-architected scroll-box → transform (`view={scale,tx,ty}`): **free pan in any direction** (the old scroll box couldn't slide past a fit-width sheet — the "only scrolls vertically" repro), cursor-anchored zoom, **Bluebeam pan/tool collision** (middle-mouse always pans; Space-hold pans; Select on empty pans, on an object selects/moves; a drawing tool draws), **view-transform-only** (markups stay page-unit, calibration untouched), and a perf path that rescales the existing bitmap during a zoom and re-rasterises crisply (debounced) on settle. The Site map + Stitcher migrated their pan/zoom math to the same engine, **byte-identical** (unit-tested) — verified unchanged. Trackpad pinch (ctrl+wheel) routes through the wheel path; touchscreen two-finger pinch is **B322** (follow-up).
+> **Verified (V84):** 43/43 headless — `verify-b320.mjs` 13/13 (free pan L/R/down, cursor-anchored zoom 0.1px drift, calibrated measurement reads identical feet through zoom+pan + stays calibrated, middle-mouse pans-without-drawing, draw+select-move, sheet-switch keeps zoom), `verify-siteplanner-viewport.mjs` 6/6 (Site map unchanged), `verify-docreview-viewer.mjs` 13/13 (B288–B296 still green) + viewportTransform unit tests. Eligible to move to BACKLOG-DONE.
 
-### B314 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B314**)*
-> ✅ **BUILT + VERIFIED — 2026-06-21, branch `claude/gifted-heisenberg-a6zlvt`.** New shared rail `src/shared/ui/ToolRail.jsx`; Markup adopts it (10 tools + zoom moved off the header into a right-side icon rail, active highlight on #EF9F27, Takeoff panel made collapsible beside it). Site Planner keeps its own inlined rail for now (can adopt the shared one later). verify-b314 11/11 headless + no regression (viewer suite 13/13). **Pending merge to `main`** (owner go-live). Move to BACKLOG-DONE on merge.
-`[x]` **Change:** move the Markup drawing/measure tools and zoom controls out of `AppHeader` row 2 into a vertical tool rail on the right, matching Bluebeam and the Site Planner's tool placement.
-> **Moves to the rail:** Select, Calibrate, Distance, Perimeter, Area, Count, Rect, Cloud, Text + the zoom controls (−, %, +, Fit). **Stays put (row 2 or a top-of-canvas strip):** the document-level controls (Open another, Stitch sheets, Library, active-sheet name) — sheet management, not drawing tools; don't pull those into the rail.
-> **Layout (needs a decision — see owner-steer):** the right side already holds the Takeoff panel, so this creates two right-side regions. Match the Site Planner: reuse its rail rather than building a one-off — narrow icon rail flush to the canvas with the (collapsible) Takeoff panel beside/right of it. NB the Site rail is inlined in `SitePlanner.jsx` (~L6610–6752) and coupled to its tool/menu state, so "reuse" means extracting a shared rail component first.
-> **Detail:** vertical rails want icons + tooltip (or icon + small label), not stacked text labels; keep the active-tool highlight on the Markup accent (`#EF9F27`); Select is the default active tool. Removing the tools may leave row 2 holding only the doc controls — confirm row 2 doesn't collapse to an empty strip; collapse or repurpose it if so.
-> **Files likely touched:** `AppHeader.jsx` (strip the row-2 Markup tools), the Markup module layout (`DocReview.jsx`), a shared tool-rail component.
+### B321 — Move Markup tools to a right-side vertical rail (Bluebeam-style) `[Doc Review / Markup]` (feature)  *(arrived as coworker-chat "NEW-2" 2026-06-21; filed B314 → renumbered **B321** after a hot `main` took B313–B319)*
+`[x]` **SHIPPED via PR #238 → `main` (2026-06-21).** New shared, presentational rail `src/shared/ui/ToolRail.jsx`; Markup adopts it — the 10 drawing/measure tools + zoom (In/Out/Fit/Page + a % readout) moved off `AppHeader` row 2 into a right-side icon rail, flush to the canvas, active highlight on the Markup accent **#EF9F27**, Select default; the Takeoff panel is now collapsible beside it. Row 2 keeps Open/Stitch/Library/filename + Undo/Redo (never empty). Site Planner keeps its own inlined rail for now (can adopt the shared one later). **V84:** `verify-b321.mjs` 11/11 headless + no regression. Eligible to move to BACKLOG-DONE.
+
+### B322 — Touchscreen two-finger pinch-zoom on the Markup canvas + the Site map `[Doc Review / Markup + Site Planner]` (feature)  *(owner-requested 2026-06-21 right after B320/B321; minted **B322** — next free after B321)*
+`[ ]` **Follow-up to B320.** Desktop trackpad pinch already zooms (it arrives as ctrl+wheel → the existing wheel path). What's missing: a **two-finger pinch on a touchscreen**, which fires as two simultaneous `touch` pointers (not a wheel), so neither the Markup canvas nor the Site map zooms on it today (both match — neither had it). **Plan:** add a small shared pinch helper to `viewportTransform.js` (zoom by the finger-distance ratio about the pinch midpoint, which also pans as the midpoint moves) and wire a 2-pointer path into each module's pointer handlers, **gated on `pointerType==='touch'` + exactly 2 active pointers** so the verified mouse/trackpad path is untouched. Files: `viewportTransform.js`, `DocReview.jsx`, `SitePlanner.jsx` pointer handlers.
+
+### B316 — Hard-block (not just warn) measuring over a not-yet-aligned stitch sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-20: "don't let it measure on uncalibrated things" — tightens the shipped B301; first filed B303, renumbered **B316** — a hot `main` consumed B303–B315)*
+`[x]` B301 shipped a **soft warning** when a Distance/Area landed over a sheet that hadn't been aligned yet — but it still **committed** the measurement, so a silently-wrong length/area could land in the takeoff. Owner asked for a hard block. **Fixed + shipped to `main` this session (branch `claude/awesome-feynman-i7wypf`):** a distance/area point on an un-aligned sheet (`measureOverUnaligned`) is now **refused at click time** — "Align that sheet before measuring on it — its scale isn't set yet…" — so no measurement over an un-aligned sheet can be created. Calibrate stays exempt (it's the act of *setting* the scale). The right-panel chip now reads "Not aligned — Align before measuring" (was "measurements may be off"). Reuses B301's `aligned`-state + `measureOverUnaligned`; new `Stitcher.jsx` `blockedOverUnaligned`. Verified headless (`ui-audit/verify-b300-b302.mjs`: block banner shown + 0 committed lines) · lint 0 · 743 tests · build green.
 
 <!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
      gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
      BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
      a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
      B303–B307, then the Mapillary proxy B308/B309). -->
+
+<!-- 2026-06-21: coworker-chat item "NEW-1" — Undo (Ctrl+Z) unreliable after moving a building.
+     Minted **B315** — a VERY hot `main` ate my number twice: first filing was B310 (taken by main's parcel
+     click-vs-drag B310/B311 + auto-filing B312), renumbered to B313, then a second `main` merge (multi-tab
+     B313 + optimistic-concurrency B314, PR #223) took B313/B314 too, so it landed at the next free B#
+     **B315** (the rules forbid sharing a number; V78→V80→V82 chased the same way). Deduped: related to but
+     NOT a duplicate of the done B32 (no-op-edit stack pollution) — B315 is the stale-baseline race, a
+     different cause; no Open item covered undo-after-move. Per STANDING RULE #1 filed AND fixed + headless-
+     verified this session (branch `claude/ecstatic-ritchie-ihzkym`); full [x] block is in BACKLOG-DONE.md.
+     Root cause (confirmed, not guessed): the move transaction boundary was already correct (one push at
+     drag-start); the bug was `stateRef` (snapshot source + undo's dedup baseline) being updated in a
+     passive effect, so it lagged a paint and undo could act on a stale state → revert nothing / partially.
+     Fix: assign stateRef during render + extract a pure, unit-tested `lib/history.js` (live state passed in
+     explicitly) + Esc/abort-mid-drag now cancels the move cleanly. Kept as ONE item (the race affects all
+     undo; redo + multi-select already work as separate transactions, so no split). lint 0 · full suite
+     green (11 new in test/history.test.js) · build green · `ui-audit/verify-b315.mjs` 9/9 (one Ctrl+Z fully
+     reverts, Δ=0.0px). -->
 
 <!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
      ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
@@ -208,7 +210,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 - **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
 - **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
 - **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
-- **⚠ FINDING (Cowork live, 2026-06-20):** the Cloudflare **branch preview is un-secreted** — it does NOT bake in `VITE_SUPABASE_URL`/`ANON_KEY`, so it comes up **"Cloud off"** (a telemetry probe fired from the preview did NOT write to `client_errors`, while the same probe on planyr.io did). So flow (1) ("app comes up Cloud on") would FAIL against a branch preview and look like a harness bug, not an env bug. **Owner decision before building B278:** (a) add the two `VITE_SUPABASE_*` vars to the Cloudflare Pages **preview** env (the anon key is browser-safe — RLS-protected), OR (b) point B278 at a deploy that already has the env (production planyr.io, or a dedicated staging). Detail in `COWORK-RESULT-2026-06-20-telemetry-live-and-partB-findings.md`.
+- **✅ RESOLVED (Cowork live, 2026-06-20) — decision = option (a), previews use the production env.** Original finding ("preview is un-secreted, comes up Cloud off") was *almost* right but the root cause was different: the Preview scope **did** have `VITE_SUPABASE_URL`/`ANON_KEY`, but they were **stale** — pointing at the **defunct legacy Supabase project `ksetjztkplttbcehyicv`** (old `planar_*` schema) with a malformed trailing `/rest/v1/` URL, so previews silently talked to a dead project (which is why preview telemetry never reached production). Fixed by setting the Preview scope to the **production** values (`https://lyeqzkuiwngunutlkkmi.supabase.co` + the production publishable key) and redeploying; verified a fresh preview now writes to production `public.client_errors`. **So B278's flow (1) ("app comes up Cloud on") will now pass against branch previews.** ⚠ Caveat: previews now read/write the **production** DB (preview clicks touch live data) — acceptable at this scale; a separate staging DB with the current schema is the "purest" future option. Detail in `COWORK-RESULT-2026-06-20-walkthrough-token-and-preview-env.md`.
 > **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
 
 ### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
@@ -225,41 +227,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 - **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
 > Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
 
-<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
-     overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
-     drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
-     was in flight, so the batch was renumbered to the real next free IDs **B274–B277**. Deduped — all
-     four net-new (no existing OPEN item covers them), each REUSING prior art:
-       • B274 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
-         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold): those reconcile on
-         the CLIENT by union; B274 adds a SERVER-side version guard that REJECTS a stale write with a
-         loud "reload before saving" prompt — the gate B134 #4 ("409 conflict") + #5 only gestured at.
-         Reusable: the foundation for the DEFERRED multi-user team-workspace feature.
-       • B275 (multi-tab warning + optional single-editor lock) — pairs with B274; B127 made two
-         same-browser tabs silently CONVERGE, B275 makes it VISIBLE (BroadcastChannel banner) +
-         optionally elects one editor (Web Locks). Same-browser only; cross-device = B274.
-       • B276 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" returns on reload);
-         the per-item tombstone B126 deferred. (Distinct from B260, the overlay *scale* misread, done.)
-       • B277 (overlay visibility toggle) — B131 reserved the `visible !== false` shape; B277 implements
-         the per-overlay show/hide the print path already honours. Distinct from B276's delete.
-     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **B276 + B277 fixed + shipped (PR #217 →
-     `main`)** — moved to BACKLOG-DONE.md (owner-reported overlay bug + its companion toggle). **B274 +
-     B275 are being built THIS session** (owner said go ahead): the larger data-integrity pair — B274 is
-     a server-side change to the critical save path (the B124/B126/B127/B134 incident surface) + the
-     foundation for the deferred multi-user feature, and B275 depends on it. -->
-
-### B274 — Reject stale saves (optimistic concurrency on the save path) `[Platform / Persistence]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B274** — concurrent `main` consumed B270–B273; batch B274–B277)*
-`[ ]` Repro: open the same project in two tabs/sessions; edit the same object (e.g. Building 1 footprint) in both; save from tab A, then save from tab B. Tab B **silently overwrites** tab A (last-write-wins), and a reload/interleave can produce an inconsistent object (dimension label, geometry, and sf drawn from different edit states). Expected: saves carry a version (or `updated_at`) guard; a save against a stale version is **rejected, not applied**, and surfaces a loud "this project was changed in another session — reload to get the latest before saving" prompt. No silent clobber.
-- **Impl:** add a `version` (integer) to the relevant Supabase tables (`public.sites`, `public.doc_reviews`); conditional update `WHERE id = ? AND version = ?` (or compare `updated_at`); **0 rows affected → return a typed conflict to the client**, which surfaces the loud reload prompt instead of applying; bump `version` on every successful write. Migration in the existing one-shot idempotent SQL pattern (client degrades to current behaviour until it's run, like `project_library.sql`).
-- **Reuse, don't duplicate:** the client already content-merges copies (B126 `mergeSiteContent` union-by-id; B127 two-tab fold) — those stay as the *local* reconciliation; B270 is the *server* gate on top. Build the version/conflict primitive **reusable** — it is the foundation for the **DEFERRED multi-user team-workspace** feature, not a one-off.
-> **Data-safety sensitive:** touches the exact save path behind the B124/B126/B127/B134 incidents. Keep the union-merge intact, and prove a stale write is *rejected* (not lost, not silently merged-away) before shipping. Coordinate with B276's tombstones (a delete is a write that must advance the version).
-
-### B275 — Multi-tab open warning + optional single-editor lock `[App Shell]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B275** — concurrent `main` consumed B270–B273; batch B274–B277)*
-`[ ]` Detect when the same Planyr origin/project is already open in another tab of the same browser via **BroadcastChannel** (or the **Web Locks API**). Show a non-blocking banner in the AppHeader: "Planyr is open in another tab — editing in multiple tabs can conflict." Optionally elect a single active-editor tab via Web Locks; non-leader tabs go read-only with a "make this tab active" affordance. Banner clears when the other tab closes. **Known limitation: same-browser only** — cross-device conflicts are caught by **B274**'s server-side guard, not this. Pairs with B274.
-> Builds on B127 (which made two same-browser tabs silently *converge*) by making the multi-tab state *visible*; it doesn't replace it. Depends on B274 for the cross-device half, so sequence it after B274.
-
-<!-- B276 (overlay delete doesn't persist) + B277 (overlay visibility toggle) were fixed +
-     shipped this session → moved to BACKLOG-DONE.md. B274 + B275 (above) are being built next. -->
+<!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
+     overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
+     under a very hot `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
+     (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275, briefly
+     B297/B298 — was renumbered to **B314** (optimistic concurrency / reject stale saves) + **B313**
+     (multi-tab warning) once `main`'s numbering reached B312. ✅ The B314 migration
+     (src/workspaces/site-planner/db/optimistic_concurrency.sql) was RUN by the owner 2026-06-20, so the
+     guard goes active on deploy; remaining is one signed-in two-session check — VERIFICATION V79. -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced

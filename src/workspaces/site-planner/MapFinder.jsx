@@ -22,10 +22,12 @@ import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
+// Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
+// and the panel themes live with no re-render. (B318)
 const PAL = {
-  panelBg: "#ffffff", panelLine: "#e7e2d6", ink: "#2c2a26",
-  accent: "#c2410c", muted: "#8a8473",
-  chrome: "#191613", chromeLine: "#2e2a23", chromeInk: "#ece7db", chromeMuted: "#9b9482", ember: "#e8590c",
+  panelBg: "var(--surface-raised)", panelLine: "var(--border-default)", ink: "var(--text-primary)",
+  accent: "var(--accent)", muted: "var(--text-secondary)",
+  chrome: "var(--chrome-bg)", chromeLine: "var(--chrome-divider)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)",
 };
 
 // Free aerial sources (no API key). Both are ArcGIS MapServers that support
@@ -745,7 +747,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     color: primary ? "#fff" : PAL.ink, fontWeight: primary ? 600 : 500,
     boxShadow: primary ? "0 2px 8px rgba(232,89,12,0.3)" : "none",
   });
-  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "#fff", fontFamily: "inherit" };
+  const field = { padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.panelLine}`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit" };
 
   // One left-rail site row — shared by every status section (B235). Status marker,
   // name (struck through when Dead), status + acreage, and the hover "show on map" ⊕.
@@ -763,7 +765,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
           onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
           style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
-            border: `1.5px solid ${t.color}`, background: t.hollow ? "#fff" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
+            border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
           {t.glyph}
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -793,7 +795,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#efeadf" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
       {/* map */}
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
@@ -846,7 +848,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
               style={{
                 flex: "none", display: "flex", alignItems: "center", gap: 5,
                 height: 30, padding: "0 11px", borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.13)", background: "rgba(255,255,255,0.07)",
+                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                 color: PAL.chromeInk, fontSize: 12.5, fontWeight: 600,
                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
               }}
@@ -866,7 +868,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 onClick={() => setSelectMode(false)}
                 style={{
                   flex: "none", height: 30, padding: "0 10px", borderRadius: 6,
-                  border: "1px solid rgba(255,255,255,0.13)", background: "rgba(255,255,255,0.07)",
+                  border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
                   color: PAL.chromeInk, fontSize: 12, fontWeight: 600,
                   cursor: "pointer", fontFamily: "inherit",
                 }}
@@ -961,7 +963,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
         {/* saved sites */}
         {sites.length > 0 && (
-          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
             {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
             <button onClick={toggleSitesPanel} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -974,7 +976,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
             {/* Type-to-filter the list by name (B235). */}
             <div style={{ padding: "0 8px 6px" }}>
               <input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} placeholder="Filter by name…" aria-label="Filter sites by name"
-                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: 7, color: PAL.ink, background: "#fff", fontFamily: "inherit", outline: "none" }} />
+                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", fontSize: 12, border: `1px solid ${PAL.panelLine}`, borderRadius: 7, color: PAL.ink, background: "var(--surface-raised)", fontFamily: "inherit", outline: "none" }} />
             </div>
             {/* Status chips = POSITIVE multi-select filters (B235): tap to show only those
                 statuses (list + map pins both). None selected = show everything. Colors +
@@ -987,7 +989,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                     title={`${STATUS_META[st]?.label || st}: ${n} — ${on ? "click to remove from the filter" : "click to show only this status"}`}
                     style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
                       fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
-                      background: on ? t.color : "#fff", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
+                      background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
                     <span style={{ color: on ? "#fff" : t.color, fontSize: 11 }}>{t.glyph}</span>
                     {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
                   </button>
@@ -1009,7 +1011,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                   return (
                     <div key={st}>
                       <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
-                        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "#faf8f3", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
+                        style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
                         <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
                         <span style={{ color: t.color, fontSize: 11 }}>{t.glyph}</span>
                         <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
@@ -1026,7 +1028,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         )}
 
         {/* imagery + labels + overlay layers control */}
-        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
+        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <span style={{ color: PAL.muted }}>Imagery</span>
             <select style={{ ...field, padding: "4px 6px", fontSize: 12, flex: 1 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
@@ -1050,7 +1052,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}
         {err && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.accent, lineHeight: 1.45, pointerEvents: "none" }}>
             {err}
           </div>
         )}
@@ -1065,7 +1067,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         )}
         {/* contextual selection guidance — only while actively selecting (not a persistent fixture) */}
         {!err && selectMode && (
-          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "rgba(255,255,255,0.94)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 12, bottom: 12, zIndex: 1000, maxWidth: 380, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "8px 11px", fontSize: 12.5, color: PAL.ink, lineHeight: 1.45, pointerEvents: "none" }}>
             {zoom != null && zoom < PARCEL_MINZOOM
               ? "Click any lot to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
               : "Click a lot to add it (＋). Hover an added lot and click to remove it (−). Add several, then Plan."}
@@ -1085,7 +1087,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           <div onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
               top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
-              width: 180, background: "#fff", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
+              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
               const t = statusToken(st); const cur = statusOf(statusMenu.site) === st;
@@ -1094,7 +1096,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                   style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                     background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
                   <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: 99,
-                    border: `1.5px solid ${t.color}`, background: t.hollow ? "#fff" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
+                    border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
                   <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
                   {cur && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
                 </button>
@@ -1115,11 +1117,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       )}
       {confirmDel && (
         <div onClick={() => setConfirmDel(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "rgba(20,18,15,0.5)", display: "grid", placeItems: "center" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 12, boxShadow: "0 18px 50px rgba(0,0,0,0.3)", padding: 20, width: 340, maxWidth: "92vw" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: PAL.ink, marginBottom: 6 }}>Delete this site?</div>
             <div style={{ fontSize: 12.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 16 }}>“{confirmDel.site || confirmDel.name || "this site"}” and all of its plans will be removed. This can't be undone.</div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "#fff", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
+              <button className="gbtn" style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: `1px solid ${PAL.panelLine}`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontWeight: 600 }} onClick={() => setConfirmDel(null)}>Cancel</button>
               <button style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 8, border: "1px solid #b91c1c", background: "#b91c1c", color: "#fff", cursor: "pointer", fontWeight: 600 }} onClick={() => { onDeleteSite && onDeleteSite(confirmDel.id); setConfirmDel(null); }}>Delete</button>
             </div>
           </div>

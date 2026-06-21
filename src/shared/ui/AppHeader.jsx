@@ -19,17 +19,67 @@
  * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
+import { useTheme } from "../theme/ThemeProvider.jsx";
 
-const CHROME = "#14110e";
-const LINE   = "#2e2a23";
-// Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on CHROME).
+// Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
+// (B318): light theme = light chrome, dark theme = dark chrome.
+const CHROME = "var(--chrome-bg-elev)";
+const LINE   = "var(--chrome-divider)";
+// Inactive module tabs: full-opacity, muted-but-legible (meets WCAG AA on the chrome).
 // NOT a low-opacity/disabled treatment — inactive must read as clearly clickable. (B167)
-const TAB_IDLE = "#c9c3b4";
+const TAB_IDLE = "var(--chrome-tab-inactive)";
+// Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
+// tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-markup)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
+
+// Light / Dark / System segmented control — lives in the row-1 right zone. Pure local
+// theme switch (reads/sets the ThemeProvider); not cloud-tied. (B317)
+const THEME_OPTS = [
+  { id: "light",  label: "Light",  icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
+  { id: "dark",   label: "Dark",   icon: <path d="M13 9.4A5.2 5.2 0 0 1 6.6 3 5.2 5.2 0 1 0 13 9.4Z" /> },
+  { id: "system", label: "System", icon: <><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.4h4M8 11.4v2" /></> },
+];
+
+function ThemeToggle({ mode, setMode }) {
+  return (
+    <div role="group" aria-label="Theme" style={{
+      display: "flex", alignItems: "center", gap: 2, padding: 2, borderRadius: 8,
+      border: `1px solid ${LINE}`, background: "var(--chrome-bg)", flex: "none",
+    }}>
+      {THEME_OPTS.map((o) => {
+        const on = mode === o.id;
+        return (
+          <button
+            key={o.id}
+            onClick={() => setMode(o.id)}
+            title={`${o.label} theme`}
+            aria-pressed={on}
+            style={{
+              display: "grid", placeItems: "center", width: 24, height: 21, borderRadius: 6,
+              border: "none", cursor: "pointer",
+              background: on ? "var(--chrome-bg-elev)" : "transparent",
+              color: on ? "var(--chrome-text)" : "var(--chrome-tab-inactive)",
+              boxShadow: on ? "0 1px 2px rgba(0,0,0,0.16)" : "none",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              style={{ display: "block" }}>
+              {o.icon}
+            </svg>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // Re-exported from the pure accent module (single source of truth) so existing
 // `import { MODULE_ACCENT } from "./AppHeader.jsx"` consumers keep working.
@@ -80,7 +130,8 @@ const MODULES = [
 // underline indicator. Icons are crisp SVG at a fixed 13px (no bitmap scaling). (B167)
 function ModuleTab({ m, isActive, onClick }) {
   const [hover, setHover] = useState(false);
-  const tabAccent = MODULE_ACCENT[m.id] || "#e8590c";
+  const fill = ACCENT_FILL[m.id] || "var(--accent)";
+  const textCol = ACCENT_TEXT[m.id] || "var(--accent)";
   return (
     <button
       onClick={onClick}
@@ -93,9 +144,9 @@ function ModuleTab({ m, isActive, onClick }) {
         display: "flex", alignItems: "center", gap: 5,
         height: "100%", padding: "0 13px",
         border: "none",
-        borderBottom: `2px solid ${isActive ? tabAccent : "transparent"}`,
+        borderBottom: `2px solid ${isActive ? fill : "transparent"}`,
         background: "transparent",
-        color: isActive || hover ? tabAccent : TAB_IDLE,
+        color: isActive || hover ? textCol : TAB_IDLE,
         fontFamily: "inherit", fontSize: 12.5,
         fontWeight: isActive ? 600 : 500,
         cursor: "pointer", whiteSpace: "nowrap",
@@ -114,6 +165,26 @@ function ModuleTab({ m, isActive, onClick }) {
       {m.label}
     </button>
   );
+}
+
+// B313 — track whether the same project is open in another same-browser tab (BroadcastChannel),
+// so the header can warn that editing in two tabs can conflict. Degrades to "no peers" where
+// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B314.
+function useMultiTab(projectId) {
+  const [state, setState] = useState({ otherCount: 0, sameProjectTabs: 0, conflictRisk: false });
+  const ref = useRef(null);
+  useEffect(() => {
+    const p = createMultiTabPresence({ project: projectId });
+    ref.current = p;
+    p.onChange(setState);
+    p.start();
+    const bye = () => p.stop();
+    window.addEventListener("pagehide", bye); // 'bye' so other tabs clear promptly on close
+    return () => { window.removeEventListener("pagehide", bye); p.stop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { if (ref.current) ref.current.setProject(projectId); }, [projectId]); // keep presence in sync as the project changes
+  return state;
 }
 
 export default function AppHeader({
@@ -137,6 +208,8 @@ export default function AppHeader({
   homeLabel,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const { mode, resolved, setMode } = useTheme();
+  const multiTab = useMultiTab(currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning
 
   useEffect(() => {
     const handle = (e) => {
@@ -149,7 +222,7 @@ export default function AppHeader({
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  const accent = MODULE_ACCENT[module] || "#e8590c";
+  const accent = MODULE_ACCENT[module] || "var(--accent)";
 
   // When fullscreen, render only a floating exit button; the header collapses
   // to 0 height so the workspace canvas fills the full viewport.
@@ -173,6 +246,7 @@ export default function AppHeader({
   }
 
   return (
+    <>
     <header
       style={{
         flex: "none",
@@ -199,7 +273,7 @@ export default function AppHeader({
               padding: "2px 4px", borderRadius: 6,
             }}
           >
-            <BrandMark size={20} tile={false} wordmark surface="dark" />
+            <BrandMark size={20} tile={false} wordmark surface={resolved === "dark" ? "dark" : "light"} />
           </button>
 
           {/* Project breadcrumb / switcher (B191–B193) — immediately right of the wordmark */}
@@ -238,6 +312,7 @@ export default function AppHeader({
           }}
         >
           {saveSlot}
+          <ThemeToggle mode={mode} setMode={setMode} />
           {authControl}
         </div>
       </div>
@@ -270,5 +345,13 @@ export default function AppHeader({
         </div>
       </div>
     </header>
+    {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
+        Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
+    {multiTab.conflictRisk && (
+      <div role="status" style={{ position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
+        <span>⧉ This project is open in <b>another tab</b>. Editing it in more than one tab can conflict — work in a single tab to be safe.</span>
+      </div>
+    )}
+    </>
   );
 }
