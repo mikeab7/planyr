@@ -21,6 +21,7 @@
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
+import { casUpsert, isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -72,6 +73,14 @@ const storageKeyFor = (uid, projectId, discipline, srcId) =>
 
 /* ------------------------- review records (Postgres) ------------------------ */
 
+// Per-tab `version` tokens for the optimistic-concurrency guard (B314), populated by
+// loadReview/listReviews and advanced on every successful write. Same primitive the Site
+// Planner uses (shared casUpsert), so a review changed in another session can't be silently
+// clobbered. Until db/optimistic_concurrency.sql adds the column, every write degrades to a
+// plain upsert (today's behaviour) and this stays empty.
+const reviewVersions = {};
+export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; }
+
 export async function upsertReview(record) {
   if (!supabase) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
@@ -92,18 +101,35 @@ export async function upsertReview(record) {
     data,
   };
   const full = { ...base, project_id: record.projectId || null, item: record.item || null, revision: record.revision || null, doc_date: record.docDate || null };
-  let { error } = await supabase.from("doc_reviews").upsert(full, { onConflict: "user_id,id" });
-  if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
-    ({ error } = await supabase.from("doc_reviews").upsert(base, { onConflict: "user_id,id" }));
-  if (!error) writeDraft(uid, data); // keep the local mirror in lockstep with the cloud
-  return { ok: !error, error: error ? error.message : null };
+  // Optimistic concurrency (B314), guarded by the version we last synced. TWO independent
+  // graceful degrades layer here: (a) the library index columns may be un-migrated → retry
+  // with the core `base` row; (b) the `version` column may be un-migrated → fall back to a
+  // plain upsert (today's full→base behaviour). Either way saving never regresses.
+  const libColMiss = (e) => !!e && /column|project_id|doc_date|revision|item|schema cache/i.test(e) && !/version/i.test(e);
+  const expected = reviewVersions[record.id];
+  let r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: full, expected });
+  if (r.ok === false && r.error && libColMiss(r.error)) // library columns absent → core row
+    r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: base, expected });
+  if (r.degrade) { // version column absent → plain upsert (today's full→base fallback)
+    let { error } = await supabase.from("doc_reviews").upsert(full, { onConflict: "user_id,id" });
+    if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
+      ({ error } = await supabase.from("doc_reviews").upsert(base, { onConflict: "user_id,id" }));
+    if (!error) writeDraft(uid, data);
+    return { ok: !error, error: error ? error.message : null };
+  }
+  if (r.conflict) return { ok: false, conflict: true }; // another session advanced this review — caller prompts a reload
+  if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, data); return { ok: true }; }
+  return { ok: false, error: r.error || "save failed" };
 }
 
 // The full serialized review (the `data` jsonb), or null. RLS scopes to the user.
 export async function loadReview(id) {
   if (!supabase || !id) return null;
-  const { data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle();
+  let { data, error } = await supabase.from("doc_reviews").select("data, version").eq("id", id).maybeSingle();
+  if (error && isMissingVersionColumn(error)) // pre-migration → re-select without version
+    ({ data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle());
   if (error || !data) return null;
+  if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B314)
   return data.data || null;
 }
 
@@ -120,6 +146,7 @@ export async function listReviews() {
 
 export async function deleteReview(id) {
   if (!supabase || !id) return { ok: false };
+  delete reviewVersions[id]; // stop tracking a removed review's version (B314)
   const uid = await currentUid();
   // Remove the source files (by their stored keys, so any path scheme is covered),
   // then the row. RLS scopes both stores to the owner.
