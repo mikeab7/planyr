@@ -1,4 +1,31 @@
 ## ✅ Done
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
+     crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
+     when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge
+     time; B25431/B3340 here are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND implemented +
+     headless-verified the same session per STANDING RULE #1 (branch `claude/loving-newton-t7gzpq`). The
+     CV/heavy-dep tails (OCR, scale-bar, geometric edge-match, legend symbol-union) are tracked as B340 in
+     Later/Roadmap. Renumber touched only this batch — main's B325 (pan-crash) / B326–B328 (file-class) /
+     B329 (viewport) refs left intact. -->
+
+### B336 — Sheet-metadata reader: title block, scale, match-line labels `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-2"; minted **B336**)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/loving-newton-t7gzpq`).** The shared positional reader the whole batch consumes. New `extractPageItems` (pdf.js) keeps each text run's x/y; pure `src/shared/files/sheetMeta.js` finds the **title-block band** (text-density on the right/bottom edge), the **sheet title** (largest wordy line in the band, label/data rows skipped), the **stated scale** (reuses B267 `parseSheetScale`), and every **MATCH-LINE label** with its position + orientation (page-edge → vertical/horizontal cut). Reuses B312's `titleBlockParse` for discipline/number/revision/date — no second/parallel reader; surfaces a `confidence` instead of guessing. `doc-review/lib/sheetRead.js` glues pdf.js → reader → grouping with a **dormant injectable OCR seam** for scanned pages (→ B340). **12 + 6 unit tests** (`test/sheetMeta.test.js`, `test/sheetRead.test.js`).
+> **Dedup:** folded the CLAUDE.md roadmap "read its title block" (auto-filing) — extends the shipped filing readers with the positional layer they lacked, doesn't duplicate them.
+
+### B335 — Drop a whole set → auto-group pages into logical sheets (collapsed list) `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-1"; minted **B335**)*
+`[x]` **Shipped + verified 2026-06-21.** Pure `src/shared/files/sheetGroups.js` collapses consecutive pages that share a plan type (discipline + `item`) AND a contiguous sheet-number run into logical sheets ("Grading Plan · C-5–C-7 · 3 sheets"); cover/general-notes stay standalone; conservative (under-groups rather than mis-merges). The Stitcher tray now shows **logical sheets** (read+grouped in the background after a drop), with an **"all pages"** safety-net toggle and a "Reading sheets…" state. Clicking a grouped plan adds every page at once (auto-stitched, B337). **7 unit tests** (`test/sheetGroups.test.js`); headless V87 confirmed a 4-page set → 2 logical entries.
+
+### B337 — Automatic match-line stitching `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-3"; minted **B337**)*
+`[x]` **Shipped + verified 2026-06-21.** Pure `doc-review/lib/autoStitch.js` builds the seam graph from B336's match-line labels and places each sheet by feeding the shared seam's two endpoints into the **existing `solveM()`** similarity fit (`stitchGeom.js`, B300) — BFS from the most-connected anchor, the whole group then slotted to the right of existing content. A label-less sheet stays **unplaced** and drops to the 2-point manual Align **pre-seeded** with its detected seam endpoints (half the clicks); manual Align remains the safety net. **5 unit tests** (`test/autoStitch.test.js`); headless V87 confirmed 3 sheets auto-stitch with **coincident seams** (Δx ≈ 0.78·width, not the old +40 gap).
+> **Dedup:** this WAS the roadmap's "automatic match-line detection later," now specified — folded, built on `solveM`. The geometric edge-line middle-fallback (when labels are missing) is deferred → B340.
+
+### B338 — Crop title blocks + single merged legend on stitched plans `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-4"; minted **B338**)*
+`[x]` **Shipped + verified 2026-06-21.** On a grouped composite each sheet is **clipped to its drawing area** (the B336 title-block band hidden) so the drawings butt cleanly, with a **"Crop blocks"** toggle. One **pinned "Composite key"** panel lists the group merged + the auto-set scale — rendered as an overlay (not baked into the raster) so it stays readable at any zoom. Grouping/crop metadata now rides the saved stitch (additive, back-compatible) so a reload keeps the cropped composite + key. Headless V87 confirmed 3 clipPaths + the pinned key + the toggle. The graphical legend **symbol-union** is deferred → B340.
+
+### B339 — Auto-calibrate from the sheet's stated scale `[Doc Review]` (feature)  *(owner chat 2026-06-21; arrived as "NEW-5"; minted **B339**)*
+`[x]` **Shipped + verified 2026-06-21.** When a grouped plan is added, `groupCalibration` (`doc-review/lib/sheetRead.js`) reads the group's stated scale and sets the composite `ftPerUnit` automatically — gated on a standard plot size (`detectSheet`) so a resized/half-size sheet can't mis-scale the set; manual Calibrate still overrides. Reuses `overlayScale.js` (`parseSheetScale`/`ftPerPointForScale`). Headless V87 confirmed the composite auto-calibrated from "1\"=40'" (takeoff "Calibrated", key "Scale set").
+> **Dedup:** the SINGLE-SHEET half already shipped (B267 `autoDetectScales`); this added the stitcher/grouped-composite half. The graphic scale-bar fallback is deferred → B340.
+
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
      "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across both files was
      B315 — B25431 / B3340 in this file are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND fixed

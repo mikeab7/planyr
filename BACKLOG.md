@@ -22,6 +22,33 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups,
+     stitches, crops, and calibrates itself" (the headline auto-assembly tranche). FIRST filed B325–B329,
+     but a VERY hot `main` (PR #238 viewport/rail B329–B331 + #240 file-class B326–B328 + #241 pan-crash
+     B325, all merged while this integrated) consumed B325–B334 — so to avoid two items sharing a number
+     this batch renumbered B325–B329 → **B335–B339** (+ **B340** for the deferred tails); highest B# across
+     both files was B334 at merge time. Per STANDING RULE #1: filed here AND implemented + headless-verified
+     the SAME session (branch `claude/loving-newton-t7gzpq`); the shipped [x] blocks live in BACKLOG-DONE.md.
+     DEDUP (owner flagged two CLAUDE.md roadmap lines being pulled forward — FOLD, don't duplicate):
+       • B336 (NEW-2) FOLDS the auto-filing roadmap detail "read its title block." NOT a duplicate of the
+         shipped filing reader (B312 `titleBlockParse.js`/`localRead.js` + B299 server) — those read a
+         JOINED string for filing fields. B336 is the POSITIONAL superset grouping/stitching need (per-item
+         x/y, title-block BAND, sheet TITLE, stated SCALE via B267 `parseSheetScale`, match-line labels with
+         position+orientation). EXTENDS + REUSES both, no second reader.
+       • B337 (NEW-3) IS the roadmap line "automatic match-line detection later," now specified — folded,
+         not a new parallel item. Builds on the existing `solveM()` (`stitchGeom.js`, B300); keeps the
+         2-point manual Align as the safety net.
+       • B339 (NEW-5) — the SINGLE-SHEET half already ships (B267 `autoDetectScales`); B339's net-new part
+         is the STITCHER/grouped-composite half + the graphic scale-bar fallback. Reuses `overlayScale.js`.
+       • B335 (grouping) + B338 (crop + merged legend) are net-new.
+     SHIPPED + headless-verified this session (V87, `ui-audit/verify-b335-b339.mjs`, 13/13, 0 page errors;
+     30 new unit tests; full suite green) — full [x] blocks in BACKLOG-DONE.md. The CV/heavy-dep TAILS
+     behind the seams (scanned-sheet OCR, graphic scale-bar, geometric edge-line stitch, legend symbol-
+     union) are filed together as **B340** in 🕓 Later / Roadmap (genuine can't-now: heavy deps / computer-
+     vision / not headless-verifiable — the manual-Align safety net + text-layer path cover the common
+     case today). NB: renumber touched only THIS batch's refs; main's B325 (pan-crash) / B329 (viewport)
+     / B326–B328 (file-class) left intact. -->
+
 <!-- 2026-06-21: owner-dropped batch (coworker chat) NEW-1..NEW-2 — Document Review / "Markup" canvas
      navigation + tool placement, brought to parity with the Site Planner. FIRST filed B313/B314, but a
      VERY hot `main` consumed the numbers repeatedly while this integrated — B313–B319 (multi-tab/
@@ -1512,6 +1539,14 @@ Original spec:
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B340 — Auto-assembly CV/OCR tails behind the B335–B339 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B335–B339 batch; minted **B340** — a hot `main` took B325–B334)*
+`[ ]` The B335–B339 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. Four tails are deferred behind clean injectable seams because each is heavy-dependency or computer-vision work that **can't be headless-verified in the sandbox**, and the manual-Align safety net + text-layer path already cover the common case:
+  1. **Scanned-sheet OCR** — the `ocr` seam in `doc-review/lib/sheetRead.js` is wired (a no-text page calls it); fill it with **Tesseract.js in a Web Worker** so an image-only sheet still groups/stitches. Deferred: ~2 MB wasm dep + training data fetch, and no scanned fixture to verify against here.
+  2. **Graphic scale-bar reading (B339 tail)** — when there's no stated scale text, measure the drawn scale bar to set `ftPerUnit`. Needs vector-graphics/CV analysis, not text.
+  3. **Geometric edge-line match (B337 middle fallback)** — when match-line *labels* are missing, match the cut geometry across two sheets' edges. Today, label-less sheets correctly drop to the 2-point manual Align **pre-seeded** with detected seam endpoints (the spec's final safety net, already wired) — this is the CV step between labels and manual.
+  4. **Legend symbol-union (B338 tail)** — extract each sheet's graphical legend entries and union them into the pinned Composite key (today the key lists the grouped plan + auto-scale; the crop + pinned panel ship). Needs symbol/vector extraction.
+> Each is gated behind a seam exactly like the app's other not-yet-provisioned heavy compute (the AI title-block reader, the APS converter). Pick up when there's a way to verify (a scanned sample set; a CV pass we can headless-check). Coupled to the ★ north-star "map → drawings → latest set."
 
 ### B256 — Scheduler recompute is O(n²); will lag past ~500 tasks `[Scheduler / perf]` (task)  *(orig "P2"; minted **B256**)*
 `[ ]` `cascadeDates`/`rollupParentDates` re-filter the task list repeatedly on each edit; `depLines` calls `tasks.indexOf` inside its loop; `rolledHealthMap`/`progressMap` recurse with `.filter`. Fine at the current ~180 tasks; will start to feel laggy past ~500. Fix: build an `id → index` map and a `parent → children[]` map once per recompute and reuse them — behaviour-preserving. **Verify** every task's start/end/duration is byte-identical before/after on the real production dataset. Gated by board size → Later until a board actually grows that large.
