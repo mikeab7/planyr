@@ -24,7 +24,7 @@ import {
 const MUTED = "var(--text-secondary)", LINE = "var(--border-default)", INK = "var(--text-primary)";
 const groupHdr = { fontSize: 10, color: MUTED, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", margin: "6px 0 4px" };
 const STATUS = {
-  loading: { color: "#f59e0b", label: "loading…" },
+  loading: { color: "var(--warn-text)", label: "loading…" },
   loaded: { color: "var(--status-active)", label: "loaded" },
   empty: { color: "var(--text-tertiary)", label: "no data" },
   failed: { color: "var(--status-dead)", label: "failed" },
@@ -109,7 +109,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
         {/* NEW-1: honest out-of-coverage caption for an ON layer (e.g. COH sewer in
             Dallas) — the map still renders everything the source returns for the view. */}
         {outHere && (
-          <div style={{ fontSize: 10, color: "#b45309", lineHeight: 1.4, marginTop: 1 }}>
+          <div style={{ fontSize: 10, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 1 }}>
             No data in this area — this layer only covers its home region. The map still shows whatever the source returns here.
           </div>
         )}

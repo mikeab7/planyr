@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V95 — Invisible site-name fixed + whole-app low-contrast sweep (B355) ✅ (self-verified headless BOTH themes — no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
+- **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
+- **✅ `ui-audit/contrast-audit.mjs`:** every token pair (incl. the new `--success/danger/info-text`) clears WCAG AA in both themes.
+- **Note:** the sign-in-gated deep drawers (Project Files / Library) and SiteReviewModal weren't render-reached logged-out, but their colours are provably AA via the token audit; an optional signed-in eyeball on planyr.io in **dark** mode is a nicety, not a blocker.
+
 ### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
 **Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
 is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose
