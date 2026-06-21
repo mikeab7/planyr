@@ -49,8 +49,21 @@ describe("STRESS · a 2-word common name scattered across an unrelated sheet doe
     expect(s.score).toBeLessThan(0.6); // below the auto-file floor
   });
 
-  it("the project name printed as a PHRASE still auto-files (recall preserved)", () => {
-    expect(matchProjectInText("ALTA SURVEY OF KATY GRAND — BUILDING 1", PROJECTS).projectId).toBe("g1");
+  it("a generic name in a real title block (repeated) or corroborated, and a distinctive name once, auto-file (recall; B360)", () => {
+    // A real Katy Grand set repeats the name across its sheet title blocks → files on the repetition.
+    expect(matchProjectInText("KATY GRAND — BUILDING 1   KATY GRAND   ALTA SURVEY", PROJECTS).projectId).toBe("g1");
+    // The generic name once + a corroborating job number also files (weak + strong via noisy-or).
+    expect(matchProjectInText("KATY GRAND — BUILDING 1  PROJECT NO. KG-2025", PROJECTS).projectId).toBe("g1");
+    // A DISTINCTIVE name (rare/long token) files on a single mention.
+    expect(matchProjectInText("CYPRESS LOGISTICS PARK — SITE PLAN", PROJECTS).projectId).toBe("g2");
+  });
+
+  it("a single coincidental mention of a GENERIC name does NOT auto-file (Katy Grand Parkway; B360)", () => {
+    // "Katy Grand" is a prefix of the real Katy-area "Grand Parkway" highway — one stray mention
+    // must hold, not misfile to the Katy Grand project (the never-auto-guess rule, sharpened).
+    const m = matchProjectInText("DETENTION POND AT THE KATY GRAND PARKWAY INTERCHANGE", PROJECTS);
+    expect(m.projectId).not.toBe("g1");
+    expect(m.needsFiling).toBe(true);
   });
 
   it("a scattered name corroborated by a real id DOES match (weak signal + strong signal)", () => {
