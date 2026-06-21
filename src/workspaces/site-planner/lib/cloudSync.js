@@ -5,6 +5,16 @@
  * logged-in user's data; localStorage remains the store when logged out.
  */
 import { supabase } from "./supabase.js";
+import { casUpsert, isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
+
+// Per-tab memory of the `version` we last synced for each site, so a save can be a
+// compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
+// Populated by cloudList; advanced on every successful write; cleared on delete / user
+// switch. Module-scope = naturally per-tab. Until the `version` column is migrated in,
+// every write degrades to a plain upsert (today's behaviour) and this stays empty.
+const siteVersions = {};
+export function clearSiteVersions() { for (const k of Object.keys(siteVersions)) delete siteVersions[k]; }
+export const _siteVersions = siteVersions; // test seam (read/seed in unit tests)
 
 // Don't push a huge embedded screenshot dataURL into a DB row — keep the underlay
 // placement but drop the inline image (map-sourced underlays use a URL, not a
@@ -36,25 +46,45 @@ export async function cloudUpsert(uid, model) {
     updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
     data: m,
   };
-  const { error } = await supabase.from("sites").upsert(row, { onConflict: "user_id,id" });
-  return { ok: !error, error: error ? error.message : null };
+  // Optimistic concurrency (B314): a conditional write guarded by the version we last synced.
+  // A stale write (another session advanced the row) is REJECTED as a conflict, not applied —
+  // the caller surfaces a loud "reload before saving" prompt instead of a silent overwrite.
+  const r = await casUpsert(supabase, "sites", { uid, id: m.id, row, expected: siteVersions[m.id] });
+  if (r.ok) { siteVersions[m.id] = r.version; return { ok: true }; }
+  if (r.conflict) return { ok: false, conflict: true };
+  if (r.degrade) {
+    // The `version` column isn't migrated in yet → fall back to a plain upsert (today's
+    // last-write-wins). Saving is never blocked by the feature being un-migrated; the guard
+    // is simply dormant until db/optimistic_concurrency.sql is run.
+    const { error } = await supabase.from("sites").upsert(row, { onConflict: "user_id,id" });
+    return { ok: !error, error: error ? error.message : null };
+  }
+  return { ok: false, error: r.error || "cloud write failed" };
 }
 
 export async function cloudDelete(uid, id) {
   if (!supabase || !uid || !id) return { ok: false };
+  delete siteVersions[id]; // stop tracking a removed row's version
   // Scope by user_id AND id (defense-in-depth — don't rely on RLS alone).
   const { error } = await supabase.from("sites").delete().eq("user_id", uid).eq("id", id);
   return { ok: !error, error: error ? error.message : null };
 }
 
 // Every site row for the signed-in user (RLS returns only their own). Returns the
-// array of serialized Site Models (the `data` column).
+// array of serialized Site Models (the `data` column), and records each row's `version`
+// so the next save can compare-and-swap against it (B314).
 export async function cloudList(uid) {
   if (!supabase || !uid) return [];
-  const { data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false });
+  let { data, error } = await supabase.from("sites").select("data, version").order("updated_at", { ascending: false });
+  // Pre-migration: the `version` column doesn't exist yet → re-select just `data` so loading
+  // never breaks before db/optimistic_concurrency.sql is run (the guard stays dormant).
+  if (error && isMissingVersionColumn(error))
+    ({ data, error } = await supabase.from("sites").select("data").order("updated_at", { ascending: false }));
   // THROW on a real fetch error so callers can tell it apart from a genuinely-empty
   // result. Returning [] here let `pullCloud` wipe the local cache to empty on a
   // transient/offline error, showing a scary "no sites" state (B54).
   if (error) throw new Error(error.message || "cloud list failed");
-  return (data || []).map((r) => r.data).filter(Boolean);
+  const rows = data || [];
+  for (const r of rows) if (r && r.data && r.data.id != null && r.version != null) siteVersions[r.data.id] = r.version;
+  return rows.map((r) => r.data).filter(Boolean);
 }

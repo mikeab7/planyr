@@ -184,41 +184,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 - **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
 > Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
 
-<!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 — data-integrity / multi-session safety +
-     overlay lifecycle. First filed as B270–B273, but concurrent `main` consumed B270 (Project Files
-     drop-zone), B271 (pointer-lockout), B272 (main-thread-stall) + B273 (filing practice) while this
-     was in flight, so the batch was renumbered to the real next free IDs **B274–B277**. Deduped — all
-     four net-new (no existing OPEN item covers them), each REUSING prior art:
-       • B274 (reject stale saves / optimistic concurrency) — distinct from the DONE *client-side*
-         content-merge (B126 `mergeSiteContent` unions by id; B127 two-tab fold): those reconcile on
-         the CLIENT by union; B274 adds a SERVER-side version guard that REJECTS a stale write with a
-         loud "reload before saving" prompt — the gate B134 #4 ("409 conflict") + #5 only gestured at.
-         Reusable: the foundation for the DEFERRED multi-user team-workspace feature.
-       • B275 (multi-tab warning + optional single-editor lock) — pairs with B274; B127 made two
-         same-browser tabs silently CONVERGE, B275 makes it VISIBLE (BroadcastChannel banner) +
-         optionally elects one editor (Web Locks). Same-browser only; cross-device = B274.
-       • B276 (overlay delete doesn't persist) — owner-reported bug ("Jacinto Port" returns on reload);
-         the per-item tombstone B126 deferred. (Distinct from B260, the overlay *scale* misread, done.)
-       • B277 (overlay visibility toggle) — B131 reserved the `visible !== false` shape; B277 implements
-         the per-overlay show/hide the print path already honours. Distinct from B276's delete.
-     STATUS 2026-06-20 (branch `claude/peaceful-ride-k41y6e`): **B276 + B277 fixed + shipped (PR #217 →
-     `main`)** — moved to BACKLOG-DONE.md (owner-reported overlay bug + its companion toggle). **B274 +
-     B275 are being built THIS session** (owner said go ahead): the larger data-integrity pair — B274 is
-     a server-side change to the critical save path (the B124/B126/B127/B134 incident surface) + the
-     foundation for the deferred multi-user feature, and B275 depends on it. -->
-
-### B274 — Reject stale saves (optimistic concurrency on the save path) `[Platform / Persistence]` (bug)  *(arrived as "NEW-1" 2026-06-20; minted **B274** — concurrent `main` consumed B270–B273; batch B274–B277)*
-`[ ]` Repro: open the same project in two tabs/sessions; edit the same object (e.g. Building 1 footprint) in both; save from tab A, then save from tab B. Tab B **silently overwrites** tab A (last-write-wins), and a reload/interleave can produce an inconsistent object (dimension label, geometry, and sf drawn from different edit states). Expected: saves carry a version (or `updated_at`) guard; a save against a stale version is **rejected, not applied**, and surfaces a loud "this project was changed in another session — reload to get the latest before saving" prompt. No silent clobber.
-- **Impl:** add a `version` (integer) to the relevant Supabase tables (`public.sites`, `public.doc_reviews`); conditional update `WHERE id = ? AND version = ?` (or compare `updated_at`); **0 rows affected → return a typed conflict to the client**, which surfaces the loud reload prompt instead of applying; bump `version` on every successful write. Migration in the existing one-shot idempotent SQL pattern (client degrades to current behaviour until it's run, like `project_library.sql`).
-- **Reuse, don't duplicate:** the client already content-merges copies (B126 `mergeSiteContent` union-by-id; B127 two-tab fold) — those stay as the *local* reconciliation; B270 is the *server* gate on top. Build the version/conflict primitive **reusable** — it is the foundation for the **DEFERRED multi-user team-workspace** feature, not a one-off.
-> **Data-safety sensitive:** touches the exact save path behind the B124/B126/B127/B134 incidents. Keep the union-merge intact, and prove a stale write is *rejected* (not lost, not silently merged-away) before shipping. Coordinate with B276's tombstones (a delete is a write that must advance the version).
-
-### B275 — Multi-tab open warning + optional single-editor lock `[App Shell]` (feature)  *(arrived as "NEW-2" 2026-06-20; minted **B275** — concurrent `main` consumed B270–B273; batch B274–B277)*
-`[ ]` Detect when the same Planyr origin/project is already open in another tab of the same browser via **BroadcastChannel** (or the **Web Locks API**). Show a non-blocking banner in the AppHeader: "Planyr is open in another tab — editing in multiple tabs can conflict." Optionally elect a single active-editor tab via Web Locks; non-leader tabs go read-only with a "make this tab active" affordance. Banner clears when the other tab closes. **Known limitation: same-browser only** — cross-device conflicts are caught by **B274**'s server-side guard, not this. Pairs with B274.
-> Builds on B127 (which made two same-browser tabs silently *converge*) by making the multi-tab state *visible*; it doesn't replace it. Depends on B274 for the cross-device half, so sequence it after B274.
-
-<!-- B276 (overlay delete doesn't persist) + B277 (overlay visibility toggle) were fixed +
-     shipped this session → moved to BACKLOG-DONE.md. B274 + B275 (above) are being built next. -->
+<!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
+     overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
+     under a very hot `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
+     (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275, briefly
+     B297/B298 — was renumbered to **B314** (optimistic concurrency / reject stale saves) + **B313**
+     (multi-tab warning) once `main`'s numbering reached B312. ✅ The B314 migration
+     (src/workspaces/site-planner/db/optimistic_concurrency.sql) was RUN by the owner 2026-06-20, so the
+     guard goes active on deploy; remaining is one signed-in two-session check — VERIFICATION V79. -->
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-4 for Document Review (Markup) — sheet labels,
      render fidelity, scale intelligence. Provisionally B246–B249; concurrent `main` repeatedly advanced
