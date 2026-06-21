@@ -508,7 +508,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const anyGroups = pdfs.some((p) => Array.isArray(p.groups));
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
-  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink });
+  const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const alignMsg = align && (align.seeded
     ? ["Seam detected — click where its FIRST end lands on the placed sheet", "Click where its SECOND end lands"][align.step]
@@ -519,9 +519,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
       <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={onOpenReview} signedIn={signedIn} />
       {/* toolbar */}
-      <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid #2e2a23", flexWrap: "wrap" }}>
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
-        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
+      <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid var(--chrome-divider)", flexWrap: "wrap" }}>
+        <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
+        <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <label style={{ ...btn(false), display: "inline-block" }}>
           Open PDFs…<input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }} onChange={(e) => { openFiles(e.target.files); e.target.value = ""; }} />
         </label>
@@ -531,13 +531,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <div style={{ flex: 1 }} />
         <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
         <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
-        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
+        <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.05, v.zoom / 1.2) }))}>−</button>
         <span style={{ color: PAL.chromeMuted, fontSize: 11.5, width: 42, textAlign: "center" }}>{Math.round(view.zoom * 100)}%</span>
         <button style={btn(false)} onClick={() => setView((v) => ({ ...v, zoom: Math.min(8, v.zoom * 1.2) }))}>+</button>
-        <span style={{ width: 1, height: 20, background: "#2e2a23" }} />
+        <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
-        <button style={{ ...btn(false), border: "1px solid #2e2a23", background: "rgba(255,255,255,0.06)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
+        <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
         <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
@@ -696,7 +696,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           )}
         </div>
       </div>
-      {(busy || err) && <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid #2e2a23", color: err ? "#fbbf24" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>{err || "Rendering…"}</div>}
+      {(busy || err) && <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: "1px solid var(--chrome-divider)", color: err ? "var(--warn-text)" : PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>{err || "Rendering…"}</div>}
     </div>
   );
 }

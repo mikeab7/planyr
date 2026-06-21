@@ -29,6 +29,7 @@
   --chrome-muted:        #353B49;
   --chrome-tab-inactive: #454C5C;
   --save-badge:          #0F6E56;
+  --warn-text:           #8A5410;   /* saving / unsaved / offline label on chrome (AA amber) */
 
   /* Module accents — FILLS fixed in both themes; the -text variants swap per theme. */
   --accent-site:          #1D9E75;
@@ -63,6 +64,7 @@
   /* Global interactive accent (focus rings, form controls, active states).
      Replaces the retired ember (#e8590c); tracks the drafting accent. */
   --accent:          #C2410C;
+  --on-accent:       #FFFFFF;   /* text/icon ON a solid --accent fill (active tool/btn) */
   --focus-ring:      rgba(194, 65, 12, .45);
   --focus-ring-soft: rgba(194, 65, 12, .10);
 
@@ -120,6 +122,7 @@
   --chrome-muted:        #A6ADBA;
   --chrome-tab-inactive: #C2C8D2;
   --save-badge:          #7FD8B8;
+  --warn-text:           #EFB54E;
 
   /* Module accent TEXT — light-on-dark set (for the dark chrome). Fills unchanged. */
   --accent-site-text:     #5DCAA5;
@@ -145,6 +148,9 @@
 
   /* Global interactive accent */
   --accent:          #F26B3A;
+  /* The dark accent is intentionally light (B319, legible on the dark canvas), so
+     white-on-it is only 3.03:1 — on-fill text goes near-black instead (6:1+). */
+  --on-accent:       #15171C;
   --focus-ring:      rgba(242, 107, 58, .50);
   --focus-ring-soft: rgba(242, 107, 58, .16);
 
