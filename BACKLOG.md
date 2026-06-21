@@ -188,8 +188,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
      under a very hot `main`: the overlay pair landed as **B276** (delete persistence) + **B277**
      (visibility), merged via PR #217 (LIVE); the data-integrity pair — first filed B274/B275, briefly
-     B297/B298 — was renumbered to **B312** (optimistic concurrency / reject stale saves) + **B313**
-     (multi-tab warning) once `main`'s numbering reached B311. ✅ The B312 migration
+     B297/B298 — was renumbered to **B314** (optimistic concurrency / reject stale saves) + **B313**
+     (multi-tab warning) once `main`'s numbering reached B312. ✅ The B314 migration
      (src/workspaces/site-planner/db/optimistic_concurrency.sql) was RUN by the owner 2026-06-20, so the
      guard goes active on deploy; remaining is one signed-in two-session check — VERIFICATION V79. -->
 

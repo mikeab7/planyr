@@ -18,6 +18,7 @@
 import { createIndexProvider } from "../../../shared/files/fileFacts.js";
 import { emptyPlacementFacts, mergePlacementFacts } from "../../../shared/placement/placementFacts.js";
 import { supabase } from "../../site-planner/lib/supabase.js";
+import { localTitleBlockRead } from "./localRead.js";
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? "").trim());
 const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
@@ -53,10 +54,27 @@ async function sessionToken() {
   try { const { data } = await supabase.auth.getSession(); return (data && data.session && data.session.access_token) || null; } catch (_) { return null; }
 }
 
-/* POST one drawing to the auto-filing proxy. Returns { ok, decision, placement, facts } on a
- * real read, or { ok:false, skipped, error }. Never throws. */
-export async function autofile(file, projects = [], { endpoint = DEFAULT_ENDPOINT, fetchImpl = fetch, getToken = sessionToken } = {}) {
+/* File one drawing — PLAIN CODE FIRST, AI only as fallback (B312, owner direction).
+ *   Tier 1 (free, instant, no tokens): read the PDF's embedded text in the browser and match a
+ *     project deterministically. Works for any drawing with a text layer (most CAD PDFs).
+ *   Tier 2 (AI): only when Tier 1 finds NO text (scanned/image-only sheet) AND the backend is
+ *     enabled — POST to the server reader. So tokens are spent only on the hard minority.
+ * Returns { ok, decision, placement, facts } on a real read, else { ok:false, skipped, error }.
+ * `localRead` is injectable for tests (so the tiering is testable without pdf.js). Never throws. */
+export async function autofile(file, projects = [], { endpoint = DEFAULT_ENDPOINT, fetchImpl = fetch, getToken = sessionToken, localRead = localTitleBlockRead, serverEnabled = AUTOFILE_ENABLED, forceServer = false } = {}) {
   if (!file) return { ok: false, skipped: true, error: "No file." };
+
+  // Tier 1 — free local read. A confident match OR a "needs filing" result are both real
+  // outcomes (no tokens); only "no text" / "couldn't open" falls through to the AI.
+  // (forceServer skips Tier 1 — used for placement-fact capture, which is AI/CV-only.)
+  if (!forceServer) {
+    let local;
+    try { local = await localRead(file, projects); } catch (_) { local = null; }
+    if (local && local.ok && local.hasText) return { ok: true, decision: local.decision, placement: null, facts: local.facts, source: "local" };
+  }
+
+  // Tier 2 — AI fallback (scanned sheet with no text layer). Only when the backend is on.
+  if (!serverEnabled) return { ok: false, skipped: true, source: "local-no-text", error: "Scanned sheet (no embedded text); AI fallback isn't enabled." };
   const token = await getToken();
   if (!token) return { ok: false, skipped: true, error: "Sign in to auto-file." };
   let resp;
@@ -72,25 +90,32 @@ export async function autofile(file, projects = [], { endpoint = DEFAULT_ENDPOIN
   return interpretResponse(resp.status, body);
 }
 
-/* The real index provider. `backendReady` is true ONLY when auto-filing is enabled, so the UI
- * never claims "auto-detected" while the backend is dormant. `autofile` is added onto the
- * provider for the drawer's drop handler; it gracefully skips when disabled. */
-export function createAutofilingProvider({ enabled = AUTOFILE_ENABLED, endpoint = DEFAULT_ENDPOINT, fetchImpl, getToken } = {}) {
-  const io = { endpoint };
+/* The real index provider.
+ *  - `autofileReady` is TRUE by default: the Tier-1 plain-code read works in the browser with no
+ *    key, no cloud, no cost — so the drawer auto-files dropped drawings out of the box.
+ *  - `backendReady` is true only when the AI fallback is enabled (the honest signal for "AI can
+ *    read scanned sheets too" + placement capture).
+ *  `autofile` always runs (local-first); it only reaches the AI when a sheet has no text AND the
+ *  backend is on. */
+export function createAutofilingProvider({ enabled = AUTOFILE_ENABLED, endpoint = DEFAULT_ENDPOINT, fetchImpl, getToken, localRead } = {}) {
+  const io = { endpoint, serverEnabled: enabled };
   if (fetchImpl) io.fetchImpl = fetchImpl;
   if (getToken) io.getToken = getToken;
+  if (localRead) io.localRead = localRead;
 
   const impl = {};
   if (enabled) {
-    // capturePlacementFacts rides the SAME server read as autofile (the one-pass payoff).
+    // capturePlacementFacts rides the AI read (placement is the AI/CV step, not Tier-1) →
+    // forceServer skips the local fast-path so we actually get the scale/north-arrow facts.
     impl.capturePlacementFacts = async (file) => {
-      const r = await autofile(file, [], io);
+      const r = await autofile(file, [], { ...io, forceServer: true });
       return r.ok && r.placement ? mergePlacementFacts(emptyPlacementFacts(), r.placement) : emptyPlacementFacts();
     };
   }
   const provider = createIndexProvider(impl); // backendReady = !!capturePlacementFacts = enabled
   provider.enabled = enabled;
-  provider.autofile = (file, projects) => (enabled ? autofile(file, projects, io) : Promise.resolve({ ok: false, skipped: true, error: "Auto-filing is off." }));
+  provider.autofileReady = true; // the free local path is always available in the browser
+  provider.autofile = (file, projects) => autofile(file, projects, io);
   return provider;
 }
 

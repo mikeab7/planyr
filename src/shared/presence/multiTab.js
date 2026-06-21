@@ -4,7 +4,7 @@
  *
  * Scope + relationship to other safety nets:
  *   - Same-browser only. Cross-DEVICE / cross-browser conflicts are caught server-side by the
- *     optimistic-concurrency guard (B312), not here.
+ *     optimistic-concurrency guard (B314), not here.
  *   - This is the VISIBLE companion to B127 (which already made two same-browser tabs silently
  *     converge): B313 surfaces the situation so the user isn't surprised.
  *

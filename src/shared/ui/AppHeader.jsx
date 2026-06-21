@@ -119,7 +119,7 @@ function ModuleTab({ m, isActive, onClick }) {
 
 // B313 — track whether the same project is open in another same-browser tab (BroadcastChannel),
 // so the header can warn that editing in two tabs can conflict. Degrades to "no peers" where
-// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B312.
+// BroadcastChannel is unavailable. Cross-device conflicts are caught server-side by B314.
 function useMultiTab(projectId) {
   const [state, setState] = useState({ otherCount: 0, sameProjectTabs: 0, conflictRisk: false });
   const ref = useRef(null);

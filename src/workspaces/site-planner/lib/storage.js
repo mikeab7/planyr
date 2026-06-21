@@ -18,7 +18,7 @@ import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions } from "./cloudS
 let activeUser = null;
 export function setActiveUser(uid) {
   const next = uid || null;
-  if (next !== activeUser) clearSiteVersions(); // don't carry one user's optimistic-version tokens into another's session (B312)
+  if (next !== activeUser) clearSiteVersions(); // don't carry one user's optimistic-version tokens into another's session (B314)
   activeUser = next;
 }
 export const isCloudActive = () => !!activeUser;

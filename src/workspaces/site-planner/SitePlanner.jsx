@@ -1316,7 +1316,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
   // True when a cloud write was REJECTED because another session advanced this project since
-  // we loaded it (B312 optimistic concurrency). Distinct from cloudSaveFailed (a write that
+  // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
   // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
   // user must reload to get the latest before saving, so it gets its own loud "reload" banner.
   // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the

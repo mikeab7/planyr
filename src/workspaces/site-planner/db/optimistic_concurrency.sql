@@ -1,4 +1,4 @@
--- Optimistic concurrency / "reject stale saves" (B312) — run ONCE in the Supabase SQL
+-- Optimistic concurrency / "reject stale saves" (B314) — run ONCE in the Supabase SQL
 -- editor. Idempotent; safe to re-run. ADDITIVE: adds an integer `version` column to the
 -- two user-data tables so a save can be rejected when another session advanced the row in
 -- between (no silent last-write-wins clobber). RLS is UNCHANGED — the existing per-user
