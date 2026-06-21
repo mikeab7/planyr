@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   fwd, inv, solveM, sheetBBox,
-  MIN_ALIGN_BASE, alignBaselinesDegenerate, sheetContains, measureOverUnaligned,
+  MIN_ALIGN_BASE, alignBaselinesDegenerate, sheetContains, measureOverUnaligned, panTo,
 } from "../src/workspaces/doc-review/lib/stitchGeom.js";
 
 const ID = { A: 1, B: 0, e: 0, f: 0 };
@@ -71,5 +71,41 @@ describe("stitcher geometry (doc-review)", () => {
     expect(measureOverUnaligned(placed, [{ x: 50, y: 50 }, { x: 350, y: 50 }])).toBe(true);  // one point over the fresh sheet
     expect(measureOverUnaligned([base], [{ x: 50, y: 50 }])).toBe(false);                    // only aligned sheets
     expect(measureOverUnaligned([], [{ x: 0, y: 0 }])).toBe(false);                          // no sheets → no warning
+  });
+
+  // B325 — the pan crash. The setView updater used to read drag.current INSIDE the deferred
+  // updater; a gesture aborted (pointerup / pointercancel / blur-recovery) before React ran
+  // the updater nulled the ref → "Cannot read properties of null (reading 'panX')" thrown in
+  // the render phase → the whole stitcher hit the error boundary. The fix captures the origin
+  // into a local and closes over it (panTo). These tests pin both the math and the contract.
+  describe("B325: panTo (pan from a captured drag origin)", () => {
+    const view = { panX: 40, panY: 40, zoom: 0.4 };
+    const origin = { sx: 100, sy: 100, panX: 40, panY: 40 };
+
+    it("translates the view by the pointer delta from the captured origin", () => {
+      expect(panTo(view, origin, 130, 160)).toEqual({ panX: 70, panY: 100, zoom: 0.4 }); // +30, +60
+      expect(panTo(view, origin, 100, 100)).toEqual({ panX: 40, panY: 40, zoom: 0.4 });  // no move
+      expect(panTo(view, origin, 70, 40)).toEqual({ panX: 10, panY: -20, zoom: 0.4 });   // negative delta
+    });
+
+    it("preserves other view fields (zoom) it doesn't touch", () => {
+      expect(panTo({ ...view, zoom: 2.5 }, origin, 130, 160).zoom).toBe(2.5);
+    });
+
+    it("survives the drag ref being nulled mid-gesture (the captured origin is what's read)", () => {
+      const dragRef = { current: { sx: 100, sy: 100, panX: 40, panY: 40 } };
+      const d = dragRef.current;                       // capture, exactly as onMove now does
+      const updater = (v) => panTo(v, d, 130, 160);    // close over the captured origin
+      dragRef.current = null;                          // gesture aborted before React flushes the updater
+      expect(() => updater(view)).not.toThrow();
+      expect(updater(view)).toEqual({ panX: 70, panY: 100, zoom: 0.4 }); // still correct
+    });
+
+    it("documents the bug: the OLD pattern (reading the ref in the updater) throws once it's null", () => {
+      const dragRef = { current: { sx: 100, sy: 100, panX: 40, panY: 40 } };
+      const oldUpdater = (v) => ({ ...v, panX: dragRef.current.panX + (130 - dragRef.current.sx) });
+      dragRef.current = null;                          // the abort that used to crash the stitcher
+      expect(() => oldUpdater(view)).toThrow(/panX/);
+    });
   });
 });
