@@ -40,3 +40,17 @@ The engine lives inside a single in-browser-Babel HTML file and isn't importable
 6. **CRASH** — `buildGanttSVG` dereferenced `t.name.length`; a nameless task crashed
    the Gantt PDF/print exhibit. → coerce name; also filter unparseable dates so one bad
    value can't poison the exhibit's min/max into NaN geometry.
+
+## Round 3 (2026-06-21) — the load/deserialize path, all fixed
+A different angle: the one place untrusted data enters — a corrupt Supabase `data`
+jsonb row or a hand-edited `<script id="planar-data">` block. `stress-scheduler3.mjs`
+ran the full load pipeline `ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(d))))`
+on 24 malformed shapes and found **13 crash modes**, all in the first/undefended
+normalizer. A throw here bricks the scheduler — the load `catch` re-runs `normalizeToV6`
+on the seed, so a malformed seed hangs forever on the loader.
+7. **CRASH ×13** — null/missing/array `projects`; null/string projects; missing,
+   null, object, or numeric `tasks`; null tasks; a null contact name; a non-string
+   `responsibleParty`. → `normalizeToV6`/`normalizeIds` now skip null/garbage projects
+   and coerce `tasks` to an array (mirroring the guards the sibling normalizers already
+   used); `ensureContacts` `String()`-coerces names and `responsibleParty`. Good data is
+   unchanged (every project + task preserved).

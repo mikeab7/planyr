@@ -147,3 +147,4 @@ vite.config.ts.timestamp-*
 
 # Transient ui-audit verification screenshots
 ui-audit/screens/
+ui-audit/stress/*.png

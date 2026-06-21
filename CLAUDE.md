@@ -313,12 +313,18 @@ server/                   # placeholder README only — NOT built or deployed; b
   `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
   to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
   **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **Scanned-sheet OCR — BUILT (B349, owner-requested).** A scanned / image-only drawing (no text
+- **Scanned-sheet OCR — BUILT (B351, owner-requested).** A scanned / image-only drawing (no text
   layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
   (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
   so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
   up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
-  pixels never leave the browser). 7 unit tests + a LIVE headless run (V90, `verify-b349-ocr.mjs`).
+  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b351-ocr.mjs`).
+- **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
+  **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
+  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME
+  engines (`readSheetMeta`/`groupSheets`/`statedCalibration`) — no duplicate modules. A page with no
+  title block falls back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
+  (`ui-audit/verify-markup-sheet-labels.mjs` 7/7 + no-regression 13/13).
 - **Remaining CV tails are deferred behind seams → B340** (Later/Roadmap): graphic scale-bar reading,
   the geometric edge-line stitch fallback, legend symbol-union. The common case (vector + now scanned
   via OCR) is shipped. 30 unit tests; headless-verified end-to-end (V87, `ui-audit/verify-b335-b339.mjs`, 13/13).

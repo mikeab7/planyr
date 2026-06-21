@@ -1,4 +1,4 @@
-/* Scanned-sheet OCR (B349 — was B340's OCR tail) — fills the dormant OCR seam B336/B337 left wired.
+/* Scanned-sheet OCR (B351 — was B340's OCR tail) — fills the dormant OCR seam B336/B337 left wired.
  *
  * Most CAD drawings carry a real text layer (handled free + instant by the deterministic
  * reader). A SCANNED / image-only sheet has none — `extractPageItems` returns [], the page reads

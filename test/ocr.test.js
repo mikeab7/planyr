@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ocrScaleFor, extractWords, wordsToItems, createOcrRunner } from "../src/workspaces/doc-review/lib/ocr.js";
 import { readSheetMeta } from "../src/shared/files/sheetMeta.js";
 
-describe("ocrScaleFor — render density (B349)", () => {
+describe("ocrScaleFor — render density (B351)", () => {
   it("caps a big sheet by the memory budget and a small sheet at 4×", () => {
     expect(ocrScaleFor(2448, 1584)).toBeCloseTo(Math.sqrt(24e6 / (2448 * 1584)), 3); // E-size ≈ 2.5×
     expect(ocrScaleFor(612, 792)).toBe(4);   // letter → ceiling
@@ -20,7 +20,7 @@ describe("extractWords — tolerate flat or nested Tesseract output", () => {
   });
 });
 
-describe("wordsToItems — Tesseract boxes → page-unit items (B349)", () => {
+describe("wordsToItems — Tesseract boxes → page-unit items (B351)", () => {
   it("divides pixel bboxes by the render scale and drops blank/low-confidence words", () => {
     const words = [
       { text: "C-5", confidence: 92, bbox: { x0: 200, y0: 100, x1: 320, y1: 140 } }, // scale 2 → page 100,50,60,20
@@ -53,7 +53,7 @@ function scannedGradingWords(scale = 2) {
   return words;
 }
 
-describe("createOcrRunner — orchestrate render→recognize→convert (B349)", () => {
+describe("createOcrRunner — orchestrate render→recognize→convert (B351)", () => {
   it("an OCR'd scanned page flows through readSheetMeta to the same metadata as a text page", async () => {
     const renderPage = async () => ({ canvas: { width: 4896, height: 3168 }, baseW: 2448, baseH: 1584, scale: 2 });
     const recognize = async () => ({ words: scannedGradingWords(2) });

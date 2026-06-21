@@ -186,6 +186,43 @@ describe("rollupParentDates — deep nesting stays fast and matches the referenc
   });
 });
 
+describe("load pipeline — corrupt cloud/seed data must not crash the whole load", () => {
+  // index.html composes ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(d)))).
+  // A throw here bricks the scheduler (the catch re-runs normalizeToV6 on the seed, so a
+  // malformed seed hangs forever on the loader). Every hostile shape must degrade, not throw.
+  const cases = [
+    ["d = null", null],
+    ["d = {}", {}],
+    ["projects = null", { projects: null }],
+    ["projects = array", { projects: [{ id: 1, name: "P", tasks: [] }] }],
+    ["a project is null", { projects: { 1: null } }],
+    ["a project is a string", { projects: { 1: "oops" } }],
+    ["tasks missing", { projects: { 1: { id: 1, name: "P" } } }],
+    ["tasks = null", { projects: { 1: { id: 1, name: "P", tasks: null } } }],
+    ["tasks = object", { projects: { 1: { id: 1, name: "P", tasks: { 0: {} } } } }],
+    ["tasks = number", { projects: { 1: { id: 1, name: "P", tasks: 5 } } }],
+    ["a task is null", { projects: { 1: { id: 1, name: "P", tasks: [null] } } }],
+    ["task = {}", { projects: { 1: { id: 1, name: "P", tasks: [{}] } } }],
+    ["parentId cycle", { projects: { 1: { id: 1, name: "P", tasks: [{ id: 1, parentId: 2 }, { id: 2, parentId: 1 }] } } }],
+    ["contact name null", { projects: { 1: { id: 1, name: "P", tasks: [] } }, settings: { contacts: [{ id: 1, name: null }] } }],
+    ["responsibleParty number", { projects: { 1: { id: 1, name: "P", tasks: [{ id: 1, responsibleParty: 42 }] } } }],
+  ];
+  for (const [label, doc] of cases) {
+    it(`survives: ${label}`, () => { expect(() => E.loadPipeline(doc)).not.toThrow(); });
+  }
+
+  it("a well-formed doc loads with every project and task preserved", () => {
+    const doc = { projects: { 1: { id: 1, name: "P", tasks: [
+      { id: 1, name: "Parent", start: "2026-06-22", end: "2026-06-22", duration: 1, predecessors: [], parentId: null },
+      { id: 2, name: "Child", start: "2026-06-23", end: "2026-06-23", duration: 1, predecessors: [{ id: 1, type: "FS", lag: 0 }], parentId: 1 },
+    ] } } };
+    const out = E.loadPipeline(doc);
+    expect(Object.keys(out.projects)).toEqual(["1"]);
+    expect(out.projects["1"].tasks).toHaveLength(2);
+    expect(out.projects["1"].tasks.map(t => t.name)).toEqual(["Parent", "Child"]);
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   it("addBD coerces + bounds its step count (MAX_BD_STEPS)", () => {
@@ -204,5 +241,13 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("buildGanttSVG guards a nameless task and filters unparseable dates", () => {
     expect(src).toMatch(/a nameless task must not crash the exhibit/);
     expect(src).toMatch(/filter\(d=>d&&!isNaN\(pd\(d\)\)\)/);
+  });
+  it("normalizeToV6 guards corrupt projects/tasks on load", () => {
+    expect(src).toMatch(/if \(!d \|\| typeof d !== "object"\) d = \{\};/);
+    expect(src).toMatch(/const srcTasks = Array\.isArray\(proj\.tasks\) \? proj\.tasks : \[\];/);
+  });
+  it("ensureContacts coerces non-string contact names and responsibleParty", () => {
+    expect(src).toMatch(/String\(c\?\.name \|\| ''\)\.toLowerCase\(\)/);
+    expect(src).toMatch(/String\(\(t && t\.responsibleParty\) \|\| ''\)\.trim\(\)/);
   });
 });

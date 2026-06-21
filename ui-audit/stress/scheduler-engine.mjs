@@ -192,3 +192,78 @@ export const renumberTasks = (tasks) => {
     predecessors: normPreds(t.predecessors).map(p => ({...p, id: map[p.id]})).filter(p => p.id),
   }));
 };
+
+export const sortByVisualOrder = (tasks) => {
+  const childMap = {};
+  tasks.forEach(t => {
+    const p = t.parentId ?? null;
+    if (!childMap[p]) childMap[p] = [];
+    childMap[p].push(t);
+  });
+  const result = [];
+  const walk = (parentId) => {
+    (childMap[parentId] || []).forEach(t => { result.push(t); walk(t.id); });
+  };
+  walk(null);
+  const seen = new Set(result.map(t => t.id));
+  tasks.filter(t => !seen.has(t.id)).forEach(t => result.push(t));
+  return result;
+};
+
+const DEFAULT_SETTINGS = {defaultSplit:60, snapDefault:true, holidays:{...DEFAULT_HOLIDAYS}, customHealth:[], healthLabelOverrides:{}, barLabels:{left:"start", right:"end", year:true, nameAlign:"left"}, rowHeight:24};
+
+// The four load-path normalizers (copied from inside the App component in index.html).
+export const normalizeToV6 = d => {
+  if (!d || typeof d !== "object") d = {};
+  if (d._v6) return d;
+  const projects = {};
+  const srcProjects = (d.projects && typeof d.projects === "object") ? d.projects : {};
+  Object.entries(srcProjects).forEach(([id, proj]) => {
+    if (!proj || typeof proj !== "object") return;
+    const srcTasks = Array.isArray(proj.tasks) ? proj.tasks : [];
+    const tasks = srcTasks.filter(t => t && typeof t === "object").map(t => ({
+      ...t,
+      predecessors: normPreds(t.predecessors),
+      end: calcEnd(t.start, t.duration),
+    }));
+    projects[id] = {...proj, tasks: rollupParentDates(tasks)};
+  });
+  return {...d, projects, _v6: true, healthColStyle: d.healthColStyle || "stoplight",
+    settings: d.settings ? {...DEFAULT_SETTINGS, ...d.settings, holidays:{...DEFAULT_HOLIDAYS,...(d.settings.holidays||{})}, customHealth: d.settings.customHealth||[], healthLabelOverrides: d.settings.healthLabelOverrides||{}} : {...DEFAULT_SETTINGS, holidays:{...DEFAULT_HOLIDAYS}}};
+};
+export const ensureHolidays = d => {
+  if (!d?.settings) return d;
+  const merged = {...DEFAULT_HOLIDAYS, ...(d.settings.holidays||{})};
+  return {...d, settings: {...d.settings, holidays: merged}};
+};
+export const normalizeIds = d => {
+  if (!d?.projects) return d;
+  const projects = {};
+  Object.entries(d.projects).forEach(([pid, proj]) => {
+    if (!proj || typeof proj !== "object") return;
+    const tasks = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+    projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
+  });
+  const nTid = {...(d.nTid || {})};
+  Object.entries(projects).forEach(([pid, proj]) => { nTid[pid] = (proj.tasks?.length || 0) + 1; });
+  return {...d, projects, nTid};
+};
+export const ensureContacts = d => {
+  if (!d?.projects) return d;
+  const existing = (d.settings?.contacts || []);
+  const existingNames = new Set(existing.map(c => String(c?.name || '').toLowerCase()));
+  const seen = new Set();
+  Object.values(d.projects).forEach(proj => {
+    ((proj && Array.isArray(proj.tasks)) ? proj.tasks : []).forEach(t => {
+      const rp = String((t && t.responsibleParty) || '').trim();
+      if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
+        existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
+        existingNames.add(rp.toLowerCase());
+        seen.add(rp.toLowerCase());
+      }
+    });
+  });
+  return {...d, settings: {...d.settings, contacts: existing}};
+};
+// The full load pipeline as index.html composes it.
+export const loadPipeline = d => ensureContacts(normalizeIds(ensureHolidays(normalizeToV6(d))));

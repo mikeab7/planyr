@@ -54,7 +54,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [reading, setReading] = useState(false); // reading + grouping a freshly dropped set (B335/B336)
-  const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B343) — slower
+  const [ocrRunning, setOcrRunning] = useState(false); // a scanned page is being OCR'd (B351) — slower
   const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
   const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
   const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
@@ -158,7 +158,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // Read every page's metadata and collapse the file into logical sheets (B335/B336). Runs in
   // the background after a drop — read-only, so it can't clobber the placement state; on any
   // failure the file just falls back to the raw per-page tray (never blocks adding sheets).
-  // A SCANNED / image-only page (no text layer) goes through the OCR seam (B343): the runner only
+  // A SCANNED / image-only page (no text layer) goes through the OCR seam (B351): the runner only
   // spins up the Tesseract worker if such a page is actually hit, so a normal vector set pays
   // nothing. `onOcrStart` flips the status copy so the (slower) OCR pass is visible.
   const readGroupsFor = async (srcId, doc) => {
@@ -370,14 +370,14 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // committed area can't include one; just gate on the ≥3-point minimum here. (B302/B313)
   const finishArea = () => { if (draft && draft.kind === "area" && draft.pts.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), kind: "area", pts: draft.pts }]); } setDraft(null); };
 
-  // Two points placed → open an INLINE entry box (no window.prompt — owner rule). The
-  // world midpoint maps to screen px via the current pan/zoom. (B304)
+  // Two points placed → open an INLINE entry box (no window.prompt — owner rule). Store only
+  // the WORLD points; the box's screen position is derived from the live pan/zoom at render
+  // time (below), so a wheel-zoom while the box is open can't leave it stranded off its line. (B304)
   const doCalibrate = (pts) => {
     const u = dist(pts[0], pts[1]);
     if (u < 1) { setErr("Line too short — zoom in and retry."); return; }
     setErr("");
-    const mid = worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
-    setCalInput({ pts, x: mid.x, y: mid.y, value: "" });
+    setCalInput({ pts, value: "" });
   };
   // Validate + apply the composite calibration; reject ratios/junk with a message (B304).
   const commitCalibrate = () => {
@@ -537,6 +537,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const anyGroups = pdfs.some(hasGroups);
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
+  // Live screen position of the inline Calibrate box, derived from the stored WORLD points each
+  // render so it follows the line under pan/zoom (the box doesn't block the wheel). (B304)
+  const calPos = calInput ? worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (calInput.pts[0].x + calInput.pts[1].x) / 2, y: (calInput.pts[0].y + calInput.pts[1].y) / 2 }) : null;
   const btn = (on) => ({ padding: "6px 10px", fontSize: 11.5, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
   const iconBtn = (disabled) => ({ ...btn(false), padding: "5px 8px", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" });
   const alignMsg = align && (align.seeded
@@ -663,7 +666,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           </svg>
           {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
           {calInput && (
-            <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                 <input autoFocus value={calInput.value}
@@ -696,7 +699,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                 <div key={s.groupLabel} style={{ fontSize: 11.5, color: PAL.ink, padding: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.groupLabel}>{s.groupLabel}</div>
               ))}
               <div style={{ fontSize: 10.5, color: ftPerUnit ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
-                {ftPerUnit ? `Scale set · ${f0(1 / ftPerUnit)} units/ft` : "Scale not set — use Calibrate once"}
+                {ftPerUnit ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
               </div>
             </div>
           )}
