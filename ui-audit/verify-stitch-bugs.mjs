@@ -74,9 +74,9 @@ const bodyTxt = () => page.evaluate(() => document.body.innerText);
 const imageRects = () => page.evaluate(() => {
   const svg = [...document.querySelectorAll("svg")].find((s) => s.querySelector("image"));
   if (!svg) return [];
-  return [...svg.querySelectorAll("image")].map((im) => { const r = im.getBoundingClientRect(); return { x: r.x, w: r.width, cx: r.x + r.width / 2 }; }).sort((a, b) => a.x - b.x);
+  return [...svg.querySelectorAll("image")].map((im) => { const r = im.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2 }; }).sort((a, b) => a.x - b.x);
 });
-const svgRect = () => page.evaluate(() => { const s = [...document.querySelectorAll("svg")].find((x) => x.querySelector("image")) || document.querySelector("svg"); const r = s.getBoundingClientRect(); return { x: r.x, w: r.width }; });
+const svgRect = () => page.evaluate(() => { const s = [...document.querySelectorAll("svg")].find((x) => x.querySelector("image")) || document.querySelector("svg"); const r = s.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
 
 await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
 await sleep(700);
@@ -86,54 +86,105 @@ await page.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
 await page.waitForFunction(() => /auto-stitch/.test(document.body.innerText), {}, { timeout: 30000 }).catch(() => {});
 await sleep(400);
 
-console.log("\nFIX-1 — removing the world-frame sheet doesn't strand an unaligned sheet:");
-// Use the raw per-page tray so the 2nd added sheet is aligned:false (manual-add path).
-await page.locator('button:has-text("all pages")').first().click({ timeout: 8000 });
-await sleep(300);
-// Add page 1 (frame, aligned) then page 2 (aligned:false, needs Align).
-await page.locator('button:has-text("· p1")').first().click({ timeout: 8000 });
-await sleep(500);
-await page.locator('button:has-text("· p2")').first().click({ timeout: 8000 });
+// Add the auto-stitched, auto-CALIBRATED grouped plan first (clean default view) for the
+// composite/scale/measure checks; the raw-page FIX-1 runs last after a reset.
+await page.locator('button:has-text("Grading Plan")').first().click({ timeout: 8000 });
+await page.waitForFunction(() => /Scale set/.test(document.body.innerText), {}, { timeout: 20000 }).catch(() => {});
 await sleep(700);
 let txt = await bodyTxt();
-check(/Not aligned/.test(txt), "the manually-added 2nd sheet is flagged 'Not aligned' (precondition)");
-check((await imageRects()).length === 2, "two sheets are placed (precondition)");
-// Remove the FIRST placed sheet (the frame). Its card is the first "Remove" button.
-await page.locator('button:has-text("Remove")').first().click({ timeout: 8000 });
-await sleep(600);
+const groupImgs = await imageRects();
+const onSheet = (img, fx, fy) => ({ x: img.x + img.w * fx, y: img.y + img.h * fy });
+
+console.log("\nFIX-4 — composite key shows the real engineer's scale, not 'units/ft':");
+check(/1"\s*≈\s*40'/.test(txt), `the composite key reads the drawing scale (1" ≈ 40'), not a meaningless 'units/ft'`);
+check(!/units\/ft/.test(txt), "the meaningless 'units/ft' readout is gone");
+
+console.log("\nFIX-3 — distance read-out shows one decimal foot:");
+// Calibrated now → a real measurement must show a NON-zero one-decimal foot (not whole-foot,
+// and not the trivial "0.0 ft" takeoff placeholder).
+const dimg = groupImgs[0]; // the anchor sheet, near the default viewport
+await page.locator('button:has-text("Distance")').first().click({ timeout: 8000 });
+await sleep(200);
+if (dimg) {
+  const a = onSheet(dimg, 0.2, 0.5), b = onSheet(dimg, 0.7, 0.5);
+  await page.mouse.click(a.x, a.y);
+  await page.mouse.click(b.x, b.y);
+  await sleep(400);
+}
 txt = await bodyTxt();
-const imgs1 = await imageRects();
-check(imgs1.length === 1, `one sheet remains after removing the frame (images = ${imgs1.length})`);
-check(!/Not aligned/.test(txt), "the surviving sheet is promoted to the frame — no stranded 'Not aligned' state");
-check(/placed sheets · 1/i.test(txt), "the placed-sheets count reads 1");
+check(/[1-9][\d,]*\.\d\s*ft/.test(txt), `a real distance shows a non-zero one-decimal foot (not whole-foot)`);
+
+console.log("\nFIX-5 — the inline Calibrate box follows the line under wheel-zoom:");
+await page.locator('button:has-text("Calibrate")').first().click({ timeout: 8000 });
+await sleep(200);
+if (dimg) {
+  const a = onSheet(dimg, 0.25, 0.35), b = onSheet(dimg, 0.6, 0.35);
+  await page.mouse.click(a.x, a.y);
+  await page.mouse.click(b.x, b.y);
+  await sleep(300);
+}
+// Select the calibrate box by its unique input placeholder (avoids matching a full-width parent).
+const boxLeft = () => page.evaluate(() => { const i = document.querySelector('input[placeholder*="38"]'); return i ? i.getBoundingClientRect().left : null; });
+const before2 = await boxLeft();
+check(before2 != null, "the inline Calibrate box opened");
+if (before2 != null) {
+  const cc = await svgRect();
+  await page.mouse.move(cc.x + cc.w / 2, cc.y + 60);
+  await page.mouse.wheel(0, -400);
+  await sleep(300);
+  const after2 = await boxLeft();
+  check(after2 != null && Math.abs(after2 - before2) > 8, `the box tracked the zoom (left ${before2 == null ? "?" : Math.round(before2)}→${after2 == null ? "?" : Math.round(after2)}), not stranded`);
+}
+await page.keyboard.press("Escape");
+await sleep(150);
 
 console.log("\nFIX-2 — the ± zoom buttons anchor on the viewport centre:");
 const sr = await svgRect();
-const C = sr.x + sr.w / 2;            // viewport centre, page coords
+const C = sr.x + sr.w / 2;            // viewport centre, screen px
 const before = (await imageRects())[0];
 await page.locator("button", { hasText: /^\+$/ }).first().click({ timeout: 8000 });
 await sleep(400);
 const after = (await imageRects())[0];
 if (before && after) {
   const ratio = (after.x - C) / ((before.x - C) || 1e-6);
-  // Centre-anchored zoom by 1.2 ⇒ (x − C) scales by ~1.2; origin-anchored would not.
   check(after.w > before.w * 1.1, `the sheet grew on +zoom (w ${Math.round(before.w)}→${Math.round(after.w)})`);
   check(Math.abs(ratio - 1.2) < 0.18, `a fixed point's offset from centre scaled ~1.2× (got ${ratio.toFixed(2)}) — centre-anchored`);
 }
 
-console.log("\nFIX-3 — distance read-out shows one decimal foot:");
-// The set is auto-calibrated (scale set). Draw a Distance across the placed sheet.
-await page.locator('button:has-text("Distance")').first().click({ timeout: 8000 });
-await sleep(200);
-const d = await imageRects();
-if (d[0]) {
-  const y = 470;
-  await page.mouse.click(d[0].x + 30, y);
-  await page.mouse.click(d[0].x + d[0].w * 0.6, y);
-  await sleep(400);
-}
-txt = await bodyTxt();
-check(/\d\.\d\s*ft/.test(txt), `a distance label/total shows a decimal foot (one-decimal, not whole-foot)`);
+console.log("\nFIX-1 — removing the world-frame sheet doesn't strand an unaligned sheet:");
+// Run in a FRESH context (clean localStorage) so the raw-page manual-add path starts empty —
+// the earlier grouped composite would otherwise still be on this canvas.
+const ctx2 = await browser.newContext({ viewport: { width: 1500, height: 950 }, ignoreHTTPSErrors: true });
+const p2 = await ctx2.newPage();
+p2.on("pageerror", (e) => pageErrors.push(String(e)));
+await p2.goto(BASE, { waitUntil: "load" });
+await sleep(1200);
+await p2.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await sleep(700);
+await p2.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
+await sleep(700);
+await p2.setInputFiles('input[type="file"]', PDF, { timeout: 8000 });
+await p2.waitForFunction(() => /auto-stitch/.test(document.body.innerText), {}, { timeout: 30000 }).catch(() => {});
+await sleep(400);
+await p2.locator('button:has-text("all pages")').first().click({ timeout: 8000 });
+await sleep(300);
+await p2.locator('button:has-text("· p1")').first().click({ timeout: 8000 }); // frame (aligned)
+await sleep(500);
+await p2.locator('button:has-text("· p2")').first().click({ timeout: 8000 }); // aligned:false, needs Align
+await sleep(700);
+const p2txt = () => p2.evaluate(() => document.body.innerText);
+const p2imgs = () => p2.evaluate(() => { const s = [...document.querySelectorAll("svg")].find((x) => x.querySelector("image")); return s ? s.querySelectorAll("image").length : 0; });
+txt = await p2txt();
+check(/Not aligned/.test(txt), "the manually-added 2nd sheet is flagged 'Not aligned' (precondition)");
+check((await p2imgs()) === 2, `two sheets are placed (precondition, images = ${await p2imgs()})`);
+await p2.locator('button:has-text("Remove")').first().click({ timeout: 8000 }); // remove the frame
+await sleep(600);
+txt = await p2txt();
+const n1 = await p2imgs();
+check(n1 === 1, `one sheet remains after removing the frame (images = ${n1})`);
+check(!/Not aligned/.test(txt), "the surviving sheet is promoted to the frame — no stranded 'Not aligned' state");
+check(/placed sheets · 1/i.test(txt), "the placed-sheets count reads 1");
+await ctx2.close();
 
 check(pageErrors.length === 0, `no uncaught JS errors during the run (${pageErrors.length})`);
 if (pageErrors.length) console.log("  pageerrors:", pageErrors.slice(0, 4));
