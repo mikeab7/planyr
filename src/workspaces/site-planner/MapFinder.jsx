@@ -4,7 +4,8 @@ import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
 import { recordSourceResult, filterHealthyCandidates } from "./lib/sourceHealth.js";
-import { syncOverlayLayers, withTileRetry } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
@@ -22,7 +23,7 @@ import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
-// and the panel themes live with no re-render. (B275)
+// and the panel themes live with no re-render. (B318)
 const PAL = {
   panelBg: "var(--surface-raised)", panelLine: "var(--border-default)", ink: "var(--text-primary)",
   accent: "var(--accent)", muted: "var(--text-secondary)",
@@ -280,6 +281,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
   const overlayRefs = useRef({}); // key -> live esri dynamicMapLayer (this map's instances)
+  const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
   const [selected, setSelected] = useState([]); // [{key, rings:[[ [lon,lat],…] ], latlngsList:[[ [lat,lng],…] ], addr, acct, attrs, county}] — rings = every outer part (multipart-safe)
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
@@ -416,6 +418,22 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
   }, [overlays]); // eslint-disable-line
+
+  /* Coverage (NEW-1/B283): which layers' DATA reaches the current view, for the
+     Layers panel's relevance picker. Recompute on map move (debounced) and when the
+     nearby-range pref changes. Picker-only — never touches the map's requests. */
+  useEffect(() => {
+    let t;
+    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(mapRef.current), overlays, getNearbyRadiusMiles()));
+    const debounced = () => { clearTimeout(t); t = setTimeout(recompute, 250); };
+    // Read each regional service's extent from its health probe (no extra request), then compute.
+    prefetchExtents(ALL_LAYERS, probeService).then(recompute);
+    recompute();
+    const map = mapRef.current;
+    if (map) map.on("moveend", debounced);
+    const unsub = subscribeRelevance(recompute);
+    return () => { clearTimeout(t); if (map) map.off("moveend", debounced); unsub(); };
+  }, [overlays]);
 
   /* keep the map sized correctly when shown after being hidden */
   useEffect(() => {
@@ -1028,7 +1046,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 resolved from the view centre on every moveend — so the right utility
                 overlays are offered outside Houston too; per-site jurisdiction still
                 follows the site's own county once one is opened in the planner. */}
-            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} />
+            <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} coverage={coverage} />
           </div>
         </div>
 

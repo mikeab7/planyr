@@ -7,7 +7,7 @@
      THEME TOKENS — LIGHT (defaults). Dark overrides live in [data-theme="dark"].
      Components reference tokens via var(--…) — never raw hex. The drafting canvas
      reads the JS mirror in src/shared/theme/palette.js (var() can't be used in SVG
-     attributes / canvas export). Keep the two in sync. (B273/B274/B275/B276)
+     attributes / canvas export). Keep the two in sync. (B316/B317/B318/B319)
      ============================================================================ */
 
   /* Surfaces */
@@ -20,7 +20,7 @@
   --text-secondary: #353B49;
   --text-tertiary:  #4B5263;
 
-  /* Chrome — top bars, tool rail, status bar. Themes WITH the app (B275): light
+  /* Chrome — top bars, tool rail, status bar. Themes WITH the app (B318): light
      theme = light chrome, dark theme = dark chrome (no dark bar over a white app). */
   --chrome-bg:           #EAEEF3;
   --chrome-bg-elev:      #FFFFFF;
@@ -43,14 +43,14 @@
 
   /* Project-status palette (B234) as tokens so DOM badges theme live. The canonical
      hexes mirror src/shared/ui/statusTokens.js (map pins read those directly — pins
-     sit on the aerial map, a theme-neutral surface). Dark = lighter variants (B277). */
+     sit on the aerial map, a theme-neutral surface). Dark = lighter variants (B320). */
   --status-pursuit:  #378ADD;
   --status-active:   #639922;
   --status-onhold:   #BA7517;
   --status-complete: #888780;
   --status-dead:     #E24B4A;
 
-  /* Work surfaces — drafting canvas + Markup mat (B276). */
+  /* Work surfaces — drafting canvas + Markup mat (B319). */
   --canvas-bg:          #EDF1F6;   /* cool drafting field (retires the warm cream) */
   --canvas-grid-minor:  #DCE3EB;
   --canvas-grid-major:  #C5CED9;
@@ -126,7 +126,7 @@
   --accent-schedule-text: #AFA9EC;
   --accent-markup-text:   #EF9F27;
 
-  /* Status — lighter variants so saturated values don't go muddy on dark cards (B277) */
+  /* Status — lighter variants so saturated values don't go muddy on dark cards (B320) */
   --status-pursuit:  #6FB4F0;
   --status-active:   #8FCB4E;
   --status-onhold:   #E0A23E;

@@ -21,7 +21,7 @@
 // a theme-neutral surface, so they keep the canonical color in both themes). On DARK
 // app surfaces (cards/panels) the saturated values go muddy, so each carries a lighter
 // `darkColor` variant; DOM badges consume these via the --status-* CSS vars in
-// index.css (which mirror these). (B234 / B277)
+// index.css (which mirror these). (B234 / B320)
 export const STATUS_TOKENS = {
   pursuit:  { color: "#378ADD", darkColor: "#6FB4F0", glyph: "○", shape: "ring",  hollow: true,  dashed: true,  struck: false, dim: false },
   active:   { color: "#639922", darkColor: "#8FCB4E", glyph: "●", shape: "dot",   hollow: false, dashed: false, struck: false, dim: false },

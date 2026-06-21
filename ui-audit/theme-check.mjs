@@ -1,5 +1,5 @@
 /* Theme verification harness (dev tool) — screenshots the app in BOTH themes so a
- * session can eyeball the light/dark/system work (B273–B277). Seeds a demo site +
+ * session can eyeball the light/dark/system work (B316–B320). Seeds a demo site +
  * sets localStorage['planyr.theme'] before load (the pre-paint script picks it up).
  * Run: node ui-audit/theme-check.mjs   (vite preview must be running on :4173)
  */

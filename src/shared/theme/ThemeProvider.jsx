@@ -1,4 +1,4 @@
-/* ThemeProvider — light / dark / system theming foundation (B274).
+/* ThemeProvider — light / dark / system theming foundation (B317).
  *
  * - mode: the user's CHOICE — "light" | "dark" | "system" (default "system").
  * - resolved: the ACTIVE theme — "light" | "dark" (System resolves via the OS).

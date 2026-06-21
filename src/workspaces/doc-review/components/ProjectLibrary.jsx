@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, setProjectStatus, deleteReview, DISCIPLINES, STATUSES, STATUS_META } from "../lib/reviewStore.js";
 
 const PAL = { paper: "var(--surface-raised)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)" };
-// Canonical status palette via CSS vars (B234/B277): matches the rest of the app and
+// Canonical status palette via CSS vars (B234/B320): matches the rest of the app and
 // themes live (light↔dark). Replaces the old local drift (#d97706/#15803d/…).
 const STATUS_COLOR = { pursuit: "var(--status-pursuit)", active: "var(--status-active)", onhold: "var(--status-onhold)", complete: "var(--status-complete)", dead: "var(--status-dead)" };
 const UNFILED = "__unfiled__";

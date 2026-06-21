@@ -15,7 +15,10 @@
 import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES } from "./jurisdiction.js";
-import { overpassLayer, mapillaryLayer, mapillaryToken } from "./evidenceLayers.js";
+import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import {
+  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
+} from "./layerRequest.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -93,8 +96,15 @@ export const EVIDENCE = {
     note: "OpenStreetMap fire hydrants. Loads at zoom ≥ 14.",
   },
   mapillary: {
-    kind: "mapillary", label: "Street-level detections (Mapillary)", opacity: 0.95,
-    note: "Crowdsourced pole/hydrant detections — needs a free Mapillary token (set below). Loads at zoom ≥ 16.",
+    // NEW-3/B285: plain-language name; the "Mapillary" brand is demoted to a small
+    // source/attribution note (`source`) since the brand wasn't recognized.
+    // B308: served for every visitor via the same-origin /api/mapillary proxy (token
+    // held server-side), so it works with NO per-user token — `needsSetup` is gone.
+    // If the proxy has no token (e.g. a preview deploy) the layer degrades gracefully.
+    kind: "mapillary", label: "Poles & hydrants from street imagery",
+    sublabel: "Detected in crowdsourced street-level photos.",
+    source: "Mapillary", opacity: 0.95,
+    note: "Pole & fire-hydrant detections from crowdsourced street-level photos. Loads at zoom ≥ 16.",
   },
   hifld_tx: {
     kind: "esriFeature", label: "Transmission lines (HIFLD)",
@@ -239,7 +249,7 @@ export async function fetchWithRetry(url, opts = {}, tries = 3) {
   for (let i = 0; ; i++) {
     try {
       const r = await fetch(url, opts);
-      if (r.ok || ![429, 500, 502, 503, 504].includes(r.status) || i >= tries - 1) return r;
+      if (r.ok || !isTransientStatus(r.status) || i >= tries - 1) return r;
     } catch (e) {
       if (i >= tries - 1) throw e;
     }
@@ -266,7 +276,11 @@ export async function probeService(url) {
       const j = await r.json().catch(() => ({}));
       result = j && j.error
         ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
-        : { ok: true, error: null };
+        // Capture the service's own data extent (fullExtent, or `extent` on a
+        // FeatureServer/layer) straight from the health probe — the coverage engine
+        // (NEW-1/B283) reprojects it to test whether this layer's data reaches the view.
+        // No extra request: it's already in this same ?f=json response.
+        : { ok: true, error: null, fullExtent: (j && (j.fullExtent || j.extent)) || null };
     }
   } catch (e) {
     // The fetch threw — we couldn't even reach the service to health-check it (CORS,
@@ -279,6 +293,31 @@ export async function probeService(url) {
   result.ts = Date.now();
   _probeCache.set(key, result);
   return result;
+}
+
+/* esri-leaflet FeatureLayer retry/backoff (NEW-5/B287). Wires the pure retry policy
+ * (featureRetryDecision in layerRequest.js) onto a live FeatureLayer: esri-leaflet
+ * issues its own GeoJSON queries with no retry of its own, so a single transient
+ * 5xx/429 (or a codeless network/CORS blip) on a jurisdiction vector service — City ETJ
+ * (H-GAC), County boundaries (TxDOT) — would otherwise drop the whole layer to "failed"
+ * (both threw transient 503s live 2026-06-20). Re-issue via refresh() with exponential
+ * backoff; hold the dot at "loading" while retrying; report "failed" only once we give
+ * up; a successful 'load' resets the counter. */
+export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
+  let tries = 0, timer = null;
+  lyr.on("load", () => { tries = 0; onStatus && onStatus(k, "loaded"); });
+  lyr.on("requesterror", (e) => {
+    const code = e && e.error && (e.error.code ?? e.error.httpStatus);
+    const { retry, delayMs } = featureRetryDecision(code, tries, max);
+    if (retry) {
+      tries += 1;
+      onStatus && onStatus(k, "loading", `${cfg.label}: service hiccup — retrying (${tries}/${max})…`);
+      clearTimeout(timer);
+      timer = setTimeout(() => { try { lyr.refresh(); } catch (_) {} }, delayMs);
+    } else {
+      onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
+    }
+  });
 }
 
 /* Reconcile the live esri/vector layers on `map` with the `overlays` state. `refs`
@@ -316,7 +355,10 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
         const lyr = overpassLayer(cfg.query, report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "mapillary") {
-        if (!mapillaryToken()) { fail(k, cfg, "Add a Mapillary token to enable this layer."); return; }
+        // B308: served via the same-origin /api/mapillary proxy (token held server-side),
+        // so the layer loads for every visitor with NO per-user token. mapillaryLayer
+        // reports a quiet "unconfigured" (gray) only if the proxy itself has no server
+        // token (e.g. a preview deploy) — never a hard failure, never an error toast.
         const lyr = mapillaryLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else {
@@ -331,31 +373,29 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
           if (cfg.kind === "esriImage") {
-            const o = { url: cfg.url, opacity: st.opacity, pane };
-            if (cfg.rendering) o.renderingRule = { rasterFunction: cfg.rendering };
-            lyr = EL.imageMapLayer(o);
+            lyr = EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane));
           } else if (cfg.kind === "esriFeature") {
-            lyr = EL.featureLayer({ url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: false, style: () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity: st.opacity, fillOpacity: 0 }) });
+            lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
             lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
           } else {
-            const o = { url: cfg.url, opacity: st.opacity, pane, f: "image" };
-            if (cfg.layers) o.layers = cfg.layers;
-            lyr = EL.dynamicMapLayer(o);
+            lyr = EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane));
           }
-          // A requesterror is often a NON-fatal hiccup — e.g. a CORS-blocked metadata /
-          // service-info fetch while the f=image export still renders via a CORS-exempt
-          // <img>. Surface a quiet per-layer status, but DON'T drop the layer or fire the
-          // alarming toast; the 'load' event below flips it back to "loaded" if the image
-          // lands. (A genuinely-down service simply shows its quiet "failed" dot.)
-          // esri's own requesterror text wrongly fingers "CORS" / "could not parse JSON"
-          // even when the real cause is the agency host being down (a plain HTTP 500), so
-          // surface a plain, honest status instead of esri's misleading message (verified
-          // against NWI's 2026-06-17 outage). This is NOT necessarily fatal: the picture
-          // loads via a CORS-exempt <img>, and the 'load' handler below flips the dot back
-          // to "loaded" if it lands — so this message only persists for a service that is
-          // genuinely unavailable.
-          lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
-          lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+          if (cfg.kind === "esriFeature") {
+            // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
+            // won't retry its own request, so a transient 5xx/blip on City ETJ or County
+            // boundaries would otherwise drop the layer on a single hiccup.
+            attachFeatureRetry(lyr, k, cfg, onStatus);
+          } else {
+            // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a
+            // CORS-blocked metadata fetch while the f=image export still renders via a
+            // CORS-exempt <img>. Surface a quiet per-layer status, but DON'T drop the layer
+            // or fire the alarming toast; the 'load' event flips it back to "loaded" if the
+            // image lands. (esri's own requesterror text wrongly fingers "CORS"/"could not
+            // parse JSON" even when the real cause is the agency host being down — so we say
+            // something plain + honest; this message only persists for a genuinely-down one.)
+            lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
+            lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+          }
           if (lyr.setOpacity) lyr.setOpacity(st.opacity);
           lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)

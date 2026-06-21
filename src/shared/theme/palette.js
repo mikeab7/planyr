@@ -8,7 +8,7 @@
  * rasterization either. So canvas colors must be concrete at render time.
  *
  * KEEP THE TWO IN SYNC. (Same established pattern as src/shared/brand/tokens.js ↔
- * the --coral-* vars in index.css.) (B273 / B274 / B275 / B276)
+ * the --coral-* vars in index.css.) (B316 / B317 / B318 / B319)
  */
 
 const LIGHT = {
