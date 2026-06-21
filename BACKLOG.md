@@ -210,7 +210,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      items; JSON re-import already ships as Export JSON). RELATED: **B131** (overlay-in-print toggle,
      done) is PRESERVED — the `printOverlay` checkbox still gates the placed overlay in the export;
      **B50** (export/print robustness) is partly SUPERSEDED for the print path (the old "don't strand
-     a blank Preparing… window" guard is moot — there's no window now). **B355/B160** are the
+     a blank Preparing… window" guard is moot — there's no window now). **B361/B160** are the
      *Scheduler* Gantt PDF/Print export (a different module), not this. Filed AND shipped this same
      session — moved to BACKLOG-DONE.md; browser-verified (VERIFICATION **V60**). -->
 
@@ -539,6 +539,13 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 > Likely lives in the shared cloud save/load layer, so fix it workspace-agnostically even though it surfaced in Site Planner.
 > **Dedup / cross-refs — filed net-new: same SYMPTOM class as B124, but a fresh live recurrence that raises two UNINVESTIGATED root causes.** Same "data loss on reload" symptom as **B124** (Schiel/JFK), whose root cause (the `pullCloud` thin-merge + the two-store split) was found and fixed in **B126/B127**, with the loud-failure half in **B125** — and **★ corrected 2026-06-17 (this session): all of B124/B125/B126/B127 are MERGED (PRs #81/#83/#85/#89) AND DEPLOYED to live planyr.io** (the live `SitePlannerApp` chunk carries the B126 version-history key `planarfit:sites:history:v1` + the "Version history" dialog + the B125 "Retry now" banner; the shell has the Supabase URL baked in → **cloud is ON**). So the recurrence is **NOT unmerged code and NOT cloud-off — both ruled out**, which eliminates candidate #1 and #2's cloud-off premise. Refocus on the causes the shipped fixes do NOT cover: **#3** (the 10-building state never durably persisted — a debounced cloud push that didn't fire before the reload, so the loader fell back to the older 6-building cloud copy; B126's union-merge only recovers work that reached a store, not work that never persisted — the closest fit), **#4** (a silent save error — expired auth token / RLS 401–403 / 409), or **#5** (load precedence). Also overlaps the historical **B18** (last-debounce-window edits flush local-only) and **B54** (`pullCloud` overwrites the cache with `{}` on a fetch error). If the investigation pins the live cause to one of those, note it both here and there rather than re-fixing. The visible-status guardrail is **B125** (it would have surfaced this immediately); the SCHIEL recovery action is **B136**.
 > **Progress 2026-06-17 (this session, branch `claude/nice-ptolemy-9j0u7g`): the load-precedence half (#5) is FIXED in code.** Root cause pinned in the boot sequence: `SitePlannerApp` renders the planner `key={activeSiteId}` and the planner snapshots its plan from storage **once at mount**; the first synchronous render runs BEFORE auth resolves (`activeUser` still null → reads the legacy/local store), so a signed-in user can paint a stale copy — and the authoritative copy that `applyUser`'s `pullCloud` merges in is a **same-tab `localStorage` write (fires no `storage` event)**, so the already-mounted planner never refreshes. Exactly the owner's "showed 6 buildings, then came back to 10 on its own." Fix: a `loadEpoch` bumped after the boot/sign-in pull and folded into the planner's `key`, forcing a one-time remount so the resumed plan re-reads the freshly-merged store. **Display/load-timing only — the save/merge/version-history logic is untouched, so it cannot worsen data safety** (worst case is a sub-second remount). lint 0 errors · 191 tests · build green · lazy split intact. **Still OPEN:** causes **#3 (never-persisted / debounce-flush gap)** and **#4 (silent save error)** — the true-loss cases where work never reached any store — need the visible/honest save-status + flush work tracked in **B125/NEW-3**. **Verification gap:** the sandbox browser can't sign in, so the signed-in boot path needs a signed-in click-through to confirm end-to-end; the change is gated to the signed-in resume branch, so logged-out behavior is unchanged. **The signed-in end-to-end browser confirmation is logged as VERIFICATION V28** — the "limit" this session couldn't self-run (sandbox can't sign in); a signed-in coworker runs it down.
+## 🎨 UI audit pass — 2026-06-16
+
+Full UI workstream from `UI_AUDIT.md` (re-authored this session: the predecessor 58-item
+audit lived only in a parallel chat and was never committed, and several of its findings
+were already implemented on `main`, so it was redone against HEAD + headless screenshots in
+`ui-audit/screens/`). The brief's "coordinate-with" B-numbers (B2/B3/B10/B15/B16/B18/B19) were
+that chat's provisional numbers — reconciled in `UI_AUDIT.md` (they map to real B2/B3/B10/**B65**/**B66** + two net-new). **Renumbered on merge:** these were minted B93–B99 on the branch, but `main` had meanwhile spent B93–B107 on its own UI/GIS work, so they are **B108–B113** here — and a couple are now superseded by main's parallel changes (noted inline; the legend item was dropped entirely).
 
 ## 🐞 Bug audit — 2026-06-15 (overnight sweep)
 
@@ -672,7 +679,7 @@ product switcher) already shipped for the *planner* context bar and explicitly l
 physical row is a later polish," so **B104** is that remaining polish for the *map* view
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
-### B355 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)  *(renumbered from a colliding B159 → B355, 2026-06-21; the surviving B159 is the Task-names visibility toggle)*
+### B361 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)  *(renumbered from a colliding B159 → B361, 2026-06-21; the surviving B159 is the Task-names visibility toggle; B355 was taken by the concept-names feature)*
 
 - [ ] Add a **time scale selector** to the PDF/Print Exhibit export sidebar, controlling the density of the Gantt chart's time axis in the exported output.
 - Options: **Days · Weeks · Months · Quarters** — matching common schedule exhibit conventions.
@@ -688,10 +695,10 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - [ ] Add a control to the PDF/Print Exhibit export sidebar that lets the user adjust how much of the total page width the Gantt chart occupies vs. the task name/info columns.
 - Recommended implementation: a **horizontal split slider** or a **numeric percentage field** (e.g., "Gantt width: 60%") that shifts the column-to-chart ratio.
 - Preview updates in real time as the user drags/adjusts.
-- **Interacts with B355 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
+- **Interacts with B361 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
 - Export-only; live schedule layout unaffected.
 
-<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B355 (related but distinct control). -->
+<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
 
 ---
 

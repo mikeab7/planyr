@@ -202,7 +202,7 @@ export default function ModuleLoader({ module = "scheduler", label, style }) {
       style={{
         position: "absolute", inset: 0, zIndex: 5,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        gap: 18, padding: 24, background: "#f6f8fa",
+        gap: 18, padding: 24, background: "var(--surface-page)",
         opacity: shown ? 1 : 0, transition: "opacity 0.35s ease",
         ...style,
       }}
@@ -212,7 +212,7 @@ export default function ModuleLoader({ module = "scheduler", label, style }) {
         ...(reduce ? { animation: "pl-pulse 1.8s ease-in-out infinite" } : null) }}>
         <Skin accent={theme.accent} reduce={reduce} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, color: "#6b7280", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--text-secondary)", fontFamily: "'Inter', system-ui, sans-serif", fontSize: 13, fontWeight: 500 }}>
         <span style={{ width: 9, height: 9, borderRadius: 2, background: theme.accent, transform: "rotate(45deg)",
           ...(reduce ? null : { animation: "pl-pulse 1.4s ease-in-out infinite" }) }} />
         {caption}

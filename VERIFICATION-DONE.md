@@ -7,6 +7,22 @@ nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 ## Archived 2026-06-21 — passed / superseded items swept from VERIFICATION.md
 
+### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).
+- **✅ `ui-audit/contrast-sweep.mjs`:** walks the rendered DOM of every workspace in both themes (planner, site-name menu, Markup, Schedule), measuring each text node's computed colour vs its effective background → **0 low-contrast elements** in both themes. Screenshots confirm the site name ("Katy Logistics Park") is clearly visible in light AND dark — the owner's reported invisible-name bug is gone.
+- **✅ `ui-audit/contrast-audit.mjs`:** every token pair (incl. the new `--success/danger/info-text`) clears WCAG AA in both themes.
+- **Note:** the sign-in-gated deep drawers (Project Files / Library) and SiteReviewModal weren't render-reached logged-out, but their colours are provably AA via the token audit; an optional signed-in eyeball on planyr.io in **dark** mode is a nicety, not a blocker.
+
+### V95 — New site plans default to lettered concepts (Concept A, B, … AA) (B355) ✅ (self-verified headless in the real planner — fully done)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — the logged-out localStorage store is the same plan-creation code path used signed-in) · **Next check** — none required.
+- **✅ Live-verified 2026-06-21 (`ui-audit/verify-b355-concepts.mjs`, 4/4 checks, 0 genuine page errors):** seeded a real saved site, resumed into the planner, and clicked **Plan ▾ → ＋ New plan** for three cases — the header re-labelled the new plan exactly as designed:
+  - existing **"Concept A"** → new plan **"Concept B"** (sequences to the next letter);
+  - existing **"Concept C"** (A/B deleted) → **"Concept D"** (continues PAST the highest, never reuses a deleted gap);
+  - existing legacy **"Plan 1"** → **"Concept A"** (old "Plan N" names are ignored, not renamed).
+  - (The harness filters two documented sandbox-only noise classes — basemap-less seed NaN SVG geometry + CORS-blocked external GIS probes — and asserts no *genuine* JS error.)
+- **✅ Deterministic path (`test/conceptName.test.js`, 14 tests):** A–Z, the Z→AA→AB→… spreadsheet roll-over (bijective base-26, no 27th-concept crash), round-trip stability, gap-not-reused, and legacy "Plan N" ignored.
+- Pure `conceptName.js` wired into all three creation paths (new-from-map, new-plan-same-parcel, blank-site first save) + the `createSiteModel` fallback. Name stays user-editable; no retroactive rename of existing plans. full suite 1055 · lint 0 · build green.
+
 ### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
 **Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
 is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose
@@ -74,6 +90,16 @@ GENERAL NOTES vary by page, a stacked "5 / A-3" detail callout on C-5, and a sep
   - lint **0 errors** · **850 tests** (+4 new pinch unit tests in `test/viewportTransform.test.js`: midpoint/distance, spread zooms 2× about the fingers, two-finger pan, clamp) · build green; `DocReview` / `SitePlannerApp` / shared `viewportTransform` lazy chunks intact.
 - **Not covered (headless limit):** the literal feel on physical glass (latency, momentum) — the math, gating, and zoom direction are all proven here; a 10-second pinch on an actual phone/tablet is the only thing left, and it needs no sign-in.
 
+### V87 — Doc Review: drop a whole set → it auto-groups, auto-stitches, crops, and auto-calibrates (B335–B339) ✅ (self-verified headless — text-layer path fully done; signed-in resume worth one eyeball)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out; a generated 4-sheet vector PDF carrying real title blocks, stated scales, and MATCH-LINE labels) · **Next check** — a **signed-in** check that a saved stitched composite reloads with its grouping/crop/scale intact (autosave is the shared Supabase path; the stitch/crop logic itself is browser-only and proven here).
+- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b335-b339.mjs`, 13/13 checks, 0 page errors, screenshot `ui-audit/screens/b335-b339.png`):**
+  - **B335 grouping:** dropping a 4-page set collapsed the tray into **2 logical sheets** — a **COVER** standalone + a 3-sheet **"Grading Plan · C-5–C-7 · 3 sheets · auto-stitch"** group (the per-page "add each sheet" step is gone as the default; an "all pages" toggle still reveals the raw page list).
+  - **B337 auto-stitch:** clicking the group **auto-placed all 3 sheets**, seams coincident — adjacent sheets butt at the cut (Δx ≈ 0.78·width, the cropped drawing edge), **not** the old +40 gap — and the notice read "Auto-stitched 3 sheets."
+  - **B339 auto-calibrate:** the composite picked up **1"=40' from the sheet** automatically (no manual Calibrate); the takeoff panel reads **Calibrated** and the pinned key shows **"Scale set."**
+  - **B338 crop + key:** each grouped sheet's title-block band is **clipped** (3 `clipPath`s) so the drawings butt cleanly; one **pinned "Composite key"** lists the group once (not 3 title blocks); the **Crop blocks** toggle removes the clips.
+  - **30 new unit tests** for the pure engines (`sheetMeta`/`sheetGroups`/`autoStitch`/`sheetRead`); lint **0** · full suite green · build green; DocReview + pdf lazy chunks intact.
+- **Deferred tails (behind clean seams, tracked as B340 — heavy-dep / CV, can't headless-verify):** scanned-sheet **OCR** (Tesseract.js) for the no-text minority; **graphic scale-bar** reading; the **geometric edge-line** middle fallback when match-line labels are missing (the 2-point manual Align — pre-seeded with detected seam endpoints — remains the safety net and is wired); **graphical legend symbol-union**. The common case (CAD vector PDFs with a text layer) is fully shipped + verified above.
+
 ### V86 — Markup canvas pan/zoom parity with the Site map (shared engine, B329) + tools moved to a right-side rail (B330) ✅ (fully self-verified headless — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium-1228 on the built app, `vite preview`, logged-out — the Markup viewer is browser-only, so this is full coverage; re-run green after merging the latest `main` theming + file-storage + memory-cap) · **Next check** — none required (pure view/UI; no auth or cloud path touched). Optional eyeball on planyr.io once live: open a PDF in Markup, drag to pan in any direction, wheel to zoom toward the cursor, and confirm the tools sit in the right-side rail.
 - **✅ B329 self-verified (`ui-audit/verify-markup-viewport.mjs`, 13/13, 0 page errors):** free pan LEFT / RIGHT / DOWN at fit-width (the old scroll box couldn't pan horizontally — the "only scrolls vertically" repro), cursor-anchored wheel zoom (0.1px drift), a calibrated Distance reads the **same feet** through zoom+pan and the sheet stays **calibrated** (the view transform never touches geometry/calibration), **middle-mouse pans with a drawing tool active AND draws nothing** (Bluebeam rule), draw + Select-drag-move, sheet-switch keeps zoom.
@@ -86,10 +112,6 @@ GENERAL NOTES vary by page, a stacked "5 / A-3" detail callout on C-5, and a sep
 - **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — pan is browser-only, no auth path) · **Next check** — none (auth-independent client logic).
 - **✅ Self-verified 2026-06-21 (`ui-audit/verify-b325-pan.mjs`, all checks pass, 0 page errors):** a normal pan moves the world transform (`translate(40 40)` → `translate(160 130)`); **12 mid-pan aborts** (window blur + visibilitychange + pointercancel, each interleaved with pointer moves) raise **no error boundary** ("hit an error and couldn't load") and **0** `panX` page errors; pan still works afterward. Backed by **4 unit tests** (`test/stitchGeom.test.js` → `panTo`): the math, that a captured origin survives the drag ref being nulled mid-gesture, and a teeth test that the OLD pattern (reading `drag.current` in the deferred updater) throws `/panX/`.
 - **Why fully done logged-out:** the pan handler + the `panTo` helper live entirely in the Stitcher client (`Stitcher.jsx` + `lib/stitchGeom.js`), no auth or cloud dependency.
-
-### V83 — Stitch: measuring over an un-aligned sheet is now BLOCKED, not just warned (B316) ✅ (self-verified headless — fully done, no signed-in check needed)
-- **Added** 2026-06-21 · **Cadence** once (acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out, generated 2-page Letter PDF) · **Next check** — none (pure Stitch-canvas behavior; no auth/cloud path). Owner call: "don't let it measure on uncalibrated things."
-- **✅ Self-verified 2026-06-21 (`ui-audit/verify-b300-b302.mjs`, all checks pass, 0 page errors):** a Distance drawn over a not-yet-aligned 2nd sheet is **refused** — the block banner "Align that sheet before measuring on it" appears and **0** distance lines are committed (B301 had shown a soft warning but still committed the measurement). The B300 degenerate-align reject + B302 ≥3-pt Area guards still pass; a valid Align still clears the flag. lint **0** · **743 tests** · build green.
 
 ### V82 — Undo (Ctrl+Z) reliably reverts a building move in one step (B315) ✅ (self-verified headless — fully done, browser-only, no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-21 ✅ (headless **chromium-1194** on the built app, `vite preview`, logged-out — the planner canvas + undo are browser-only, no auth path) · **Next check** — none required (auth-independent client logic).
@@ -194,27 +216,38 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   Storage and re-rasterizes when signed in). This was shipped UNVERIFIED — confirm on the
   preview/prod.
 
-### V18 — Auto-numbered building labels: "Building N" + renumber-on-delete (B122) ✅
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 ✅
-- **Steps:** Open a site in the Site Planner. Place a **Building** → its label reads **"Building 1"**
-  (above its sf and dimensions). Place a second and third → they read **"Building 2"** then
-  **"Building 3"** in placement order. Now **delete "Building 2"** → expect the old "Building 3" to
-  re-label **immediately** as "Building 2" (numbers stay contiguous 1…N, no gap). Add another → it
-  appends as the next number. A site with a **single** building still reads "Building 1".
-- **Identity check (the important one):** give a building attached **parking** or a **bump-out**, then
-  delete a *lower-numbered* building so this one renumbers. Confirm the attached pieces stay attached and
-  nothing re-points — attachment binds to the hidden stable id, not the visible number, so a renumber
-  must never detach or mis-link anything.
-- **Expect:** every visible building label updates in one pass on delete; non-building elements
-  (car parking, paving, roads, detention ponds, sidewalks) are unaffected; bump-out pieces don't get
-  their own number.
-- **Result ✅ (2026-06-17, self-verified headless Chromium on the built artifact):** drew three buildings
-  → labelled **Building 1 / 2 / 3** in placement order; selected the **middle** one (Building 2) and
-  deleted it → the former **Building 3 renumbered to Building 2** (same 156,735 sf / 457′×343′ — identity
-  unchanged), leaving a contiguous {1, 2} with no gap. Screenshot eyeballed; the static 4-line stack
-  (name / sf / dims) rendered correctly too. (Attached-piece identity on renumber wasn't separately driven,
-  but identity is keyed on the stable `el.id`, which the delete leaves untouched.)
-- **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
+### V15 — ★ Persistence ROOT FIX: a thinner copy can't erase a fuller one + Version history (B126) — Version history ✅ / merge ⚠️ — HIGH PRIORITY
+- **2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON):**
+  - **✅ Version history (step 2/3):** Plan ▾ → Version history listed automatic backups by **timestamp · N buildings** (3 → 2 → 1). Restored the 1-building version (canvas reverted, re-saved), then restored back to 3 → **restore is reversible**. Backups live per-plan in `sites:history:v1` (each carries a `sig` like `5/0/0/0/0/0/0` + a full `model` snapshot).
+  - **✅ Two-tab merge at the divergent save (step 1 headline):** opened the same site in two tabs; tab B added Building 4, stale tab A added Building 5 → the cloud store correctly held the **union of 5** (neither erased the other), and that 5-building state was captured in Version history.
+  - **⚠️ BUT the union didn't *stick* on a later save.** The version-history `buildings` trajectory was `…4 (tab B adds) → 5 (tab A adds, union ✅) → 4 (a later save drops back) → 4 + easement`. A subsequent save from a tab that had **never visually repainted** the other tab's building thinned the *live* plan 5→4. The dropped building **survives in the 3:20 backup** (recoverable via Version history), so it's not silent permanent loss — but it's the exact scenario B127 ("open tabs converge while still open; a stale tab's save folds in, never thins") aims to prevent. Tab A's canvas never live-repainted tab B's building even though its numbering jumped to "Building 5" (data model knew; canvas didn't). **Needs a clean controlled repro** (two tabs both actually rendering all buildings, then a second save from each). Caveat: this came from a hand-driven two-tab race, but the 5→4 drop is unambiguous in the history signatures.
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** — · **Next check** 2026-06-16
+- **▶ Full step-by-step script:** **`PERSISTENCE_TEST_SCRIPT.md`** (T1–T11, with paste-in Console helpers and a results table) — run that end-to-end and record the outcome back here. The summary below is the short form.
+- **Why this matters:** B124 stopped whole *sites* vanishing, but buildings could still disappear *inside* a
+  site because sync kept whichever whole copy was saved last — so a copy with fewer buildings could overwrite
+  a fuller one (a stale tab, a second device, a hiccup mid-load). B126 makes sync **merge** the two copies
+  (every building in either is kept) and adds **automatic local backups** you can restore from.
+- **Steps (signed in, on planyr.io):**
+  1. **Merge keeps both (two-tab test — the headline):** open the same site in **two browser tabs**. In tab A
+     add **building X**; in tab B (don't reload it) add **building Y**. Let both reach **"Synced ✓"**.
+     **Reload both tabs** → **both X and Y are present** in each — neither tab's copy erased the other's.
+  2. **Version history restore:** **Plan ▾ → Version history…** → a dialog lists earlier automatic backups
+     (timestamp · N buildings). Click **Restore** on an earlier one → the canvas returns to that version and
+     re-saves. Re-open Version history → the version you just replaced is now **also** listed (a restore is
+     itself reversible).
+  3. **De-dupe sanity:** make a few edits that change the building/element count → each appears as its own
+     version; a pure move (no count change) does **not** spam a new version.
+- **Expect:** a building drawn in any copy is **never lost to a sync**; the count never silently drops; Version
+  history lists and restores prior versions, reversibly. (Backdrop aerials/images may need re-dropping after a
+  restore — geometry is always restored in full.)
+- **If it fails:** **CRITICAL** class (data) — if a building still disappears on a sync/reload, flag it
+  immediately with the exact step + browser console; do **not** log-and-move-on.
+- **Update 2026-06-16 (B127):** the first run found **no data loss** but one rough edge — two open tabs
+  could **disagree until reload** (the durable store briefly held the thinner copy). That's now **fixed**:
+  a stale tab's save **folds into** the store (never thins it) and open tabs **live-sync** via `storage`
+  events. **Re-run T5/T6 to confirm:** (a) after the two-tab divergent edits, **both tabs converge while
+  still open** (no reload needed), and (b) the durable `sites:v1` always holds the **union** (never the
+  thinner copy), so any reload shows the full set.
 
 ### V20 — GIS layers survive a CORS-blocked health-check (B129 / PR #60) ✅
 - **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-17 (real Chromium/Playwright on planyr.io) · **Next check** —
@@ -231,24 +264,6 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
 - **RESOLVED by B133 / V26 (2026-06-17):** rather than wait for `fwspublicservices` to recover, NWI was pointed
   at the live sibling raster host `fwsprimary.wim.usgs.gov` and **verified rendering in a real browser** — see V26.
   (The old `fwspublicservices` host is still 500; this trigger is superseded.)
-
-### V25 — Detention pond expansion: lock-as-existing baseline + storage gained (B132) ⚠️ SUPERSEDED by V30 / B139
-- ⚠️ **Superseded 2026-06-17 by V30 / B139.** The "Lock as existing pond" button this verified was replaced by the **"Expand this pond"** mode (B139) — that exact flow no longer exists. The detention math + dashed ghost it checked live on and were re-verified under V30. No action; kept for history.
-- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
-- **Steps:** Open a site, draw a **Detention Pond** (rectangle or click-points irregular). Select it → the right
-  panel's **Detention storage** section now ends with a **"Lock as existing pond"** button. (1) Click it → a toast
-  confirms the lock and a faint **dashed ghost** of the current outline appears under the pond. (2) Drag a corner /
-  edit a vertex to **enlarge** the footprint (and/or raise **Total depth**) → an **"Expansion vs. existing"** box
-  shows **Existing storage**, **Proposed storage**, and a green **"Storage gained +X.XX ac-ft"** (plus cf) that
-  updates live as you drag. (3) **Shrink** the pond below the baseline → the line flips to red **"Storage lost"**.
-  (4) **Clear** → ghost and the comparison box disappear; depth/freeboard/slope are retained. (5) Save, reload the
-  site → the locked baseline (ghost + numbers) persists. (6) **Rotate** the pond before locking, then enlarge → the
-  ghost stays aligned to the real (rotated) original outline, not offset.
-- **Expect:** the gain equals proposed − existing computed with the SAME depth/slope method (so it's apples-to-
-  apples); ghost lands exactly on the original outline for both rectangle and irregular ponds, rotated or not;
-  numbers and ghost survive reload; "screening only — confirm with your civil engineer" caveat shown.
-- **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
-  offset/rotated, gain number not updating, baseline lost on reload).
 
 ### V26 — NWI wetlands restored from the live `fwsprimary` raster host (B133) ⚠️ SUPERSEDED by V27
 - ⚠️ **Superseded 2026-06-17 by V27 / B135.** This verified the raster *renders + 200 + CORS*, but the source
@@ -297,28 +312,6 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   'https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer/export?bbox=-10594500,3487000,-10591500,3490000&bboxSR=102100&imageSR=102100&size=10,10&layers=show:1,2&f=image'`
   should return **200**. **Also watch the `Test/` path** — it's USFWS staging and may be renamed when their production
   `Wetlands/MapServer` is repopulated; if this 404/500s, NWI shows the honest "service unavailable" (B129) until re-pointed.
-
-### V29 — Fort Bend parcels are clickable, not just visible (B137) ✅
-- **Added** 2026-06-17 · **Cadence** once (bugfix) · **Last checked** 2026-06-17 ✅ · **Next check** done
-- **✅ VERIFIED LIVE 2026-06-17 on planyr.io** (headless Chromium, logged-out). Geocoded to Sugar Land (Fort
-  Bend), entered **Select parcels**, clicked a lot → it **selected on the first click**: the selection card
-  read **"1 parcel · 0.34 ac · Highway 90A"** with the orange highlight, and **"No parcel right there" never
-  fired**. The browser console confirmed `gis.fbcad.org/serverarcgis2/.../layers` was **CORS-blocked /
-  unreachable** (FBCAD down, as at fix time) — so the lot selected **purely via the statewide TxGIO fallback**,
-  which is exactly the B137 fix. Screenshot evidence captured. (Signed-in county-label relabel — B36a / V3 —
-  still rides the same code path; not re-exercised here since auth is CORS-blocked in the sandbox.)
-- **Steps:** Map view → "＋ Select parcels" → pan to a **Fort Bend** area (e.g. Sugar Land / Rosenberg /
-  Richmond) and zoom in until purple parcel outlines paint. (1) Click directly on a lot → it should
-  **select** (orange highlight + the selection card shows acreage), NOT pop "No parcel right there." (2)
-  Click it again → it deselects. (3) Confirm a **Harris** lot still selects exactly as before (no regression).
-  (4) Plan the selected Fort Bend lot → the planner hand-off should record **county = fortbend** (the B36a
-  relabel runs because the hit came via the statewide TxGIO layer).
-- **Expect:** any displayed Fort Bend outline is selectable; Harris unchanged; the saved site's county reads
-  Fort Bend. Works even though FBCAD's own host may be down — the statewide TxGIO layer answers the click.
-- **Note:** FBCAD (`gis.fbcad.org/serverarcgis2`) was returning HTTP 503 at fix time; if it comes back up the
-  county CAD will answer first and TxGIO stays the fallback — either way the lot must select.
-- **If it fails:** if a clearly-outlined Fort Bend lot still won't select, that's a real regression — log ❌
-  here with the coordinate; otherwise note what looked off (no data risk).
 
 ### V30 — Detention pond "Expand this pond" mode (B139) ✅
 - **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Self-verified 2026-06-17** (headless Chromium, logged-out preview build) · supersedes V25
@@ -455,13 +448,6 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
   - Zero console/page errors.
   - lint 0 · **230 tests** · build green; `SitePlannerApp` lazy chunk intact.
 - **Typing guard (code-verified, not regressed):** the bail-when-a-field-is-focused guard is pre-existing (`document.activeElement` is INPUT/SELECT/TEXTAREA → return); this change only **appended** `contentEditable`, so the "Delete while editing a field must not nuke canvas elements" behavior is unchanged. (A live headless guard test was flaky only because reliably focusing the right panel input in the built UI was finicky — not a behavior gap.)
-
-### V41 — Grab an unfilled markup shape by its INTERIOR, not just the border line (B155 increment 1) ✅
-- **Added** 2026-06-18 · **Checked** 2026-06-18 — self-verified, headless Chromium (built artifact via `vite preview`) · **Cadence** once (fix acceptance)
-- **Why:** owner-reported — selecting a markup rectangle was "kinda difficult, you have to grab exactly on the line." Cause: closed shape markups (`rect`/`ellipse`/`polygon`) rendered `fill:"none"` with selection on the element's own `onPointerDown`, so only the painted 2px stroke was a click target. Fix: `pointerEvents:"all"` on those shapes (same technique B142 used for text/callout boxes) so the **whole interior** is a hit target even when unfilled. Applied in `SitePlanner.jsx` and `components/ParcelDrawing.jsx` (the Box tool).
-- **Steps (Site Planner):** "Start blank" → **Rectangle** tool (R) → dragged an unfilled box → **Escape** (deselect) → clicked the rectangle's **interior centre** (not the border).
-- **Result ✅:** the drawn `<rect>` carries `pointer-events="all"` with `fill="none"` (interior is a hit target). Selection handles (the rotate `circle[r="6"]`) read **1 after draw → 0 after Escape → 1 after the interior click** — i.e. clicking inside the empty box re-selected it; the "MARKUP · RECT" panel opened (Fill opacity at 0, confirming it's unfilled). Screenshot `/tmp/b150-after-interior-click.png` shows the selected unfilled box with grips. lint 0 errors · **230 tests** · build green; `SitePlannerApp` / `DocReview` lazy chunks intact.
-- **Not covered:** **ParcelDrawing's** identical one-attribute change (the Box on a parcel drawing) wasn't separately driven — it needs a real drawing attached + rasterized (V9's flow), which is awkward logged-out; it's the same `pointerEvents="all"` edit on an analogous `fill:"none"` rect whose move handler already `stopPropagation`s, so low-risk by analogy. Doc Review's rect interior-select was already shipped under B33. The broader B155 tranche (shared `hitTest`, screen-space tolerance, forgiving line/polyline hit area, z-order tie-break, hover preview B156) is **not** in this increment — still ⏳ in BACKLOG B155/B156.
 
 ### V47 — Parcel active-state inheritance (B213) + edge-run setbacks (B214) + fanned dimensions (B215) ✅
 - **Added** 2026-06-19 · **Checked** 2026-06-19 — self-verified, headless Chromium against the local `dist/` build (logged-out) · **Cadence** once (feature + bugfix acceptance)

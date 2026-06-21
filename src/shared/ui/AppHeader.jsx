@@ -4,8 +4,11 @@
  *               || project name (center) ||
  *               save slot | auth control
  *
- * Row 2 (36px): module tabs (Site · Schedule · Markup)
+ * Row 2 (44px): module tabs (Site · Schedule · Markup)
  *               || toolbar slot (workspace-specific tools) ||
+ * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
+ * happens, so it carries the visual weight; the nav row stays thin. Don't equalise them
+ * — near-identical heights are what made "which row matters?" ambiguous.
  *
  * Props
  *   module        — active workspace id ('site-planner' | 'scheduler' | 'doc-review')
@@ -357,8 +360,8 @@ export default function AppHeader({
         </div>
       </div>
 
-      {/* ── Row 2 — 36px ────────────────────────────────────────────── */}
-      <div style={{ height: 36, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
+      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ── */}
+      <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
 
         {/* Module tabs */}
         <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
@@ -388,7 +391,7 @@ export default function AppHeader({
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
     {multiTab.conflictRisk && (
-      <div role="status" style={{ position: "fixed", top: 70, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
+      <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
         <span>⧉ This project is open in <b>another tab</b>. Editing it in more than one tab can conflict — work in a single tab to be safe.</span>
       </div>
     )}

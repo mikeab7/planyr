@@ -38,8 +38,12 @@ const pill = {
 const avatar = (signedIn, size = 20) => ({
   width: size, height: size, borderRadius: 99, flex: "none",
   display: "grid", placeItems: "center",
-  fontSize: size >= 28 ? 12.5 : 10.5, fontWeight: 800, color: "#fff",
-  background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)",
+  fontSize: size >= 28 ? 12.5 : 10.5, fontWeight: 800,
+  // Signed-in: white initial on the green gradient. Signed-out: the badge sits on the
+  // light/elevated pill, so it must use chrome tokens — a hardcoded white "›" was
+  // invisible on the now-light chrome (same theme-flip trap as B341).
+  color: signedIn ? "#fff" : "var(--chrome-text)",
+  background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "var(--chrome-bg)",
 });
 const acctPanel = {
   padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",

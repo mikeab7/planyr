@@ -121,7 +121,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
             <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: "-0.01em" }}>
               Review on-device sites
             </div>
-            <div style={{ fontSize: 11.5, color: "#607aaa", marginTop: 2 }}>
+            <div style={{ fontSize: 11.5, color: "#8DA2C8", marginTop: 2 }}>
               {decidedCount} of {sites.length} decided
             </div>
           </div>
@@ -197,7 +197,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
                         }}>
                           {label.primary}
                         </div>
-                        <div style={{ fontSize: 11, color: "#4a6080", marginTop: 1, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 11, color: "#8DA2C8", marginTop: 1, display: "flex", gap: 6, flexWrap: "wrap" }}>
                           {label.secondary && <span>{label.secondary}</span>}
                           {meta && <span>{meta}</span>}
                           {planName && <span>{planName}</span>}
@@ -213,7 +213,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
                         }}>
                           {empty ? "Empty site (nothing was saved)" : "Untitled site"}
                         </div>
-                        <div style={{ fontSize: 11, color: "#4a6080", marginTop: 1 }}>
+                        <div style={{ fontSize: 11, color: "#8DA2C8", marginTop: 1 }}>
                           {s.updatedAt ? `Created ${formatDate(s.updatedAt)}` : ""}
                         </div>
                       </>
@@ -225,10 +225,10 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80", background: "rgba(74,222,128,0.12)", borderRadius: 5, padding: "2px 8px" }}>Saved</span>
                   )}
                   {isSkipped && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>On device</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9aa3b2", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>On device</span>
                   )}
                   {isDiscarded && (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>Discarded</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9aa3b2", background: "rgba(107,114,128,0.13)", borderRadius: 5, padding: "2px 8px" }}>Discarded</span>
                   )}
                   {isFailed && (
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#f87171", background: "rgba(248,113,113,0.12)", borderRadius: 5, padding: "2px 8px" }}>Failed</span>
@@ -244,7 +244,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
                         onClick={(e) => { e.stopPropagation(); handleDiscard(s.id); }}
                         style={{
                           flex: 1, cursor: "pointer",
-                          background: "#374151", color: "#9ca3af",
+                          background: "#374151", color: "#b8bdc7",
                           border: "1px solid #4b5563", borderRadius: 7,
                           padding: "7px 0", fontFamily: F, fontSize: 12.5, fontWeight: 700,
                         }}
@@ -308,7 +308,7 @@ export function SiteReviewModal({ uid, onOpen, onClose }) {
           display: "flex", alignItems: "center", gap: 10,
         }}>
           {decidedCount < sites.length ? (
-            <span style={{ flex: 1, fontSize: 12, color: "#4a6080" }}>
+            <span style={{ flex: 1, fontSize: 12, color: "#8DA2C8" }}>
               {sites.length - decidedCount} remaining · click a site or use Open to see it first
             </span>
           ) : (

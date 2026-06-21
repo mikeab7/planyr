@@ -22,7 +22,6 @@ import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectLibrary from "./components/ProjectLibrary.jsx";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
@@ -105,7 +104,6 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // --- cloud persistence (stitched-set review) ---
   const [reviewId, setReviewId] = useState(() => newReviewId());
   const [meta, setMeta] = useState(() => newMeta()); // { title, projectId, project, discipline, item, revision, docDate }
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const pdfsRef = useRef([]); useEffect(() => { pdfsRef.current = pdfs; });
   const placedRef = useRef([]); useEffect(() => { placedRef.current = placed; });
   const sameName = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
@@ -639,7 +637,6 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFiles(e.dataTransfer.files); }}>
-      <ProjectLibrary open={libraryOpen} onClose={() => setLibraryOpen(false)} onOpenReview={onOpenReview} signedIn={signedIn} />
       {/* toolbar */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: PAL.chrome, borderBottom: "1px solid var(--chrome-divider)", flexWrap: "wrap" }}>
         <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={onReview}>‹ Single sheet</button>
@@ -660,8 +657,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={btn(showRefs)} onClick={() => setShowRefs((v) => !v)} title="Show clickable detail-callout hotspots — click one to pull up that detail in a popup (B350)">{showRefs ? "✓ " : ""}Details</button>
-        <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
-        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
+        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} idle={placed.length === 0} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
