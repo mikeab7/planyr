@@ -18,6 +18,8 @@
  */
 import { readTitleBlockText, classifyDiscipline } from "./titleBlockParse.js";
 import { parseSheetScale } from "../../workspaces/site-planner/lib/overlayScale.js";
+import { parseDetailRefs, parseDetailAnchors } from "./detailRefs.js";
+import { parseNotes } from "./sheetNotes.js";
 
 const norm = (s) => (s || "").toString().toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -190,6 +192,7 @@ export function readSheetMeta(page = {}) {
       hasText: false, confidence: 0,
       sheetNumber: "", sheetTitle: "", discipline: "Other", item: "Document", revision: "", date: "",
       scale: null, titleBlock: null, drawingArea: drawingAreaOf(dims, null), matchLines: [],
+      detailRefs: [], detailAnchors: [], notes: [],
     };
   }
   const lines = reconstructLines(items);
@@ -198,6 +201,11 @@ export function readSheetMeta(page = {}) {
   const matchLines = parseMatchLines(lines, dims);
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   const sheetTitle = readSheetTitle(lines, band, item);
+  // Detail-callout bubbles + where details are defined (B350, Bluebeam click-to-detail) and the
+  // notes/legend blocks (B350, keep every sheet's notes through the crop).
+  const detailRefs = parseDetailRefs(items, lines, dims);
+  const detailAnchors = parseDetailAnchors(lines, dims);
+  const notes = parseNotes(lines, dims);
 
   // Confidence: a blend of the spatial reads we actually got — used to surface low-confidence
   // sheets to the user rather than silently mis-group/mis-stitch them ("never auto-guess").
@@ -213,5 +221,6 @@ export function readSheetMeta(page = {}) {
     sheetNumber: fields.sheetNumber || "", sheetTitle,
     discipline, item, revision: fields.revision || "", date: fields.date || "",
     scale, titleBlock: band, drawingArea: drawingAreaOf(dims, band), matchLines,
+    detailRefs, detailAnchors, notes,
   };
 }

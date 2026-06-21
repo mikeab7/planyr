@@ -16,6 +16,8 @@ import { parseFeet } from "./lib/parseLength.js";
 import { fwd, inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
 import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
+import { normSheet } from "../../shared/files/detailRefs.js";
+import { aggregateNotes } from "../../shared/files/sheetNotes.js";
 import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
@@ -29,6 +31,7 @@ const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
+const DBOX = { w: 380, h: 256 }; // detail "cloud" popup viewing box (px) — stable module const (B350)
 // Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B300/B301 alignment guards) lives
 // in lib/stitchGeom.js so it can be unit-tested away from the component.
 
@@ -58,6 +61,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const [showAllPages, setShowAllPages] = useState(false); // safety net: reveal the raw per-page tray
   const [cropBlocks, setCropBlocks] = useState(true);      // crop title-block bands on grouped composites (B338)
   const [legendOpen, setLegendOpen] = useState(true);      // the pinned composite key (B338)
+  const [notesOpen, setNotesOpen] = useState(false);       // expand the aggregated notes/legend (B350)
+  const [showRefs, setShowRefs] = useState(true);          // show clickable detail-callout hotspots (B350)
+  const [detail, setDetailPopup] = useState(null);         // open detail "cloud" popup (B350)
   const [notice, setNotice] = useState("");                // transient auto-stitch result line
   const drag = useRef(null);
 
@@ -191,18 +197,27 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     return next;
   });
 
+  // Find a page's read metadata (detail refs/anchors/notes/sheet number) from the background
+  // read+group pass, so a single-page add carries the same furniture a grouped add does.
+  const pageMetaOf = (pdf, pageNum) => {
+    for (const g of pdf.groups || []) { const pg = (g.pages || []).find((p) => p.pageNum === pageNum); if (pg) return pg; }
+    return {};
+  };
+
   const addSheet = async (pdf, pageNum) => {
     if (loadingRef.current) return; // a load is rebuilding placed[]; its blind setPlaced would clobber this sheet (B51)
     setBusy(true);
     try {
       const img = await renderPageToImage(pdf.doc, pageNum, 2);
+      const pm = pageMetaOf(pdf, pageNum);
       setPlaced((arr) => {
         let M = { ...ID };
         if (arr.length) { const right = Math.max(...arr.map((s) => sheetBBox(s).maxX)); M = { ...ID, e: right + 40 }; }
         // The first sheet IS the world frame (auto-aligned). Every later sheet drops at
         // identity scale offset to the right and must be Aligned before its measurements
         // can be trusted — track that per sheet so we can flag + warn until it is (B301).
-        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0 }];
+        return [...arr, { id: uid(), srcId: pdf.srcId, pageNum, name: `${pdf.name} · p${pageNum}`, href: img.href, baseW: img.baseW, baseH: img.baseH, M, missing: false, aligned: arr.length === 0,
+          sheetNumber: pm.sheetNumber || "", detailRefs: pm.detailRefs || [], detailAnchors: pm.detailAnchors || [], notes: pm.notes || [] }];
       });
     } finally { setBusy(false); }
   };
@@ -225,6 +240,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           name: `${pdf.name.replace(/\.pdf$/i, "")} · ${pg.sheetNumber || "p" + pg.pageNum}`,
           href: img.href, baseW: img.baseW, baseH: img.baseH,
           drawingArea: da, sheetNumber: pg.sheetNumber || "", matchLines: pg.matchLines || [], missing: false,
+          detailRefs: pg.detailRefs || [], detailAnchors: pg.detailAnchors || [], notes: pg.notes || [],
         });
       }
       const { placements, unplaced } = autoPlaceGroup(built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines })));
@@ -402,7 +418,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
     if (mod) return;
     if (e.key === "Enter") finishArea();
-    else if (e.key === "Escape") { setDraft(null); setAlign(null); setCalInput(null); }
+    else if (e.key === "Escape") { setDraft(null); setAlign(null); setCalInput(null); closeDetail(); }
     else if ((e.key === "Delete" || e.key === "Backspace") && removeLastVertex()) e.preventDefault();
   };
   useEffect(() => {
@@ -419,7 +435,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
     stitch: {
-      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [] })),
+      placed: placed.map((s) => ({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW: s.baseW, baseH: s.baseH, M: s.M, aligned: s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] })),
       view, measures, ftPerUnit,
     },
   }), [reviewId, meta, pdfs, placed, view, measures, ftPerUnit]);
@@ -437,6 +453,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setMeta(newMeta());
     setPdfs([]); setPlaced([]); setMeasures([]); setFtPerUnit(0);
     setView({ panX: 40, panY: 40, zoom: 0.4 }); setAlign(null); setDraft(null); setTool("pan"); setErr(""); setCalInput(null); setNotice(""); setShowAllPages(false);
+    closeDetail();
     clearHistory();
     pdfsRef.current = []; placedRef.current = [];
   };
@@ -477,7 +494,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         // First placed sheet is always the world frame; older saves predate the `aligned`
         // flag, so treat the rest as aligned (they were saved with a real transform) — only
         // genuinely unaligned new sheets carry aligned:false, so we never falsely flag. (B301)
-        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [] });
+        out.push({ id: s.id, srcId: s.srcId, pageNum: s.pageNum, name: s.name, baseW, baseH, M: s.M, href, missing, aligned: idx === 0 ? true : s.aligned !== false, drawingArea: s.drawingArea || null, grouped: !!s.grouped, groupLabel: s.groupLabel || null, matchLines: s.matchLines || [], sheetNumber: s.sheetNumber || "", detailRefs: s.detailRefs || [], detailAnchors: s.detailAnchors || [], notes: s.notes || [] });
         idx++;
       }
       if (tok !== loadTok.current) return; // superseded before committing the placed sheets (B52)
@@ -521,6 +538,77 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // any zoom instead of being baked into the raster.
   const composite = [...new Map(placed.filter((s) => s.groupLabel).map((s) => [s.groupLabel, s])).values()];
 
+  // B350 — pull EVERY placed sheet's notes/legend into one pinned model, deduped, with the
+  // sheets each note appeared on, so a note that changes page to page is captured (not lost
+  // behind the title-block crop). Keyed by sheet number when known, else the placement order.
+  const notesModel = aggregateNotes(placed.map((s, i) => ({ sheet: s.sheetNumber || `#${i + 1}`, notes: s.notes || [] })));
+  const noteCount = notesModel.reduce((n, g) => n + g.lines.length, 0);
+
+  // B350 — resolve a detail callout's target sheet to something we can show in the popup:
+  // an already-placed sheet's rendered image first (instant), else a page from a loaded PDF
+  // (rendered on demand), else nothing (honest "not in this set").
+  const findSheetByCode = (code) => {
+    const want = normSheet(code);
+    if (!want) return null;
+    const p = placedRef.current.find((s) => s.href && normSheet(s.sheetNumber) === want);
+    if (p) return { href: p.href, baseW: p.baseW, baseH: p.baseH, anchors: p.detailAnchors || [], name: p.name };
+    for (const pdf of pdfsRef.current) {
+      if (!pdf.doc) continue;
+      for (const g of pdf.groups || []) {
+        const pg = (g.pages || []).find((x) => normSheet(x.sheetNumber) === want);
+        if (pg) return { pdf, pageNum: pg.pageNum, anchors: pg.detailAnchors || [], name: `${pdf.name.replace(/\.pdf$/i, "")} · ${pg.sheetNumber}` };
+      }
+    }
+    return null;
+  };
+
+  // Open the "cloud" — pull up the referenced detail without leaving the current drawing.
+  const openDetail = async (ref, screen) => {
+    setDetailPopup({ ref, screen, status: "loading", title: `Detail ${ref.detail} · Sheet ${ref.sheetRaw || ref.sheet}` });
+    const found = findSheetByCode(ref.sheet);
+    if (!found) { setDetailPopup({ ref, screen, status: "missing", title: `Detail ${ref.detail} · Sheet ${ref.sheetRaw || ref.sheet}` }); return; }
+    try {
+      let href = found.href, baseW = found.baseW, baseH = found.baseH;
+      if (!href && found.pdf) { const img = await renderPageToImage(found.pdf.doc, found.pageNum, 2); href = img.href; baseW = img.baseW; baseH = img.baseH; }
+      // If the target sheet labels this detail ("DETAIL 5"), center the popup on it; else fit.
+      const anchor = (found.anchors || []).find((a) => a.detail === ref.detail);
+      setDetailPopup({ ref, screen, status: "ready", title: `Detail ${ref.detail} · Sheet ${ref.sheetRaw || ref.sheet}`, href, baseW, baseH, anchor: anchor || null, name: found.name, ownHref: !found.href });
+    } catch (_) { setDetailPopup({ ref, screen, status: "missing", title: `Detail ${ref.detail} · Sheet ${ref.sheetRaw || ref.sheet}` }); }
+  };
+  // Free a popup image we rendered ourselves (not one borrowed from a placed sheet) on close/replace.
+  const closeDetail = () => { setDetailPopup((d) => { if (d && d.ownHref && d.href && d.href.startsWith("blob:")) { try { URL.revokeObjectURL(d.href); } catch (_) {} } return null; }); };
+  const detailDrag = useRef(null);
+  // Initialise the popup's view once the image is ready: center+zoom on the named detail if the
+  // target sheet labels it, else fit the whole sheet. The user can then pan/zoom inside the cloud.
+  useEffect(() => {
+    if (!detail || detail.status !== "ready" || detail.view || !detail.baseW) return;
+    const fit = Math.min(DBOX.w / detail.baseW, DBOX.h / detail.baseH);
+    let view;
+    if (detail.anchor) {
+      const sc = Math.min(Math.max(fit * 3.2, fit), 2);
+      view = { scale: sc, tx: DBOX.w / 2 - sc * detail.anchor.x, ty: DBOX.h / 2 - sc * detail.anchor.y };
+    } else {
+      view = { scale: fit, tx: (DBOX.w - fit * detail.baseW) / 2, ty: (DBOX.h - fit * detail.baseH) / 2 };
+    }
+    setDetailPopup((d) => (d ? { ...d, view } : d));
+  }, [detail]);
+  const detailWheel = (e) => {
+    e.preventDefault();
+    const box = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - box.left, my = e.clientY - box.top;
+    setDetailPopup((d) => {
+      if (!d || !d.view) return d;
+      const ns = Math.max(0.03, Math.min(10, d.view.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      const k = ns / d.view.scale;
+      return { ...d, view: { scale: ns, tx: mx - (mx - d.view.tx) * k, ty: my - (my - d.view.ty) * k } };
+    });
+  };
+  const detailFit = () => setDetailPopup((d) => {
+    if (!d || !d.baseW) return d;
+    const fit = Math.min(DBOX.w / d.baseW, DBOX.h / d.baseH);
+    return { ...d, view: { scale: fit, tx: (DBOX.w - fit * d.baseW) / 2, ty: (DBOX.h - fit * d.baseH) / 2 } };
+  });
+
   // The tray shows LOGICAL sheets (B335) once a file has been read+grouped: one entry per
   // group/single, click to add the whole thing auto-stitched. "Show all pages" (or a file still
   // being read) falls back to the raw per-page list — the safety net that never went away.
@@ -537,6 +625,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const anyGroups = pdfs.some(hasGroups);
   const G = `translate(${view.panX} ${view.panY}) scale(${view.zoom})`;
   const ls = (n) => n / view.zoom; // constant on-screen size inside the zoomed group
+  // Detail hotspots only grab clicks in Pan mode (so measure/align/calibrate clicks pass through). (B350)
+  const refsInteractive = showRefs && tool === "pan" && !align && !draft;
   // Live screen position of the inline Calibrate box, derived from the stored WORLD points each
   // render so it follows the line under pan/zoom (the box doesn't block the wheel). (B304)
   const calPos = calInput ? worldToScreen({ scale: view.zoom, tx: view.panX, ty: view.panY }, { x: (calInput.pts[0].x + calInput.pts[1].x) / 2, y: (calInput.pts[0].y + calInput.pts[1].y) / 2 }) : null;
@@ -569,6 +659,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <button style={btn(false)} onClick={() => zoomBtn(1.2)}>+</button>
         <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
+        <button style={btn(showRefs)} onClick={() => setShowRefs((v) => !v)} title="Show clickable detail-callout hotspots — click one to pull up that detail in a popup (B350)">{showRefs ? "✓ " : ""}Details</button>
         <button style={{ ...btn(false), border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }} onClick={() => setLibraryOpen(true)} title="Browse the project library">📁 Library</button>
         <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
@@ -630,6 +721,19 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                     <rect x={0} y={0} width={s.baseW} height={s.baseH} fill="#f59e0b14" stroke="#b45309" strokeWidth={ls(2.5)} strokeDasharray={`${ls(12)} ${ls(8)}`} pointerEvents="none" />
                     <text x={s.baseW / 2} y={ls(30)} fontSize={ls(22)} textAnchor="middle" fill="#b45309" fontWeight="700" pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(5) }}>⚠ Not aligned — click “Align”</text>
                   </>}
+                  {/* B350 — clickable detail-callout hotspots: ring the printed bubble; click pulls
+                      up that detail in a popup. Interactive only in Pan mode so measure/align clicks
+                      aren't swallowed; stopPropagation keeps a click from also starting a pan. */}
+                  {showRefs && (s.detailRefs || []).map((r, ri) => (
+                    <g key={"ref" + ri} transform={`translate(${r.x} ${r.y})`}
+                      style={{ cursor: refsInteractive ? "pointer" : "default" }}
+                      pointerEvents={refsInteractive ? "auto" : "none"}
+                      onPointerDown={refsInteractive ? (e) => e.stopPropagation() : undefined}
+                      onClick={refsInteractive ? (e) => { e.stopPropagation(); openDetail(r, { x: e.clientX, y: e.clientY }); } : undefined}>
+                      <circle r={ls(12)} fill="#1d4ed8" fillOpacity={detail && detail.ref === r ? 0.28 : 0.12} stroke="#1d4ed8" strokeWidth={ls(1.8)} />
+                      <text y={ls(4)} fontSize={ls(12)} textAnchor="middle" fill="#1d4ed8" fontWeight="800" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: ls(3) }}>{r.detail}</text>
+                    </g>
+                  ))}
                 </g>;
               })}
               {/* measures (world coords) */}
@@ -688,9 +792,11 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             </div>
           )}
           {/* Pinned composite KEY (B338): one merged entry per grouped plan + the auto-set scale,
-              floated over the canvas so it stays readable at any zoom (not baked into the raster). */}
-          {composite.length > 0 && legendOpen && (
-            <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 210, background: "rgba(255,255,255,0.96)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
+              floated over the canvas so it stays readable at any zoom (not baked into the raster).
+              B350 — also carries every sheet's NOTES/LEGEND, aggregated + deduped, so a note that
+              changes page to page is still shown (cropping the title block can't lose it). */}
+          {(composite.length > 0 || noteCount > 0) && legendOpen && (
+            <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 230, maxHeight: "calc(100% - 20px)", overflowY: "auto", background: "rgba(255,255,255,0.97)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>Composite key</span>
                 <button onClick={() => setLegendOpen(false)} title="Hide" style={{ border: "none", background: "none", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
@@ -701,10 +807,34 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               <div style={{ fontSize: 10.5, color: ftPerUnit ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
                 {ftPerUnit ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
               </div>
+              {noteCount > 0 && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 5 }}>
+                  <button onClick={() => setNotesOpen((v) => !v)} style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", border: "none", background: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>Notes &amp; legend · {noteCount}</span>
+                    <span style={{ fontSize: 11, color: PAL.accent }}>{notesOpen ? "hide" : "show"}</span>
+                  </button>
+                  {notesOpen && notesModel.map((g, gi) => (
+                    <div key={gi} style={{ marginTop: 5 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: PAL.ink, letterSpacing: "0.03em" }}>{g.heading}</div>
+                      {g.lines.map((ln, li) => {
+                        // A note that didn't appear on every sheet bearing this heading is a per-sheet
+                        // variation — tag it with the sheet(s) so a divergent note is obvious, not lost.
+                        const varies = g.sheetsWithHeading.length > 1 && ln.sheets.length > 0 && ln.sheets.length < g.sheetsWithHeading.length;
+                        return (
+                          <div key={li} style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.4, padding: "1px 0 1px 6px" }}>
+                            {ln.text}
+                            {varies && <span style={{ color: "#b45309", fontWeight: 700 }}> · {ln.sheets.join(", ")}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-          {composite.length > 0 && !legendOpen && (
-            <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key</button>
+          {(composite.length > 0 || noteCount > 0) && !legendOpen && (
+            <button onClick={() => setLegendOpen(true)} style={{ position: "absolute", top: 10, left: 10, zIndex: 4, ...btn(false), fontSize: 11 }}>▣ Key{noteCount > 0 ? ` · ${noteCount} notes` : ""}</button>
           )}
           {/* Auto-stitch result line (B337) — what just happened, dismissable. */}
           {notice && (
@@ -712,6 +842,46 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           )}
           {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: "#5a554a", fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Drop a whole set — it stitches itself</div><div style={{ fontSize: 12.5 }}>Drop a multi-page PDF → it groups the pages into logical sheets → click a grouped plan to add it auto-stitched, cropped, and scaled. Manual add &amp; Align stay as the safety net.</div></div></div>}
         </div>
+        {/* B350 — the detail "cloud": click a detail callout → that detail pops up here without
+            leaving the current drawing. Pulls the referenced sheet, centers on the named detail if
+            it can read where it's defined, and is pan/zoomable inside the box. */}
+        {detail && (() => {
+          const PW = DBOX.w + 22;
+          const left = Math.max(8, Math.min((detail.screen?.x || 200) - PW / 2, (typeof window !== "undefined" ? window.innerWidth : 1200) - PW - 8));
+          const top = Math.max(8, Math.min((detail.screen?.y || 200) + 18, (typeof window !== "undefined" ? window.innerHeight : 800) - DBOX.h - 96));
+          return (
+            <div style={{ position: "fixed", left, top, zIndex: 30, width: PW, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.34)", fontFamily: "system-ui, sans-serif", overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--chrome-bg)", borderBottom: "1px solid var(--chrome-divider)" }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--chrome-text)" }}>☁ {detail.title}</span>
+                <div style={{ flex: 1 }} />
+                {detail.status === "ready" && <button onClick={detailFit} style={{ ...btn(false), padding: "2px 7px", fontSize: 10.5 }} title="Fit the whole sheet">Fit</button>}
+                <button onClick={closeDetail} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--chrome-muted)", fontSize: 16, lineHeight: 1, padding: 0 }} title="Close (Esc)">×</button>
+              </div>
+              <div style={{ position: "relative", width: DBOX.w + 22, height: DBOX.h, background: "var(--canvas-mat)", overflow: "hidden" }}>
+                {detail.status === "loading" && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: PAL.muted, fontSize: 12 }}>Pulling up the detail…</div>}
+                {detail.status === "missing" && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center", padding: 16, color: PAL.muted, fontSize: 12, lineHeight: 1.5 }}>Sheet {detail.ref.sheetRaw || detail.ref.sheet} isn’t in this set yet.<br />Open or drop it, then click the callout again.</div>}
+                {detail.status === "ready" && detail.href && (
+                  <div style={{ position: "absolute", inset: 0, cursor: detailDrag.current ? "grabbing" : "grab", touchAction: "none" }}
+                    onWheel={detailWheel}
+                    onPointerDown={(e) => { detailDrag.current = { sx: e.clientX, sy: e.clientY, tx: detail.view?.tx || 0, ty: detail.view?.ty || 0 }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} }}
+                    onPointerMove={(e) => { const dd = detailDrag.current; if (!dd) return; setDetailPopup((d) => (d && d.view ? { ...d, view: { ...d.view, tx: dd.tx + (e.clientX - dd.sx), ty: dd.ty + (e.clientY - dd.sy) } } : d)); }}
+                    onPointerUp={(e) => { detailDrag.current = null; try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} }}
+                    onPointerCancel={() => { detailDrag.current = null; }}>
+                    {detail.view && <img src={detail.href} alt={detail.title} draggable={false}
+                      style={{ position: "absolute", left: 0, top: 0, width: detail.baseW, height: detail.baseH, transformOrigin: "0 0", transform: `translate(${detail.view.tx}px, ${detail.view.ty}px) scale(${detail.view.scale})`, imageRendering: "auto", userSelect: "none" }} />}
+                    {detail.view && detail.anchor && (() => {
+                      const cx = detail.view.tx + detail.view.scale * detail.anchor.x, cy = detail.view.ty + detail.view.scale * detail.anchor.y;
+                      return <svg width={DBOX.w + 22} height={DBOX.h} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}><circle cx={cx} cy={cy} r={18} fill="none" stroke={PAL.accent} strokeWidth={2.5} /></svg>;
+                    })()}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 10, color: PAL.muted, padding: "4px 10px", borderTop: `1px solid ${PAL.line}`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {detail.status === "ready" ? `${detail.name || ""} · scroll to zoom · drag to pan` : ""}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* right panel: placed sheets + takeoff */}
         <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>

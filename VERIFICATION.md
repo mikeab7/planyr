@@ -60,6 +60,19 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
+**Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
+is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose
+GENERAL NOTES vary by page, a stacked "5 / A-3" detail callout on C-5, and a separate A-3 details sheet:
+- **Notes:** the pinned Composite key shows **"Notes & legend · 3"** (two common notes + the C-5-only one,
+  deduped); expanding it surfaces the **C-5-only note flagged with its sheet** (so a per-page change is
+  obvious, not lost behind the title-block crop).
+- **Detail cloud:** the "5/A-3" callout renders a clickable hotspot; clicking it opens a **"Detail 5 ·
+  Sheet A-3"** cloud popup that **renders the referenced A-3 sheet** — without leaving the current drawing.
+- **No regression:** `verify-b335-b339.mjs` still **13/13** (drop-a-set group/stitch/crop/calibrate). 14
+  new unit tests; full suite green (1029 with main folded in); lint **0 errors**; build green; lazy chunk split intact.
+- **Optional eyeball (not blocking):** a signed-in save→reload of a stitched review to confirm the new
+  `detailRefs`/`notes` ride the cloud row (the data path mirrors the proven stitch persistence).
 ### V94 — Pinch stress test (B353): the B331 pinch is robust AND a shipped regression (it broke Site Planner vertex editing) is fixed ✅ (fully self-verified headless — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug + stress acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out; **trusted** CDP multitouch on a `hasTouch` context) · **Next check** — none required; an optional one-time pinch on a physical touchscreen remains the only nicety (carried from V88).
 - **What the stress test FOUND (and fixed):** the B331 pinch handlers were added as a *duplicate* `onPointerDownCapture`/`onPointerMoveCapture` on the Site Planner SVG; JSX silently keeps only the last, so the vertex-edit capture handlers were dropped — **vertex selection / shift-click-insert / insert-hover-hint broke on mouse and touch**. Fixed by merging the capture props (pinch first, vertex when not pinching). Plus multitouch hardening (`reseedPinch`: 3rd-finger absorb + partial-lift re-baseline) and a permanent AST guard test (`test/noDuplicateJsxProps.test.js`).
