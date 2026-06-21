@@ -1,39 +1,39 @@
 ## ✅ Done
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
-     "Drive is the primary file home" direction. Minted **B316–B319** (highest B# across both files was
+     "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across both files was
      B315 — B25431 / B3340 in this file are CSS hex colours, not IDs). Filed in BACKLOG.md Open AND fixed
      + verified the same session per STANDING RULE #1 (branch `claude/bold-bohr-hohz2x`).
      Dedup before filing:
-       • NEW-1 (B316): the PRIMARY claim ("there is no Drive delete anywhere") was ALREADY shipped under
+       • NEW-1 (B321): the PRIMARY claim ("there is no Drive delete anywhere") was ALREADY shipped under
          the B207 Drive wiring — `deleteReview` already removes `sources[].driveKey` via `deleteFromDrive`.
-         So B316 is only the RESIDUAL the brief flagged: loadReview→null (network) left keys=[] → nothing
+         So B321 is only the RESIDUAL the brief flagged: loadReview→null (network) left keys=[] → nothing
          cleaned. Distinct from B38(a) (re-file orphaning on upsert).
-       • NEW-2/3/4 (B317/B318/B319): net-new. NOT duplicates of the single-sheet VIEWER batch B288–B296
+       • NEW-2/3/4 (B322/B323/B324): net-new. NOT duplicates of the single-sheet VIEWER batch B288–B296
          (zoom/pan/markup interaction) nor the STITCH-guard batch B300–B302 (align/measure-commit) — those
          never touched which storage backend a source goes to, nor the autosave gating. -->
-### B316 — `deleteReview` orphans the Drive copy when the cloud record can't be read `[Doc Review / Files]` (bug)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B316**)*
+### B321 — `deleteReview` orphans the Drive copy when the cloud record can't be read `[Doc Review / Files]` (bug)  *(arrived as coworker-chat "NEW-1" 2026-06-21; minted **B321**)*
 `[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** Deleting a review no longer leaves source bytes orphaned in Google Drive (or Supabase Storage) when the cloud record read misses.
 - **Already shipped (B207 Drive wiring):** the brief's primary point — "there is no Drive delete anywhere in the code" — was already addressed: `deleteReview` removes every `sources[].driveKey` through `deleteFromDrive` (a `DELETE /api/files?key=…`) alongside the Supabase `BUCKET.remove(keys)`.
 - **Residual fix (this session):** if `loadReview(id)` returns `null` (a transient network miss), `sources` was `[]`, so **neither** the Supabase objects **nor** the Drive objects were removed. `deleteReview` now falls back to the synchronous **local mirror** (`readDraft(uid, id)`, which carries the same `sources[]` incl. `storageKey` + `driveKey`) to recover the file list, so cleanup still runs. Best-effort and in parallel; it never blocks the row delete, and the legacy `<uid>/<id>/` folder sweep is unchanged.
 - **Verified — lint 0 · 788 tests · build green** (8 new in `test/docPersistence.test.js`); doc-review lazy chunk intact. The storage path is auth-gated (cloud + Drive), so the unit tests assert the graceful-degrade contract; a signed-in delete-with-Drive is the live check (logged in VERIFICATION).
 > **Dedup:** primary already done under B207; this is the loadReview-null residual. Distinct from B38(a) (upsert re-file orphaning).
 
-### B317 — "Open PDF…" and every Stitcher sheet upload to Supabase only, never Drive `[Doc Review / Stitch + Files]` (bug)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B317**)*
+### B322 — "Open PDF…" and every Stitcher sheet upload to Supabase only, never Drive `[Doc Review / Stitch + Files]` (bug)  *(arrived as coworker-chat "NEW-2" 2026-06-21; minted **B322**)*
 `[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** Interactively-opened single sheets and **all** stitched sheets now go through the **same Drive-first / Supabase-fallback path** as filing, instead of Supabase-only.
 - **One shared storage policy:** added `reviewStore.storeSource(srcId, blob, { projectId, discipline, fileName })` — push to Google Drive (the primary home); only if Drive doesn't take it, fall back to Supabase Storage. `fileNewReview` was refactored to call it too, so there's a single source of truth for "where a source's bytes live" (no more two slightly-different copies of the policy).
 - **Call sites:** `DocReview.openFile` and `Stitcher.openFiles` now call `storeSource` (were `uploadSource` → Supabase only) and persist `driveKey`; both `buildSnapshot`s carry `driveKey`; `Stitcher.loadStitch` reads back Drive-first then Supabase (`DocReview.fetchSourceBytes` already did). 
 - **Why it matters:** (a) these files now live in Drive like filed ones (the "Drive is the primary file home" direction); (b) they **bypass Supabase's 50 MB per-file cap on the happy path** — an E-size sheet or a large multi-sheet set that used to silently flag `oversize` ("re-drop on load") now stores in Drive; (c) stitched sheets carry a `driveKey`, so a stitched set can read its sheets back from Drive.
 - **Verified — lint 0 · 788 tests · build green** (`storeSource` degrade-path test); doc-review lazy chunk intact. The full Drive round-trip needs the (not-yet-deployed) Drive backend + sign-in, so it's the live check; the fallback to Supabase keeps today's behaviour until Drive is on.
-> **Dedup:** net-new; the viewer (B288–B296) and stitch-guard (B300–B302) batches never touched the storage backend choice. Pairs with B316 (Drive delete) and B318 (keyless-source window).
+> **Dedup:** net-new; the viewer (B288–B296) and stitch-guard (B300–B302) batches never touched the storage backend choice. Pairs with B321 (Drive delete) and B323 (keyless-source window).
 
-### B318 — A source saved with a null key during the upload window becomes unfetchable on a quick reload `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-3" 2026-06-21; minted **B318**)*
+### B323 — A source saved with a null key during the upload window becomes unfetchable on a quick reload `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-3" 2026-06-21; minted **B323**)*
 `[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** A file opened and then reloaded **before its upload resolved** no longer strands the backdrop with a pointer the loader can't fetch.
 - **Cause:** `openFile`/`openFiles` set the source into state immediately with `storageKey:null` (and no `driveKey`), which made it an autosave dep; the debounce + the synchronous local mirror could capture that **keyless** source before the upload's `.then(setSource w/ key)` ran. A reload in that window saved a record pointing at a source with no key → `fetchSourceBytes` couldn't fetch it → a permanent "re-open it to view", even though the bytes may have landed.
 - **Fix:** `buildSnapshot` now persists a source only when it's actually stored — `isStoredSource(s) = !!(s.storageKey || s.driveKey || s.oversize)`. While a just-opened/added file is still uploading (keyless), it's **omitted** from the saved `sources`, so a mid-upload reload can't save a broken pointer; the markups still save, and once the upload resolves the source is persisted normally (its key change re-triggers autosave). Applied to both the single-sheet and the per-sheet Stitcher snapshots. (`oversize` still counts as "stored" → the existing graceful "re-drop on load" path is unchanged.)
 - **Verified — lint 0 · 788 tests · build green** (`isStoredSource` unit tests: keyed/drive/oversize ⇒ persistable; keyless/absent ⇒ not); doc-review lazy chunk intact.
-> **Dedup:** net-new; shares the `isStoredSource` predicate with B317's snapshots. Backdrop-only loss (markups were always safe).
+> **Dedup:** net-new; shares the `isStoredSource` predicate with B322's snapshots. Backdrop-only loss (markups were always safe).
 
-### B319 — A genuine edit made within the post-open suspend window isn't flagged dirty → never reaches the cloud `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-4" 2026-06-21; minted **B319**)*
+### B324 — A genuine edit made within the post-open suspend window isn't flagged dirty → never reaches the cloud `[Doc Review]` (bug)  *(arrived as coworker-chat "NEW-4" 2026-06-21; minted **B324**)*
 `[x]` **Fixed + verified 2026-06-21 (branch `claude/bold-bohr-hohz2x`).** An edit made right after opening/resuming a review (inside the ~1.5 s programmatic-load window) is now mirrored, flagged dirty, and reaches the cloud.
 - **Cause:** the autosave effect early-returned for the whole suspend window (B19), skipping **both** the local mirror **and** `dirtyRef=true`. The unmount/hide flush gates its cloud upsert on `dirtyRef`, so an edit in that window never reached the cloud (lost cross-device, or entirely on a tab crash before flush). The window is armed at load-start, so it usually elapsed harmlessly during a large PDF's fetch — it bit on small/cached PDFs.
 - **Fix:** the per-tick decision is now a pure, unit-tested `lib/autosavePlan.js → planAutosave({enabled, empty, loadEcho, suspended})`. The programmatic-load **echo** is identified precisely by a `loadEchoRef` flag (armed by `suspendSave`, consumed on the echo tick) rather than by the blunt time window, so it's still skipped — but a **genuine edit**, even inside the window, now **mirrors + flags dirty** (so it's recoverable on-device AND flushes to the cloud); only its **debounced cloud re-save** stays suppressed while suspended, preserving B19's "don't re-stamp the just-loaded snapshot" intent (and B44's "no re-upsert of unchanged data on a mode toggle").

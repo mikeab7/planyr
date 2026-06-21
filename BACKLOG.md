@@ -23,22 +23,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-21: coworker-chat batch NEW-1..NEW-4 — Document Review FILE-STORAGE consistency after the
-     "Drive is the primary file home" direction. Minted **B316–B319** (highest B# across BACKLOG.md +
+     "Drive is the primary file home" direction. Minted **B321–B324** (highest B# across BACKLOG.md +
      BACKLOG-DONE.md was B315; the B25431 / B3340 hits in BACKLOG-DONE.md are CSS hex colours, not IDs).
      Per STANDING RULE #1: filed here AND fixed + verified the SAME session (branch
      `claude/bold-bohr-hohz2x`); full [x] blocks live in BACKLOG-DONE.md.
-       • B316 (NEW-1) — deleteReview orphaned the Drive copy. PRIMARY ("no Drive delete anywhere") was
+       • B321 (NEW-1) — deleteReview orphaned the Drive copy. PRIMARY ("no Drive delete anywhere") was
          ALREADY shipped under the B207 Drive wiring (`deleteFromDrive` + the driveKeys loop); the RESIDUAL
          (loadReview→null left keys=[] → nothing cleaned) is fixed via a local-mirror fallback. FIXED.
-       • B317 (NEW-2) — "Open PDF…" + every Stitcher sheet uploaded to Supabase only. Routed through the
+       • B322 (NEW-2) — "Open PDF…" + every Stitcher sheet uploaded to Supabase only. Routed through the
          shared Drive-first/Supabase-fallback `storeSource` (the same path filing uses); driveKey now
          persisted + read back; lifts the 50 MB Supabase cap off big drawings on the happy path. FIXED.
-       • B318 (NEW-3) — a keyless source saved mid-upload became unfetchable on a quick reload. buildSnapshot
+       • B323 (NEW-3) — a keyless source saved mid-upload became unfetchable on a quick reload. buildSnapshot
          now persists a source only once it's really stored (`isStoredSource`). FIXED.
-       • B319 (NEW-4) — a genuine edit inside the post-open suspend window wasn't flagged dirty → never
+       • B324 (NEW-4) — a genuine edit inside the post-open suspend window wasn't flagged dirty → never
          reached the cloud. Pure `planAutosave` gate: load-echo skipped, real edits mirror+dirty+flush. FIXED.
      Deduped — NEW-2/3/4 are net-new (NOT the viewer batch B288–B296 nor the stitch-guard batch B300–B302,
-     which never touched the storage backend choice or the autosave gating); B316 = the residual on top of
+     which never touched the storage backend choice or the autosave gating); B321 = the residual on top of
      the already-shipped B207 Drive delete (distinct from B38(a) upsert re-file orphaning). lint 0 · 788
      tests (8 new in test/docPersistence.test.js) · build green · doc-review lazy chunk intact. -->
 

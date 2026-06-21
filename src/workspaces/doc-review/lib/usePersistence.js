@@ -30,7 +30,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   const uidRef = useRef(null);
   const firstRun = useRef(true);
   const suspendUntilRef = useRef(0); // a programmatic load parks this in the future so the autosave won't re-save what it just loaded (B19)
-  const loadEchoRef = useRef(false); // the next autosave tick is a programmatic load echoing its own deps, not a user edit — skip it without suppressing real edits in the same window (B319)
+  const loadEchoRef = useRef(false); // the next autosave tick is a programmatic load echoing its own deps, not a user edit — skip it without suppressing real edits in the same window (B324)
   const dirtyRef = useRef(false); // an unsaved edit since the last successful write — gates the unmount/hide flush so a single↔stitch toggle doesn't re-upsert unchanged data (B44)
 
   // Track cloud readiness up front and on auth changes. The badge stays "local"
@@ -82,7 +82,7 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     // A programmatic load (resume/open) re-emits the deps it just set; that echo must not mark
     // dirty or re-save. A GENUINE edit — even one made inside the short post-load window — must
     // still be mirrored + flagged dirty so it's recoverable and reaches the cloud on flush; only
-    // its debounced cloud write is suppressed while suspended (B19/B44/B319).
+    // its debounced cloud write is suppressed while suspended (B19/B44/B324).
     const plan = planAutosave({
       enabled: enabledRef.current, empty: emptyRef.current(),
       loadEcho: loadEchoRef.current, suspended: Date.now() < suspendUntilRef.current,

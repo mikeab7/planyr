@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { planAutosave } from "../src/workspaces/doc-review/lib/autosavePlan.js";
 import { isStoredSource, storeSource } from "../src/workspaces/doc-review/lib/reviewStore.js";
 
-/* B319/NEW-4 — a genuine edit made inside the ~1.5 s post-open suspend window must still be
+/* B324/NEW-4 — a genuine edit made inside the ~1.5 s post-open suspend window must still be
  * mirrored + flagged dirty (so it's recoverable and flushes to the cloud), while only the
  * programmatic-load echo is skipped and only the debounced cloud re-save is suppressed. */
-describe("planAutosave — post-load suspend window no longer eats real edits (B319)", () => {
+describe("planAutosave — post-load suspend window no longer eats real edits (B324)", () => {
   it("a programmatic-load echo is skipped entirely, and the echo flag is consumed", () => {
     expect(planAutosave({ enabled: true, empty: false, loadEcho: true, suspended: true }))
       .toEqual({ consumeEcho: true, markDirty: false, mirror: false, scheduleSave: false });
@@ -31,9 +31,9 @@ describe("planAutosave — post-load suspend window no longer eats real edits (B
   });
 });
 
-/* B318/NEW-3 — buildSnapshot must not persist a source whose bytes aren't stored yet (no key),
+/* B323/NEW-3 — buildSnapshot must not persist a source whose bytes aren't stored yet (no key),
  * or a quick reload mid-upload strands the backdrop with an unfetchable pointer. */
-describe("isStoredSource — only a really-stored source is persistable (B318)", () => {
+describe("isStoredSource — only a really-stored source is persistable (B323)", () => {
   it("true once it has a Drive key, a Supabase key, or is known-oversize", () => {
     expect(isStoredSource({ storageKey: "uid/project-x/civil/src1.pdf" })).toBe(true);
     expect(isStoredSource({ driveKey: "project-x/civil/a.pdf" })).toBe(true);
@@ -47,10 +47,10 @@ describe("isStoredSource — only a really-stored source is persistable (B318)",
   });
 });
 
-/* B317/NEW-2 — interactively-opened + stitched sources go through the same Drive-first,
+/* B322/NEW-2 — interactively-opened + stitched sources go through the same Drive-first,
  * Supabase-fallback path as filing. With no cloud configured the helper degrades cleanly
  * (no key, never throws) rather than half-writing. */
-describe("storeSource — Drive-first/Supabase-fallback, degrades gracefully (B317)", () => {
+describe("storeSource — Drive-first/Supabase-fallback, degrades gracefully (B322)", () => {
   it("returns an unstored-but-clean result when the cloud isn't configured", async () => {
     const r = await storeSource("src1", { size: 10, type: "application/pdf" }, { projectId: "p1", discipline: "Civil", fileName: "a.pdf" });
     expect(r.ok).toBe(false);

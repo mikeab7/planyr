@@ -129,9 +129,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         if (miss) { await bindSource(miss.srcId, doc, f); continue; }
         const srcId = newSourceId();
         setPdfs((p) => [...p, { srcId, name: f.name, doc, numPages: doc.numPages, blob: f, size: f.size, storageKey: null, driveKey: null, oversize: false, missing: false }]);
-        // Store Drive-first, Supabase-fallback (B317) — the same path filing uses, so stitched
+        // Store Drive-first, Supabase-fallback (B322) — the same path filing uses, so stitched
         // sheets live in Drive and aren't bound by Supabase's 50 MB cap. A sheet stays keyless
-        // in state until this resolves; buildSnapshot won't persist a keyless source (B318).
+        // in state until this resolves; buildSnapshot won't persist a keyless source (B323).
         storeSource(srcId, f, { projectId: meta.projectId, discipline: meta.discipline, fileName: f.name }).then((r) =>
           setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
         ).catch(() => {}); // best-effort store; don't leak an unhandled rejection
@@ -316,7 +316,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         let doc = null, missing = true;
         if (!src.oversize) {
           // Read-back prefers Google Drive (the file's home), falls back to Supabase Storage
-          // so a pre-Drive sheet — or any Drive miss — still opens (B317, fallback-safe).
+          // so a pre-Drive sheet — or any Drive miss — still opens (B322, fallback-safe).
           let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
           if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
           if (buf) { doc = await loadPdf(buf); missing = false; }

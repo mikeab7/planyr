@@ -152,7 +152,7 @@ export async function deleteReview(id) {
   // then the row. RLS scopes both stores to the owner.
   try {
     // Prefer the cloud record; if the network read misses, fall back to the local mirror so
-    // we can still clean up Storage + Drive instead of orphaning bytes (B316/NEW-1).
+    // we can still clean up Storage + Drive instead of orphaning bytes (B321/NEW-1).
     let rec = await loadReview(id);
     if (!rec && uid) rec = readDraft(uid, id);
     const srcs = (rec && rec.sources) || [];
@@ -332,7 +332,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
 // "re-drop" placeholder). Persisting a still-uploading (keyless) source would save a pointer
 // the loader can't fetch → a permanent "re-open it to view" even though the bytes may have
 // landed; buildSnapshot filters by this so a quick reload mid-upload can't strand a backdrop
-// (B318/NEW-3).
+// (B323/NEW-3).
 export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.oversize));
 
 /* Store ONE interactively-opened source PDF (the "Open PDF…" single sheet and every Stitcher
@@ -340,7 +340,7 @@ export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.ov
  * fallback — so these files (a) live in Drive like filed ones and (b) bypass Supabase's 50 MB
  * per-file cap on the happy path (the cap otherwise silently flagged big E-size drawings
  * "oversize"). Returns { ok, storageKey, driveKey, oversize, driveError, driveSkipped }.
- * Never throws. (B317/NEW-2.) */
+ * Never throws. (B322/NEW-2.) */
 export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName } = {}) {
   const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
   if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, driveError: null, driveSkipped: false };

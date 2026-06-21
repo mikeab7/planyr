@@ -249,9 +249,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, onG
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
       setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
-      // Store Drive-first, Supabase-fallback (B317). The source stays keyless in state until
+      // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
-      // mid-upload can't strand the backdrop with an unfetchable pointer (B318).
+      // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
       storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then((r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection

@@ -13,7 +13,7 @@
  *                unmount/hide flush), but we must NOT schedule the debounced cloud write — that
  *                would re-save the just-loaded snapshot with a fresh updatedAt (B19). Before the
  *                fix the whole tick was skipped, so a genuine edit made <~1.5 s after open was
- *                never flagged dirty and never reached the cloud (B319/NEW-4).
+ *                never flagged dirty and never reached the cloud (B324/NEW-4).
  *
  * Returns the four actions the hook performs, all independent booleans.
  */
