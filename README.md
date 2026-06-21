@@ -101,6 +101,22 @@ src/lib/arcgis.js         # ArcGIS REST query + geometry → local feet (EPSG:22
 Adding another county is just one entry in `src/lib/counties.js` pointing at its
 ArcGIS REST layer or service URL.
 
+## Deploy secrets (server-side — not in the repo)
+
+Production runs on **Cloudflare Pages** (serving planyr.io). Third-party secrets live as
+encrypted **Cloudflare Pages → Settings → Environment variables / Secrets**, never in the
+repo or the client bundle:
+
+- **`MAPILLARY_TOKEN`** — the Mapillary access token for the "Poles & hydrants from street
+  imagery" layer. Read **server-side only** by the `/api/mapillary` Pages Function
+  (`context.env.MAPILLARY_TOKEN`); it is deliberately **not** a `VITE_*` var (that would
+  compile into the public JS). Set in the **Production** environment (add it to **Preview**
+  too if you want per-branch preview URLs to show the layer). If it's absent the layer just
+  degrades gracefully — no street imagery, no error. See `.env.example`.
+
+The Supabase **anon** key is the only key that ships to the browser (it's RLS-protected and
+public by design); everything else (service-role, third-party API keys) stays server-side.
+
 ## Known limitations (prototype)
 
 - Ponds and footprints are rectangles; the parcel offset (setback) is a simple

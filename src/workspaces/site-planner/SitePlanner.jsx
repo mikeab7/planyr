@@ -97,7 +97,7 @@ const DOGEAR_D = 60; // dog-ear projection out from the dock face
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
 const FEAT_BTN_MIN_PX = 72;
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
-// B308 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
+// B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
 // longer constantly mis-fires as a selection. Travel is in SCREEN px (zoom-independent); the
 // time window lets a slow, precise click that drifts a pixel or two still select, while any
@@ -756,7 +756,7 @@ const saveSnapPref = (on) => { try { sessionStorage.setItem(SNAP_PREF_KEY, on ? 
 
 const DEFAULT_SETTINGS = {
   gridSize: 10, snap: false,
-  parcelSelect: true,   // B309: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
+  parcelSelect: true,   // B311: ON = click a parcel to select it (drag still pans); OFF = pure browse/measure, a click never selects. Persisted per project.
   setback: 25, showSetback: true,
   stallW: 9, stallDepth: 18, aisle: 24, parkAngle: 90,
   trailerW: 12, trailerL: 53, trailerAisle: 60,
@@ -2786,7 +2786,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     // (Dragging never bonds elements anymore — grouping is the explicit Group tool,
     // B261/B262. A plain/Shift drag only moves; snap only aligns position.)
-    // B308: a press that began on a LOCKED parcel pans the canvas; if the pointer barely moved
+    // B310: a press that began on a LOCKED parcel pans the canvas; if the pointer barely moved
     // and the press was brief, it was a deliberate click → select that parcel (any larger
     // movement was a pan and leaves the selection untouched).
     if (d && d.mode === "pan" && d.tapParcel != null
@@ -3709,7 +3709,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
     if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge (works regardless of the select toggle)
-    // B309: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
+    // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
     if (!settings.parcelSelect) return;
@@ -3726,7 +3726,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
-    // B308: a press on a LOCKED parcel starts a PAN, not a select — selecting on pointer-down
+    // B310: a press on a LOCKED parcel starts a PAN, not a select — selecting on pointer-down
     // is exactly what turned panning across parcels into a constant accidental select. Tag the
     // pan with the parcel id + the press origin so a genuine CLICK (tiny travel, brief — tested
     // in onUp) still selects it; any real drag pans and never selects.

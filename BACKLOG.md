@@ -22,31 +22,26 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-20: parcel click-vs-drag (B308) + select-parcels toggle (B309) were filed here and SHIPPED
-     the same session per STANDING RULE #1 — moved to BACKLOG-DONE.md (headless-verified V77). Renumbered
-     from a first-filed B300/B301 + V75 that concurrent `main` consumed (stitch-guard B300–B302 + Doc
-     Review editing B303–B307; V75/V76). -->
+<!-- 2026-06-20: parcel click-vs-drag (B310) + select-parcels toggle (B311) — Site Planner planner-canvas
+     gesture work — were filed here AND shipped the same session per STANDING RULE #1; moved to
+     BACKLOG-DONE.md (headless-verified V78). Renumbered B300/B301 → B308/B309 → B310/B311 (V75→V77→V78) as
+     a very hot `main` consumed each prior pair in turn (Doc Review stitch-guard B300–B302 + editing
+     B303–B307, then the Mapillary proxy B308/B309). -->
 
-<!-- 2026-06-20: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
-     ALL visitors via a server-side token proxy (Option B), instead of per-browser token entry. Minted
-     **B303–B304** (highest B# across both files was B302 after concurrent `main`'s B288–B302 batches).
-     Deduped — net-new (no existing proxy item); builds on the just-shipped B285/B286 (Mapillary rename +
-     "needs setup" gating) + the KEY DECISION "Mapillary token is a secret." NOTE: B303 is the one open
-     item that CANNOT be self-verified headless in the sandbox (a Cloudflare Pages Function doesn't run
-     under `vite preview`), so its live check is owner-secret + deploy + a coworker confirm — stated in
-     the item. -->
+<!-- 2026-06-20/21: coworker-chat batch NEW-1..NEW-2 — make the Mapillary "street imagery" layer work for
+     ALL visitors via a server-side token proxy (Option B). FIRST filed B303/B304, but a concurrent `main`
+     batch (Doc Review markup editing) had ALSO taken B303–B307 while this was in flight (both saw B302 as
+     the max, both blind) — so to clear the collision this batch yielded to the larger, already-shipped
+     Doc Review claim and renumbered to **B308/B309**. **B308 (the proxy) is BUILT + SHIPPED** 2026-06-21
+     (branch claude/busy-allen-ofgy9l) — full [x] block in BACKLOG-DONE.md. The owner set the
+     MAPILLARY_TOKEN secret in Cloudflare Pages Production, so the LIVE "imagery renders" confirm just
+     needs the next Production deploy (logged in VERIFICATION). **B309 stays Open (`[~]` partial)** — B308
+     already reframed the client paste-box as an optional override; the final VITE_MAPILLARY_TOKEN-path
+     removal waits until B308 is confirmed live so we never drop the only working path before it's proven. -->
 
-### B303 — Server-side Mapillary token proxy so the street-level layer works for all users `[Site Planner / functions]` (feature)  *(arrived as coworker-chat "NEW-1" 2026-06-20; minted **B303** — highest B# across both files was B302)*
-`[ ]` Make the Mapillary **"Poles & hydrants from street imagery"** evidence layer available to every visitor **without per-user token entry**, while keeping the token OFF the public bundle (the "secrets stay server-side; only the RLS-protected Supabase anon key reaches the browser" rule). Chosen approach = **Option B (server-side proxy)**, NOT Option A (bake `VITE_MAPILLARY_TOKEN` into the build): any `VITE_*` var is compiled into the public JS, exposing a borrowable token — the KEY DECISION "Mapillary token is a secret" + the audit's *token-in-bundle* finding forbid A.
-- Add a **Cloudflare Pages Function** (`functions/api/mapillary/[[path]].js`) that injects the token from an encrypted Cloudflare **Secret `MAPILLARY_TOKEN`** (NOT a `VITE_*` var, NOT a plaintext `wrangler.toml` var) and forwards to the Mapillary Graph API, returning JSON to the client. Same-origin → no CORS. (Mirrors the existing thin same-origin Pages-Function pattern, `functions/api/auth/google/*`.)
-- Client change: `src/workspaces/site-planner/lib/evidenceLayers.js` → `fetchMapillary` calls the same-origin proxy path instead of `graph.mapillary.com` directly, and STOPS appending `access_token=` to the client URL (resolves the audit's *token-in-URL* LOW finding; token-not-in-bundle resolves the *token-in-bundle* LOW finding).
-- **Abuse guardrails (it's now a public endpoint spending the owner's quota):** allow-list ONLY the Graph endpoint/fields the app calls (`map_features`; `id,object_value,geometry`; the pole/hydrant filter); add an **Origin/Referer check** (planyr.io + Cloudflare preview hosts) + basic **rate limiting**; consider short-TTL response caching to cut quota. Preserve UX: zoom ≥ 16 gating + the status-dot states unchanged.
-- **⛔ Verify-blocker (stated plainly):** a Pages Function runs ONLY in the Cloudflare runtime — it does **not** execute under `vite preview`/the sandbox, so the end-to-end proxy can't be self-verified headless here the way the GIS/UI work was. Unit-test the pure pieces (allow-list/param validation); the live check needs **(1) the owner to add the `MAPILLARY_TOKEN` secret in the Cloudflare dashboard** and **(2) a deploy**, then a coworker confirm (zoom-in over a covered area → dots render; **no token in any client request**). Until the secret is set the endpoint is dormant (no token → empty), so the code can ship inert ahead of configuration.
-> **Dedup:** net-new. Builds on **B285/B286** (Mapillary rename + "needs setup" gating, shipped) and the KEY DECISION "Mapillary token is a secret." Resolves the audit's two LOW findings (token-in-bundle, token-in-URL). The in-app `MLY|…` paste box stays until **B304** retires/optionalizes it.
-
-### B304 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B303  *(arrived as coworker-chat "NEW-2" 2026-06-20; minted **B304**)*
-`[ ]` After **B303** ships AND is verified live, remove/redirect the now-redundant client token mechanisms: drop the `VITE_MAPILLARY_TOKEN` build-var path, and convert the in-app Mapillary token (`MLY|…`) paste box to either **removed** or an **optional power-user override** (default path is the proxy, so no token entry is required).
-> **Dedup:** the cleanup half of B303; strictly **depends on B303 verified live** — don't remove the only working path before the proxy is proven. Net-new.
+### B309 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B308  *(arrived as coworker-chat "NEW-2" 2026-06-20; first filed B304 then renumbered **B309** — concurrent `main`'s Doc Review batch took B303–B307)*
+`[~]` **Partly done via B308 (2026-06-21).** The same-origin proxy is now the DEFAULT path and the in-app `MLY|…` box is already reframed as an **optional power-user override** (no token entry required). **Remaining, only AFTER B308 is confirmed live on Production:** drop the now-dead `VITE_MAPILLARY_TOKEN` read in `evidenceLayers.mapillaryToken()` (a baked VITE var would re-expose a token — the audit finding), and make the final call on the override box (keep as advanced, or remove). Held until B308's live confirm so the only working path isn't removed before the proxy is proven.
+> **Dedup:** the cleanup half of B308; strictly **depends on B308 verified live**. Net-new.
 
 <!-- 2026-06-20: owner-dropped batch (chat) NEW-1..NEW-3 — Document Review STITCH + MARKUP safety
      guards. Minted **B300–B302** (highest B# across both files was B299 after concurrent `main`'s
