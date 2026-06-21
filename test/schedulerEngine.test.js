@@ -101,17 +101,108 @@ describe("end-to-end: a hostile imported project survives the full recompute", (
   });
 });
 
+describe("parsePreds — hostile predecessor strings never throw", () => {
+  it("parses MS-Project syntax and ignores junk", () => {
+    expect(E.parsePreds("2SS+3")).toEqual([{ id: 2, type: "SS", lag: 3 }]);
+    expect(E.parsePreds("3FF-1d")).toEqual([{ id: 3, type: "FF", lag: -1 }]);
+    expect(E.parsePreds("1,2SS")).toEqual([{ id: 1, type: "FS", lag: 0 }, { id: 2, type: "SS", lag: 0 }]);
+    expect(E.parsePreds("abc")).toEqual([]);
+    expect(E.parsePreds("2XX")).toEqual([]);
+  });
+  it("never throws on null/objects/numbers", () => {
+    for (const x of [null, undefined, 42, {}, "", "-3", "2FS+"]) expect(() => E.parsePreds(x)).not.toThrow();
+  });
+});
+
+describe("constrainedStartFrom — the four MS-Project conventions", () => {
+  const pred = { start: "2026-06-22", end: "2026-06-26" }; // Mon–Fri
+  it("FS = next business day after the predecessor's end", () => {
+    expect(E.constrainedStartFrom(pred, { type: "FS", lag: 0 }, 1)).toBe("2026-06-29"); // skip weekend
+  });
+  it("SS = same start as the predecessor", () => {
+    expect(E.constrainedStartFrom(pred, { type: "SS", lag: 0 }, 1)).toBe("2026-06-22");
+  });
+  it("unknown type falls back to FS and never throws", () => {
+    expect(() => E.constrainedStartFrom(pred, { type: "ZZ", lag: 0 }, 1e9)).not.toThrow();
+  });
+});
+
+describe("rollupParentDates — deep nesting stays fast and matches the reference", () => {
+  // Reference = the ORIGINAL O(n²·depth) algorithm. The optimized version (child index +
+  // deepest-first ordering) must produce byte-identical output on random hierarchies.
+  const reference = (tasks) => {
+    const map = {};
+    tasks.forEach((t) => { map[t.id] = { ...t }; });
+    const parentIds = new Set(tasks.filter((t) => t.parentId !== null).map((t) => t.parentId));
+    if (!parentIds.size) return tasks;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      parentIds.forEach((pid) => {
+        if (!map[pid]) return;
+        const children = Object.values(map).filter((t) => t.parentId === pid);
+        if (!children.length) return;
+        const vs = children.map((t) => t.start).filter(Boolean);
+        const ve = children.map((t) => t.end).filter(Boolean);
+        if (!vs.length || !ve.length) return;
+        const ns = vs.reduce((a, b) => (a < b ? a : b));
+        const ne = ve.reduce((a, b) => (a > b ? a : b));
+        const nd = ns === ne && children.every((c) => c.duration === 0) ? 0 : Math.max(0, E.difBD(ns, ne) + 1);
+        if (map[pid].start !== ns || map[pid].end !== ne || map[pid].duration !== nd) {
+          map[pid] = { ...map[pid], start: ns, end: ne, duration: nd };
+          changed = true;
+        }
+      });
+    }
+    return tasks.map((t) => map[t.id]);
+  };
+
+  const randHierarchy = (seed) => {
+    let s = seed; const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const N = 30 + Math.floor(rnd() * 40);
+    const tasks = [];
+    for (let i = 1; i <= N; i++) {
+      const parentId = i === 1 ? null : (rnd() < 0.6 ? 1 + Math.floor(rnd() * (i - 1)) : null);
+      const d = Math.floor(rnd() * 28);
+      const start = `2026-0${1 + Math.floor(rnd() * 9)}-${String(1 + Math.floor(rnd() * 27)).padStart(2, "0")}`;
+      tasks.push({ id: i, name: "t" + i, start, end: E.calcEnd(start, d || 1), duration: d, predecessors: [], parentId });
+    }
+    return tasks;
+  };
+
+  it("optimized output is identical to the reference across 40 random trees", () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const t = randHierarchy(seed);
+      expect(E.rollupParentDates(t)).toEqual(reference(t));
+    }
+  });
+
+  it("1000-deep nesting completes well under a second (was ~11s)", () => {
+    const tasks = [];
+    for (let i = 1; i <= 1000; i++) tasks.push({ id: i, name: "t" + i, start: "2026-06-22", end: `2026-06-${22 + (i % 7)}`, duration: 1, predecessors: [], parentId: i > 1 ? i - 1 : null });
+    const t0 = performance.now();
+    E.rollupParentDates(tasks);
+    expect(performance.now() - t0).toBeLessThan(2000);
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   it("addBD coerces + bounds its step count (MAX_BD_STEPS)", () => {
     expect(src).toMatch(/MAX_BD_STEPS/);
     expect(src).toMatch(/if \(isNaN\(d\)\) return s;/);
   });
-  it("rollupParentDates guards orphaned parentIds", () => {
+  it("rollupParentDates guards orphans, indexes children, and orders deepest-first", () => {
     expect(src).toMatch(/if \(!map\[pid\]\) return;\s*\/\/ orphaned/);
+    expect(src).toMatch(/childIdsByParent/);
+    expect(src).toMatch(/depthOf\(b\) - depthOf\(a\)/);
   });
   it("parseFlexDate rejects non-finite parts and impossible calendar dates", () => {
     expect(src).toMatch(/!Number\.isFinite\(m\)/);
     expect(src).toMatch(/chk\.getMonth\(\) \+ 1 !== m/);
+  });
+  it("buildGanttSVG guards a nameless task and filters unparseable dates", () => {
+    expect(src).toMatch(/a nameless task must not crash the exhibit/);
+    expect(src).toMatch(/filter\(d=>d&&!isNaN\(pd\(d\)\)\)/);
   });
 });
