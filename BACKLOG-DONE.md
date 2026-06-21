@@ -1,4 +1,16 @@
 ## ✅ Done
+
+<!-- 2026-06-21: owner chat — "make the stitch tool great on all the other stuff: keep the notes in the
+     legend shown but get ALL of them in case they change by page; and like Bluebeam, click a detail
+     reference number → pull up a cloud of that detail without leaving the drawing." Minted **B350** (next
+     free after B349). Filed AND built + headless-verified the SAME session per STANDING RULE #1. -->
+
+### B350 — Stitcher: aggregated notes/legend across the set + Bluebeam-style detail-callout "cloud" `[Doc Review / Stitch]` (feature)  *(owner chat 2026-06-21 "make it great on all the other stuff"; minted **B350**)*
+`[x]` **Built + headless-verified 2026-06-21.** Two upgrades to the stitch tool, both backed by pure shared readers so they're unit-tested away from pdf.js:
+- **Notes/legend, captured across the whole set (never lost to the crop).** The auto-stitch crop (B338) hides each sheet's title-block band — where the **general notes / legend** usually live. A new pure reader `src/shared/files/sheetNotes.js` (`parseNotes` finds each `GENERAL/GRADING/KEYED NOTES`, `LEGEND`, `ABBREVIATIONS` block; `aggregateNotes` merges every placed sheet's blocks, **dedupes** repeated boilerplate, and **flags a note that didn't appear on every sheet** with the sheet(s) it came from — so a note that **changes page to page** is surfaced, not buried). Wired into `readSheetMeta` (each page now carries `notes`) and shown in the pinned **Composite key** as an expandable "Notes & legend · N" section.
+- **Click a detail reference → the detail pops up as a "cloud" (Bluebeam-style).** A new pure reader `src/shared/files/detailRefs.js` reads detail-callout **bubbles** (a detail id stacked over a sheet code — "5 / A-3" — plus inline `5/A-3` and `SEE DETAIL 5 ON SHEET A-3` forms; conservative — a plain fraction can't match) and where details are **defined** (`DETAIL 5`, `SECTION A-A`). Each callout renders as a clickable hotspot ring on the placed sheet; clicking it **pulls up that detail in a floating cloud popup** that renders the referenced sheet (reused from a placed sheet, or rendered on demand from a loaded PDF), **centered on the named detail** when the target sheet labels it — pan/zoomable, so you never leave the current drawing. Honest fallback: a target that isn't in the set yet says so. New toolbar **Details** toggle; hotspots only grab clicks in Pan mode (measure/align/calibrate pass through).
+- **Persistence:** placed sheets now carry `sheetNumber`/`detailRefs`/`detailAnchors`/`notes` through save/load. **Scope:** all inside the doc-review workspace; lazy chunk split intact. **Tests:** 14 new unit tests (`test/detailRefs.test.js` 8, `test/sheetNotes.test.js` 6); full suite **957 → 971** green; lint 0 errors; build green. **Headless:** `ui-audit/verify-b350.mjs` 11/11 (notes aggregated + the C-5-only note flagged; the "5/A-3" hotspot opens a "Detail 5 · Sheet A-3" cloud rendering the A-3 sheet) + `verify-b335-b339.mjs` 13/13 no-regression.
+
 <!-- 2026-06-21: SECOND pass of the stitch-tool bug sweep (owner: "merge and then look for more"), after
      B343–B347 merged via #246. Minted **B348/B349** (next free after B347). Both in the Stitcher COMPONENT,
      fixed + headless-verified (`ui-audit/verify-stitch-bugs.mjs` now 14/14, incl. these two). -->

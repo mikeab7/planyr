@@ -324,6 +324,25 @@ server/                   # placeholder README only — NOT built or deployed; b
   symbol-union. The common case (CAD vector PDFs with a text layer) is fully shipped. 30 unit
   tests; headless-verified end-to-end (V84, `ui-audit/verify-b325-b329.mjs`, 13/13).
 
+### Document Review — stitcher notes/legend capture + click-to-detail "cloud" (B350) — LIVE
+- **Notes/legend survive the crop, aggregated across the set.** The auto-crop (B338) hides the
+  title-block band where general notes/legends live. Pure `src/shared/files/sheetNotes.js`
+  (`parseNotes` finds each `GENERAL/GRADING/KEYED NOTES` / `LEGEND` / `ABBREVIATIONS` block;
+  `aggregateNotes` merges every placed sheet's blocks, dedupes boilerplate, and **flags a note
+  that differs by sheet** with its sheet tag) → the pinned **Composite key** gains an expandable
+  "Notes & legend · N" section. So a note that **changes page to page** is captured, never lost.
+- **Click a detail callout → that detail pops up (Bluebeam-style), without leaving the drawing.**
+  Pure `src/shared/files/detailRefs.js` reads detail-callout **bubbles** (a detail id stacked
+  over a sheet code "5 / A-3", plus inline / keyword forms — conservative: a plain fraction can't
+  match) and detail **definitions** (`DETAIL 5`, `SECTION A-A`). Callouts render as clickable
+  hotspot rings; clicking opens a floating **cloud popup** rendering the referenced sheet (reused
+  from a placed sheet or rendered on demand), centered on the named detail when the target labels
+  it, pan/zoomable. Honest fallback when the target sheet isn't in the set. Toolbar **Details**
+  toggle; hotspots only grab clicks in Pan mode.
+- Both REUSE the B336 positional reader (wired into `readSheetMeta` → each page carries `notes`/
+  `detailRefs`/`detailAnchors`); placed sheets persist them. 14 unit tests; V92 headless
+  (`ui-audit/verify-b350.mjs`, 11/11) + `verify-b335-b339.mjs` 13/13 no-regression.
+
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
   has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens
