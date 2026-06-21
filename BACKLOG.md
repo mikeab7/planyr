@@ -22,6 +22,23 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B360 — Title-block intelligence: unify the readers, expand the discipline taxonomy, tune on the real corpus (V79 filing + V67 scale) `[Doc Review]` (task)  *(2026-06-21; filed B356, renumbered **B360** — `main` #268 took B356–B359 while in flight)*
+`[x]` **Done + tuned on the owner's real drawings — merging via PR #270 (branch `claude/bold-cori-okbxu5`).** The Drive connector was re-authed to michael@planyr.io mid-session, so the empirical tuning ran here (no second session needed). 1078 tests, lint 0, build green, lazy chunks intact.
+
+**Unify (one reader, one extractor).** Relocated `parseSheetScale` → `src/shared/files/sheetScale.js` (re-exported from `overlayScale.js` for back-compat); `sheetMeta` imports it from shared (removes the shared→workspace import). `readTitleBlockText` returns `scale` in the same pass; `readSheetMeta` consumes that one read. `firstPagesText` folded into `doc-review/lib/pdf.js`. Civil-only `parseScaleNote` untouched.
+
+**Scale-reader bug (V67).** `parseSheetScale` returned null on an architectural scale when a number (a date) was printed right before it (`…10/24/2025  1/8"=1'-0"`) — the mixed-number branch swallowed the date digits + fraction. Fixed with `(?<!\d)` + a ≤2-digit mixed whole-inch.
+
+**Discipline taxonomy (owner decision 2026-06-21).** Added dedicated buckets in the owner's order: Architectural, Structural, Civil, Mechanical, Electrical, Plumbing, Landscape, Fire Alarm, Fire Sprinkler (+ Survey/Environmental/Geotech/CAD/Other). Fire split (Alarm vs Sprinkler); Structural/M/E/P out of "Other"/"MEP". Canonical list now in `titleBlockParse.js`, re-exported by `reviewStore` (+ the walled-off server reader kept in lockstep) so the reader / store / filing-UI can't drift.
+
+**Corpus tuning** (`ui-audit/lib/filingScore.mjs` + `score-filing.mjs`; Jacintoport + Mesa sets read via the Drive connector, ground truth = the descriptive filename). Reader fixes the real sheets drove:
+- `classifyDiscipline` → WEIGHTED dominance (a definitive sheet-type like "floor plan"/"foundation plan" ≫ a bare cross-reference name like "structural"); dropped bare "elevation(s)" as a keyword (a structural sheet is full of spot elevations). Fixes a real STRUCTURAL set misfiled Civil (deep stray "grading") **and** the inverse ARCH case.
+- `findDates` requires a consistent separator → a dimension "5-29/32" no longer parses as 2032 and poisons the latest-date pick.
+- `parseRevision` maps "ISSUE FOR CONSTRUCTION" (no "D") → IFC, and no longer reads the heading "REVISIONS" as "Rev S".
+**Result (8 readable sheets): project 8/8, discipline 6/7, date 3/6, revision 3/5.** Remaining misses are ground-truth nuances (a sheet's latest revision date vs the owner's package date; a mixed-revision "make-ready" package) or genuine data gaps (image-only scans with no text layer) — not reader bugs. Real-snippet unit tests lock every fix in.
+
+**Remaining tail (separate, not a regression):** image-only / scanned sets (e.g. Mesa Plumbing/Electrical have ~no text layer) and the `.dwg` files can't be Tier-1 text-read — they fall to the already-built-but-dormant Tier-2 AI/OCR (B299/B352) + the DWG→DXF server path. Eligible to move to BACKLOG-DONE on merge.
+
 ### B309 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B308  *(arrived as coworker-chat "NEW-2" 2026-06-20; first filed B304 then renumbered **B309** — concurrent `main`'s Doc Review batch took B303–B307)*
 `[~]` **Partly done via B308 (2026-06-21).** The same-origin proxy is now the DEFAULT path and the in-app `MLY|…` box is already reframed as an **optional power-user override** (no token entry required). **Remaining, only AFTER B308 is confirmed live on Production:** drop the now-dead `VITE_MAPILLARY_TOKEN` read in `evidenceLayers.mapillaryToken()` (a baked VITE var would re-expose a token — the audit finding), and make the final call on the override box (keep as advanced, or remove). Held until B308's live confirm so the only working path isn't removed before the proxy is proven.
 > **Dedup:** the cleanup half of B308; strictly **depends on B308 verified live**. Net-new.
