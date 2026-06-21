@@ -313,10 +313,21 @@ server/                   # placeholder README only — NOT built or deployed; b
   `doc-review/lib/autoStitch.js` (seam graph → the existing `solveM`, B300; label-less sheets drop
   to manual Align pre-seeded with detected endpoints); **crop + pinned composite key (B338)** and
   **per-group auto-calibrate (B339)** wired into `Stitcher.jsx`.
-- **CV/heavy-dep tails are deferred behind seams → B340** (Later/Roadmap): scanned-sheet OCR
-  (Tesseract.js), graphic scale-bar reading, the geometric edge-line stitch fallback, legend
-  symbol-union. The common case (CAD vector PDFs with a text layer) is fully shipped. 30 unit
-  tests; headless-verified end-to-end (V84, `ui-audit/verify-b325-b329.mjs`, 13/13).
+- **Scanned-sheet OCR — BUILT (B352, owner-requested).** A scanned / image-only drawing (no text
+  layer) now reads too: `doc-review/lib/ocr.js` renders the page to a canvas and runs **Tesseract.js**
+  (WASM worker), then converts the per-word boxes into the SAME page-unit items `sheetMeta` consumes,
+  so it groups/stitches/crops/calibrates through the identical pipeline. Lazy (the worker only spins
+  up for a no-text page; WASM core + English model load from a pinned CDN — jsDelivr — on first use,
+  pixels never leave the browser). 7 unit + 15 stress tests + a LIVE headless run (V93, `verify-b352-ocr.mjs`).
+- **Markup-sidebar parity (B266 + B348, follow-up).** The above shipped the grouping in the
+  **Stitcher**; the single-sheet **Markup** sidebar now also shows each sheet's **real # + title**
+  (not "Sheet N" — B266) and **collapses into the same logical sheets** (B348), reusing the SAME
+  engines (`readSheetMeta`/`groupSheets`/`statedCalibration`) — no duplicate modules. A page with no
+  title block falls back to "Sheet N" (gated on `meta.titleBlock || meta.sheetNumber`). Verified V88
+  (`ui-audit/verify-markup-sheet-labels.mjs` 7/7 + no-regression 13/13).
+- **Remaining CV tails are deferred behind seams → B340** (Later/Roadmap): graphic scale-bar reading,
+  the geometric edge-line stitch fallback, legend symbol-union. The common case (vector + now scanned
+  via OCR) is shipped. 30 unit tests; headless-verified end-to-end (V87, `ui-audit/verify-b335-b339.mjs`, 13/13).
 
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
@@ -329,7 +340,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   Low-contrast gray body/label text is **disallowed** (eye strain in bright offices); subtle grays
   are correct ONLY for borders, the drafting grid, and the semantic "Complete" status badge. New UI
   must reference **theme tokens, never raw hex**, and clear **WCAG AA (≥ 4.5:1)** for body text on
-  its surface in **both** themes. (B316–B320)
+  its surface in **both** themes. This is now **machine-enforced**: `ui-audit/contrast-audit.mjs`
+  (parses the real `index.css`) + `test/contrast.test.js` fail CI if any defined token pair drops
+  below its floor — so a palette edit can't silently re-introduce a low-contrast pair. Text/icon ON
+  the global accent fill uses **`--on-accent`** (white in light, near-black in dark — the dark accent
+  is too light for white); saving/unsaved/offline labels use **`--warn-text`** (AA amber). The common
+  trap (the B341 regression): a chrome-region component that **hardcodes a color instead of a token**
+  reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
+  lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
+  live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline
@@ -421,8 +440,8 @@ Build the **browser-only** tranche first (no backend, no credentials), then the
   align); **automatic match-line detection — BUILT (B337)**: drop a set → it auto-groups
   (B335) + auto-stitches from match-line labels + auto-calibrates (B339) + crops title
   blocks (B338); the 2-point manual Align stays the safety net (pre-seeded when a seam is
-  detected). The CV/OCR tails (scanned-sheet OCR, scale-bar, geometric edge-match) → B340.
-  Near-automatic once DWG conversion lands.
+  detected). **Scanned sheets read via OCR too (B349).** The remaining CV tails (scale-bar,
+  geometric edge-match, legend symbol-union) → B340. Near-automatic once DWG conversion lands.
 - Revision compare: add a revision to a discipline set and compare the two
   (overlay/diff) — confirm against the existing overlay/version-compare item.
 - ★ North-star: "map → drawings → latest set" — from the Site Planner map, click a

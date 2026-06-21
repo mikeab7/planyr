@@ -33,7 +33,14 @@ export function sheetBBox(s) {
 // far off-canvas at huge scale — silently, with no undo. Callers must reject the alignment
 // when this is true (mirrors DocReview's calibrate "line too short" guard).
 export const MIN_ALIGN_BASE = 1; // page/world units — far below any real two-point baseline
+// B350 — a NON-FINITE endpoint (NaN/Infinity from a bad PDF read or a mis-built drawingArea) must
+// also be rejected. `Math.hypot(NaN,…) < 1` is `NaN < 1` → false, so a NaN baseline used to slip
+// PAST the length guard, reach solveM, and produce a NaN matrix that silently poisons the sheet's
+// transform and the whole composite's bbox (every Math.min/max over it goes NaN). Treat any
+// non-finite point as degenerate so the same "reject + fall back to manual Align" path catches it.
+const finitePt = (p) => !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 export const alignBaselinesDegenerate = (b1, b2, A1, A2) =>
+  !(finitePt(b1) && finitePt(b2) && finitePt(A1) && finitePt(A2)) ||
   Math.hypot(b2.x - b1.x, b2.y - b1.y) < MIN_ALIGN_BASE ||
   Math.hypot(A2.x - A1.x, A2.y - A1.y) < MIN_ALIGN_BASE;
 

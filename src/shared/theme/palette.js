@@ -21,7 +21,7 @@ const LIGHT = {
   chromeText: "#1B1E26", chromeMuted: "#353B49", chromeTabInactive: "#454C5C",
   saveBadge: "#0F6E56",
   /* Global interactive accent (focus/forms/buttons) — replaces the retired ember */
-  accent: "#C2410C",
+  accent: "#C2410C", onAccent: "#FFFFFF",
   /* Work surfaces — drafting canvas + Markup mat */
   canvasBg: "#EDF1F6", canvasGridMinor: "#DCE3EB", canvasGridMajor: "#C5CED9",
   canvasParcel: "#5b6650", canvasSetback: "#b45309", canvasSelection: "#C2410C",
@@ -40,8 +40,8 @@ const DARK = {
   chromeBg: "#111319", chromeBgElev: "#171A21", chromeDivider: "#262A33",
   chromeText: "#ECEFF4", chromeMuted: "#A6ADBA", chromeTabInactive: "#C2C8D2",
   saveBadge: "#7FD8B8",
-  /* Global interactive accent */
-  accent: "#F26B3A",
+  /* Global interactive accent — light enough (B319) that on-fill text goes near-black */
+  accent: "#F26B3A", onAccent: "#15171C",
   /* Work surfaces */
   canvasBg: "#0E1014", canvasGridMinor: "rgba(232,235,240,0.05)", canvasGridMajor: "rgba(232,235,240,0.10)",
   canvasParcel: "#2FBE90", canvasSetback: "#E0954A", canvasSelection: "#F26B3A",

@@ -362,8 +362,8 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
               onClick={newBlankSite}
               style={{
                 padding: "4px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6,
-                border: "1px solid rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.07)",
-                color: "rgba(236,231,219,0.75)", cursor: "pointer", fontFamily: "inherit",
+                border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)",
+                color: "var(--chrome-text)", cursor: "pointer", fontFamily: "inherit",
                 whiteSpace: "nowrap",
               }}
             >

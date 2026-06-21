@@ -33,7 +33,7 @@ const pill = {
   display: "flex", alignItems: "center", gap: 7,
   maxWidth: 220, padding: "4px 9px 4px 5px", borderRadius: 99,
   cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-  border: `1px solid ${LINE}`, background: "rgba(255,255,255,0.06)", color: "#ece7db",
+  border: `1px solid ${LINE}`, background: "var(--chrome-bg-elev)", color: "var(--chrome-text)",
 };
 const avatar = (signedIn, size = 20) => ({
   width: size, height: size, borderRadius: 99, flex: "none",
@@ -42,24 +42,24 @@ const avatar = (signedIn, size = 20) => ({
   background: signedIn ? "linear-gradient(150deg,#16a34a,#15803d)" : "rgba(255,255,255,0.12)",
 });
 const acctPanel = {
-  padding: 6, borderRadius: 10, background: "#fff", color: "#2c2a26",
-  border: "1px solid #e7e2d6", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 const acctRow = {
   display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left",
   padding: "8px 9px", borderRadius: 7, border: "none", background: "transparent",
-  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "#2c2a26",
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
 };
-const acctDivider = { height: 1, background: "#ece7db", margin: "4px 4px" };
-const hoverOn  = (e) => { e.currentTarget.style.background = "#f1eee6"; };
+const acctDivider = { height: 1, background: "var(--border-default)", margin: "4px 4px" };
+const hoverOn  = (e) => { e.currentTarget.style.background = "var(--hover-ghost)"; };
 const hoverOff = (e) => { e.currentTarget.style.background = "transparent"; };
 
 // Tiny 14px line icons for the dropdown rows.
 const RowIcon = ({ d, size = 14 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    style={{ flex: "none", color: "#6b6557" }}>
+    style={{ flex: "none", color: "var(--text-tertiary)" }}>
     {d}
   </svg>
 );
@@ -156,8 +156,8 @@ export default function Shell() {
             <span style={avatar(true, 30)}>{profileApi.initial}</span>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
-              {profileApi.org && <div style={{ fontSize: 11.5, color: "#6b6557", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
-              <div style={{ fontSize: 11.5, color: "#8a8475", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+              {profileApi.org && <div style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
+              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
             </div>
           </div>
           <div style={acctDivider} />

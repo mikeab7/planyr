@@ -21,6 +21,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import AnchoredMenu from "./AnchoredMenu.jsx";
 import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
@@ -39,45 +40,82 @@ const TAB_IDLE = "var(--chrome-tab-inactive)";
 const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-markup)" };
 const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
 
-// Light / Dark / System segmented control — lives in the row-1 right zone. Pure local
-// theme switch (reads/sets the ThemeProvider); not cloud-tied. (B317)
+// Light / Dark / System theme options. The picker now lives inside the row-1 Settings
+// gear popover (B342) rather than sitting open in the header — decluttered, but still one
+// click and reachable signed-out. Pure local theme switch (reads/sets the ThemeProvider,
+// whose matchMedia "System" listener is independent of where this control mounts). (B317)
 const THEME_OPTS = [
-  { id: "light",  label: "Light",  icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
-  { id: "dark",   label: "Dark",   icon: <path d="M13 9.4A5.2 5.2 0 0 1 6.6 3 5.2 5.2 0 1 0 13 9.4Z" /> },
-  { id: "system", label: "System", icon: <><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.4h4M8 11.4v2" /></> },
+  { id: "light",  label: "Light",  hint: "Always light",            icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
+  { id: "dark",   label: "Dark",   hint: "Always dark",             icon: <path d="M13 9.4A5.2 5.2 0 0 1 6.6 3 5.2 5.2 0 1 0 13 9.4Z" /> },
+  { id: "system", label: "System", hint: "Match your computer",     icon: <><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.4h4M8 11.4v2" /></> },
 ];
 
-function ThemeToggle({ mode, setMode }) {
+const settingsPanel = {
+  padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
+  border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
+  fontFamily: "system-ui, sans-serif",
+};
+
+// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Always
+// present, signed in or out, so the theme switch never depends on the account menu. (B342)
+function SettingsMenu({ mode, setMode }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef(null);
   return (
-    <div role="group" aria-label="Theme" style={{
-      display: "flex", alignItems: "center", gap: 2, padding: 2, borderRadius: 8,
-      border: `1px solid ${LINE}`, background: "var(--chrome-bg)", flex: "none",
-    }}>
-      {THEME_OPTS.map((o) => {
-        const on = mode === o.id;
-        return (
-          <button
-            key={o.id}
-            onClick={() => setMode(o.id)}
-            title={`${o.label} theme`}
-            aria-pressed={on}
-            style={{
-              display: "grid", placeItems: "center", width: 24, height: 21, borderRadius: 6,
-              border: "none", cursor: "pointer",
-              background: on ? "var(--chrome-bg-elev)" : "transparent",
-              color: on ? "var(--chrome-text)" : "var(--chrome-tab-inactive)",
-              boxShadow: on ? "0 1px 2px rgba(0,0,0,0.16)" : "none",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-              style={{ display: "block" }}>
-              {o.icon}
-            </svg>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <button
+        ref={anchor}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Settings"
+        title="Settings — display theme"
+        style={{
+          display: "grid", placeItems: "center", width: 30, height: 26, borderRadius: 7,
+          border: `1px solid ${LINE}`, background: "var(--chrome-bg)", color: "var(--chrome-text)",
+          cursor: "pointer", flex: "none",
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block" }}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
+        placement="below-right" width={206} gap={8} panelStyle={settingsPanel}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-tertiary)", padding: "4px 8px 6px" }}>
+          Display theme
+        </div>
+        {THEME_OPTS.map((o) => {
+          const on = mode === o.id;
+          return (
+            <button
+              key={o.id}
+              onClick={() => setMode(o.id)}
+              aria-pressed={on}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                padding: "8px 9px", borderRadius: 7, border: "none", cursor: "pointer",
+                fontFamily: "inherit", background: on ? "var(--hover-ghost)" : "transparent", color: "var(--text-primary)",
+              }}
+              onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--hover-ghost)"; }}
+              onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}>
+                {o.icon}
+              </svg>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>{o.label}</span>
+                <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)" }}>{o.hint}</span>
+              </span>
+              {on && <span aria-hidden style={{ color: "var(--accent-site-text)", fontWeight: 800, fontSize: 13 }}>✓</span>}
+            </button>
+          );
+        })}
+      </AnchoredMenu>
+    </>
   );
 }
 
@@ -222,7 +260,9 @@ export default function AppHeader({
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  const accent = MODULE_ACCENT[module] || "var(--accent)";
+  // The breadcrumb uses `accent` as foreground TEXT ("current" / "New project"), so it
+  // must be the AA-passing -text token, never the fill (fill-as-text = 3.4:1, B341/B318).
+  const accent = ACCENT_TEXT[module] || "var(--accent)";
 
   // When fullscreen, render only a floating exit button; the header collapses
   // to 0 height so the workspace canvas fills the full viewport.
@@ -312,7 +352,7 @@ export default function AppHeader({
           }}
         >
           {saveSlot}
-          <ThemeToggle mode={mode} setMode={setMode} />
+          <SettingsMenu mode={mode} setMode={setMode} />
           {authControl}
         </div>
       </div>

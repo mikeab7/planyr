@@ -1,4 +1,102 @@
 ## ✅ Done
+
+### B352 — Scanned-sheet OCR: read image-only drawings into the auto-assembly pipeline `[Doc Review / Stitch]` (feature)  *(owner-requested 2026-06-21 right after B335–B339: "Add ocr capabilities if I don't have that"; minted **B352** — was B340's OCR tail; a very hot `main` (B341–B351 + V88–V92) consumed every earlier number this session)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/loving-newton-t7gzpq`).** Fills the dormant OCR seam B336/B337 left wired, so a **scanned / image-only** drawing (no text layer) now reads, groups, stitches, crops, and auto-calibrates through the SAME pipeline as a vector PDF.
+- **How:** `doc-review/lib/ocr.js` renders a no-text page to a canvas (`renderPageToOcrCanvas`, pdf.js, density-capped ≤24 MP) and runs **Tesseract.js** (WASM, in its own worker) to recover the text **with per-word bounding boxes**, then `wordsToItems` converts those boxes into the exact `{ str, x, y, w, h }` page-unit items `sheetMeta.readSheetMeta` (B336) already consumes — so OCR'd pages feed the title-block/scale/match-line reader identically. Low-confidence words are dropped (consistent with "never auto-guess").
+- **Lazy + cheap on the common path:** `createOcrRunner` only spins up the worker when a no-text page is actually hit (a normal vector set pays nothing); the Tesseract orchestrator is a separate ~16 KB chunk and the WASM core + English model load from a pinned CDN (jsDelivr — reachable from Cloudflare Pages) only on first use, then browser-cached. The drawing's pixels never leave the browser. The Stitcher shows a "Reading scanned sheet (OCR)…" status while it runs.
+- **Verified:** **7 unit tests** (`test/ocr.test.js` — the bbox→page-unit conversion, lazy single-worker reuse + dispose, fail-soft, and a scanned title block flowing through `readSheetMeta` to the right sheet number / title / scale / match-line) **+ a LIVE headless run** (`ui-audit/verify-b352-ocr.mjs`, **V93**): the real Tesseract engine loads from jsDelivr in Chromium and reads a "scanned" title block + match line — "GRADING PLAN / SHEET NO. C-5 / SCALE: 1\"=40' / MATCH LINE - SEE SHEET C-6" — recovering C-5, the title, the 40-scale, and the C-6 target. lint 0 · full suite green · build green; DocReview lazy chunk intact, Tesseract split into its own on-demand chunk. **OCR-path stress-hardened the same session — see the B352 stress addendum below.**
+> **Dedup:** this is B340's OCR tail, pulled forward on owner request; B340 keeps the 3 remaining computer-vision tails (graphic scale-bar, geometric edge-match, legend symbol-union). Distinct + complementary to main's stitch-engine stress-tests and Stitcher-component bug sweeps (this session) — those predate OCR and never touch `ocr.js`.
+
+**Stress addendum (owner: "stress test it") — B352.** Adversarial pass over the OCR layer (the stitch-engine stress tests predate OCR and didn't cover it). It turned up + fixed one real **non-finite poison** (the same class the engine stress-test fixed in `stitchGeom`): a **non-finite bbox coordinate** (NaN/±Infinity — which a noisy scan can emit) slipped past `wordsToItems`' `x1 <= x0` guard (`NaN <= NaN` is `false`), pushing a NaN item that would poison the whole reader (title-block density → NaN, line sort → undefined). `wordsToItems` now requires all four box coords **finite** + the box non-inverted, guards a 0/NaN/negative/Infinity render scale and non-finite page dims, and coerces non-string OCR text. New `test/ocrStress.test.js` — **15 tests** across malformed boxes, broken Tesseract shapes (`extractWords`), every orchestration failure (render/recognize/worker-creation throw → null; all-low-confidence → graceful no-text record), the OCR→`readSheetMeta`→grouping integration (a garbage scan stays standalone; an unreadable number isn't force-merged; clean scans group through NaN noise), and a **300-iteration randomized fuzz** asserting no non-finite item ever leaks and `readSheetMeta` always returns a finite [0,1] confidence. **LIVE stress** (`ui-audit/verify-b352-ocr.mjs`, 9/9): the real engine reads a clean scan AND — the dangerous case — emits **0 words on a blank page and on pure noise (no hallucinated sheet number/title)**, and a small-font degraded render doesn't throw. Full suite **959 tests**, lint 0, build clean.
+
+### B351 — Auto-filing matcher: close two browser-path MISFILE vectors `[Doc Review / Auto-file]` (bug)  *(owner chat 2026-06-21 "keep going" — stress-testing adjacent to the stitch tool; minted **B351** — next free after B350)*
+`[x]` **Fixed + verified 2026-06-21 (branch `claude/stitch-tool-stress-test-1tvw5b`).** Continuing the "stress-test / look up how to break things" pass into the auto-filing project matcher (same risk class as the stitcher: **a misfile is worse than an unfiled file**). The browser matcher (`matchProject.js` `scoreProjectInText`) searches the sheet's raw text, so it had two false-positive vectors the server twin (`server/filing/matcher.js`, which compares *extracted fields* with exact equality) avoids by construction — both could **auto-route a drawing onto the wrong project**:
+- **Short IDs matched as a substring of the separator-stripped whole document** — `normId(wholeText).includes(id)` matched a 4-digit job / 6-digit parcel number as a coincidental substring spanning unrelated words (e.g. job `"1045"` inside `"…210455…"`, or a parcel inside a longer run). Now matched by **boundary-aligned equality** against `idWindows` (the normId of each run of ≤5 *adjacent* tokens), so a real id split by punctuation/space (`1234567-000-001`, `1234567 000 001`, `KG-2025`) still matches but a coincidental digit run can't manufacture a confident match.
+- **Scattered name words scored 0.8 (auto-filed)** — a 2-word common name like *Katy Grand* whose words merely appear *somewhere* on an unrelated Katy-area / Grand-Parkway sheet auto-routed there. A full-**phrase** hit still scores 0.9 (auto-files), but a scattered all-words hit now scores **0.55 — below the 0.6 auto-file floor**, so it can corroborate another signal via noisy-or but never auto-route by itself ("never auto-guess").
+- Also hardened `scoreProjectInText` to tolerate a `null` entry in the projects list (the `= {}` default only caught `undefined`).
+- **Untouched:** the shared `decide()` thresholds (`minConfidence 0.6` / `minMargin 0.15`) — only the client-specific text-search *scoring method* changed, so the decision contract stays in parity with the server matcher. **New `test/matchProjectStress.test.js` — 11 adversarial tests** (substring-id rejection + real split-id recall, scattered-name-no-autofile + phrase recall + corroborated match, empty/junk/ambiguous/huge-blob/malformed-input). Existing 8 matcher tests still green; full suite **968 tests**, lint 0 errors, build clean. (Auto-filing is gated dormant behind `VITE_AUTOFILE_ENABLED`, so this is precision hardening on a not-yet-lit path — no production behavior change.)
+
+<!-- 2026-06-21: SECOND pass of the stitch-tool bug sweep (owner: "merge and then look for more"), after
+     B343–B347 merged via #246. Minted **B348/B349** (next free after B347). Both in the Stitcher COMPONENT,
+     fixed + headless-verified (`ui-audit/verify-stitch-bugs.mjs` now 14/14, incl. these two). -->
+
+### B348 — Inline Calibrate box detaches from its line on wheel-zoom `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21 "look for more"; minted **B348**)*
+`[x]` **Fixed + verified 2026-06-21.** The Calibrate entry box stored its screen position **once** (computed at open time). `onDown` blocks pan while it's open, but `onWheel` is NOT blocked — so zooming to read the drawing while typing the known length left the box stranded away from its two-point line. The box now derives its screen position from the stored **world** points via the live pan/zoom each render (`calPos`), so it tracks the line under any zoom. `Stitcher.jsx` (`doCalibrate` stores points only; render computes `calPos`). Headless confirmed the box follows a wheel-zoom.
+
+### B349 — Composite key shows a meaningless "N units/ft" instead of the drawing scale `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21 "look for more"; minted **B349**)*
+`[x]` **Fixed + verified 2026-06-21.** The pinned composite key read `Scale set · {round(1/ftPerUnit)} units/ft` — i.e. **page-points per foot** (~2 for a 1"=40' sheet), which reads as nonsense to a reviewer. Since the world frame is always identity-scale (world unit = page point), `ftPerUnit × 72` is the real **feet per paper inch**, so the key now reads `Scale set · 1" ≈ 40'` — the engineer's scale the reviewer recognises. `Stitcher.jsx` composite-key readout. Headless confirmed `1" ≈ 40'` for the auto-calibrated set and that `units/ft` is gone.
+
+<!-- 2026-06-21: bug sweep of the drawing STITCH tool (owner: "find all the bugs you can on the drawing
+     stitch tool"). Branch `claude/drawing-stitch-bugs-g5h119`. FIRST minted B341–B345, but two concurrent
+     `main` landings consumed those numbers (PR #244 theming-contrast took B341/B342; a sibling stitch
+     STRESS-TEST session — below — also took B341) — so renumbered to **B343–B347**. These five are all in
+     the Stitcher COMPONENT (tray, remove, zoom-anchor, foot formatting, seeded-align markers) and DO NOT
+     overlap the sibling's ENGINE hardening (`stitchGeom`/`autoStitch`/`sheetGroups` non-finite/contradiction/
+     scale-band/rollover guards) — complementary, not duplicate. All five filed AND fixed + headless-verified
+     the same session per STANDING RULE #1. Build green, lazy chunks intact; new harness
+     `ui-audit/verify-stitch-bugs.mjs` (9/9) + the existing `verify-b335-b339.mjs` (13/13, no regression). -->
+
+### B343 — Stitcher tray hides a file whose grouping failed (its pages become unreachable) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B341, renumbered **B343** — main #244 took B341/B342)*
+`[x]` **Fixed + verified 2026-06-21.** The background read→group (B335) sets a file's `groups` to `[]` on any read exception. The tray's grouped view rendered `p.groups.map(...)` → **zero entries**, so a file that failed to group showed nothing and the user had no way to add its pages (the "all pages" toggle was their only escape, with no hint it was needed). Now a file is shown in grouped mode only when its read produced **≥1 logical sheet** (`hasGroups`); an empty/failed group result falls back to the raw per-page list for that file (groupSheets always yields ≥1 run for a readable page, so empty == failure). `Stitcher.jsx` `trayItems`/`anyGroups`.
+
+### B344 — Removing the world-frame (index-0) stitch sheet strands a leftover un-aligned sheet `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B342, renumbered **B344** — main #244 took B341/B342)*
+`[x]` **Fixed + verified 2026-06-21.** The first placed sheet is the world frame (`aligned:true`); the Align button + "Not aligned" chip are gated on `i > 0`. Removing the frame promoted a still-`aligned:false` sheet to index 0, where it **lost its Align button yet stayed measurement-blocked** (`measureOverUnaligned`) — an unrecoverable stuck state (measuring errored "Align that sheet…" with no Align affordance). New `removeSheet` helper promotes the new first sheet to the frame (`aligned:true`) on removal, restoring the "index-0 is the frame" invariant. Also guarded `onDown`'s align path against a sheet removed mid-align (was a `sheet.M` null deref). Headless: add frame + un-aligned sheet → remove frame → survivor is framed, no stranded "Not aligned".
+
+### B345 — Stitcher ± zoom buttons anchor on the world origin, not the viewport centre `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21; first filed B343, renumbered **B345**)*
+`[x]` **Fixed + verified 2026-06-21.** The wheel zoom is cursor-anchored (shared `zoomAround`, B329) but the ± buttons just scaled `view.zoom` with pan untouched, so content slid toward the top-left corner on every click (cf. the single-sheet B290). New `zoomBtn(factor)` routes the ± buttons through `zoomAround` about the **viewport centre**. Headless confirmed a fixed point's offset from centre scales ~1.2× per click.
+
+### B346 — Stitcher distance read-outs round to whole feet (inconsistent with area's 2-dp acres) `[Doc Review / Stitch]` (bug, minor)  *(owner chat 2026-06-21; first filed B344, renumbered **B346** — the stitch counterpart of B296)*
+`[x]` **Fixed + verified 2026-06-21.** B296 gave the single-sheet tool one-decimal linear feet, but the Stitcher's on-canvas distance label and the "Distance" takeoff total still used whole-foot `f0` (a 150.6 ft line read "151 ft"). Added `f1` and used it for both. Headless confirmed a decimal-foot read-out.
+
+### B347 — Seeded auto-stitch fallback gives no endpoint-order cue (reverse clicks flip the sheet 180°) `[Doc Review / Stitch]` (bug)  *(owner chat 2026-06-21; first filed B345, renumbered **B347**)*
+`[x]` **Fixed + verified 2026-06-21.** When auto-stitch (B337) can't place a sheet but knows its seam side, manual Align is **pre-seeded** with the moving sheet's two seam endpoints (`detectedEndpointsFor`) and the user clicks the two matching points on a placed sheet. Nothing showed WHICH seed was "first" vs "second", so clicking the matching points in reverse order silently rotated the sheet 180° via `solveM`. The seeded flow now draws **numbered markers (1, 2)** at the moving sheet's seed endpoints (its current position), so the click order is unambiguous. Additive render only; no geometry change.
+
+<!-- ✅ DONE 2026-06-21 (branch claude/focused-davinci-kkytxf). Follow-up to PR #242 (which shipped the
+     drop-a-set → group/auto-stitch/crop/auto-calibrate feature in the STITCHER). #242 left the single-
+     sheet MARKUP sidebar as a flat "Sheet N" list, so B266 (real sheet labels there) was never delivered
+     on that surface. This PR brings the real sheet # + title + the logical-group collapse to the Markup
+     sidebar, REUSING #242's shared engines (sheetMeta.readSheetMeta + sheetGroups.groupSheets +
+     sheetRead.statedCalibration — no duplicate modules). Delivers the open B266 + the new B348. 7/7
+     headless (ui-audit/verify-markup-sheet-labels.mjs) + #242's viewer suite still 13/13 (no regression);
+     846 tests, lint 0, build green. VERIFICATION V91. Backstory: a parallel session had built an
+     equivalent FULL implementation (PR #243) just before #242 merged; on the owner's "compare, then
+     salvage extras" call, the duplicate engines/Stitcher work were discarded and only this genuinely-
+     missing Markup-sidebar piece was kept, rebased onto #242. -->
+
+### B266 — Sheet sidebar labels from the title block (real sheet # + name, not "Sheet N") `[Doc Review / Markup]` (feature)  *(arrived as "NEW-1" 2026-06-20; delivered 2026-06-21 as a follow-up to #242)*
+`[x]` **Shipped.** The single-sheet Markup sidebar now shows each sheet's real **sheet # + title** read
+from its title block (e.g. "C-5 — GRADING PLAN", "COVER SHEET"), not generic "Sheet N". Built on #242's
+shared reader (`sheetMeta.readSheetMeta` — which locates the title-block band first, so a "SEE SHEET X"
+cross-ref or a detail/grid ref can't masquerade as the sheet number, the crux this item called out).
+**No-auto-guess:** a sheet with no detected title block / no readable number falls back to "Sheet N"
+(gated on `meta.titleBlock || meta.sheetNumber`, so a stray body-text line is never surfaced as the
+label). OCR for scanned sheets stays the shared remaining slice (tracked under B267 + #242's dormant OCR
+seam in `sheetRead.js`). 7/7 headless (`ui-audit/verify-markup-sheet-labels.mjs`, V91); #242's viewer
+suite still 13/13.
+
+### B348 — Collapse the Markup single-sheet sidebar into logical sheets (parity with the Stitcher) `[Doc Review / Markup]` (feature)  *(arrived 2026-06-21; minted **B348** — next free after B347)*
+`[x]` **Shipped (follow-up to #242).** #242 collapses a dropped set into logical sheets in the STITCHER
+tray; this brings the same collapse to the single-sheet **Markup** sidebar: consecutive pages sharing a
+plan type + a contiguous sheet-number run show as one expandable entry ("Grading Plan · C-5–C-7 · 3
+sheets"); cover/notes/one-offs stay standalone. Reuses #242's `sheetGroups.groupSheets` (the same engine
+the Stitcher uses, so the two surfaces agree) + surfaces the per-sheet stated-scale auto-calibrate (·≈)
+via `sheetRead.statedCalibration`. The sidebar count reads "N sheets · M pages" so the collapse is
+visible. Verified: a 4-page set → 2 logical entries, the group expands to its members (V91).
+### B341 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; minted **B341** — next free after B340)*
+### B350 — Stress-test the drawing stitch tool: harden the auto-stitch against bad PDF sets `[Doc Review / Stitch]` (task)  *(owner chat 2026-06-21: "stress test the stitch tool, look up how to break things and implement strategies to do so"; **renumbered twice in a very hot number space** — first shipped as B341 (PR #248), bumped to B348 when a concurrent `main` kept B341 for theming-contrast (PR #244), then bumped again to **B350** when THREE more sessions collided on B348 (PR #255 calibrate-box, a Markup-sidebar feature, and this). B350 was the next free after B349 at this push; the other two B348 entries belong to other already-merged sessions and are left as-is. Code comments + tests + harness all carry B350.)*
+`[x]` **Shipped + verified 2026-06-21 (branch `claude/stitch-tool-stress-test-1tvw5b`).** Adversarial pass over the stitch core (`stitchGeom.js`, `autoStitch.js`, `sheetGroups.js`, `sheetMeta.js`) — drove each engine with the inputs a messy real-world PDF set throws at it and fixed four ways it could **fail silently** (the worst kind here: a bad transform flings a sheet off-canvas, or — worse — butts two drawings together at the wrong size/place and the takeoff reads a confident wrong number). All four follow the owner rule **"a wrong stitch is worse than an un-stitched one"**: when a signal is unreliable the sheet is left **unplaced → manual-Align safety net**, never auto-guessed.
+- **Non-finite endpoints (NaN/Infinity) used to slip past the degenerate-baseline guard** — `Math.hypot(NaN) < 1` is `NaN < 1` → `false`, so a NaN coordinate (bad read / mis-built drawing area) reached `solveM`, produced a NaN matrix, and poisoned the sheet transform **and** the whole composite's bbox (every `Math.min/max` over it → NaN). `alignBaselinesDegenerate` now rejects any non-finite point. (`stitchGeom.js`)
+- **Contradictory match-line labels produced a wrong (overlapping/mirrored) stitch** — if both sheets claimed the seam on their "right", `buildAdjacency` trusted it. It now treats the **geometric opposite** as the source of truth and **drops the edge** when a sheet's own label contradicts it (→ manual Align). (`autoStitch.js`)
+- **Mismatched page sizes were silently rescaled** — a similarity fit from two endpoints will shrink/blow up a half-size detail page to make the seam meet. `autoPlaceGroup` now rejects a placement whose implied scale strays past **`MAX_STITCH_SCALE` (±25%)** and leaves the sheet for manual Align. (`autoStitch.js`)
+- **Grouping chained across a major rollover** — the packed `ordinal` (major·100+minor) made `C-1.99 → C-2.00` look consecutive (and could collide two codes onto one ordinal). `consecutiveCodes` now compares the parsed major/minor by numbering level, so a rollover starts a new logical sheet. (`sheetGroups.js`)
+- **New `test/stitchStress.test.js` — 29 adversarial tests** across 8 break-strategy groups (non-finite/degenerate coords, contradictory seams, size mismatch, cycles/duplicates/self-refs/missing targets, sheet-code edge cases, reader junk/empty/huge input, a **300-iteration randomized fuzz** asserting the partition + finiteness + scale-band invariants, and the measure-over-unaligned guard). Full suite green (**879 tests**, lint 0 errors, build clean). Pure-engine + DI hardening, so no live-browser verification needed; the manual-Align safety net and text-layer path are unchanged. **(Round 1 — PR #248, merged 2026-06-21.)**
+
+**Round 2 — reader / grouping / calibration path (follow-up, same B350).** After round 1 hardened the placement geometry, a second adversarial pass over the text reads and takeoff math turned up one real functional gap and locked in the rest:
+- **A set numbered past sheet 99 was invisible to grouping AND auto-stitch** — `parseSheetNumber` capped the major at `\d{1,2}`, so `C-100` read as `""`, while `parseSheetCode` (sheetGroups) and the match-line `SHEET_REF` (sheetMeta) both already accepted 3 digits. A sheet with no readable number can't be chained by contiguity or found in the seam graph's by-number index, so a `C-100…C-110` plan set never grouped or stitched. Bumped the **label-anchored** read to `\d{1,3}` (still requires a "SHEET NO." label, so the `A195` grid-ref guard is intact). (`titleBlockParse.js`)
+- **New `test/stitchReaderStress.test.js` — 13 tests**: 3-digit sheets now read + group + auto-stitch end-to-end (incl. through the wired `readSheetMeta`); date reading rejects impossible months/days/years and picks the newest under a huge-blob load; takeoff math (`dist`/`polyArea`/`pathLength`/`centroidOf`/`measureValue`/`measureLabel`) degrades on too-few / collinear / concave / coincident / non-finite input and **never fabricates a number** — a non-finite calibration reads a safe sentinel ("set scale" / "—"), never a plausible-looking figure. Full suite green (**892 tests**, lint 0 errors, build clean).
+
+**Round 3 — LIVE interactive stress (headless browser).** Rounds 1–2 fuzzed the pure engines; round 3 attacks the one surface they can't reach — the real React interaction layer — with a new headless harness **`ui-audit/verify-stitch-stress.mjs`** (V92, **14/14 checks, 0 page errors**) driving a synthetic 4-page civil set: **(S1)** a degenerate manual Align (two coincident reference clicks) is refused and the sheet is **not flung**; **(S2)** measuring over a not-yet-aligned sheet is **blocked** and commits nothing; **(S3)** an interrupted pan (window `blur` mid-drag) doesn't crash or stick; **(S4)** ± zoom-button spam **clamps** at 5%/800%; **(S5)** a 45-click random fuzz across all tools never crashes the Stitcher. The hypothesized "remove a sheet mid-Align → deref `undefined.M`" crash was found **already guarded** (the sibling session's B344 fix, `if (!sheet) { setAlign(null); … }` in `onDown`) — so this round adds a permanent interaction regression net rather than a new fix. No source change; harness + V-log only.
+
 <!-- 2026-06-21: owner-chat batch NEW-1..NEW-5 — Document Review "drop a whole set → it groups, stitches,
      crops, and calibrates itself." FIRST filed B325–B329, renumbered → **B335–B339** (+ **B340** tails)
      when a hot `main` (#238/#240/#241) consumed B325–B334 before this merged (highest B# was B334 at merge
@@ -69,6 +167,88 @@
 
 ### B325 — Stitcher pan crash: "Cannot read properties of null (reading 'panX')" when a pan is interrupted `[Doc Review / Stitch]` (bug)  *(owner-reported 2026-06-21: "its broken, i was on the stitcher and it broke"; minted **B325** — a hot `main` had reached B324)*
 `[x]` **Fixed + shipped 2026-06-21 (branch `claude/awesome-feynman-i7wypf`).** The pan handler's `setView` updater read `drag.current` **inside** the deferred updater. That updater runs in React's render phase, which for a continuous `pointermove` can be deferred a tick; a discrete event in between — `pointerup`, `pointercancel`, or the **B270** blur/visibility gesture-abort — nulls `drag.current` first. Reading the ref then dereferenced null and threw in the render phase → the Document Review **error boundary** caught it ("hit an error and couldn't load") and the whole stitcher went down. A real user hits this by tab-switching / losing focus / a pointer-cancel mid-pan. **Fix:** capture the drag origin into a local and close over it via a pure `panTo()` helper in `lib/stitchGeom.js`, so an aborted gesture can't crash the deferred updater. **Verified:** 4 unit tests (`test/stitchGeom.test.js` — math, null-ref-survival, + a teeth test that the OLD ref-reading pattern throws `/panX/`) and a headless harness (`ui-audit/verify-b325-pan.mjs`: a normal pan moves the world; 12 mid-pan aborts → no error boundary, 0 `panX` errors; pan still works after). lint 0 · build green. VERIFICATION **V84**.
+
+<!-- 2026-06-21: owner-dropped (coworker chat, "Backlog mode") a pair — NEW-1 contrast regression
+     + full-app audit, NEW-2 move the theme picker into Settings. First filed B321/B322, **renumbered
+     to B341 / B342 on merge** — a concurrent `main` landed a Doc-Review Drive batch B321–B324 + the
+     B325–B340 stitcher/file/pinch work while this was in flight, so the real next-free was B341.
+     Filed AND fixed AND verified the SAME session per STANDING RULE #1; recorded straight here (done),
+     not left in Open. Sequence honored: B341 first
+     (legible in both themes) THEN B342 (relocate). DEDUPE: net-new. B341 is the *follow-up* to B320
+     (which shipped the dark text ramp) — B320 migrated index.css + AppHeader + palette.js + the PAL
+     objects but MISSED the inline hardcoded colors in the chrome-region components, which is the
+     regression B341 closes; not a duplicate. B342 supersedes the B316/B317 note "theme control lives
+     in the account dropdown or Settings" by landing it in a row-1 Settings gear (reachable signed-out,
+     which the account dropdown is not). No other open item touches contrast or the theme control. -->
+
+### B341 — Contrast regression from the scheme change; full-app audit `[Site / shared / theming]` (bug)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-1"; first filed B321, renumbered **B341** — concurrent `main` consumed B321–B340)*
+`[x]` **Fixed + audited + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** After the
+B316–B320 scheme change, several chrome elements rendered too light to read. **Root cause:** B318 flipped
+the chrome from always-dark to **themes-with-the-app** (light theme → light chrome), and migrated
+`index.css` + `AppHeader` + `palette.js` + the per-file `PAL` *objects* to tokens — but a set of
+**chrome-region components kept inline hardcoded old-dark-chrome hexes** (`#ece7db` cream text,
+`#fff` active text, `#9b9482`/`#8a8473` warm grays, `#2e2a23` borders, `rgba(255,255,255,0.0x)` fills,
+a hardcoded-dark status-bar bg, and pale dark-chrome badge colors `#86efac`/`#fbbf24`). On the new
+**light** chrome those became cream/white-on-white; one (the planner status bar) was dark-text-on-a-
+still-hardcoded-dark-bg. The two reported cases — the **user-name pill** and the **Dashboard/Map
+toggle** — were exactly this class, so the fix audited the **whole tree**, not just the three reported spots.
+- **Audit method (as briefed):** diffed the scheme commit (`32a1b8a`) to see which tokens changed,
+  then grepped every consumer of the retired hexes; built a **programmatic WCAG checker over every
+  defined token pair** in both themes (`ui-audit/contrast-audit.mjs`, parses the real `index.css`) +
+  a **live headless probe** that reads the computed text/bg of the actual chrome elements
+  (`ui-audit/verify-b341-contrast.mjs`).
+- **Token system itself was sound** — every actionable pair clears AA in both themes; the only WARNs
+  are documented exceptions (locked Site/Schedule brand fills, only ever used as ≥3:1 underline +
+  unused `--on-accent-*` text tokens; the amber Markup underline whose state is also carried by its
+  passing text; owner-exempt subtle borders). So the regression was purely the unmigrated components.
+- **Fixes (repointed to tokens):** `Shell.jsx` (account pill + dropdown), `ProjectBreadcrumb.jsx`
+  (crumbs + dropdown; **AppHeader now passes the `-text` accent token**, never the fill, for the
+  "current"/"New project" labels — fill-as-text was 3.4:1), `SitePlanner.jsx` (status bar bg, Files
+  button, left-rail + tool-rail + snap/parcel active text, hdrTab chips, save-slot warn color),
+  `DocReview.jsx` (header title + Files + chrome buttons), `Stitcher.jsx` (toolbar dividers/buttons),
+  `ReviewsBar.jsx` (badge colors + dropdown), `LayerPanel.jsx` (warm grays → tokens; it rides the
+  themed surface-overlay so it was dark-on-dark in dark mode), and the reusable `Field` label.
+- **Two new tokens** (both themes, AA-checked): **`--on-accent`** (text ON the global accent fill —
+  white in light, near-black in dark because the B319 dark accent `#F26B3A` is too light for white at
+  only 3.0:1) and **`--warn-text`** (legible amber for saving/unsaved/offline badges, replacing the
+  dark-chrome `#fbbf24`).
+- **Before → after (reported + key siblings), contrast on the light chrome:**
+
+  | Element | before | after (light / dark) |
+  |---|---|---|
+  | User-name / Sign-in pill text | `#ece7db` on `#FFF` ≈ **1.2:1** | **16.66 / 15.11** |
+  | Dashboard·Map crumb (active) | `#fff` on `#FFF` = **1.0:1** | **16.66 / 15.11** |
+  | Dashboard·Map crumb (idle) | `#9b9482` ≈ **3.0:1** | **11.2 / 10.4** |
+  | Planner status bar text | dark-on-dark ≈ **1.3:1** | **9.6–14.3 / 8.2–16** |
+  | Markup "Saved ✓" badge | `#86efac` ≈ **1.4:1** | **5.3 / 11** |
+  | Active module tab + inactive tabs | (ok) | 5.3–6.9 / 8–10.3 |
+
+- **Deliverables:** `ui-audit/contrast-audit.mjs` (token-pair report, exits non-zero on any actionable
+  fail) + **`test/contrast.test.js`** (3 tests — both themes pass their floor; the WARN set stays
+  locked) so a future palette edit that drops a pair below AA fails CI instead of the eye. Module
+  accents stayed confined to the tab row (no accent bled into body areas).
+- **Verified:** lint 0 errors · **783 tests** (3 new) · build green · doc-review + SitePlannerApp lazy
+  chunks intact · headless **both themes** all chrome elements clear WCAG AA (**V84**); screenshots
+  `ui-audit/screens/b341-chrome-{light,dark}.png` + `theme-markup-{light,dark}.png`.
+
+### B342 — Move the display-theme picker (Light / Dark / System) out of the open header into Settings `[shared / theming]` (task)  *(owner-dropped 2026-06-21 "Backlog mode"; arrived as "NEW-2"; first filed B322, renumbered **B342** — concurrent `main` consumed B321–B340)*
+`[x]` **Done + verified this session (branch `claude/dreamy-fermi-qqyt9j`).** The Light / Dark / System
+control used to sit open in `AppHeader` row 1 as a 3-button segmented control. It now lives behind a
+**Settings gear (⚙) in row 1** that opens an `AnchoredMenu` popover ("DISPLAY THEME" → Light "Always
+light" / Dark "Always dark" / System "Match your computer", active row checked).
+- **Theme state/store untouched** — the gear popover renders the same `useTheme()`-wired options; only
+  the control's *placement* changed. Persistence stays per-user in `localStorage['planyr.theme']` as
+  before.
+- **Edge case handled:** the "System" live OS-preference listener (`matchMedia('(prefers-color-scheme:
+  dark)')`) lives in **`ThemeProvider`** (app-root context), NOT in the relocated control — so it keeps
+  updating mid-session after the move, verified by inspection + the existing theme tests.
+- **Kept reachable signed-OUT** (deliberate): the gear is always present, so the theme switch never
+  depends on the signed-in account dropdown (and the sandbox self-tests run logged-out). The only
+  header consumer of the old control was AppHeader itself — confirmed nothing else depended on it.
+- **Verified:** lint 0 · 783 tests · build green · headless logged-out (**V84**,
+  `ui-audit/verify-b342-settings.mjs`): segmented control gone, gear opens the popover, choosing Dark →
+  `data-theme="dark"` + persisted, back to Light → `data-theme="light"`; screenshot
+  `ui-audit/screens/b342-settings-popover.png`.
 
 <!-- ✅ DONE 2026-06-21 (branch claude/ecstatic-faraday-qoc8vf, commit 32a1b8a). The B316 umbrella +
      B317–B320 shipped together as one chain: light / dark / system theming. Token system (data-theme
