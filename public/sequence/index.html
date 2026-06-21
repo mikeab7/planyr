@@ -4318,6 +4318,9 @@ function App() {
   useEffect(() => {
     if (!inShell) return;
     const onMsg = (e) => {
+      // These messages mutate state (switch project, open dashboard, create a project),
+      // so only accept them from the same-origin shell — never a cross-origin embedder.
+      if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-shell") return;
       if (m.type === "planar:nav-select" && m.id != null) {
@@ -8366,7 +8369,11 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const HC={gray:"#94a3b8",yellow:"#d97706",red:"#dc2626",green:"#16a34a",paused:"#9ca3af"};
   // Build full month list with date metadata for adaptive filtering
   const months=[], cur2=new Date(pd(minD));cur2.setDate(1);
-  while(cur2<=pd(maxD)){
+  // Bound the header loop: a valid-but-extreme end date (e.g. a typo'd year 9999, or
+  // imported far-future data) would otherwise build ~95k month cells. 12000 months =
+  // 1000 years, far beyond any real schedule.
+  let _mGuard=12000;
+  while(cur2<=pd(maxD) && _mGuard-->0){
     months.push({x:xOf(fd(cur2)), mo:cur2.getMonth(), yr:cur2.getFullYear(),
       label:cur2.toLocaleDateString("en-US",{month:"short",year:"2-digit"})});
     cur2.setMonth(cur2.getMonth()+1);
