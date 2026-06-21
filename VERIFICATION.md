@@ -60,6 +60,15 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V95 — New site plans default to lettered concepts (Concept A, B, … AA) (B355) ✅ (self-verified headless in the real planner — fully done)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app, `vite preview`, logged-out — the logged-out localStorage store is the same plan-creation code path used signed-in) · **Next check** — none required.
+- **✅ Live-verified 2026-06-21 (`ui-audit/verify-b355-concepts.mjs`, 4/4 checks, 0 genuine page errors):** seeded a real saved site, resumed into the planner, and clicked **Plan ▾ → ＋ New plan** for three cases — the header re-labelled the new plan exactly as designed:
+  - existing **"Concept A"** → new plan **"Concept B"** (sequences to the next letter);
+  - existing **"Concept C"** (A/B deleted) → **"Concept D"** (continues PAST the highest, never reuses a deleted gap);
+  - existing legacy **"Plan 1"** → **"Concept A"** (old "Plan N" names are ignored, not renamed).
+  - (The harness filters two documented sandbox-only noise classes — basemap-less seed NaN SVG geometry + CORS-blocked external GIS probes — and asserts no *genuine* JS error.)
+- **✅ Deterministic path (`test/conceptName.test.js`, 14 tests):** A–Z, the Z→AA→AB→… spreadsheet roll-over (bijective base-26, no 27th-concept crash), round-trip stability, gap-not-reused, and legacy "Plan N" ignored.
+- Pure `conceptName.js` wired into all three creation paths (new-from-map, new-plan-same-parcel, blank-site first save) + the `createSiteModel` fallback. Name stays user-editable; no retroactive rename of existing plans. full suite 1055 · lint 0 · build green.
 ### V92 — Stitcher: notes/legend aggregated across the set + click-a-detail "cloud" (B350) ✅ (self-verified headless — browser-only, no signed-in check needed)
 **Self-verified 2026-06-21** against the real built app on `vite preview` (logged-out — the stitch core
 is browser-only). `ui-audit/verify-b350.mjs` **11/11, 0 page errors** with a generated set whose

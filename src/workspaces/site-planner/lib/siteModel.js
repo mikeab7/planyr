@@ -63,7 +63,7 @@ export function createSiteModel(p = {}) {
     id: p.id || null,
     groupId: p.groupId || p.id || null,
     site: p.site || p.name || "Untitled site",
-    name: p.name || "Plan 1",
+    name: p.name || "Concept A",
     updatedAt: p.updatedAt || Date.now(),
     // geo anchor + jurisdiction
     origin: p.origin || null,
