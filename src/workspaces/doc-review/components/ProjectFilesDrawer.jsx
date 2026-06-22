@@ -27,6 +27,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, upsertFileFacts, listFileFacts, markReviewPlaced, DISCIPLINES } from "../lib/reviewStore.js";
+import { listMyTeams } from "../../site-planner/lib/teams.js";
+import { shareProject, makeProjectPrivate } from "../../site-planner/lib/sharing.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
@@ -222,6 +224,11 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
               </label>
             </div>
 
+            {/* Share-with-team control for the selected project (team feature) */}
+            {activeProject && (
+              <ShareControl project={projects.find((p) => p.id === activeProject)} onChanged={refresh} />
+            )}
+
             {/* saved-view chips (queries, not folders) */}
             <div style={{ flex: "none", display: "flex", flexWrap: "wrap", gap: 5, padding: "8px 12px", borderBottom: `1px solid ${PAL.line}` }}>
               {SAVED_VIEWS.map((v) => (
@@ -315,6 +322,82 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
           Folders are saved views — queries over a tagged index. Files stay attached regardless of project status.
         </div>
       </div>
+    </div>
+  );
+}
+
+/* Share the selected project with a team (team feature) — share/unshare the whole project
+ * (its plans + reviews + file index) so teammates can see and edit it. Inline panel (no dialog
+ * box, per the owner rule); only the project owner can change it (the DB enforces it too). */
+function ShareControl({ project, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [teams, setTeams] = useState(null); // null = not loaded
+  const [busy, setBusy] = useState(false);
+  const [confirmPrivate, setConfirmPrivate] = useState(false);
+  const [err, setErr] = useState("");
+  const shared = !!(project && project.teamId);
+
+  useEffect(() => { if (open && teams === null) listMyTeams().then(setTeams).catch(() => setTeams([])); }, [open, teams]);
+  if (!project) return null;
+  const teamName = (teams || []).find((t) => t.id === project.teamId)?.name;
+
+  const doShare = async (teamId) => {
+    setBusy(true); setErr("");
+    const r = await shareProject(project.id, teamId);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || "Couldn't share."); return; }
+    setOpen(false); onChanged && onChanged();
+  };
+  const doPrivate = async () => {
+    setBusy(true); setErr("");
+    const r = await makeProjectPrivate(project.id);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || "Couldn't update."); return; }
+    setConfirmPrivate(false); setOpen(false); onChanged && onChanged();
+  };
+
+  const link = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 11, fontFamily: "inherit", fontWeight: 600, padding: 0 };
+  const opt = { fontSize: 11, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: PAL.ink, padding: "3px 9px" };
+
+  return (
+    <div style={{ flex: "none", padding: "6px 12px", borderBottom: `1px solid ${PAL.line}`, fontSize: 11 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: shared ? PAL.accent : PAL.muted }}>
+          {shared ? `◐ Shared${teamName ? " · " + teamName : ""}` : "○ Private"}
+        </span>
+        <button style={{ ...link, marginLeft: "auto" }} onClick={() => { setOpen((o) => !o); setErr(""); setConfirmPrivate(false); }}>
+          {open ? "Close" : shared ? "Sharing…" : "Share…"}
+        </button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {teams === null ? (
+            <div style={{ color: PAL.muted }}>Loading teams…</div>
+          ) : teams.length === 0 ? (
+            <div style={{ color: PAL.muted, lineHeight: 1.4 }}>You're not on a team yet. Create one in your account menu (Team), then share this project with it.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              <span style={{ color: PAL.muted }}>Share with:</span>
+              {teams.map((t) => (
+                <button key={t.id} disabled={busy} onClick={() => doShare(t.id)}
+                  style={{ ...opt, ...(t.id === project.teamId ? { borderColor: PAL.accent, color: PAL.accent } : {}) }}>
+                  {t.name}{t.id === project.teamId ? " ✓" : ""}
+                </button>
+              ))}
+              {shared && (confirmPrivate ? (
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: PAL.muted }}>Remove team access?</span>
+                  <button style={{ ...opt, color: "var(--warn-text)" }} disabled={busy} onClick={doPrivate}>Make private</button>
+                  <button style={opt} disabled={busy} onClick={() => setConfirmPrivate(false)}>Cancel</button>
+                </span>
+              ) : (
+                <button style={{ ...link }} disabled={busy} onClick={() => setConfirmPrivate(true)}>Make private</button>
+              ))}
+            </div>
+          )}
+          {err && <div style={{ color: "var(--warn-text)", marginTop: 5 }}>{err}</div>}
+        </div>
+      )}
     </div>
   );
 }

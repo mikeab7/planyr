@@ -5,6 +5,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
+import { claimInvites } from "./lib/teams.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 import { nextConceptName } from "./lib/conceptName.js";
@@ -104,6 +105,11 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
     setMigrateMsg(""); setHideMigrate(false); // reset the prompt on any real auth switch
     if (uid) {
       setCloudLoading(true);
+      // TEAM: activate any invites waiting on this user's email (an existing account invited
+      // after signup) BEFORE pulling, so a freshly-joined team's shared projects come down in
+      // the same pull. Best-effort — never blocks loading the user's own sites.
+      await claimInvites().catch(() => {});
+      if (seq !== applySeq.current) return; // superseded by a newer auth event
       const res = await pullCloud(uid).catch(() => ({ ok: false }));
       if (seq !== applySeq.current) return; // superseded by a newer auth event — don't apply stale cloud/view state (B43)
       setCloudLoading(false);

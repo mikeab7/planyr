@@ -1,7 +1,9 @@
 /* Optimistic-concurrency upsert (B314) — a reusable compare-and-swap over a Supabase table
- * keyed by (user_id, id) with an integer `version` column. Used by BOTH the Site Planner
+ * keyed by `id` with an integer `version` column. Used by BOTH the Site Planner
  * (public.sites) and Document Review (public.doc_reviews) so the conflict semantics are
- * identical and the primitive is ready for the DEFERRED multi-user team-workspace feature.
+ * identical. This is the primitive the multi-user team-workspace feature builds on: the
+ * UPDATE is scoped by (id, version) and access is enforced by RLS, so a teammate can edit a
+ * shared row without a false conflict and without re-stamping the creator (user_id).
  *
  * Contract: a write carries the `version` the client last synced. The DB applies it ONLY if
  * the stored version still matches — a single conditional UPDATE, atomic at the row level —
@@ -23,13 +25,22 @@
 // doc_reviews' library columns), and those must NOT be mistaken for "degrade the version
 // guard". Covers Postgres undefined-column (42703 "… does not exist") and the PostgREST
 // schema-cache miss (PGRST204 "Could not find the 'version' column …").
-export const isMissingVersionColumn = (error) => {
+// Generic "this column isn't migrated in yet" detector. Accepts a Supabase error object OR a
+// plain message string (casUpsert surfaces `error` as a string). If `col` is given, the message
+// must mention it — so a missing optional column (version, team_id, …) isn't confused with a
+// different one. Covers Postgres undefined-column (42703 "… does not exist") and the PostgREST
+// schema-cache miss (PGRST204 "Could not find the '…' column …").
+export const isMissingColumn = (error, col) => {
   if (!error) return false;
-  const msg = String(error.message || "").toLowerCase();
-  if (!msg.includes("version")) return false;
-  const code = String(error.code || "").toLowerCase();
+  const msg = String((error && error.message) || error || "").toLowerCase();
+  if (col && !msg.includes(String(col).toLowerCase())) return false;
+  const code = String((error && error.code) || "").toLowerCase();
   return msg.includes("does not exist") || msg.includes("schema cache") || msg.includes("could not find") || code === "42703" || code === "pgrst204";
 };
+// The signal that the `version` column isn't there yet (migration not run). Must name the
+// VERSION column specifically — a table can have OTHER optional columns that also 404 (e.g.
+// doc_reviews' library columns), and those must NOT be mistaken for "degrade the version guard".
+export const isMissingVersionColumn = (error) => isMissingColumn(error, "version");
 // unique_violation (23505) — an INSERT hit an existing primary key: we thought the row was
 // new but it already exists (another session created it) → treat as a conflict, not an error.
 const isUniqueViolation = (error) => String((error && error.code) || "") === "23505";
@@ -60,18 +71,26 @@ export function interpretInsert(rows, error) {
 }
 
 // Perform the guarded write. `client` = a supabase client; `table` = "sites"|"doc_reviews";
-// `row` = the column payload (id, user_id, data, + any duplicated columns — NOT version);
+// `row` = the column payload (id, data, + any duplicated columns — NOT user_id, NOT version);
+// `uid` = the signed-in user, stamped as user_id (creator) ONLY on the insert branch;
 // `expected` = the version the client last synced (null/undefined ⇒ treat as a brand-new row).
 // Returns the typed outcome above and never throws.
+//
+// TEAM NOTE: the conditional UPDATE filters on (id, version) only — NOT user_id. Once a project
+// is shared, a teammate's uid differs from the row's creator (user_id), so a user_id filter would
+// match 0 rows and report a false conflict. Access scoping is enforced by RLS (own row OR a row
+// shared with a team you're in); `id` is the primary key, `version` is the concurrency guard. We
+// also DON'T send user_id in the UPDATE payload, so a teammate edit never re-stamps the creator.
 export async function casUpsert(client, table, { uid, id, row, expected }) {
   try {
     if (expected == null) {
-      const { data, error } = await client.from(table).insert({ ...row, version: 1 }).select("version");
+      // Insert: stamp the creator here (callers omit user_id from `row` so an UPDATE can't clobber it).
+      const { data, error } = await client.from(table).insert({ ...row, user_id: uid, version: 1 }).select("version");
       return interpretInsert(data, error);
     }
     const { data, error } = await client.from(table)
       .update({ ...row, version: expected + 1 })
-      .eq("user_id", uid).eq("id", id).eq("version", expected)
+      .eq("id", id).eq("version", expected)
       .select("version");
     return interpretCas(data, error);
   } catch (e) {

@@ -39,7 +39,7 @@ const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 // across this merge instead of being resurrected. Collections not yet wired to record a tombstone
 // keep the old recoverable "a delete can reappear once" trade-off; never silent data loss, and
 // the local version history makes any surprise recoverable meanwhile — see BACKLOG B126/B276.)
-export function mergePulledSites(existing, cloudModels) {
+export function mergePulledSites(existing, cloudModels, selfUid) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
   const cloudAt = {};
@@ -51,10 +51,16 @@ export function mergePulledSites(existing, cloudModels) {
     const local = map[n.id];
     map[n.id] = local ? mergeSiteContent(local, n) : n; // content-union — never drop drawn work
   }
+  // TEAM: only re-push rows THIS user owns. A teammate's shared row (ownerId set to someone else)
+  // is read-through only — re-pushing it from your device would churn versions / risk a false
+  // conflict on the real owner's edits. A row with no ownerId (legacy local-only) or no selfUid
+  // (older callers / tests) is treated as ours, preserving the prior heal behavior.
+  const mine = (m) => !selfUid || !m.ownerId || m.ownerId === selfUid;
   const toPush = Object.keys(map).filter((id) =>
-    !(id in cloudAt) ||
-    (map[id].updatedAt || 0) > cloudAt[id] ||
-    contentCount(map[id]) > (cloudCount[id] || 0));
+    mine(map[id]) && (
+      !(id in cloudAt) ||
+      (map[id].updatedAt || 0) > cloudAt[id] ||
+      contentCount(map[id]) > (cloudCount[id] || 0)));
   return { map, toPush };
 }
 
@@ -72,7 +78,7 @@ export async function pullCloud(uid) {
   }
   let existing = {};
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  const { map, toPush } = mergePulledSites(existing, models);
+  const { map, toPush } = mergePulledSites(existing, models, uid);
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
@@ -480,7 +486,13 @@ export function deleteSite(id) {
   delete sites[id];
   writeSites(sites);
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
-  if (activeUser) cloudDelete(activeUser, id); // fire-and-forget cloud removal
+  // Fire-and-forget cloud removal. TEAM: a regular member can't delete a teammate's SHARED
+  // project (RLS allows only the owner or a team admin) — if the server rejects the delete,
+  // re-pull so the row reappears in the cache instead of vanishing only on this device.
+  if (activeUser) {
+    const me = activeUser;
+    cloudDelete(me, id).then((r) => { if (r && r.ok === false) pullCloud(me).catch(() => {}); }).catch(() => {});
+  }
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }

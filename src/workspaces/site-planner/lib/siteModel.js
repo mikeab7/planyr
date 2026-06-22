@@ -15,7 +15,7 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 7;
+export const SITE_MODEL_VERSION = 8;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -41,7 +41,7 @@ const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
 // an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
-// bump-out sizing + bonded-rotation repair) doesn't disturb it. (saveSite re-normalizes
+// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -117,6 +117,11 @@ export function createSiteModel(p = {}) {
     site: p.site || p.name || "Untitled site",
     name: p.name || "Concept A",
     updatedAt: p.updatedAt || Date.now(),
+    // team sharing (additive; null = private). teamId = the team this plan is shared with;
+    // ownerId = the creating user (overlaid from the DB user_id column by cloudList). Persisted
+    // flat + back-compatible: an old record has neither → both null → behaves exactly as before.
+    teamId: p.teamId || null,
+    ownerId: p.ownerId || null,
     // geo anchor + jurisdiction
     origin: p.origin || null,
     county: p.county || null,
@@ -277,6 +282,15 @@ export const parcelDrawingsOf = (m, parcelId = null) =>
   (m.parcelDrawings || []).filter((d) => parcelId == null || d.parcelId === parcelId);
 // Deal stage, always one of STATUSES (defaults to "pursuit" if somehow unset).
 export const statusOf = (m) => normStatus(m && m.status, DEFAULT_STATUS);
+
+// Team sharing (team feature). `teamId` = the team this plan is shared with (null = private);
+// `ownerId` = the user who created it (set from the DB user_id column by cloudList). Returns a
+// small descriptor the UI reads to show a "Shared / Private" badge and "owned by a teammate".
+export const teamShareOf = (m) => ({
+  teamId: (m && m.teamId) || null,
+  shared: !!(m && m.teamId),
+  ownerId: (m && m.ownerId) || null,
+});
 
 // Everything that constrains development: title easements + routed easement
 // corridors (from markups), per-parcel setbacks (derived), and the live GIS

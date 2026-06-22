@@ -18,6 +18,12 @@ create table if not exists public.profiles (
   updated_at  timestamptz not null default now()
 );
 
+-- email mirror (team feature): a teammate roster needs to show who's on the team by
+-- email, but auth.users.email isn't readable across users. Mirror it here (seeded by the
+-- signup trigger + backfill) so the team roster RPC (db/teams.sql list_members) can return
+-- it WITHOUT opening profiles SELECT to other users. Additive; safe to re-run.
+alter table public.profiles add column if not exists email text;
+
 -- 2) RLS — private by default (identical shape to public.sites) ---------------
 alter table public.profiles enable row level security;
 
@@ -44,14 +50,15 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, first_name, last_name, org)
+  insert into public.profiles (id, first_name, last_name, org, email)
   values (
     new.id,
     nullif(new.raw_user_meta_data ->> 'first_name', ''),
     nullif(new.raw_user_meta_data ->> 'last_name', ''),
-    nullif(new.raw_user_meta_data ->> 'org', '')
+    nullif(new.raw_user_meta_data ->> 'org', ''),
+    lower(new.email)
   )
-  on conflict (id) do nothing;
+  on conflict (id) do update set email = excluded.email;
   return new;
 end;
 $$;
@@ -65,10 +72,11 @@ create trigger on_auth_user_created
 -- Anyone who signed up before this shipped has names in user_metadata (or nothing).
 -- Seed a row so the header never has a missing profile to fall over; null names are
 -- fine (the UI falls back to email — see useProfile.js).
-insert into public.profiles (id, first_name, last_name, org)
+insert into public.profiles (id, first_name, last_name, org, email)
 select id,
        nullif(raw_user_meta_data ->> 'first_name', ''),
        nullif(raw_user_meta_data ->> 'last_name', ''),
-       nullif(raw_user_meta_data ->> 'org', '')
+       nullif(raw_user_meta_data ->> 'org', ''),
+       lower(email)
 from auth.users
-on conflict (id) do nothing;
+on conflict (id) do update set email = excluded.email;
