@@ -1,4 +1,4 @@
-/* B386 — the Schedule action toolbar, LIFTED into the shared AppHeader.
+/* B388 — the Schedule action toolbar, LIFTED into the shared AppHeader.
  *
  * The Schedule workspace embeds the standalone Gantt app (public/sequence/index.html) in an
  * iframe. That app now HIDES its own in-embed toolbar (`.in-iframe .app-header`) and instead
@@ -12,7 +12,7 @@
  * Styling uses the shell's chrome theme tokens so the controls theme WITH the header
  * (light/dark), not the embedded app's own palette. Icons reuse the embedded app's glyphs
  * for visual continuity. Split across `toolbarCenter` (view + review) and `toolbarContent`
- * (actions) — the two slots AppHeader exposes (B385).
+ * (actions) — the two slots AppHeader exposes (B387).
  */
 import { useState, useRef } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";

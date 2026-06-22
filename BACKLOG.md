@@ -22,43 +22,45 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
-     Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 already
-     centers the project name). Highest B# across both files was B384, so minted **B385** (its
-     dependent NEW-2 = **B386**, the Schedule toolbar lift, ALSO shipped this session — see below). Per
-     STANDING RULE #1 B385 was filed AND fixed + headless-verified (V109, 9/9) the SAME session on branch
-     `claude/inspiring-bohr-46gql9` — full [x] block lives in BACKLOG-DONE.md.
-     WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
-     becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — with the
-     center TRULY centered like Row 1 (mid-x 719 vs 720); it wraps on narrow widths and never
-     overlaps. Absent (Site/Markup) → the original 2-zone layout renders byte-for-byte unchanged
-     (per-tab wiring factored into one reused `moduleTabButtons`). Generic + additive; B386 is its
-     first consumer. Deduped: net-new — NOT the CloudSyncBadge "NEW-1" (a Row-1 saveState concern),
-     NOT the Markup toolbarContent move. lint 0 · 1201 tests · build green · AppHeader/Scheduler/
-     SitePlannerApp lazy chunks intact. -->
-
 <!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
-     AppHeader so Schedule has ONE header like Site/Markup (it depends on B385). Minted **B386**.
-     Owner GREENLIT building it the same session (rather than filing it with a plan), so per
-     STANDING RULE #1 it was fixed + headless-verified (V110, 17/17) on branch
-     `claude/inspiring-bohr-46gql9` — full [x] block lives in BACKLOG-DONE.md.
-     WHAT SHIPPED: the embedded Gantt app's action toolbar is now rendered up in the shell's Row-2
-     header — Grid/Split/Gantt + review inbox in B385's `toolbarCenter`; zoom/export/save/history/
-     contacts/automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker
-     was UNFOUNDED: the embedded app already renders its panels as self-positioned `position:fixed`
-     modals/drawers toggled by boolean state (never anchored to their buttons), so lifting the
-     trigger buttons is clean — buttons post `planar:*` commands, panels still open in the iframe.
-     The bridge (B203) was extended, not rebuilt: iframe → shell adds `planar:toolbar-state`
-     (view/zoom%/reviewCount/saveStatus/activePanel…); shell → iframe adds view-set/review-toggle/
-     zoom/export/save/history/contacts/automation/settings/format. Strict same-origin guards kept;
-     iframe stays source-of-truth (badge = reported count, `ready`-gated, never fabricated).
-     `.in-iframe .app-header{display:none}` now hides the whole in-embed header (re-widening what
-     B381 narrowed — B381 narrowed it only because the toolbar had no shell home yet). Standalone
-     /sequence/ untouched (hide + bridge both `inShell`-gated). Two settings gears kept separate
-     (B342 theme vs Schedule view); "share" = the existing Contacts control (none invented).
-     Deduped: completion of the B203 bridge; SUPERSEDES B381's harness `verify-schedule-toolbar.mjs`
-     (now retired — it asserted the opposite). New `ScheduleToolbar.jsx`; edits to Scheduler.jsx +
-     index.html. lint 0 · 1201 tests · build green · JSX OK · Scheduler/AppHeader lazy chunks intact. -->
+     AppHeader so Schedule has ONE header like Site/Markup (built on the B387 center slot). Filed
+     B386, **renumbered B388** — a concurrent `main` (PRs #289/#290) took B385/B386 while this was in
+     flight, so B387/B388 are the real next free IDs (branch commit titles still say B385/B386).
+     Owner GREENLIT building it the same session, so per STANDING RULE #1 it was fixed + headless-
+     verified (V111, 17/17) on branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the embedded Gantt app's action toolbar now renders up in the shell's Row-2 header —
+     Grid/Split/Gantt + review inbox in B387's `toolbarCenter`; zoom/export/save/history/contacts/
+     automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker was
+     UNFOUNDED: the embedded app already renders its panels as self-positioned fixed modals/drawers
+     (never anchored to buttons), so lifting the trigger buttons is clean — buttons post `planar:*`
+     commands, panels still open in the iframe. The B203 bridge was extended (planar:toolbar-state +
+     command messages), strict same-origin guards kept, iframe stays source-of-truth (badge = reported
+     count, never fabricated). `.in-iframe .app-header{display:none}` hides the whole in-embed header
+     (re-widening what B381 narrowed); standalone /sequence/ untouched (inShell-gated). Two settings
+     gears kept separate (B342 vs Schedule view); "share" = the existing Contacts control. SUPERSEDES
+     B381's harness `verify-schedule-toolbar.mjs` (retired). New `ScheduleToolbar.jsx`; edits to
+     Scheduler.jsx + index.html. lint 0 · 1201 tests · build green · JSX OK · lazy chunks intact. -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
+     Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 centers
+     the project name). Filed B385, **renumbered B387** — concurrent `main` (PR #289) took B385 while
+     this was in flight; canonical IDs for this pair are B387 + B388. Per STANDING RULE #1 it was fixed +
+     headless-verified (V110, 9/9) the SAME session on branch `claude/inspiring-bohr-46gql9` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
+     becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — center TRULY
+     centered like Row 1 (mid-x 719 vs 720); it wraps on narrow widths and never overlaps. Absent
+     (Site/Markup) → the original 2-zone layout renders byte-for-byte unchanged. Generic + additive;
+     B388 (the Schedule toolbar lift) is its first consumer. Deduped: net-new — NOT the CloudSyncBadge
+     "NEW-1" (a Row-1 saveState concern), NOT the Markup toolbarContent move. lint 0 · 1201 tests ·
+     build green · AppHeader/Scheduler/SitePlannerApp lazy chunks intact. -->
+
+<!-- 2026-06-22: cross-chat "NEW-1" — Schedule Gantt drew phantom dependency arrows into empty
+     space, pointing at unscheduled (blank-date) tasks. First filed B385, **renumbered B386** — a
+     concurrent `main` (PR #289) took B385 for the Site Planner parcel-identify feature while this
+     was in flight, so B386 is the real next free ID. Filed AND fixed + headless-verified (V109) +
+     SHIPPED the same session per STANDING RULE #1 — merged to `main` via PR #290 (branch
+     `claude/gifted-rubin-0adp7h`). Full [x] block lives in BACKLOG-DONE.md. -->
 
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
      left-hand panel so you never have to back out to the map to assemble more land. Highest B#
@@ -79,6 +81,20 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      multipart-import pipeline it reuses), NOT B99/B100 (the lock/active model it inherits). lint 0
      · 1201 tests · build green · `SitePlannerApp` lazy chunk intact. B384 (Add by address) left Open
      by design — the geocode logic lives in MapFinder and needs a clean extraction, not a rush. -->
+
+<!-- 2026-06-22: owner follow-up on B383 — "it should work like the map select parcel tool where the
+     parcel boundaries light up and you can easily click to add one or multiple." Minted **B385**.
+     Per STANDING RULE #1 filed AND fixed + headless-verified (V108 extended, 22/22) the SAME session
+     on branch `claude/determined-volta-hzjxmc` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the "Identify from county GIS" path now behaves like the map's Select-parcels tool —
+     while it's armed, the county parcel OUTLINES light up on the aerial (the SAME magenta esri-leaflet
+     `makeParcelLayer`, extracted to shared `lib/parcelDisplay.js` so map + planner share one source),
+     and each CLICK adds that lot straight to the plan (one or many); a re-click toggles a just-added
+     lot off; a drag pans (click-vs-drag resolved in onUp, mirroring B310). The old preview-card-then-
+     "＋ Add to plan" button is gone — the card now shows the just-added lot's appraisal + the kept
+     jurisdiction lookup. Reuses the single add path (`parcelsFromRings`) + the existing query; outlines
+     load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
+     (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
 
 ### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
 `[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.

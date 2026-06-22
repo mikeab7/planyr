@@ -1,6 +1,6 @@
-/* Headless harness for the Row-2 center slot (B385). Mounts the REAL AppHeader twice —
+/* Headless harness for the Row-2 center slot (B387). Mounts the REAL AppHeader twice —
  * once WITHOUT toolbarCenter (the unchanged 2-zone tabs|toolbar layout) and once WITH it
- * (the new 3-zone tabs|center|toolbar layout) — so verify-b385-toolbar-center.mjs can prove:
+ * (the new 3-zone tabs|center|toolbar layout) — so verify-b387-toolbar-center.mjs can prove:
  *   • the center zone renders ONLY when the prop is supplied;
  *   • the module tabs + the right toolbar render in BOTH cases (additive, no regression);
  *   • when present, the center group sits between the tabs and the toolbar and is optically

@@ -5,7 +5,7 @@
  *               cloud-sync badge | settings | auth control
  *
  * Row 2 (44px): module tabs (Site · Schedule · Markup)
- *               | optional center slot (toolbarCenter, B385) |
+ *               | optional center slot (toolbarCenter, B387) |
  *               || toolbar slot (workspace-specific tools) ||
  * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
  * happens, so it carries the visual weight; the nav row stays thin. Don't equalise them
@@ -23,7 +23,7 @@
  *                                    is now the shared CloudSyncBadge driven by saveState)
  *   authControl   — ReactNode     — user avatar or sign-in button (Shell provides)
  *   toolbarContent — ReactNode    — module-specific toolbar buttons (workspace provides)
- *   toolbarCenter  — ReactNode    — optional Row-2 center group (B385); present ⇒ Row 2 is a
+ *   toolbarCenter  — ReactNode    — optional Row-2 center group (B387); present ⇒ Row 2 is a
  *                                    3-zone tabs|center|toolbar layout (center optically centered
  *                                    like Row 1). Absent (Site/Markup) ⇒ unchanged 2-zone layout.
  *
@@ -245,10 +245,10 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
-  // Optional Row-2 center group (B385). When provided, Row 2 renders a 3-zone layout
+  // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
   // (tabs | center | toolbar) with the center group optically centered like Row 1.
   // Generic + additive: callers that omit it (Site, Markup) keep the 2-zone layout
-  // unchanged. Its first consumer is the Schedule toolbar lift (B386).
+  // unchanged. Its first consumer is the Schedule toolbar lift (B388).
   toolbarCenter,
   // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
   // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
@@ -315,7 +315,7 @@ export default function AppHeader({
     );
   }
 
-  // Module tabs — shared by both Row-2 layouts (with and without the B385 center slot)
+  // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
   const moduleTabButtons = MODULES.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
@@ -399,7 +399,7 @@ export default function AppHeader({
       </div>
 
       {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
-           With a center slot (B385) Row 2 is a 3-zone layout: tabs (flex:1) | center group
+           With a center slot (B387) Row 2 is a 3-zone layout: tabs (flex:1) | center group
            (shrink-to-content) | toolbar (flex:1, end), so the center group is optically
            centered the same way Row 1 centers the project name. The row may wrap on a
            too-narrow viewport (the center/toolbar flow to a second line) instead of

@@ -1,12 +1,12 @@
-/* B385 — verify the Row-2 center slot on the REAL AppHeader, driven headless against
+/* B387 — verify the Row-2 center slot on the REAL AppHeader, driven headless against
  * ui-audit/header-center-harness.html:
  *   1. With NO toolbarCenter: the module tabs + right toolbar render and there is NO center
- *      zone — the pre-B385 2-zone layout is unchanged.
+ *      zone — the pre-B387 2-zone layout is unchanged.
  *   2. With toolbarCenter: the center group renders + is visible.
  *   3. The tabs + right toolbar STILL render with the center present (additive, no regression).
  *   4. The center group sits BETWEEN the tabs and the right toolbar, and is optically centered
  *      (its mid-x ≈ the row's mid-x — the left & right zones share the slack like Row 1).
- * Run: npm run dev &  then  node ui-audit/verify-b385-toolbar-center.mjs
+ * Run: npm run dev &  then  node ui-audit/verify-b387-toolbar-center.mjs
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;

@@ -318,12 +318,12 @@ input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%
    toggle + project switcher (bridged over postMessage, B203), and the shell's Row-2 toolbar
    re-renders the action controls — view switcher, Review, Zoom, Export, Save, Version
    History, Contacts, Automation, Format, Settings — driving THIS app over the postMessage
-   toolbar bridge (B386). So hide our own header entirely in-embed, or there'd be a double
+   toolbar bridge (B388). So hide our own header entirely in-embed, or there'd be a double
    toolbar. (Its self-positioned panels/modals — Settings, Format, etc. — still render; they
    were never anchored to these buttons, so the buttons can live up in the shell.)
    History: B381 narrowed an earlier `.app-header{display:none}` to hide only the duplicated
    nav, because the action toolbar had no shell home yet. Now that the shell hosts the toolbar
-   too (B386), hiding the whole header is correct again — the controls didn't vanish, they moved. */
+   too (B388), hiding the whole header is correct again — the controls didn't vanish, they moved. */
 html.in-iframe .app-header { display: none !important; }
 </style>
 <script>if(window.self!==window.top)document.documentElement.classList.add("in-iframe");</script>
@@ -4352,7 +4352,7 @@ function App() {
     return () => window.removeEventListener("message", onMsg);
   }, [inShell, addProject]);
 
-  // ── Embedded-mode TOOLBAR bridge (Planyr shell, B386) ──────────────────────
+  // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
   // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders
   // those controls up in its own unified header. So when embedded: (1) report the toolbar's
   // live state up, and (2) accept the shell's toolbar commands and run the SAME actions our
@@ -6997,6 +6997,12 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   const depLines = useMemo(() =>
     tasks.flatMap(task => normPreds(task.predecessors).map(p => {
       const pred = tasks.find(t => t.id===p.id); if(!pred) return null;
+      // A connector needs a real bar/diamond at BOTH ends. An unscheduled task has blank
+      // dates → no x-position (xOf("") is NaN) → the arrow lands in empty space pointing at
+      // nothing. Skip it; the blank row carries an explicit "Unscheduled" tag instead. Mirrors
+      // the bar renderer's isBlankDates guard AND the PDF-export connector guard (both skip
+      // blank-date endpoints) — depLines was the one draw path that lacked it.
+      if (!pred.start || !pred.end || !task.start || !task.end) return null;
       const type = (p.type||"FS").toUpperCase();
       const x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
       const x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
@@ -7171,13 +7177,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             // by depth), bottom-aligned with the brackets so baselines line up across the chart.
             const LEAF_H = ROW_H*0.25;
 
-            // Blank-date task: render just the row, no bar/diamond
+            // Blank-date task (an unscheduled stub): no bar/diamond, and — by design — no
+            // dependency arrows are drawn to it (the depLines guard skips it). Show an explicit,
+            // horizontally-sticky "Unscheduled" tag so the empty row reads as intentional rather
+            // than a rendering glitch — never a silent void. Hardcoded light hues to match this
+            // (always-light) chart body, like the bar labels above.
             if (isBlankDates) {
               return <div key={task.id} onClick={()=>setSelectedId?.(task.id)}
                 style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,
+                  display:"flex",alignItems:"center",
                   borderBottom:"1px solid rgba(0,0,0,0.1)",
                   borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",
-                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}} />;
+                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}}>
+                <span style={{position:"sticky",left:8,display:"inline-flex",alignItems:"center",
+                  height:14,padding:"0 6px",fontSize:8,fontWeight:600,letterSpacing:".05em",
+                  textTransform:"uppercase",color:"#6b7280",background:"#fff",
+                  border:"1px dashed #cbd5e1",borderRadius:7,whiteSpace:"nowrap",
+                  pointerEvents:"none",fontFamily:"'Inter',system-ui,sans-serif"}}>Unscheduled</span>
+              </div>;
             }
 
             return (

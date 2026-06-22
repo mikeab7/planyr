@@ -1,7 +1,7 @@
-/* B386 — verify the Schedule toolbar was LIFTED into the unified shell header and actually
+/* B388 — verify the Schedule toolbar was LIFTED into the unified shell header and actually
  * drives the embedded Gantt app over the postMessage bridge (not just rendered).
  *
- * The Schedule module embeds the standalone sequence app in an iframe. B386 hides that app's
+ * The Schedule module embeds the standalone sequence app in an iframe. B388 hides that app's
  * own in-iframe toolbar (`.in-iframe .app-header`) and re-renders the controls up in the
  * shell's Row-2 header; they post `planar:*` commands down and the iframe reports state back
  * (`planar:toolbar-state`). This harness drives the real built app (vite preview) headless and
