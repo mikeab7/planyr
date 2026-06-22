@@ -13,11 +13,12 @@ import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sa
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
+import FileBrowser from "./components/FileBrowser.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
+import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
@@ -83,7 +84,14 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null } = {}) {
+export default function DocReview({
+  shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null,
+  // Work Item A — the active project comes from the URL route (so it survives a module
+  // switch), not module-local state. `projectId` is the route's Site-group id (null =
+  // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
+  // is the all-projects browse mode.
+  projectId = null, onNavigate, crossProject = false,
+} = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -154,19 +162,24 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
+  // Work Item B: the file browser is the LANDING surface. `browsing` true = show the
+  // tree/facets/list; opening or starting a file flips to the review canvas; the 🗂 Files
+  // button (or selecting a project) brings the browser back.
+  const [browsing, setBrowsing] = useState(true);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
-  // The project the header breadcrumb points at in Markup (B191). Follows the open
-  // review's project; picking another project here browses its files in place (it does
-  // NOT re-file the open review — browsing ≠ filing).
-  // Seed from a fresh cross-workspace open intent so the project context carries through the
-  // switch (no "Select a project" flash); loadSingleReview/openReview confirm it after load.
-  // project_id covers a listReviews row (snake_case), projectId a loaded record (camelCase).
-  const [markupProject, setMarkupProject] = useState(() => {
-    const r = bootDocIntentRef.current && bootDocIntentRef.current.row;
-    const pid = r && (r.project_id ?? r.projectId);
-    return pid ? { id: pid, name: r.project || r.title || "Project" } : null;
-  }); // { id, name } | null
+  // The project the header breadcrumb points at in Markup now comes from the URL route
+  // (Work Item A) — so it survives a module switch instead of resetting to "Select a
+  // project". Picking another project navigates the hash; opening a review navigates to
+  // that review's project (below). Its display name resolves from the local site list
+  // (instant; the per-user cloud cache feeds it), falling back to the open review's own
+  // project label, then the id. { id, name } | null.
+  const markupProject = useMemo(() => {
+    if (!projectId) return null;
+    let name = "";
+    try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) name = p.name; } catch (_) {}
+    if (!name && meta.projectId === projectId && meta.project) name = meta.project;
+    return { id: projectId, name: name || "Project" };
+  }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
   const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
@@ -281,7 +294,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
     // file would otherwise be read via arrayBuffer() and only then fail).
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setBrowsing(false); // opening a PDF → show the review canvas
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
@@ -471,13 +484,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
+    setBrowsing(false); // a review is opening → leave the browser for the review canvas
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
@@ -487,10 +501,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
+    setBrowsing(false); // "New" → a fresh blank review canvas (still in the current project)
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
-    setMarkupProject(null);
+    // Keep the current project context: "New" starts a fresh blank review still filed
+    // under the project you're in (it does NOT drop you back to "Select a project").
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
@@ -510,8 +526,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       return;
     }
     // Carry the project context through so the breadcrumb reflects the opened file (single
-    // reviews are also set inside loadSingleReview; this also covers stitch).
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    // reviews also navigate inside loadSingleReview; this also covers stitch).
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
     if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
@@ -535,6 +551,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
     if (bootDocIntentRef.current) return;
+    // Work Item B: with a project active, Markup lands on the FILE BROWSER (the last file is
+    // one click away in the list) — don't auto-open it into the canvas. Resume-into-canvas
+    // stays only for the project-less single-file workflow (e.g. a logged-out local review).
+    if (projectId) return;
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -543,13 +563,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
       } catch (_) {}
       const uid = await currentUid();
+      // Respect an explicit deep link (Work Item A): if the URL named a project, don't
+      // auto-resume a review that belongs to a DIFFERENT project — show the linked
+      // project's browser instead. No URL project → resume freely (it reflects into the URL).
+      const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
       if (lastMode === "stitch" && lastStitch) {
         const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
-        if (rec && rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+        if (rec && rec.kind === "stitch" && !wrongProject(rec)) { setPendingStitch(rec); setMode("stitch"); return; }
       }
       if (lastSingle) {
         const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
-        if (rec && rec.kind === "single") await loadSingleReview(rec);
+        if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -977,17 +1001,16 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
-      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
-        projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
-        // picking a project browses its files in place (opens the Files drawer scoped
-        // to it); New project is born in the Site Planner. Save state from persistence.
+        // picking a project browses its files in place (the file browser, scoped to it);
+        // New project is born in the Site Planner. Save state from persistence.
         onDashboard={onGoDashboard}
         currentProject={markupProject}
-        onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
+        cross={crossProject}
+        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setBrowsing(true); }}
         onNewProject={onNewProject}
         // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
         // keeps the "a failed write is LOUD, never silent" contract (unit-locked).
@@ -995,12 +1018,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         onRetrySave={status === "conflict" ? undefined : saveNow}
         saveDetail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={
-          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
-          // a shelf every workspace reaches into, so it lives next to the project name.
-          // The project name itself is NOT repeated here — the Row-1 breadcrumb is its one
-          // canonical home (B357); a second copy in the centre was the "crowded centre".
-          <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+          // The 🗂 Files button returns to the file browser landing from the review canvas
+          // (B6). It reads as active while browsing. The project name itself isn't repeated
+          // here — the Row-1 breadcrumb is its one canonical home (B357).
+          <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
+            aria-pressed={browsing}
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+              border: `1px solid ${browsing ? "var(--accent-markup)" : "var(--chrome-divider)"}`,
+              background: browsing ? "var(--accent-markup)" : "var(--chrome-bg-elev)",
+              color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
             🗂 Files
           </button>
         }
@@ -1038,12 +1064,25 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       {openErr && (
         <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {openErr}</span>
-          <button onClick={() => { setOpenErr(""); setFilesOpen(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => { setOpenErr(""); setBrowsing(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
           <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
-      {!pdfRef.current ? (
+      {browsing ? (
+        // Work Item B — the file browser IS the landing surface (a project's tree, facets,
+        // and badged list), not an empty "drop a PDF" screen. Opening a file flips to the
+        // review canvas; the 🗂 Files button brings the browser back.
+        <FileBrowser
+          projectId={projectId}
+          projectName={markupProject?.name || ""}
+          signedIn={signedIn}
+          cross={crossProject}
+          indexProvider={autofilingProvider}
+          onOpenReview={openReview}
+          onNavigate={onNavigate}
+        />
+      ) : !pdfRef.current ? (
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>

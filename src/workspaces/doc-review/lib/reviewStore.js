@@ -246,15 +246,26 @@ export async function upsertFileFacts(row) {
   if (!supabase || !row || !row.id) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to file documents." };
-  const { error } = await supabase.from("file_facts").upsert({ ...row, user_id: uid }, { onConflict: "user_id,id" });
+  const full = { ...row, user_id: uid };
+  let { error } = await supabase.from("file_facts").upsert(full, { onConflict: "user_id,id" });
+  // Degrade gracefully if the Work Item B columns (category/state) aren't migrated yet —
+  // re-upsert without them. The tree still works (category/state are derived client-side).
+  if (error && /category|state|column/i.test(error.message || "")) {
+    const { category, state, ...core } = full;
+    ({ error } = await supabase.from("file_facts").upsert(core, { onConflict: "user_id,id" }));
+  }
   return { ok: !error, error: error ? error.message : null };
 }
 
+const FILE_FACTS_CORE = "id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at";
 export async function listFileFacts() {
   if (!supabase || !(await currentUid())) return [];
-  const { data, error } = await supabase.from("file_facts")
-    .select("id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at")
+  let { data, error } = await supabase.from("file_facts")
+    .select(FILE_FACTS_CORE + ",category,state")
     .order("updated_at", { ascending: false });
+  if (error) { // pre-migration: the category/state columns don't exist yet — read the core set
+    ({ data, error } = await supabase.from("file_facts").select(FILE_FACTS_CORE).order("updated_at", { ascending: false }));
+  }
   return error || !data ? [] : data;
 }
 

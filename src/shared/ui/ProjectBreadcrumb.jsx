@@ -46,6 +46,18 @@ const DashboardIcon = ({ size = 13 }) => (
   </svg>
 );
 
+// Private-by-default lock (Work Item A gotcha): a project a user lands on is one only
+// they can see. The lock keeps that visible, so any future sharing always reads as a
+// deliberate act — never an accidental exposure.
+const LockIcon = ({ size = 11 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flex: "none", display: "block" }}>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </svg>
+);
+
 const crumbBtn = (extra) => ({
   display: "flex", alignItems: "center", gap: 5, flex: "none",
   height: 24, padding: "0 8px", borderRadius: 6,
@@ -82,6 +94,9 @@ export default function ProjectBreadcrumb({
   projects: controlledProjects,
   // The "home" crumb label — Site → "Map", Schedule → "Dashboard" (B204).
   homeLabel = "Dashboard",
+  // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
+  // the project crumb reads "All projects" instead of a single name. Off by default.
+  cross = false,
 }) {
   const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
@@ -145,17 +160,24 @@ export default function ProjectBreadcrumb({
 
       <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
 
-      {/* Project crumb (B191) — opens the switcher dropdown */}
+      {/* Project crumb (B191) — opens the switcher dropdown. In cross-project mode it
+          reads "All projects"; on a single project it carries a Private lock. */}
       <button
         ref={anchorRef}
         onClick={() => setOpen((o) => !o)}
-        title={currentProject ? "Switch project" : "Choose a project"}
+        title={cross ? "Browsing all projects" : currentProject ? "Switch project" : "Choose a project"}
         aria-haspopup="menu"
         aria-expanded={open}
-        style={crumbBtn({ color: currentProject ? INK : MUTED, maxWidth: 240, minWidth: 0 })}
+        style={crumbBtn({ color: (currentProject || cross) ? INK : MUTED, maxWidth: 240, minWidth: 0 })}
       >
+        {currentProject && !cross && (
+          <span title="Private — only you can see this project. Sharing is always a deliberate act."
+            style={{ flex: "none", color: MUTED, display: "flex", alignItems: "center" }}>
+            <LockIcon />
+          </span>
+        )}
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {currentProject?.name || "Select a project"}
+          {cross ? "All projects" : (currentProject?.name || "Select a project")}
         </span>
         {atRisk(saveState) && (
           <span title="Saved on this device — the cloud is unreachable" aria-hidden
