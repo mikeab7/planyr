@@ -5,6 +5,7 @@
  *               cloud-sync badge | settings | auth control
  *
  * Row 2 (44px): module tabs (Site · Schedule · Markup)
+ *               | optional center slot (toolbarCenter, B385) |
  *               || toolbar slot (workspace-specific tools) ||
  * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
  * happens, so it carries the visual weight; the nav row stays thin. Don't equalise them
@@ -22,6 +23,9 @@
  *                                    is now the shared CloudSyncBadge driven by saveState)
  *   authControl   — ReactNode     — user avatar or sign-in button (Shell provides)
  *   toolbarContent — ReactNode    — module-specific toolbar buttons (workspace provides)
+ *   toolbarCenter  — ReactNode    — optional Row-2 center group (B385); present ⇒ Row 2 is a
+ *                                    3-zone tabs|center|toolbar layout (center optically centered
+ *                                    like Row 1). Absent (Site/Markup) ⇒ unchanged 2-zone layout.
  *
  * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
@@ -241,6 +245,11 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
+  // Optional Row-2 center group (B385). When provided, Row 2 renders a 3-zone layout
+  // (tabs | center | toolbar) with the center group optically centered like Row 1.
+  // Generic + additive: callers that omit it (Site, Markup) keep the 2-zone layout
+  // unchanged. Its first consumer is the Schedule toolbar lift (B386).
+  toolbarCenter,
   // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
   // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
   // simply omit it and the left zone stays logo-only.
@@ -305,6 +314,12 @@ export default function AppHeader({
       </button>
     );
   }
+
+  // Module tabs — shared by both Row-2 layouts (with and without the B385 center slot)
+  // so the per-tab wiring is defined once.
+  const moduleTabButtons = MODULES.map((m) => (
+    <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
+  ));
 
   return (
     <>
@@ -383,33 +398,50 @@ export default function AppHeader({
         </div>
       </div>
 
-      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ── */}
-      <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
-
-        {/* Module tabs */}
-        <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-          {MODULES.map((m) => (
-            <ModuleTab
-              key={m.id}
-              m={m}
-              isActive={m.id === module}
-              onClick={() => onSwitch && onSwitch(m.id)}
-            />
-          ))}
+      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
+           With a center slot (B385) Row 2 is a 3-zone layout: tabs (flex:1) | center group
+           (shrink-to-content) | toolbar (flex:1, end), so the center group is optically
+           centered the same way Row 1 centers the project name. The row may wrap on a
+           too-narrow viewport (the center/toolbar flow to a second line) instead of
+           overlapping — never absolute positioning. With NO center slot (Site/Markup) the
+           original 2-zone tabs|toolbar layout renders unchanged. */}
+      {toolbarCenter ? (
+        <div style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 2, borderTop: `1px solid ${LINE}` }}>
+          {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
+              TRULY centered regardless of how wide the tabs vs the toolbar are) */}
+          <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: 1, minWidth: 0 }}>
+            {moduleTabButtons}
+          </div>
+          {/* Center zone — workspace-supplied center group (shrink-to-content) */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
+            {toolbarCenter}
+          </div>
+          {/* Right zone — toolbar slot (flex:1 end, mirrors Row 1's right zone) */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: 0, gap: 4, overflow: "hidden" }}>
+            {toolbarContent}
+          </div>
         </div>
+      ) : (
+        <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
 
-        {/* Toolbar slot */}
-        <div
-          style={{
-            flex: 1, display: "flex", alignItems: "center",
-            justifyContent: "flex-end", paddingRight: 6,
-            minWidth: 0, gap: 4,
-            overflow: "hidden",
-          }}
-        >
-          {toolbarContent}
+          {/* Module tabs */}
+          <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
+            {moduleTabButtons}
+          </div>
+
+          {/* Toolbar slot */}
+          <div
+            style={{
+              flex: 1, display: "flex", alignItems: "center",
+              justifyContent: "flex-end", paddingRight: 6,
+              minWidth: 0, gap: 4,
+              overflow: "hidden",
+            }}
+          >
+            {toolbarContent}
+          </div>
         </div>
-      </div>
+      )}
     </header>
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
