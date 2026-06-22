@@ -22,6 +22,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B385 — Dependency connectors draw phantom arrows to unscheduled (blank-date) tasks `[Scheduler]` (bug)  *(owner-reported 2026-06-22; arrived as cross-chat "NEW-1"; minted **B385** — highest B# across both files was B384)*
+`[~]` **Fixed + verified headless (V109) + pushed to `claude/gifted-rubin-0adp7h`; the only step left is the merge to `main`, which I held pending Michael's go-ahead (this session's no-unsolicited-PR policy). Nothing else outstanding — say "ship it" and it goes live.**
+
+**Repro (Pappadoupolos, Schedule → Split/Gantt):** the "Wastewater Treatment Plant Design" branch (rows 11–13) are *unscheduled stubs* — blank start/finish, 0d, so no bar and no milestone diamond. A dependency link still terminated at/from one of them and the arrow was drawn into empty space (the "purple pointing at nothing" the owner saw).
+
+**Diagnostic fork (done first, as the brief required) → branch #1: genuine unscheduled stubs, NOT a silent date-calc failure.** Blank/unscheduled tasks are a deliberate, first-class state: `mkt` creates them (`start=""`, `dur=""`), `rollupParentDates` leaves a parent blank when *all* its children are blank (so the blank parent over blank children in rows 11–13 is the *designed* outcome), `cascadeDates` leaves a task blank when no predecessor yields a start, and BOTH the bar renderer (`isBlankDates` guard) and the PDF-export connector loop (`!pt.start||!pt.end||!t.start||!t.end`) already skip blank-date geometry. The date engine is correct — the rows are intentionally undated. The single defect: the live `GanttView.depLines` was the one draw path *missing* that guard, so it computed `xOf("")` → `NaN` and emitted a phantom path.
+
+**Fix (`public/sequence/index.html`):** (1) `depLines` now skips any link whose predecessor OR successor has blank dates — exactly the guard the export already uses, so no connector is drawn to no-geometry. (2) Per the "don't silently hide it" preference, each blank-date Gantt row now shows an explicit, horizontally-sticky **"Unscheduled"** tag, so the empty row reads as intentional rather than a glitch. 0-day *dated* milestones (rows 10, 16) keep their diamond AND their links (`start===end`, both truthy) — no regression.
+
+**Verified:** headless **V109** (`ui-audit/verify-unscheduled-deps.mjs`) — phantom connectors gone (dep-line count **1**, **zero** `NaN` paths), the one fully-dated link still draws, both blank rows tagged & visible; **proven to FAIL with the guard reverted** (3 dep paths, 3 `NaN` coords, 0 tags). lint **0 errors** · **1201** unit tests green · build green · `Scheduler` lazy chunk intact · existing scheduler harnesses still pass (no-crash 6/6, bugfixes ALL PASS, picker 8/8, rowfill-bars PASS).
+
+**Deduped — NET-NEW.** Not B380 (Scheduler.jsx nav-state render-crash — different file/cause), not B381 (toolbar hidden by a CSS over-reach — different surface). No existing Open or Done item covers dependency-connector geometry.
+
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
      left-hand panel so you never have to back out to the map to assemble more land. Highest B#
      across both files was B382, so minted **B383** (+ filed the deferred "Add by address" stretch
