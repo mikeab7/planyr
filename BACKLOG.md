@@ -22,6 +22,32 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: cross-chat diagnosis brief "NEW-1" — intermittent render crash on Schedule load
+     ("Cannot read properties of undefined"), caught by the workspace ErrorBoundary (the non-chunk
+     "Try again" variant), recovers on re-render. Highest B# across both files was B379, so minted
+     **B380**. Per STANDING RULE #1 filed AND fixed + headless-verified (V105, regression net proven
+     to FAIL with the guard off) the SAME session on branch `claude/relaxed-dijkstra-sokq4a` — full
+     [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE confirmed by reproduction, not guessed: the Schedule shell derives its breadcrumb's
+     current project with `projects.find(p => p.id === activeId)` over the project list bridged from
+     the embedded /sequence/ iframe (the brief's #1 candidate, Scheduler.jsx). The embedded app can
+     transiently post a sparse/not-yet-resolved list (an `undefined`/null entry) during its own data
+     load; one such entry makes `p.id` throw inside the Scheduler's render → the workspace boundary.
+     A pure re-render recovers because the steady-state list is well-formed. (The brief's other
+     candidates — AppHeader/ProjectBreadcrumb p.id/p.name, useProfile/displayName — were verified
+     already null-safe; the deref that actually throws is the Scheduler's `.find`.)
+     FIX (guard at the source, not optional-chaining everywhere): new pure `scheduler/lib/navState.js`
+     — `parseNavState` validates + `sanitizeProjects` coerces the inbound list to plain `{id,name}`
+     objects (drops the throwing entries) and `deriveCurrentProject` never throws / never returns
+     undefined; Scheduler.jsx routes the message + current-project derivation through them; one
+     data-entry guard in the shared `ProjectBreadcrumb` (`.filter(Boolean)`) hardens its own `p.id`/
+     `p.name` map for any controlled caller. NOT a chunk fix (not B221/B239) and NOT an ErrorBoundary
+     auto-retry — the race is removed so a genuine future crash still stays visible.
+     Deduped: net-new. NOT B221/B239 (stale-chunk family — the brief's two tells rule that out), NOT
+     B315 (undo-after-move stale-ref race, a different surface). 12 new unit tests
+     (`test/schedulerNavState.test.js`), 1198 green, lint 0, build green, `Scheduler` lazy chunk
+     intact; existing `verify-schedule-picker.mjs` still 8/8 (no regression). -->
+
 <!-- 2026-06-22: owner report "the sheet labeling is atrocious" (a structural general-notes set)
      arrived with a two-item investigation brief (NEW-1 garbage labels, NEW-2 false auto-calibration).
      Highest B# across both files was B373, so minted **B378–B379**. Per STANDING RULE #1 BOTH were
