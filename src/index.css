@@ -50,11 +50,14 @@
   --danger-text:  #B3361B;
   --info-text:    #1D4ED8;
 
-  /* Project-status palette (B234) as tokens so DOM badges theme live. The canonical
-     hexes mirror src/shared/ui/statusTokens.js (map pins read those directly — pins
-     sit on the aerial map, a theme-neutral surface). Dark = lighter variants (B320). */
-  --status-pursuit:  #378ADD;
-  --status-active:   #639922;
+  /* Project-status palette (B234; re-hued B365) as tokens so DOM badges theme live.
+     The canonical hexes mirror src/shared/ui/statusTokens.js (map pins read those
+     directly — pins sit on the aerial map, a theme-neutral surface). Salience tracks
+     importance: Pursuit = warm coral (loudest), Active = blue (NOT green, so it never
+     collides with the Site module accent), settled stages recede. Dark = lighter
+     variants (B320). */
+  --status-pursuit:  #D85A30;
+  --status-active:   #378ADD;
   --status-onhold:   #BA7517;
   --status-complete: #888780;
   --status-dead:     #E24B4A;
@@ -143,8 +146,8 @@
   --info-text:    #6FB4F0;
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320) */
-  --status-pursuit:  #6FB4F0;
-  --status-active:   #8FCB4E;
+  --status-pursuit:  #F08A5D;
+  --status-active:   #6FB4F0;
   --status-onhold:   #E0A23E;
   --status-complete: #9DA3AD;
   --status-dead:     #F2706F;

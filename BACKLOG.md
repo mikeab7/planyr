@@ -41,13 +41,26 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
          + live coverage/schema fixtures (the 14-vs-8,014 catch) + a weekly @claude drift workflow.
          SHIPPED for the analysis+jurisdiction surface. (Map-display-layer migration tail → B370, Open.)
      Deduped: NEW-2 folded into the existing "GIS layer caching" roadmap item (not a duplicate). lint 0
-     · 1129 tests · build green · `SitePlannerApp` lazy chunk intact · headless V100 11/11. RRC's own
+     · 1129 tests · build green · `SitePlannerApp` lazy chunk intact · headless V101 11/11. RRC's own
      live coverage fixtures run in CI / on planyr.io (host not on the sandbox egress allow-list). -->
 
 ### B370 — Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry `[Site Planner / Platform]` (task) — the tail of B369  *(filed 2026-06-22; minted **B370**)*
 `[ ]` **Open.** B369 made `src/shared/gis/sources.js` the single source of truth for the **Site Analysis screen + jurisdiction identify** endpoints (zero inline URLs there, CI-guarded). The **map-display** layers — the Leaflet/esri-leaflet tile + vector overlays in `lib/layers.js`, `lib/counties.js` (`JURISDICTION_LAYERS`, incl. the COH `geogimstest` host), `lib/evidenceLayers.js`, `lib/vectorLayers.js` — still hold their service URLs inline. Migrate them into the registry too, so the tier-guard (no `/Test/`/`geogimstest` without an acknowledged exception) and the drift/coverage checks cover the **whole** GIS surface, not just the screen.
 - **Why not done in the B366–B369 session:** the map-tile path is a **separate, large surface** (many layers across 4 files) and is explicitly **out of the reported bug's blast radius** — the brief notes map tiles load as `<img>` (no CORS, no screening logic) and says to leave them alone. Rushing a live-map-wide URL refactor into the same session risked breaking a working map with no fast headless way to re-verify every layer. Filing it as its own focused pass (own branch, per-layer verify) is the safe call, not a silent omission.
 - **Plan:** add map-layer rows to the registry (reuse the same `tier`/`provider`/`coverage` shape); repoint `layers.js`/`counties.js`/`evidenceLayers.js`/`vectorLayers.js` to read `serviceUrl` from the registry; extend `ui-audit/gis-source-audit.mjs`'s inline-URL scan to those files; re-verify the map renders every layer (the existing `gis-verify/coverage-picker-verify.mjs` + a tile-load check). The known COH `geogimstest` **TEST** host (a long-standing KNOWN ISSUE) becomes a registered `monitored-exception` — finally machine-tracked.
+<!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
+     hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
+     Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
+     rotation, scanned/DWG — while this was in flight, so B365 is the real next free ID; renumbered from a
+     first-filed B362). Filed AND shipped + headless-verified (19/19, V98) THIS session per STANDING RULE #1
+     — full [x] block in BACKLOG-DONE.md
+     (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
+     building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
+     status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
+     progress-arc encoding — a separate concern, untouched). Re-hued statusTokens.js (Pursuit→coral,
+     Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
+     MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
+     z-order by importance, fixed hit box); Dead hidden by default. -->
 
 ### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
 `[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
