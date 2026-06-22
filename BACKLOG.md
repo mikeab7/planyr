@@ -22,6 +22,34 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
+     floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
+     Grid/Split/Gantt view switcher, Automation, Settings, Review all gone). First filed B380,
+     renumbered **B381** — concurrent main (PR #284) took B380 for the Schedule render-crash fix while
+     this was in flight, so B381 is the real next free ID. Per STANDING RULE #1 filed AND fixed +
+     headless-verified (V106, 15/15) + merged the SAME session on branch `claude/vigilant-newton-rovl4l`
+     — full [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE (hidden, NOT deleted): the Schedule module embeds /sequence/ in an iframe; the shell's
+     Row-1 breadcrumb takes over project nav, so the sequence app hides its own duplicated nav when
+     `.in-iframe`. But the rule was `.in-iframe .app-header{display:none}` — it hid the ENTIRE header,
+     and the whole action toolbar lives in that header. Only the in-grid Columns button (in GridView,
+     not the header) survived — exactly the reported symptom. Handlers were intact throughout; a pure
+     CSS over-reach.
+     FIX (public/sequence/index.html): narrowed the rule to hide ONLY the duplicated branding/nav —
+     the logo (new .hdr-logo class), .hdr-mode (Dashboard/Projects toggle) and .hdr-project (project
+     picker), all provided by the shell breadcrumb via the B203 postMessage bridge. The action toolbar
+     is visible again, original position + original handlers. Restored exactly the shipped set — the
+     brief's speculative fit-to-view / today-jump / status-filter controls do NOT exist in this app, so
+     none were invented (no rebuild-from-guess).
+     Verified: V106 `ui-audit/verify-schedule-toolbar.mjs` 15/15 (zoom % changes 17→33, Contacts opens
+     — proven not no-ops); Site + Markup checked, NOT affected (not iframes; they use the shell's
+     toolbarContent slot, which `.in-iframe` can't reach). lint 0 · tests green · build green ·
+     `Scheduler` lazy chunk intact.
+     Deduped: NET-NEW, the completion of B203 (DONE) — B203 bridged the NAV half of the same hidden
+     header; B381 restores the ACTION-TOOLBAR half it left dark. NOT a dup of main's B380 (a separate
+     Schedule render-crash race in Scheduler.jsx — different file, different cause), nor B341 (chrome
+     token regressions), nor the Markup toolbarContent move. -->
+
 <!-- 2026-06-22: cross-chat diagnosis brief "NEW-1" — intermittent render crash on Schedule load
      ("Cannot read properties of undefined"), caught by the workspace ErrorBoundary (the non-chunk
      "Try again" variant), recovers on re-render. Highest B# across both files was B379, so minted
