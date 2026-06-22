@@ -5,6 +5,11 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V109 — Schedule Gantt: no phantom dependency arrows to unscheduled (blank-date) tasks; blank rows tagged "Unscheduled" (B386) ✅ (self-verified headless — fully done; shipped via PR #290)
+- **Harness:** `ui-audit/verify-unscheduled-deps.mjs` (chromium-1228, `--ignore-certificate-errors`, the `public/sequence/` app served directly with an injected seed). Seeds the active project with a dated task, a blank stub with no predecessor (stays blank), a dated task whose predecessor *is* that blank stub, a legitimate dated→dated link, and a blank task whose predecessor is also blank; renders the real **Split** view.
+- **Result:** PASS 2026-06-22 — exactly **1** dependency connector drawn (the only link with two dated ends), **0** SVG paths containing `NaN`, and **both** blank rows show a visible **"Unscheduled"** tag. **Proven to have teeth:** with the `depLines` guard reverted the harness FAILS exactly as the owner reported — **3** dep paths, **3** `NaN`-coordinate paths (`MNaN,36 …` plus the phantom arrowheads), **0** tags.
+- **Status:** B386 merged to `main` via **PR #290** (Cloudflare Pages deploy succeeded). Logged-out headless is fully representative (the Gantt renders the seed without sign-in), so nothing is pending; an optional planyr.io glance is a nicety, not a coverage gap. (NB: PR/commit title reads "B385" — the pre-renumber label; canonical ID is **B386**.)
+
 ### V108 — "Add parcel" front-door + map-style "Identify→add" (parcel lines light up, click to add one/many) (B383 + B385) ✅ (self-verified headless — fully done)
 - **Harness:** `ui-audit/verify-b383-add-parcel.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Three scenarios: **A** a georeferenced site (`origin` set → Identify enabled), **B** a site with `origin: null` (no GIS frame), **C** an empty georeferenced site with a **mocked HCAD parcel service** (route-fulfil with CORS headers — the live county host is CORS-blocked in the sandbox) to drive the real click→query→add pipeline.
 - **Result:** PASS 2026-06-22 — **22/22**.
