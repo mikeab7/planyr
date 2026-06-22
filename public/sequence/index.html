@@ -313,8 +313,17 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; h
 input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--amber); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.2); cursor:pointer; }
 
 
-/* when embedded in the planyr shell, hide the built-in sequence header */
-html.in-iframe .app-header { display: none !important; }
+/* When embedded in the Planyr shell, the shell's Row-1 breadcrumb already provides
+   the logo, the Dashboard/Projects toggle and the project switcher (the embedded app
+   bridges its project nav up to that breadcrumb over postMessage). So hide ONLY those
+   duplicated nav/branding bits — NOT the whole header. The action toolbar (view
+   switcher, Review, Format, Zoom, Export, Save, Version History, Contacts, Automation,
+   Settings) has no equivalent in the shell chrome and must stay visible.
+   Regression guard: this rule used to be `.app-header { display:none }`, which hid the
+   entire toolbar in the iframe — leaving only the in-grid Columns button. (B380) */
+html.in-iframe .app-header .hdr-logo,
+html.in-iframe .app-header .hdr-mode,
+html.in-iframe .app-header .hdr-project { display: none !important; }
 </style>
 <script>if(window.self!==window.top)document.documentElement.classList.add("in-iframe");</script>
 </head>
@@ -4583,8 +4592,8 @@ function App() {
       )}
       <div className="app-header" style={{minHeight:46,background:"#fff",borderBottom:"1px solid var(--bd2)",display:"flex",alignItems:"center",flexWrap:"wrap",rowGap:6,columnGap:8,padding:"6px 14px",flexShrink:0,zIndex:30}}>
 
-        {/* Logo */}
-        <svg height="26" viewBox="0 0 196 52" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0,marginRight:8,display:"block"}}>
+        {/* Logo — hidden when embedded (the shell chrome already shows the Planyr wordmark) */}
+        <svg className="hdr-logo" height="26" viewBox="0 0 196 52" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0,marginRight:8,display:"block"}}>
           <g transform="translate(0,6)">
             <rect x="0"  y="0"  width="44" height="7"  rx="2" fill="#4f46e5"/>
             <rect x="10" y="13" width="33" height="7"  rx="2" fill="#4f46e5"/>
