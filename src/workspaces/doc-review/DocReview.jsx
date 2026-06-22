@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
-import { groupSheets } from "../../shared/files/sheetGroups.js";
+import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
 import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups, pointInPoly } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
@@ -266,10 +266,15 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
   // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
   // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
-  const groups = useMemo(
-    () => groupSheets(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
+  // The read pages in order, with duplicate adjacent sheet numbers cleared (cross-reference
+  // misreads — B378). This ONE cleaned array feeds both the grouping and every per-page label
+  // lookup, so the sidebar never shows the same wrong number on several rows. `metaOf(n)` reads it.
+  const orderedMeta = useMemo(
+    () => markAdjacentDuplicateNumbers(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
     [sheetMeta, numPages]
   );
+  const metaOf = (n) => orderedMeta[n - 1] || sheetMeta[n] || null;
+  const groups = useMemo(() => groupSheets(orderedMeta), [orderedMeta]);
 
   const openFile = async (file) => {
     if (!file) return;
@@ -861,11 +866,30 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const curTool = TOOLS.find((t) => t.id === tool);
   // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
   const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
-  const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
+  const sheetShort = (n) => metaOf(n)?.sheetNumber || `Sheet ${n}`;
+  // Do we trust the read title enough to surface it as the label (B378)? A title is trustworthy
+  // when it came from a detected title-block band, OR is corroborated by a real sheet number read
+  // from the title-block zone, OR the sheet is a recognized text page (general notes / specs, where
+  // the title IS its identity). A bare band — or nothing — no longer authorizes a body line as the
+  // label (the old `hasReal` gate that let copyright/legend prose through).
+  const trustedTitle = (m) =>
+    m?.sheetTitle && m.sheetTitle !== "Document" && (m.titleBlock || m.sheetNumber || m.textDense) ? m.sheetTitle : "";
+  // The human label for a single sheet: the trusted title ("GENERAL NOTES"), else the deterministic
+  // discipline item ("Grading Plan"), with the sheet number appended; else just the number; else
+  // "Sheet N". Returns { label, real }.
+  const sheetLabel = (n) => {
+    const m = metaOf(n);
+    const title = trustedTitle(m) || (m?.item && m.item.toLowerCase() !== "document" ? m.item : "");
+    const num = m?.sheetNumber ? ` · ${m.sheetNumber}` : "";
+    if (title) return { label: `${title}${num}`, real: true };
+    if (m?.sheetNumber) return { label: m.sheetNumber, real: true };
+    return { label: `Sheet ${n}`, real: false };
+  };
   const sheetTip = (n) => {
-    const m = sheetMeta[n]; const parts = [];
+    const m = metaOf(n); const parts = [];
     if (m?.sheetNumber) parts.push(m.sheetNumber);
-    if (m?.titleBlock && m.sheetTitle && m.sheetTitle !== "Document") parts.push(m.sheetTitle); // title only from a real title block
+    const t = trustedTitle(m);
+    if (t) parts.push(t);
     if (calInfo[n]?.label) parts.push(`scale ${calInfo[n].label}${calInfo[n].src !== "manual" ? " — verify" : ""}`);
     return parts.join(" · ") || `Sheet ${n}`;
   };
@@ -1052,12 +1076,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
                 const gid = `${gi}:${g.pages[0]?.pageNum}`;
                 if (g.kind === "single") {
                   const n = g.pages[0].pageNum, active = n === page;
-                  // Use a real label only when this sheet has a confident title-block read (a detected
-                  // band or a real sheet number) — never surface a random body-text line as the label
-                  // (a textless/title-block-less page stays "Sheet N"). (B266)
-                  const m = sheetMeta[n];
-                  const hasReal = !!(m && (m.sheetNumber || m.titleBlock));
-                  const lbl = hasReal && g.label && g.label !== "Sheet" ? g.label : `Sheet ${n}`;
+                  // The label: the real title-block title + number, else "Sheet N" — never a random
+                  // body-text line (B266) and never a cross-referenced/duplicate number (B378).
+                  const lbl = sheetLabel(n).label;
                   return (
                     <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,

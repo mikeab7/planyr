@@ -57,6 +57,10 @@ describe("statedCalibration / groupCalibration — auto-calibrate per group (B33
   it("distrusts a stated scale on a NON-standard (resized) page → 0", () => {
     expect(statedCalibration({ scale: { ftPerInch: 40 }, width: 500, height: 500 })).toBe(0);
   });
+  it("does NOT auto-calibrate a text-dense notes/specs sheet, even on a standard plot (B379)", () => {
+    // a scale-looking string in dense notes text must not silently scale a non-drawing sheet
+    expect(statedCalibration({ scale: { ftPerInch: 40 }, width: W, height: H, textDense: true })).toBe(0);
+  });
   it("picks the group's scale from its first scaled page", async () => {
     const { groups } = await readAndGroup(doc, { extractItems });
     const cal = groupCalibration(groups[1].pages);

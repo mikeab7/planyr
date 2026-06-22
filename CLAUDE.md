@@ -298,6 +298,27 @@ server/                   # placeholder README only — NOT built or deployed; b
 - Both REUSE the B336 reader (`readSheetMeta` → each page carries `notes`/`detailRefs`/`detailAnchors`;
   placed sheets persist them). 14 unit tests; V92 headless (`ui-audit/verify-b350.mjs`).
 
+### Document Review — robust labels on text-dense (general-notes / specs) sheets (B378/B379) — LIVE
+- A structural general-notes set labelled atrociously (body boilerplate as the title, a body
+  cross-reference read as the sheet number on several rows, false "·≈" auto-cal). All from one
+  mismatch: the reader was tuned for a drawing (sparse plan + one dense title-block strip); a notes
+  sheet (wall-to-wall text, no drawing area) breaks every assumption. Fixed at the **shared** reader
+  so the Markup sidebar AND the Stitcher both benefit:
+  - **Title scorer** (`sheetMeta.readSheetTitle`) now prefers **short + large type** (height-dominant
+    score, ≤7-word/≤48-letter cap) + a **boilerplate filter** — so "GENERAL NOTES" wins over the
+    copyright/legend prose it used to lose to.
+  - **Sheet number** is read from the **title-block zone only** (`readSheetMeta` → band, else the
+    right/bottom edge strip when a dense sheet defeats the density-based band detector), never the
+    whole-page body — so a cross-ref ("SEE DWG S202") can't masquerade as the sheet's own number.
+    `reconstructLines` now **splits a row on a large horizontal gap** so a title-block title can't
+    merge into a far-left body line. `markAdjacentDuplicateNumbers` (sheetGroups) clears a number
+    that repeats on an adjacent page. Sidebar uses a `trustedTitle` gate (band OR zone-number OR
+    text-page corroboration) → real title, else item, else number, else "Sheet N".
+  - **B379:** `readSheetMeta` flags a **`textDense`** sheet (notes/specs/legend title, or a prose-
+    saturated drawing area); `statedCalibration` returns 0 for it — a pure-text sheet is left
+    uncalibrated, never silently mis-scaled off a stray body scale string. Real plan sheets unchanged.
+  - +10 unit tests (1153 green); headless **V104** (`ui-audit/verify-notes-sheet-labels.mjs`, 9/9).
+
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
   has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens

@@ -22,6 +22,24 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner report "the sheet labeling is atrocious" (a structural general-notes set)
+     arrived with a two-item investigation brief (NEW-1 garbage labels, NEW-2 false auto-calibration).
+     Highest B# across both files was B373, so minted **B378–B379**. Per STANDING RULE #1 BOTH were
+     filed AND fixed + headless-verified (V104) the SAME session on branch `claude/ecstatic-maxwell-6y8aq1`
+     — full [x] blocks live in BACKLOG-DONE.md:
+       • B378 (NEW-1) — text-dense sheets labelled garbage: body boilerplate as the title, a body
+         cross-reference ("S202") read as the sheet number on several rows, weak sidebar gate. Fixed
+         the shared `sheetMeta` reader — title scorer now prefers short+large type (+ boilerplate
+         filter), the sheet number is read from the title-block ZONE only (band, else edge strip),
+         `reconstructLines` splits on a large horizontal gap so a title can't merge into a body line,
+         a `trustedTitle` sidebar gate, and a `markAdjacentDuplicateNumbers` dedup. SHIPPED.
+       • B379 (NEW-2) — a pure-text notes/specs sheet auto-calibrated off a stray body scale string.
+         Added a `textDense` classification; `statedCalibration` returns 0 for it (leaves it
+         uncalibrated, never silently mis-scaled). SHIPPED.
+     +10 unit tests, 1153 green · lint 0 errors · build green · `DocReview` lazy chunk intact ·
+     headless `ui-audit/verify-notes-sheet-labels.mjs` 9/9 + the B266/B348, B335–B339, B350 markup
+     harnesses still green. -->
+
 <!-- 2026-06-22: owner-dropped chat item — "the fact that I don't have an easy way to delete this little
      triangle that I put there is insane … go through all the tools and figure out what we need to debug."
      The "triangle" was an UNCALIBRATED Area measurement (its label falls back to "set scale"). Highest B#

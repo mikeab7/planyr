@@ -30,8 +30,12 @@ describe("addBD / difBD — malformed input must not crash or hang", () => {
     const t0 = performance.now();
     E.calcEnd("2026-06-22", 1e9);
     E.difBD("2026-06-22", "9999-12-31");
-    expect(performance.now() - t0).toBeLessThan(3000); // capped at MAX_BD_STEPS
-  });
+    // Freeze-guard, NOT a perf benchmark: this catches a MISSING cap (an uncapped 1e9-step run is
+    // ~25 min), so the bound only needs to be comfortably sub-minute. The capped run is a bounded
+    // ~1M steps (≈1–3s locally) — keep generous headroom so a slow/loaded CI runner doesn't flake
+    // (a real 3113ms run tripped a too-tight 3000ms bound).
+    expect(performance.now() - t0).toBeLessThan(20000); // capped at MAX_BD_STEPS
+  }, 60000);
   it("normal business-day math is unchanged", () => {
     expect(E.addBD("2026-06-22", 1)).toBe("2026-06-23"); // Mon → Tue
     expect(E.addBD("2026-06-26", 1)).toBe("2026-06-29"); // Fri → Mon (skip weekend)
