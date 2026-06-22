@@ -5,8 +5,9 @@
 //          reported "Utilities/Electric Transmission overlap their span" bug).
 //   B394 — buildGanttSVG (the PDF/print path) now emits in-chart names, same helper +
 //          alignment + ink + weights as on-screen; uniform black (no B210 depth-navy).
-//   B395 — dependency links route as clean orthogonal elbows (only H/V segments, square
-//          corners), not serpentine beziers; milestone tips; backward links route around.
+//   B395/B396 — dependency links are CURVED béziers (owner preference, reverting B395's
+//          orthogonal elbow) and BOUND to each bar's vertical center, so they no longer
+//          float at the row mid-line (the real defect).
 //
 // The babel-scope helpers (placeGanttLabel/depElbow/ganttNameWeight/buildGanttSVG) are
 // reachable as globals in the standalone app, so the pure geometry is unit-tested directly
@@ -63,16 +64,14 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
 const fails = [];
 const ok = (cond, msg) => { if (!cond) fails.push(msg); console.log(`  ${cond ? "✓" : "✗ FAIL"} ${msg}`); };
-// A path is orthogonal iff every consecutive segment is purely horizontal or vertical.
+// Parse a dependency connector path: it must be a CURVE (cubic bézier, contains "C"), and
+// we pull its start (M) and end points to check they're bound to the bars. (B396)
 const seg = d => {
-  const pts = d.replace(/^M/, "").split(/\s*L\s*/).map(s => s.split(",").map(Number));
-  let orth = true, bends = pts.length - 2, nan = false;
-  for (const [x, y] of pts) if (!Number.isFinite(x) || !Number.isFinite(y)) nan = true;
-  for (let i = 1; i < pts.length; i++) {
-    const dx = Math.abs(pts[i][0] - pts[i-1][0]), dy = Math.abs(pts[i][1] - pts[i-1][1]);
-    if (dx > 0.2 && dy > 0.2) orth = false;          // both change → diagonal
-  }
-  return { pts, orth, bends, nan };
+  const nums = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+  const nan = nums.some(n => !Number.isFinite(n)) || /NaN/.test(d);
+  const start = [nums[0], nums[1]];
+  const end = [nums[nums.length - 2], nums[nums.length - 1]];
+  return { curved: /C/.test(d), start, end, nan };
 };
 
 async function pass(align) {
@@ -119,18 +118,6 @@ async function pass(align) {
       mileLeft: P({kind:"milestone",align:"left",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
       mileRight: P({kind:"milestone",align:"right",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
       mileCenter: P({kind:"milestone",align:"center",bx:200,bw:0,rowTop:0,barMidY:18,barTopY:8,labelW:40,chartL:0,chartR:1000}).mode,
-      // depElbow per type — every segment orthogonal, no NaN. Each type gets geometry that
-      // is genuinely FORWARD for it (a normal link) and a genuinely BACKWARD one.
-      elbows: ["FS","SS","FF","SF"].map(t => {
-        const [ed, nd] = DEP_DIRS[t];
-        // forward = the successor's entry edge sits on the −enterDir side of the predecessor,
-        // i.e. the link can flow straight into it: enterDir>0 → successor to the right; <0 → left.
-        const fwd  = nd > 0 ? depElbow(100, 10, 300, 60, ed, nd) : depElbow(300, 10, 100, 60, ed, nd);
-        const back = nd > 0 ? depElbow(300, 10, 100, 60, ed, nd) : depElbow(100, 10, 300, 60, ed, nd);
-        const orth = pts => pts.every((p,i) => i===0 || Math.abs(p[0]-pts[i-1][0])<0.001 || Math.abs(p[1]-pts[i-1][1])<0.001);
-        return { t, fwdOrth: orth(fwd), backOrth: orth(back), fwdBends: fwd.length-2, backBends: back.length-2,
-                 dNaN: /NaN/.test(depElbowD(fwd)+depElbowD(back)) };
-      }),
     };
 
     // ---- B394: call buildGanttSVG directly (the print path) ----
@@ -149,7 +136,7 @@ async function pass(align) {
       depPaths: (svgOn.match(/<path class="dep" d="([^"]+)"/g) || []).map(m => (m.match(/d="([^"]+)"/)||[])[1]),
       svgLen: svgOn.length,
     };
-    return { names, deps, helper, pdf };
+    return { names, deps, helper, pdf, rowH: ROW_H };
   }, align);
 
   await page.screenshot({ path: OUT + `gantt-labels-${align}.png` });
@@ -170,10 +157,6 @@ async function pass(align) {
   ok(h.leafCenterOverflow === "above", `leaf Center (too wide) = caption above (${h.leafCenterOverflow})`);
   ok(h.mileLeft === "before" && h.mileRight === "after" && h.mileCenter === "above",
      `milestone L=before/R=after/C=above (${h.mileLeft}/${h.mileRight}/${h.mileCenter})`);
-  ok(h.elbows.every(e => e.fwdOrth && e.backOrth), `all dep elbows orthogonal (FS/SS/FF/SF, fwd+back)`);
-  ok(h.elbows.every(e => e.fwdBends <= 2), `every type's normal forward link ≤2 bends (${h.elbows.map(e=>e.t+":"+e.fwdBends).join(" ")})`);
-  ok(h.elbows.every(e => e.backBends <= 4), `backward links route around in ≤4 bends (${h.elbows.map(e=>e.t+":"+e.backBends).join(" ")})`);
-  ok(h.elbows.every(e => !e.dNaN), `no NaN in any elbow path`);
 
   // On-screen uniform ink + weight + summary-above
   ok(probe.names.length >= 6, `rendered ${probe.names.length} in-chart names`);
@@ -186,11 +169,14 @@ async function pass(align) {
      `"Utilities" caption stays above the bar band (bottom ${util?.bottom} ≤ rowTop+0.7·H)`);
   ok(util && leaf && util.weight > leaf.weight, `summary "Utilities" (${util?.weight}) bolder than leaf "Submit TIA" (${leaf?.weight})`);
 
-  // On-screen deps orthogonal
+  // On-screen deps: CURVED (owner preference) AND bound to the bar centers (the real fix, B396)
   const segs = probe.deps.map(seg);
+  const inBand = y => { const off = ((y % probe.rowH) + probe.rowH) % probe.rowH; return off > probe.rowH * 0.52; };
   ok(probe.deps.length === 4, `4 dependency connectors drawn (got ${probe.deps.length})`);
-  ok(segs.every(s => s.orth), `every on-screen connector is orthogonal (no diagonal segment)`);
+  ok(segs.every(s => s.curved), `every connector is a curve (cubic bézier), not an elbow`);
   ok(segs.every(s => !s.nan), `no NaN in any on-screen connector path`);
+  ok(segs.every(s => inBand(s.start[1]) && inBand(s.end[1])),
+     `every connector endpoint binds to the bar band (below the row mid-line) — not floating`);
 
   // B394 PDF/print path
   ok(probe.pdf.hasInk >= 6, `print SVG emits in-chart names in #1a1a1a (${probe.pdf.hasInk})`);
@@ -198,7 +184,7 @@ async function pass(align) {
   ok(probe.pdf.hasUtilities && probe.pdf.hasMilestone, `print SVG includes summary + milestone names`);
   ok(probe.pdf.namesOnDrop >= 6, `print "Bar names" off drops the in-chart names (Δ${probe.pdf.namesOnDrop})`);
   const psegs = probe.pdf.depPaths.map(seg);
-  ok(psegs.length > 0 && psegs.every(s => s.orth && !s.nan), `print connectors orthogonal, no NaN (${psegs.length})`);
+  ok(psegs.length > 0 && psegs.every(s => s.curved && !s.nan), `print connectors are curves, no NaN (${psegs.length})`);
 
   ok(real.length === 0, `no uncaught page errors (${real.length})`);
   if (real.length) real.slice(0, 8).forEach(e => console.log("    - " + e));

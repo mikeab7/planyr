@@ -10,7 +10,7 @@ nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 - **Result:** PASS 2026-06-22 — all checks, 3 passes, 0 page errors.
   - **B393:** weight ramp summary 800>700>600 vs leaf 500 (bold→700); `placeGanttLabel` → summary caption ALWAYS above (L=start/C=middle/R=end anchors), leaf Right=after / flips at the right clip / Center fits=plate, too-wide=above, milestone before/after/above. Live DOM: every `[data-gantt-name]` is `rgb(26,26,26)` (no navy text), the top summary "Utilities" renders mode=above and stays above the bar band, and is bolder than the leaf "Submit TIA".
   - **B394:** `buildGanttSVG` emits ≥6 in-chart names in `#1a1a1a`, **0** navy on any `<text>`, includes summary + milestone names, "Bar names" off drops them; print connectors orthogonal, no NaN.
-  - **B395:** `depElbow` per type orthogonal for forward + backward geometry (forward ≤2 bends, backward ≤4), no NaN; live scenario draws 4 orthogonal connectors incl. a backward link routing around.
+  - **B395 → B396:** dependency connectors are CURVED béziers (owner preference; B396 reverted B395's orthogonal elbow) and BOUND to each bar's vertical center — the harness asserts every connector is a curve (not an elbow), 0 NaN, and every endpoint sits in the bar band (below the row mid-line) rather than floating, on screen + in the print SVG.
 - **Pre-merge gates:** lint 0 errors · 1201 tests · build green · JSX OK. No regression: `verify-unscheduled-deps` (1/1, blank-date guard intact), `verify-scheduler-no-crash` (6/6), `verify-scheduler-bugfixes` (ALL PASS) all still green with the modified iframe embedded.
 
 ### V113 — PDF/Print Exhibit table-layout fixes: content-fit columns + year dividers + drag-resize (B390/B391/B392) ✅ (self-verified headless — fully done)
