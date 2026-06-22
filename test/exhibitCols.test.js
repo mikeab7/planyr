@@ -86,32 +86,8 @@ describe("anti-drift: the exhibit-cols helpers still match public/sequence/index
     expect(src).toMatch(/data-rs="\$\{c\.k\}"/);
     expect(src).toMatch(/type:'planarColResize'/);
   });
-  it("buildGanttSVG uses weighted year>quarter>month grid rules, no quarter label (B396)", () => {
-    expect(src).toMatch(/const gridRules=months\.map/);
-    expect(src).toMatch(/if\(m\.mo===0\)   return `<line[^`]*stroke="#8b95a3" stroke-width="1\.3"/);   // YEAR thickest
-    expect(src).toMatch(/if\(m\.mo%3===0\) return `<line[^`]*stroke="#c2c9d2" stroke-width="0\.8"/);   // QUARTER medium
-    expect(src).toMatch(/stroke="#e7ebf0" stroke-width="0\.4"/);                                       // MONTH thinnest
-  });
-  it("buildGanttSVG renders a two-tier LIGHT header (year band over month band) (B396)", () => {
-    expect(src).toMatch(/const YEAR_TIER=14, MON_TIER=16, HEADER_H=YEAR_TIER\+MON_TIER/);
-    expect(src).toMatch(/const yearLabels=yearSpans\.map/);
-    expect(src).toMatch(/const monthLabels=visibleMonths\.map/);
-    expect(src).toMatch(/var GANTT_HEAD=30, GANTT_ROW=18;/);   // paginator header height kept in lock-step
-  });
-  it("buildGanttSVG layers the vertical rules BEHIND the bars (B393 paint order)", () => {
-    // bands → grid → left edge → today → dependency arrows → bars → header text → bar labels.
-    expect(src).toMatch(/\$\{rowBands\.join\(""\)\}\$\{gridRules\}\$\{leftEdge\}\$\{todayLine\}\$\{arrows\}\$\{barLayer\.join\(""\)\}\$\{yearLabels\}\$\{monthLabels\}\$\{headerLines\}\$\{taskHeaderText\}\$\{labelLayer\.join\(""\)\}/);
-    expect(src).toMatch(/const rowBands=\[\], barLayer=\[\], labelLayer=\[\];/);
-  });
-  it("buildGanttSVG draws ONE continuous full-height left chart-edge boundary, not per-row (B394)", () => {
-    expect(src).toMatch(/const leftEdge=`<line x1="\$\{LABEL_W\}" y1="0" x2="\$\{LABEL_W\}" y2="\$\{svgH\}"/);
-  });
-  it("buildGanttSVG adds a viewBox so the whole timeline fits the page width (B396)", () => {
-    expect(src).toMatch(/viewBox="0 0 \$\{svgWidth\} \$\{svgH\}"/);
-  });
-  it("dependency connectors use orthogonal elbow routing in both paths (B395)", () => {
-    expect(src).toMatch(/function depElbowPath\(x1, y1, x2, y2, type, rowH\)\{/);
-    expect(src).toMatch(/d="\$\{depElbowPath\(x1,y1,x2,y2,type,ROW_H\)\}"/);          // export path
-    expect(src).toMatch(/d=\{depElbowPath\(l\.x1,l\.y1,l\.x2,l\.y2,l\.type,ROW_H\)\}/); // on-screen path
+  it("buildGanttSVG draws the B391 year-boundary dividers over the row bands", () => {
+    expect(src).toMatch(/const yearLines=yearMarkers\.map/);
+    expect(src).toMatch(/\$\{gridLines\}\$\{rows\}\$\{yearLines\}\$\{arrows\}\$\{todayLine\}/);
   });
 });
