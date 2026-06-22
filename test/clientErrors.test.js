@@ -8,13 +8,14 @@ import {
   DUP_MS,
   RATE_WINDOW_MS,
   RATE_MAX,
+  SESSION_MAX,
 } from "../src/shared/telemetry/clientErrors.js";
 
 // B279 — error telemetry. The pure layer (decide-to-send + row shaping) is what carries
 // the real logic; the network sink is a thin fire-and-forget insert verified headlessly.
 
 describe("decideReport — storm guard (B279)", () => {
-  const fresh = () => ({ seen: new Map(), windowStart: 0, sent: 0 });
+  const fresh = () => ({ seen: new Map(), windowStart: 0, sent: 0, total: 0 });
 
   it("reports the first time a signature is seen", () => {
     const r = decideReport("sig-a", 1000, fresh());
@@ -60,6 +61,24 @@ describe("decideReport — storm guard (B279)", () => {
     r = decideReport("after-window", 1000 + RATE_WINDOW_MS, s); s = r.state;
     expect(r.report).toBe(true);
     expect(r.state.sent).toBe(1);
+  });
+
+  it("enforces a hard per-session ceiling that the rolling window cannot re-arm past", () => {
+    let s = fresh();
+    let now = 1000;
+    let allowed = 0;
+    // Drip distinct signatures one per minute (dup window + per-minute burst cap never bite),
+    // far past the session ceiling. Only SESSION_MAX should ever get through.
+    for (let i = 0; i < SESSION_MAX + 25; i++) {
+      const r = decideReport(`drip${i}`, now, s); s = r.state;
+      if (r.report) allowed++;
+      now += RATE_WINDOW_MS; // each in its own fresh window, so the burst cap resets every time
+    }
+    expect(allowed).toBe(SESSION_MAX);
+    expect(s.total).toBe(SESSION_MAX);
+    // Even much later, nothing more goes out — the ceiling is for the page's lifetime.
+    const r = decideReport("way-later", now + 10 * RATE_WINDOW_MS, s);
+    expect(r.report).toBe(false);
   });
 
   it("honors custom opts and never throws on a bare/empty state", () => {
