@@ -1,0 +1,89 @@
+name: GIS source drift
+
+# Weekly drift detection for the GIS source registry (B369). Re-runs the live
+# reachability + schema + coverage-fixture checks (gis-verify/gis-source-coverage-verify.mjs)
+# against the real services, and — on ANY regression (an endpoint moved/renamed, a field
+# disappeared, or a coverage count collapsed, e.g. a source silently going county-clipped) —
+# opens (or bumps) a single @claude GitHub issue with the report so it's fixed before a
+# customer hits it. Idempotent: one open "gis-drift" issue is reused, not duplicated; the
+# issue is auto-closed when the checks go green again.
+#
+# Runs from main only (scheduled workflows always do). Trigger manually any time via the
+# Actions tab → Run workflow.
+on:
+  schedule:
+    - cron: "0 13 * * 1" # 13:00 UTC every Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No deps needed — the verifier is plain Node (global fetch) + a plain-JS registry import.
+      - name: Run GIS source coverage verify
+        id: verify
+        run: |
+          set +e
+          node gis-verify/gis-source-coverage-verify.mjs > gis-drift-report.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          echo "--- report ---"
+          cat gis-drift-report.txt
+      - name: Open or bump a @claude drift issue on regression
+        if: steps.verify.outputs.code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const owner = context.repo.owner, repo = context.repo.repo;
+            let report = "";
+            try { report = fs.readFileSync("gis-drift-report.txt", "utf8"); } catch (_) {}
+            if (report.length > 5000) report = report.slice(-5000); // keep the issue body sane
+            const body = [
+              "@claude — the weekly **GIS source drift** check failed. A screening source has",
+              "moved, been renamed, lost a field, or its coverage count collapsed (a source going",
+              "silently county-clipped / non-authoritative — the kind of regression B369 exists to catch).",
+              "",
+              "Please investigate `src/shared/gis/sources.js` + the failing rows below and fix the",
+              "endpoint, field map, or fixture. Re-run: `node gis-verify/gis-source-coverage-verify.mjs`.",
+              "",
+              "```",
+              report.trim() || "(no report captured)",
+              "```",
+            ].join("\n");
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", labels: "gis-drift", per_page: 1,
+            });
+            if (open.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: open[0].number, body: "⏰ Still failing —\n\n" + body });
+              core.info(`Bumped existing issue #${open[0].number}`);
+            } else {
+              const { data: created } = await github.rest.issues.create({
+                owner, repo, title: "🛰️ GIS source drift — a screening source regressed",
+                labels: ["gis-drift"], body,
+              });
+              core.info(`Opened issue #${created.number}`);
+            }
+      - name: Close the drift issue when green
+        if: steps.verify.outputs.code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner, repo = context.repo.repo;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner, repo, state: "open", labels: "gis-drift", per_page: 10,
+            });
+            for (const iss of open) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: iss.number, body: "✅ GIS source checks are green again — closing." });
+              await github.rest.issues.update({ owner, repo, issue_number: iss.number, state: "closed" });
+              core.info(`Closed issue #${iss.number}`);
+            }
