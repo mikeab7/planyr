@@ -34,6 +34,12 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      landed together. Full [x] blocks live in BACKLOG-DONE.md; headless harness V114
      (`ui-audit/verify-gantt-labels-deps.mjs`, all checks across right/center/left). -->
 
+<!-- 2026-06-22: owner feedback right after B393/B394/B395 shipped — "the serpentine things were fine,
+     i preferred those, revert, the issue was just that they weren't bound to anything". Minted **B396**:
+     reverted B395's orthogonal elbow back to the curved bézier in both render paths AND fixed the real
+     defect (the curves floated at the row mid-line; now bound to each bar's vertical center). Full [x]
+     block in BACKLOG-DONE.md; verified via the updated V114 harness. -->
+
 <!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
      screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
      (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free

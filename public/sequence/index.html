@@ -7020,22 +7020,13 @@ const placeGanttLabel = ({kind, align, bx, bw, rowTop, barMidY, barTopY, labelW,
   return (xl - labelW >= chartL) ? { x: xl, y: barMidY, anchor: "end", mode: "before" } : above(barEnd, "end");
 };
 
-// Orthogonal "elbow" dependency router — only horizontal + vertical segments, square
-// corners — keyed on the link's exit/entry anchors. exitDir/enterDir are +1 (right) /
-// −1 (left). ≤2 bends for a normal forward link; a backward link routes out → vertical →
-// back across → into the successor (around the bars, never diagonally). Returns the
-// polyline points; pure geometry from bar coordinates (works for off-screen rows). (B395)
-const depElbow = (x1, y1, x2, y2, exitDir, enterDir, stub = 9) => {
-  const ax = x1 + exitDir * stub;                 // tip of the short exit stub
-  const fwd = enterDir > 0 ? (x2 >= ax) : (x2 <= ax);   // a single vertical run reaches it?
-  if (fwd) return [[x1, y1], [ax, y1], [ax, y2], [x2, y2]];
-  const bx = x2 - enterDir * stub, my = (y1 + y2) / 2;
-  return [[x1, y1], [ax, y1], [ax, my], [bx, my], [bx, y2], [x2, y2]];
-};
-const depElbowD = pts => "M" + pts.map(p => `${Math.round(p[0] * 10) / 10},${Math.round(p[1] * 10) / 10}`).join(" L");
-// Exit/entry directions per dependency type (FS/SS/FF/SF): which edge the link leaves the
-// predecessor from and which edge (+ arrow direction) it enters the successor. (B395)
-const DEP_DIRS = { FS: [1, 1], SS: [-1, 1], FF: [1, -1], SF: [-1, -1] };
+// Dependency connectors are CURVED (cubic bézier) — owner preference (B396, reverting the
+// B395 orthogonal experiment). The real bug B395 chased was that the connectors floated at
+// the row's vertical center while the on-screen bars sit at the BOTTOM of the row, so the
+// curves looked unbound. Fix: anchor each endpoint to its bar's true vertical center (per
+// kind — leaf / summary span / milestone; computed inline in each render path since the
+// on-screen bar geometry differs from the print one) so a curve cleanly leaves the
+// predecessor bar and enters the successor bar.
 
 // ── GanttView ─────────────────────────────────────────────
 function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings}) {
@@ -7113,6 +7104,20 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     return out;
   }, [minD, totD, ppd]);
 
+  // Vertical center of a task's bar within its row — leaf bars sit at the row BOTTOM,
+  // summaries on their span, milestones on the diamond. Dependency curves anchor here so
+  // they bind to the bar instead of floating at the row's mid-line (B396).
+  const depYCenter = (t, idx) => {
+    const topY = idx * ROW_H;
+    if (t.duration === 0) return topY + ROW_H - 7.5;                    // milestone diamond center
+    if (childParentIds.has(t.id)) {                                      // summary span center
+      const dd = Math.min(t.level||0, 3), SPAN = [6,5,4,4][dd], LEG = [0.16,0.12,0.09,0.07][dd]*ROW_H;
+      return topY + (ROW_H - 2 - LEG - SPAN) + SPAN/2;
+    }
+    const LEAF_H = ROW_H*0.25;                                           // leaf bar center
+    return topY + (ROW_H - LEAF_H - 1) + LEAF_H/2;
+  };
+
   const depLines = useMemo(() =>
     tasks.flatMap(task => normPreds(task.predecessors).map(p => {
       const pred = tasks.find(t => t.id===p.id); if(!pred) return null;
@@ -7123,21 +7128,15 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
       // blank-date endpoints) — depLines was the one draw path that lacked it.
       if (!pred.start || !pred.end || !task.start || !task.end) return null;
       const type = (p.type||"FS").toUpperCase();
-      const [exitDir, enterDir] = DEP_DIRS[type] || DEP_DIRS.FS;
-      // Endpoint x = the bar EDGE the link leaves/enters (per type); a milestone has no
-      // bar edge, so anchor to its diamond TIP (center ± half-width) in the travel dir (B395).
-      let x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
-      let x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
-      if (pred.duration === 0) x1 = xOf(pred.start) + exitDir*5;
-      if (task.duration === 0) x2 = xOf(task.start) - enterDir*5;
-      const y1 = tasks.indexOf(pred)*ROW_H+ROW_H/2;
-      const y2 = tasks.indexOf(task)*ROW_H+ROW_H/2;
-      // Orthogonal elbow (square corners), not a serpentine bezier. Pure geometry, so it
-      // computes correctly even when an endpoint row is scrolled out of the window (B395).
-      const d = depElbowD(depElbow(x1, y1, x2, y2, exitDir, enterDir));
-      return {key:`${p.id}-${task.id}-${type}`, d, x2, y2, enterDir, type};
+      // x = the bar EDGE the link leaves/enters, per dependency type.
+      const x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
+      const x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
+      // y = each endpoint's BAR vertical center, so the curve binds to the bar (B396).
+      const y1 = depYCenter(pred, tasks.indexOf(pred));
+      const y2 = depYCenter(task, tasks.indexOf(task));
+      return {key:`${p.id}-${task.id}-${type}`, x1, y1, x2, y2, type};
     }).filter(Boolean))
-  , [tasks, minD, ppd]);
+  , [tasks, minD, ppd, childParentIds]);
 
   // ── In-chart name labels (B393) ──────────────────────────
   // Per-project alignment; the chart's horizontal clip is [0, totalW] (a label past it
@@ -7290,10 +7289,13 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
           <svg style={{position:"absolute",top:0,left:0,width:totalW,height:tasks.length*ROW_H,pointerEvents:"none",zIndex:3,overflow:"visible"}}>
             {depLines.map(l => {
             const color = l.type==="SS"?"#7c3aed":l.type==="FF"?"#0891b2":l.type==="SF"?"#be185d":"#0969da";
-            const aDir = l.enterDir;   // arrowhead points along the entry direction (B395)
+            // Curved (cubic bézier) connector — owner-preferred (B396). Direction-flipped 32px
+            // handles; endpoints already bound to the bar centers by depYCenter.
+            const aDir = l.x2 >= l.x1 ? 1 : -1;
             return (
               <g key={l.key}>
-                <path d={l.d} stroke={color} strokeWidth="1.2" fill="none" strokeDasharray="4 3" opacity=".55" />
+                <path d={`M${l.x1},${l.y1} C${l.x1+32*aDir},${l.y1} ${l.x2-32*aDir},${l.y2} ${l.x2},${l.y2}`}
+                  stroke={color} strokeWidth="1.2" fill="none" strokeDasharray="4 3" opacity=".55" />
                 <path d={`M${l.x2},${l.y2} L${l.x2-5*aDir},${l.y2-3} L${l.x2-5*aDir},${l.y2+3}Z`} fill={color} opacity=".55" />
               </g>
             );
@@ -8762,6 +8764,16 @@ ${barSvg}${blText}${nameSvg}`;
     for(const p of projects){
       const ix=new Map();
       p.tasks.forEach((t,i)=>ix.set(t.id, base+i));
+      // Bar vertical center per kind (leaf/milestone are centered at midY here; a summary
+      // sits on its span) so the curve binds to the bar, not the row mid-line (B396).
+      const ycOf=(task,gidx)=>{
+        const yTop=HEADER_H+gidx*ROW_H;
+        if(task.duration!==0 && p.tasks.some(x=>x.parentId===task.id)){
+          const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
+          return yTop+(ROW_H-2-LG-SP)+SP/2;
+        }
+        return yTop+ROW_H*0.5;
+      };
       for(const t of p.tasks){
         const preds=Array.isArray(t.predecessors)?t.predecessors:[];
         for(const pr of preds){
@@ -8771,16 +8783,14 @@ ${barSvg}${blText}${nameSvg}`;
           const pi=ix.get(pr.id), si=ix.get(t.id);
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
-          const [exitDir, enterDir]=DEP_DIRS[type]||DEP_DIRS.FS;
-          let x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
-          let x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
-          if(pt.duration===0) x1=xOf(pt.start)+exitDir*5;   // anchor to the milestone diamond tip (B395)
-          if(t.duration===0)  x2=xOf(t.start)-enterDir*5;
-          const y1=HEADER_H+pi*ROW_H+ROW_H*0.5, y2=HEADER_H+si*ROW_H+ROW_H*0.5;
+          const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
+          const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
+          const y1=ycOf(pt,pi), y2=ycOf(t,si);            // bound to the bar centers (B396)
+          const aDir=x2>=x1?1:-1;
           const color=DEP_C[type]||DEP_C.FS;
-          // Clean orthogonal elbow (square corners), same router as on-screen — not a serpentine bezier (B395).
-          arrows+=`<path class="dep" d="${depElbowD(depElbow(x1,y1,x2,y2,exitDir,enterDir))}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${y2} L${x2-5*enterDir},${y2-3} L${x2-5*enterDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
+          // Curved (cubic bézier) connector — owner-preferred (B396), matching the on-screen Gantt.
+          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${x2-32*aDir},${y2} ${x2},${y2}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
+            +`<path d="M${x2},${y2} L${x2-5*aDir},${y2-3} L${x2-5*aDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
         }
       }
       base+=p.tasks.length;
