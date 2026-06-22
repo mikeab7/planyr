@@ -313,17 +313,18 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; h
 input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--amber); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.2); cursor:pointer; }
 
 
-/* When embedded in the Planyr shell, the shell's Row-1 breadcrumb already provides
-   the logo, the Dashboard/Projects toggle and the project switcher (the embedded app
-   bridges its project nav up to that breadcrumb over postMessage). So hide ONLY those
-   duplicated nav/branding bits — NOT the whole header. The action toolbar (view
-   switcher, Review, Format, Zoom, Export, Save, Version History, Contacts, Automation,
-   Settings) has no equivalent in the shell chrome and must stay visible.
-   Regression guard: this rule used to be `.app-header { display:none }`, which hid the
-   entire toolbar in the iframe — leaving only the in-grid Columns button. (B381) */
-html.in-iframe .app-header .hdr-logo,
-html.in-iframe .app-header .hdr-mode,
-html.in-iframe .app-header .hdr-project { display: none !important; }
+/* When embedded in the Planyr shell, the shell's unified header now provides EVERYTHING
+   this app's own header did: the Row-1 breadcrumb shows the logo + Dashboard/Projects
+   toggle + project switcher (bridged over postMessage, B203), and the shell's Row-2 toolbar
+   re-renders the action controls — view switcher, Review, Zoom, Export, Save, Version
+   History, Contacts, Automation, Format, Settings — driving THIS app over the postMessage
+   toolbar bridge (B386). So hide our own header entirely in-embed, or there'd be a double
+   toolbar. (Its self-positioned panels/modals — Settings, Format, etc. — still render; they
+   were never anchored to these buttons, so the buttons can live up in the shell.)
+   History: B381 narrowed an earlier `.app-header{display:none}` to hide only the duplicated
+   nav, because the action toolbar had no shell home yet. Now that the shell hosts the toolbar
+   too (B386), hiding the whole header is correct again — the controls didn't vanish, they moved. */
+html.in-iframe .app-header { display: none !important; }
 </style>
 <script>if(window.self!==window.top)document.documentElement.classList.add("in-iframe");</script>
 </head>
@@ -4350,6 +4351,91 @@ function App() {
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [inShell, addProject]);
+
+  // ── Embedded-mode TOOLBAR bridge (Planyr shell, B386) ──────────────────────
+  // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders
+  // those controls up in its own unified header. So when embedded: (1) report the toolbar's
+  // live state up, and (2) accept the shell's toolbar commands and run the SAME actions our
+  // own buttons do. Standalone (not embedded) is untouched — `inShell` gates both halves and
+  // the in-iframe buttons keep their own handlers.
+  const tbSigRef = useRef("");
+  useEffect(() => {
+    if (!inShell || !data) return;
+    const sec = data.section ?? "projects";
+    const section = sec === "suggestions" ? "projects" : sec;
+    const view = data.view ?? "grid";
+    const state = {
+      view, section, isMobile: !!isMobile,
+      zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
+      zoomable: section === "projects" && (view === "split" || view === "gantt"),
+      reviewCount: reviewRows.length,
+      reviewOpen: !!reviewOpen,
+      saveStatus, savePulse: !!savePulse, fileLinked: !!fileLinked,
+      activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
+        : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
+    };
+    const sig = JSON.stringify(state);
+    if (sig === tbSigRef.current) return; // only emit when the toolbar state actually changes
+    tbSigRef.current = sig;
+    try {
+      window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
+    } catch (_) {}
+  }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
+      settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+
+  useEffect(() => {
+    if (!inShell) return;
+    const onCmd = (e) => {
+      // Same-origin shell only — these commands mutate state / trigger downloads. (Same strict
+      // guards as the nav bridge: exact origin + the planar-shell source discriminator.)
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-shell") return;
+      switch (m.type) {
+        case "planar:view-set":
+          if (m.view) setData(d => d ? { ...d, view: m.view } : d);
+          break;
+        case "planar:review-toggle": {
+          const opening = !reviewOpen;
+          if (opening && reviewRows.length && data && data.projects) {
+            const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
+            if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData(d => ({ ...d, aPid: a.project_id }));
+          }
+          setReviewOpen(opening);
+          break;
+        }
+        case "planar:zoom":
+          if (m.dir === "in") setGanttPPD(z => Math.min(80, Math.ceil(z * 1.35)));
+          else if (m.dir === "out") setGanttPPD(z => Math.max(1, Math.floor(z / 1.35)));
+          break;
+        case "planar:export":
+          if (m.mode === "pdf") setPdfExportOpen(true); else exportHTML();
+          break;
+        case "planar:save":
+          if (saveStatus === "error") { if (latestData.current) attemptCloudSave(latestData.current); }
+          else openFile();
+          break;
+        case "planar:history":
+          setHistoryOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:contacts":
+          setContactsOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setFormatOpen(false);
+          break;
+        case "planar:automation":
+          setAutomationOpen(o => !o); setSettingsOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:settings":
+          setSettingsOpen(o => !o); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:format":
+          setFormatOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false);
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener("message", onCmd);
+    return () => window.removeEventListener("message", onCmd);
+  }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
 
   const proj = data?.projects[data?.aPid];
 

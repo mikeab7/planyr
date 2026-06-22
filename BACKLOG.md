@@ -25,8 +25,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
      Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 already
      centers the project name). Highest B# across both files was B384, so minted **B385** (its
-     dependent NEW-2 = **B386**, the Schedule toolbar lift, filed Open just below). Per STANDING
-     RULE #1 B385 was filed AND fixed + headless-verified (V109, 9/9) the SAME session on branch
+     dependent NEW-2 = **B386**, the Schedule toolbar lift, ALSO shipped this session — see below). Per
+     STANDING RULE #1 B385 was filed AND fixed + headless-verified (V109, 9/9) the SAME session on branch
      `claude/inspiring-bohr-46gql9` — full [x] block lives in BACKLOG-DONE.md.
      WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
      becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — with the
@@ -37,17 +37,28 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      NOT the Markup toolbarContent move. lint 0 · 1201 tests · build green · AppHeader/Scheduler/
      SitePlannerApp lazy chunks intact. -->
 
-### B386 — Lift the Schedule toolbar into the unified AppHeader over the iframe bridge `[Scheduler / Header-Nav]` (feature) — depends on B385  *(owner-dropped from chat as "NEW-2" 2026-06-22; minted **B386** — highest B# across both files was B384, B385 took the dependency slot)*
-`[ ]` **Open — the foundation (B385) shipped this session; the lift itself is filed with its plan (see the blocker).** Collapse Schedule's two stacked header rows into one. The **Grid/Split/Gantt** toggle, **review inbox**, **zoom**, **export**, **save**, **history**, **share/Contacts**, **Automation**, and **settings** currently render INSIDE the embedded Gantt app (`public/sequence/index.html` — the `.app-header` toolbar); merge them up into the parent `AppHeader` Row 2.
-- **Arrangement (owner-specified):** Grid/Split/Gantt toggle + review inbox (with unread badge) → `toolbarCenter` (the B385 center slot). Zoom (−/%/+), export, save, history, share, Automation, settings → `toolbarContent` (right). Module tabs stay left.
-- **Mechanism — extend the EXISTING postMessage bridge (B203), don't rebuild it.** `Scheduler.jsx` + `index.html` already speak it (same-origin only, `source:"planar-seq"`/`"planar-shell"` discriminators, exact-origin target). Reuse all of it:
-  - *iframe → shell:* extend the emitted state (or add a sibling `planar:toolbar-state`) with view mode (grid/split/gantt), zoom %, unread review count, and undo/redo/save availability.
-  - *shell → iframe:* add inbound commands (`planar:view-set`, `planar:zoom`, `planar:export`, `planar:save`, `planar:history`, `planar:share`, `planar:automation`, `planar:settings`) handled inside `index.html`.
-  - hide the iframe's own toolbar in-embed via the SAME `.in-iframe` CSS mechanism that already hides its nav (narrowed in B381 — re-widen carefully to also hide the action toolbar, NOT the whole header).
-- **Files:** `src/workspaces/scheduler/Scheduler.jsx` (render lifted controls into the AppHeader slots, post commands, read reported state), `public/sequence/index.html` (emit toolbar state, accept commands, hide its in-embed toolbar), `src/shared/ui/AppHeader.jsx` (consumes B385's center slot — **already shipped**).
-- **Edge cases / gotchas (carry into the build):** keep the strict same-origin guards intact (don't loosen for the new message types); **silence is a crash** — the inbox badge count comes from the iframe's reported count, never hardcoded; render lifted controls **disabled** (or omit the badge) until the iframe reports `toolbar-state` — never a control that silently no-ops or a fabricated count; **zoom** — the iframe is source of truth (+/− post a delta, the iframe re-reports the resulting %, the parent only displays); **two settings gears** (Row-1 app/theme Settings, B342, vs Schedule's view settings) stay separate; **two save affordances** (Row-1 cloud-sync badge vs the manual save disk) — confirm they aren't redundant before keeping both; **fullscreen (F)** already collapses AppHeader so the lifted controls vanish with it automatically. **Scheduler-only:** Site + Markup feed `toolbarContent` directly (no iframe) and are untouched.
-- **Deduped:** net-new, the NEXT step on the B203 bridge. NOT a dup of **B203** (DONE — bridged the *nav* half up to the shell) nor **B381** (DONE — *restored* the in-iframe action toolbar by narrowing `.in-iframe`); B386 is the opposite move — lift that toolbar OUT of the iframe into the shared header. Depends on **B385** (the Row-2 center slot, shipped).
-- **⛔ Why filed Open, not shipped this session (the blocker — too large for one run + an architectural call):** B385 (the reusable slot, the stated dependency) IS shipped + verified this session, which unblocks this item. The lift itself is a large, high-risk pass over the 9,745-line embedded app: each of ~9 controls needs its live state bridged OUT and a command wired BACK in. Critically, **most of those controls open popovers/panels anchored to their in-iframe buttons** (export menu, version-history modal, Automation/Settings/Contacts panels, the Format popover) — lifting only the *buttons* to the parent header strips their anchor, so it needs an architectural decision (re-home the panels to the parent vs. render parent-side equivalents that post commands) plus careful re-coordination with the same-day **B381** toolbar restore. Doing half would leave a broken split toolbar — worse than today. Filed with the full plan above; the pure-action controls (view toggle, zoom, save-retry) are straightforward, the popover-bearing ones are the real work and the decision point.
+<!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
+     AppHeader so Schedule has ONE header like Site/Markup (it depends on B385). Minted **B386**.
+     Owner GREENLIT building it the same session (rather than filing it with a plan), so per
+     STANDING RULE #1 it was fixed + headless-verified (V110, 17/17) on branch
+     `claude/inspiring-bohr-46gql9` — full [x] block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: the embedded Gantt app's action toolbar is now rendered up in the shell's Row-2
+     header — Grid/Split/Gantt + review inbox in B385's `toolbarCenter`; zoom/export/save/history/
+     contacts/automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker
+     was UNFOUNDED: the embedded app already renders its panels as self-positioned `position:fixed`
+     modals/drawers toggled by boolean state (never anchored to their buttons), so lifting the
+     trigger buttons is clean — buttons post `planar:*` commands, panels still open in the iframe.
+     The bridge (B203) was extended, not rebuilt: iframe → shell adds `planar:toolbar-state`
+     (view/zoom%/reviewCount/saveStatus/activePanel…); shell → iframe adds view-set/review-toggle/
+     zoom/export/save/history/contacts/automation/settings/format. Strict same-origin guards kept;
+     iframe stays source-of-truth (badge = reported count, `ready`-gated, never fabricated).
+     `.in-iframe .app-header{display:none}` now hides the whole in-embed header (re-widening what
+     B381 narrowed — B381 narrowed it only because the toolbar had no shell home yet). Standalone
+     /sequence/ untouched (hide + bridge both `inShell`-gated). Two settings gears kept separate
+     (B342 theme vs Schedule view); "share" = the existing Contacts control (none invented).
+     Deduped: completion of the B203 bridge; SUPERSEDES B381's harness `verify-schedule-toolbar.mjs`
+     (now retired — it asserted the opposite). New `ScheduleToolbar.jsx`; edits to Scheduler.jsx +
+     index.html. lint 0 · 1201 tests · build green · JSX OK · Scheduler/AppHeader lazy chunks intact. -->
 
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
      left-hand panel so you never have to back out to the map to assemble more land. Highest B#
