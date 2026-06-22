@@ -103,7 +103,7 @@ try {
       nameW: thW("name"), startW: thW("start"),
       tableW: st ? Math.round(st.getBoundingClientRect().width) : 0,
       ganttW: sg ? Math.round(sg.getBoundingClientRect().width) : 0,
-      yearLine: svg ? /stroke="#7b8290"/.test(svg.innerHTML) : false,
+      yearLine: svg ? /stroke="#8b95a3"/.test(svg.innerHTML) : false,
       handle: !!document.querySelector('.split-table thead th[data-k="start"] .col-rs'),
     };
   });

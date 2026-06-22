@@ -86,8 +86,24 @@ describe("anti-drift: the exhibit-cols helpers still match public/sequence/index
     expect(src).toMatch(/data-rs="\$\{c\.k\}"/);
     expect(src).toMatch(/type:'planarColResize'/);
   });
-  it("buildGanttSVG draws the B391 year-boundary dividers over the row bands", () => {
-    expect(src).toMatch(/const yearLines=yearMarkers\.map/);
-    expect(src).toMatch(/\$\{gridLines\}\$\{rows\}\$\{yearLines\}\$\{arrows\}\$\{todayLine\}/);
+  it("buildGanttSVG layers vertical rules BEHIND the bars (B397 paint order)", () => {
+    // bands → grid → left edge → today → dependency (main's curved B396) → bars → header labels → bar labels
+    expect(src).toMatch(/\$\{rowBands\.join\(""\)\}\$\{gridRules\}\$\{leftEdge\}\$\{todayLine\}\$\{arrows\}\$\{barLayer\.join\(""\)\}\$\{yearLabels\}\$\{monthLabels\}\$\{headerLines\}\$\{taskHeaderText\}\$\{labelLayer\.join\(""\)\}/);
+    expect(src).toMatch(/const rowBands=\[\], barLayer=\[\], labelLayer=\[\];/);
+  });
+  it("buildGanttSVG draws ONE continuous full-height left chart-edge boundary, not per-row (B398)", () => {
+    expect(src).toMatch(/const leftEdge=`<line x1="\$\{LABEL_W\}" y1="0" x2="\$\{LABEL_W\}" y2="\$\{svgH\}"/);
+  });
+  it("buildGanttSVG uses a two-tier light header + weighted year>quarter>month grid rules (B399)", () => {
+    expect(src).toMatch(/const YEAR_TIER=14, MON_TIER=16, HEADER_H=YEAR_TIER\+MON_TIER/);
+    expect(src).toMatch(/const yearLabels=yearSpans\.map/);
+    expect(src).toMatch(/const monthLabels=visibleMonths\.map/);
+    expect(src).toMatch(/if\(m\.mo===0\)   return `<line[^`]*stroke="#8b95a3" stroke-width="1\.3"/);   // YEAR thickest
+    expect(src).toMatch(/if\(m\.mo%3===0\) return `<line[^`]*stroke="#c2c9d2" stroke-width="0\.8"/);   // QUARTER medium, no label
+    expect(src).toMatch(/stroke="#e7ebf0" stroke-width="0\.4"/);                                       // MONTH thinnest
+    expect(src).toMatch(/var GANTT_HEAD=30, GANTT_ROW=18;/);                                           // paginator header height in lock-step
+  });
+  it("buildGanttSVG adds a viewBox so the whole timeline fits the page width (B400)", () => {
+    expect(src).toMatch(/viewBox="0 0 \$\{svgWidth\} \$\{svgH\}"/);
   });
 });
