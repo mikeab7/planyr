@@ -22,6 +22,20 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
+     hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
+     Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
+     rotation, scanned/DWG — while this was in flight, so B365 is the real next free ID; renumbered from a
+     first-filed B362). Filed AND shipped + headless-verified (19/19, V98) THIS session per STANDING RULE #1
+     — full [x] block in BACKLOG-DONE.md
+     (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
+     building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
+     status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
+     progress-arc encoding — a separate concern, untouched). Re-hued statusTokens.js (Pursuit→coral,
+     Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
+     MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
+     z-order by importance, fixed hit box); Dead hidden by default. -->
+
 ### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
 `[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
 - **Tier-2 AI/OCR** (B299 `server/filing/` + B352 OCR) — server-side title-block read for scanned sheets. Owner deploy: `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. The proxy 503s until then (graceful skip) — purely additive, no regression.
