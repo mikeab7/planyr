@@ -313,17 +313,18 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; h
 input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--amber); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.2); cursor:pointer; }
 
 
-/* When embedded in the Planyr shell, the shell's Row-1 breadcrumb already provides
-   the logo, the Dashboard/Projects toggle and the project switcher (the embedded app
-   bridges its project nav up to that breadcrumb over postMessage). So hide ONLY those
-   duplicated nav/branding bits — NOT the whole header. The action toolbar (view
-   switcher, Review, Format, Zoom, Export, Save, Version History, Contacts, Automation,
-   Settings) has no equivalent in the shell chrome and must stay visible.
-   Regression guard: this rule used to be `.app-header { display:none }`, which hid the
-   entire toolbar in the iframe — leaving only the in-grid Columns button. (B381) */
-html.in-iframe .app-header .hdr-logo,
-html.in-iframe .app-header .hdr-mode,
-html.in-iframe .app-header .hdr-project { display: none !important; }
+/* When embedded in the Planyr shell, the shell's unified header now provides EVERYTHING
+   this app's own header did: the Row-1 breadcrumb shows the logo + Dashboard/Projects
+   toggle + project switcher (bridged over postMessage, B203), and the shell's Row-2 toolbar
+   re-renders the action controls — view switcher, Review, Zoom, Export, Save, Version
+   History, Contacts, Automation, Format, Settings — driving THIS app over the postMessage
+   toolbar bridge (B388). So hide our own header entirely in-embed, or there'd be a double
+   toolbar. (Its self-positioned panels/modals — Settings, Format, etc. — still render; they
+   were never anchored to these buttons, so the buttons can live up in the shell.)
+   History: B381 narrowed an earlier `.app-header{display:none}` to hide only the duplicated
+   nav, because the action toolbar had no shell home yet. Now that the shell hosts the toolbar
+   too (B388), hiding the whole header is correct again — the controls didn't vanish, they moved. */
+html.in-iframe .app-header { display: none !important; }
 </style>
 <script>if(window.self!==window.top)document.documentElement.classList.add("in-iframe");</script>
 </head>
@@ -4351,6 +4352,91 @@ function App() {
     return () => window.removeEventListener("message", onMsg);
   }, [inShell, addProject]);
 
+  // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
+  // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders
+  // those controls up in its own unified header. So when embedded: (1) report the toolbar's
+  // live state up, and (2) accept the shell's toolbar commands and run the SAME actions our
+  // own buttons do. Standalone (not embedded) is untouched — `inShell` gates both halves and
+  // the in-iframe buttons keep their own handlers.
+  const tbSigRef = useRef("");
+  useEffect(() => {
+    if (!inShell || !data) return;
+    const sec = data.section ?? "projects";
+    const section = sec === "suggestions" ? "projects" : sec;
+    const view = data.view ?? "grid";
+    const state = {
+      view, section, isMobile: !!isMobile,
+      zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
+      zoomable: section === "projects" && (view === "split" || view === "gantt"),
+      reviewCount: reviewRows.length,
+      reviewOpen: !!reviewOpen,
+      saveStatus, savePulse: !!savePulse, fileLinked: !!fileLinked,
+      activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
+        : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
+    };
+    const sig = JSON.stringify(state);
+    if (sig === tbSigRef.current) return; // only emit when the toolbar state actually changes
+    tbSigRef.current = sig;
+    try {
+      window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
+    } catch (_) {}
+  }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
+      settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+
+  useEffect(() => {
+    if (!inShell) return;
+    const onCmd = (e) => {
+      // Same-origin shell only — these commands mutate state / trigger downloads. (Same strict
+      // guards as the nav bridge: exact origin + the planar-shell source discriminator.)
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-shell") return;
+      switch (m.type) {
+        case "planar:view-set":
+          if (m.view) setData(d => d ? { ...d, view: m.view } : d);
+          break;
+        case "planar:review-toggle": {
+          const opening = !reviewOpen;
+          if (opening && reviewRows.length && data && data.projects) {
+            const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
+            if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData(d => ({ ...d, aPid: a.project_id }));
+          }
+          setReviewOpen(opening);
+          break;
+        }
+        case "planar:zoom":
+          if (m.dir === "in") setGanttPPD(z => Math.min(80, Math.ceil(z * 1.35)));
+          else if (m.dir === "out") setGanttPPD(z => Math.max(1, Math.floor(z / 1.35)));
+          break;
+        case "planar:export":
+          if (m.mode === "pdf") setPdfExportOpen(true); else exportHTML();
+          break;
+        case "planar:save":
+          if (saveStatus === "error") { if (latestData.current) attemptCloudSave(latestData.current); }
+          else openFile();
+          break;
+        case "planar:history":
+          setHistoryOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:contacts":
+          setContactsOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setFormatOpen(false);
+          break;
+        case "planar:automation":
+          setAutomationOpen(o => !o); setSettingsOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:settings":
+          setSettingsOpen(o => !o); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:format":
+          setFormatOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false);
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener("message", onCmd);
+    return () => window.removeEventListener("message", onCmd);
+  }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
+
   const proj = data?.projects[data?.aPid];
 
   const flatTasks = useMemo(() => {
@@ -6911,6 +6997,12 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
   const depLines = useMemo(() =>
     tasks.flatMap(task => normPreds(task.predecessors).map(p => {
       const pred = tasks.find(t => t.id===p.id); if(!pred) return null;
+      // A connector needs a real bar/diamond at BOTH ends. An unscheduled task has blank
+      // dates → no x-position (xOf("") is NaN) → the arrow lands in empty space pointing at
+      // nothing. Skip it; the blank row carries an explicit "Unscheduled" tag instead. Mirrors
+      // the bar renderer's isBlankDates guard AND the PDF-export connector guard (both skip
+      // blank-date endpoints) — depLines was the one draw path that lacked it.
+      if (!pred.start || !pred.end || !task.start || !task.end) return null;
       const type = (p.type||"FS").toUpperCase();
       const x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
       const x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
@@ -7085,13 +7177,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             // by depth), bottom-aligned with the brackets so baselines line up across the chart.
             const LEAF_H = ROW_H*0.25;
 
-            // Blank-date task: render just the row, no bar/diamond
+            // Blank-date task (an unscheduled stub): no bar/diamond, and — by design — no
+            // dependency arrows are drawn to it (the depLines guard skips it). Show an explicit,
+            // horizontally-sticky "Unscheduled" tag so the empty row reads as intentional rather
+            // than a rendering glitch — never a silent void. Hardcoded light hues to match this
+            // (always-light) chart body, like the bar labels above.
             if (isBlankDates) {
               return <div key={task.id} onClick={()=>setSelectedId?.(task.id)}
                 style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,
+                  display:"flex",alignItems:"center",
                   borderBottom:"1px solid rgba(0,0,0,0.1)",
                   borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",
-                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}} />;
+                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}}>
+                <span style={{position:"sticky",left:8,display:"inline-flex",alignItems:"center",
+                  height:14,padding:"0 6px",fontSize:8,fontWeight:600,letterSpacing:".05em",
+                  textTransform:"uppercase",color:"#6b7280",background:"#fff",
+                  border:"1px dashed #cbd5e1",borderRadius:7,whiteSpace:"nowrap",
+                  pointerEvents:"none",fontFamily:"'Inter',system-ui,sans-serif"}}>Unscheduled</span>
+              </div>;
             }
 
             return (
@@ -8494,7 +8597,7 @@ ${barSvg}${blText}`;
   // emphasized (bold + white) so each year's start is legible on the axis itself.
   const gridLines=months.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="${m.mo===0?'#bbb':'#eee'}" stroke-width="${m.mo===0?0.8:0.4}"/>`).join("")
     +visibleMonths.map(m=>`<text x="${m.x+3}" y="15" font-size="${m.mo===0?8.5:7.5}" font-weight="${m.mo===0?'bold':'normal'}" fill="${m.mo===0?'#ffffff':'#e8e8e8'}" font-family="Arial,sans-serif">${m.label}</text>`).join("");
-  // B386 — year-boundary dividers: a heavier vertical line at each Jan 1, drawn OVER the
+  // B391 — year-boundary dividers: a heavier vertical line at each Jan 1, drawn OVER the
   // row bands (the month lines are hidden behind them) so the split between calendar years
   // reads at a glance. Solid medium slate keeps it distinct from the red dashed Today line
   // and the colored dependency arrows. A single-year exhibit has no January boundary in
@@ -8514,7 +8617,7 @@ ${taskHeaderText}
 ${gridLines}${rows}${yearLines}${arrows}${todayLine}</svg>`;
 }
 
-// ── Exhibit column sizing (B385 content-fit + B387 drag-resize) ─────────────────────
+// ── Exhibit column sizing (B390 content-fit + B392 drag-resize) ─────────────────────
 // Minimum px the Gantt timeline keeps in the split exhibit, so widening columns can never
 // collapse the chart. Shared by buildPDFHtml and the live drag-resize script it embeds.
 const EXHIBIT_MIN_GANTT = 240;
@@ -8617,8 +8720,8 @@ function buildPDFHtml(cfg, data, forPreview) {
     // Side-by-side: a content-fit grid on the left, the Gantt timeline on the right —
     // like MS Project / Excel split view. The exhibit stacks every selected project under
     // one shared header, so the columns are sized once against the widest value of each
-    // visible column across them all (B385) — no dead gap before the dates, no clipped
-    // start/end/duration. cfg.colWidths (a user's drag, B387) overrides a column's width.
+    // visible column across them all (B390) — no dead gap before the dates, no clipped
+    // start/end/duration. cfg.colWidths (a user's drag, B392) overrides a column's width.
     const projTaskLists = selProjs.map(proj=>{
       let tasks=visibleTasks(proj);
       if(cfg.healthFilter==="active") tasks=tasks.filter(t=>t.health==="yellow"||t.health==="red");
@@ -8669,7 +8772,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     const fit=layoutExhibitCols(specs,{override:cfg.colWidths||{}, budget:contentPx-2});
     const colW=fit.widths, canResize=!!forPreview;
     // One shared header for every project. In the preview each column carries a drag
-    // handle (B387); the print output never does.
+    // handle (B392); the print output never does.
     const thCols=colDefs.map(c=>`<th data-k="${c.k}" style="width:${colW[c.k]}px">${COL_LABELS[c.k]}${canResize?`<span class="col-rs" data-rs="${c.k}" title="Drag to resize"></span>`:""}</th>`).join("");
     projTaskLists.forEach(({proj,tasks})=>{
       const rows=tasks.map((t,i)=>{
@@ -8686,7 +8789,7 @@ function buildPDFHtml(cfg, data, forPreview) {
           <div class="split-gantt" style="width:${fit.ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
         </div></div>`;
     });
-    // B387 — live drag-to-resize. Handles live in the preview header; this script (preview
+    // B392 — live drag-to-resize. Handles live in the preview header; this script (preview
     // only) resizes the dragged column across every page in real time, trading the width
     // against the Gantt (which keeps EXHIBIT_MIN_GANTT), then posts the final width to the
     // parent on release so it persists and the Gantt re-fits cleanly.
@@ -8770,7 +8873,7 @@ body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in
 .split-table{border-right:1px solid #d4d4d4}
 .split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
 .split-table table.aligned thead th{position:relative;height:22px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
-/* B387 — drag-to-resize handle on each header cell's right edge (preview only). */
+/* B392 — drag-to-resize handle on each header cell's right edge (preview only). */
 .col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
 .col-rs:hover{background:rgba(99,102,241,.5)}
 @media print{.col-rs{display:none}}
@@ -8945,7 +9048,7 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
           left.appendChild(tbl);
           framed.appendChild(left);
           var right=document.createElement('div');
-          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B387) */
+          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B392) */
           right.style.cssText='width:'+pr.ganttW+'px;flex-shrink:0';
           right.appendChild(svgWindow(pr.svgEl,0,GANTT_HEAD,pr.ganttW));                                  /* date band: repeats every page */
           if(pg.r1>pg.r0) right.appendChild(svgWindow(pr.svgEl,GANTT_HEAD+pg.r0*GANTT_ROW,(pg.r1-pg.r0)*GANTT_ROW,pr.ganttW));
@@ -9082,7 +9185,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
     confidential: "",
     collapsedIds: seedCollapsed,
     detailLevel: seedCollapsed.length ? "custom" : "all",
-    // B387 — per-column width overrides from dragging a column edge in the preview;
+    // B392 — per-column width overrides from dragging a column edge in the preview;
     // seeded from the last-saved exhibit so a tuned layout comes back. Empty = content-fit.
     colWidths: data.exportColWidths || {},
   });
@@ -9133,7 +9236,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
     return () => window.removeEventListener("message", onToggle);
   }, []);
 
-  // Column drag-resize (B387) fired from a header handle inside the preview iframe: stash
+  // Column drag-resize (B392) fired from a header handle inside the preview iframe: stash
   // the new width as an override (flush the preview immediately, like collapse) and persist
   // it on the schedule so the tuned exhibit comes back next time.
   useEffect(() => {
@@ -9390,7 +9493,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
                   <span style={{fontSize:11,color:"var(--txt)"}}>{c.label}</span>
                 </label>
               ))}
-              {/* B387 — column widths auto-fit to content; drag a header edge in the preview to tune one. */}
+              {/* B392 — column widths auto-fit to content; drag a header edge in the preview to tune one. */}
               {cfg.includeGantt && (
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
                   <span style={{fontSize:10,color:"var(--mut)",lineHeight:1.3}}>Drag a column's right edge in the preview to resize it.</span>

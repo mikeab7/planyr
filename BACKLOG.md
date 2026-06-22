@@ -22,21 +22,74 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items minted from
-     one screenshot+voice note. Highest B# across both files was B384, so **B385/B386/B387**. Per
-     STANDING RULE #1 all three were filed AND fixed + headless-verified (V109, 10/10) + merged the
-     SAME session on branch `claude/practical-edison-ggcm1k` — full [x] blocks live in BACKLOG-DONE.md:
-       • B385 (bug)  — exhibit columns mis-sized: oversized Task-Name gap + truncated Start/End/Dur.
-                       Root cause: split table used table-layout:fixed at hardcoded ~50% width with
-                       fixed per-column px and Name at w:null (absorbed the slack → the gap; dates
-                       clipped in the too-narrow fixed cols). Replaced with a content-fit width model
-                       (approxTextPx + layoutExhibitCols, pure helpers); dates/dur never flex.
-       • B386 (feat) — year-boundary divider lines on the exhibit Gantt (the month lines were drawn
-                       behind the opaque row bands, so the body had no visible gridlines). Heavier
-                       slate line at each Jan 1, drawn over the bands; January labels emphasized.
-       • B387 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
-                       reflowing live + persisted per schedule (data.exportColWidths) + a Reset.
-     Deduped: net-new. B387 RECONCILED with B160 (see its note below) — complementary, not a dup. -->
+<!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
+     screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
+     (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free
+     IDs (branch commit/PR titles still read B385/B386/B387). Per STANDING RULE #1 all three were filed
+     AND fixed + headless-verified (V113, 10/10) + merged via PR #293 the SAME session on branch
+     `claude/practical-edison-ggcm1k` — full [x] blocks live in BACKLOG-DONE.md:
+       • B390 (bug)  — exhibit columns mis-sized: oversized Task-Name gap + truncated Start/End/Dur.
+                       Split table used table-layout:fixed at hardcoded ~50% width with fixed per-column
+                       px and Name at w:null (absorbed the slack → the gap; dates clipped in the
+                       too-narrow fixed cols). Replaced with a content-fit model (pure approxTextPx +
+                       layoutExhibitCols); dates/dur never flex.
+       • B391 (feat) — year-boundary divider lines on the exhibit Gantt (month lines were hidden behind
+                       the opaque row bands). Heavier slate line at each Jan 1, drawn over the bands;
+                       January labels emphasized.
+       • B392 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
+                       reflowing live + persisted (data.exportColWidths) + a Reset.
+     Deduped: net-new. B392 RECONCILED with B160 (see its note) — complementary, not a dup. -->
+
+<!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
+     Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
+     branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the Light/Dark/System picker moved from the row-1 ⚙ gear into account → Settings
+     (AuthPanel), next to Change password. Extracted a shared `src/shared/theme/ThemePicker.jsx`
+     (one picker, used by both the Settings panel and the gear). The row-1 gear is KEPT only when
+     signed out (`{!accountActive && <SettingsMenu/>}`) so a logged-out visitor can still switch
+     (B342 preserved) without duplicating it for signed-in users. Pure relocation — ThemeProvider /
+     data-theme / System listener unchanged. lint 0 · 1201 tests · build green; B387/B388 harnesses
+     still green (the logged-out gear they rely on is preserved). -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
+     AppHeader so Schedule has ONE header like Site/Markup (built on the B387 center slot). Filed
+     B386, **renumbered B388** — a concurrent `main` (PRs #289/#290) took B385/B386 while this was in
+     flight, so B387/B388 are the real next free IDs (branch commit titles still say B385/B386).
+     Owner GREENLIT building it the same session, so per STANDING RULE #1 it was fixed + headless-
+     verified (V111, 17/17) on branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the embedded Gantt app's action toolbar now renders up in the shell's Row-2 header —
+     Grid/Split/Gantt + review inbox in B387's `toolbarCenter`; zoom/export/save/history/contacts/
+     automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker was
+     UNFOUNDED: the embedded app already renders its panels as self-positioned fixed modals/drawers
+     (never anchored to buttons), so lifting the trigger buttons is clean — buttons post `planar:*`
+     commands, panels still open in the iframe. The B203 bridge was extended (planar:toolbar-state +
+     command messages), strict same-origin guards kept, iframe stays source-of-truth (badge = reported
+     count, never fabricated). `.in-iframe .app-header{display:none}` hides the whole in-embed header
+     (re-widening what B381 narrowed); standalone /sequence/ untouched (inShell-gated). Two settings
+     gears kept separate (B342 vs Schedule view); "share" = the existing Contacts control. SUPERSEDES
+     B381's harness `verify-schedule-toolbar.mjs` (retired). New `ScheduleToolbar.jsx`; edits to
+     Scheduler.jsx + index.html. lint 0 · 1201 tests · build green · JSX OK · lazy chunks intact. -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
+     Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 centers
+     the project name). Filed B385, **renumbered B387** — concurrent `main` (PR #289) took B385 while
+     this was in flight; canonical IDs for this pair are B387 + B388. Per STANDING RULE #1 it was fixed +
+     headless-verified (V110, 9/9) the SAME session on branch `claude/inspiring-bohr-46gql9` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
+     becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — center TRULY
+     centered like Row 1 (mid-x 719 vs 720); it wraps on narrow widths and never overlaps. Absent
+     (Site/Markup) → the original 2-zone layout renders byte-for-byte unchanged. Generic + additive;
+     B388 (the Schedule toolbar lift) is its first consumer. Deduped: net-new — NOT the CloudSyncBadge
+     "NEW-1" (a Row-1 saveState concern), NOT the Markup toolbarContent move. lint 0 · 1201 tests ·
+     build green · AppHeader/Scheduler/SitePlannerApp lazy chunks intact. -->
+
+<!-- 2026-06-22: cross-chat "NEW-1" — Schedule Gantt drew phantom dependency arrows into empty
+     space, pointing at unscheduled (blank-date) tasks. First filed B385, **renumbered B386** — a
+     concurrent `main` (PR #289) took B385 for the Site Planner parcel-identify feature while this
+     was in flight, so B386 is the real next free ID. Filed AND fixed + headless-verified (V109) +
+     SHIPPED the same session per STANDING RULE #1 — merged to `main` via PR #290 (branch
+     `claude/gifted-rubin-0adp7h`). Full [x] block lives in BACKLOG-DONE.md. -->
 
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
      left-hand panel so you never have to back out to the map to assemble more land. Highest B#
@@ -57,6 +110,20 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      multipart-import pipeline it reuses), NOT B99/B100 (the lock/active model it inherits). lint 0
      · 1201 tests · build green · `SitePlannerApp` lazy chunk intact. B384 (Add by address) left Open
      by design — the geocode logic lives in MapFinder and needs a clean extraction, not a rush. -->
+
+<!-- 2026-06-22: owner follow-up on B383 — "it should work like the map select parcel tool where the
+     parcel boundaries light up and you can easily click to add one or multiple." Minted **B385**.
+     Per STANDING RULE #1 filed AND fixed + headless-verified (V108 extended, 22/22) the SAME session
+     on branch `claude/determined-volta-hzjxmc` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the "Identify from county GIS" path now behaves like the map's Select-parcels tool —
+     while it's armed, the county parcel OUTLINES light up on the aerial (the SAME magenta esri-leaflet
+     `makeParcelLayer`, extracted to shared `lib/parcelDisplay.js` so map + planner share one source),
+     and each CLICK adds that lot straight to the plan (one or many); a re-click toggles a just-added
+     lot off; a drag pans (click-vs-drag resolved in onUp, mirroring B310). The old preview-card-then-
+     "＋ Add to plan" button is gone — the card now shows the just-added lot's appraisal + the kept
+     jurisdiction lookup. Reuses the single add path (`parcelsFromRings`) + the existing query; outlines
+     load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
+     (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
 
 ### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
 `[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
@@ -914,15 +981,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Export-only; live schedule layout unaffected.
 
 <!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
-<!-- RECONCILE w/ B387 (DONE 2026-06-22): B387 shipped per-column drag-resize in the exhibit. Because
-     the table block is now exactly the sum of its (content-fit or dragged) column widths and the Gantt
-     auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already shifts the
-     column-block-vs-Gantt ratio — so B387 PARTIALLY covers this item's user need without a slider.
-     B160 remains a distinct control (one ratio handle for the whole split). If built, implement it as
-     the OVERALL budget that B387's per-column widths fit within (don't fight: B387 already clamps the
-     table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
-<!-- NB on numbering: B385/B386/B387 (the 2026-06-22 exhibit-layout batch) were the next free IDs;
-     B387 is the per-column drag this note reconciles against. -->
+<!-- RECONCILE w/ B392 (DONE 2026-06-22, PR #293): B392 shipped per-column drag-resize in the exhibit.
+     Because the table block is now exactly the sum of its (content-fit or dragged) column widths and
+     the Gantt auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already
+     shifts the column-block-vs-Gantt ratio — so B392 PARTIALLY covers this item's user need without a
+     slider. B160 remains a distinct control (one ratio handle for the whole split). If built, implement
+     it as the OVERALL budget that B392's per-column widths fit within (don't fight: B392 already clamps
+     the table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
 
 ---
 

@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { approxTextPx, layoutExhibitCols, EXHIBIT_MIN_GANTT } from "../ui-audit/stress/exhibit-cols.mjs";
 
-// Guards the PDF/Print Exhibit column sizing: content-fit defaults (B385) so the
+// Guards the PDF/Print Exhibit column sizing: content-fit defaults (B390) so the
 // Start/End/Duration columns stop truncating and the giant Task-Name gap is gone, plus
-// the per-column drag overrides (B387). The pure helpers live in public/sequence/index.html
+// the per-column drag overrides (B392). The pure helpers live in public/sequence/index.html
 // (Babel-compiled, not importable); ui-audit/stress/exhibit-cols.mjs is a faithful copy and
 // the final describe asserts the real source hasn't drifted from it.
 
@@ -43,7 +43,7 @@ describe("layoutExhibitCols — content-fit + clamps + overrides", () => {
 
   it("each column is at least wide enough for its content; the Gantt keeps its floor", () => {
     const { widths, tableW, ganttW } = layoutExhibitCols(specs(), { budget: 900, override: {} });
-    // Dates fit their full value (the core B385 fix).
+    // Dates fit their full value (the core B390 fix).
     expect(widths.start).toBeGreaterThanOrEqual(approxTextPx("12/27/26", 9) + 12);
     expect(widths.duration).toBeGreaterThanOrEqual(approxTextPx("100d", 9) + 12);
     expect(tableW).toBe(widths.name + widths.start + widths.end + widths.duration);
@@ -86,7 +86,7 @@ describe("anti-drift: the exhibit-cols helpers still match public/sequence/index
     expect(src).toMatch(/data-rs="\$\{c\.k\}"/);
     expect(src).toMatch(/type:'planarColResize'/);
   });
-  it("buildGanttSVG draws the B386 year-boundary dividers over the row bands", () => {
+  it("buildGanttSVG draws the B391 year-boundary dividers over the row bands", () => {
     expect(src).toMatch(/const yearLines=yearMarkers\.map/);
     expect(src).toMatch(/\$\{gridLines\}\$\{rows\}\$\{yearLines\}\$\{arrows\}\$\{todayLine\}/);
   });

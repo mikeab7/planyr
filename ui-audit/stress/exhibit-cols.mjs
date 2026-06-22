@@ -1,7 +1,7 @@
 // FAITHFUL COPY of the exhibit column-sizing helpers from public/sequence/index.html
 // (compiled in-browser by Babel — not importable), so they can be unit-tested in node.
 // The anti-drift block in test/exhibitCols.test.js asserts the real source still matches.
-// Keep these byte-for-byte in sync with the originals above buildPDFHtml. (B385/B387)
+// Keep these byte-for-byte in sync with the originals above buildPDFHtml. (B390/B392)
 
 export const EXHIBIT_MIN_GANTT = 240;
 
