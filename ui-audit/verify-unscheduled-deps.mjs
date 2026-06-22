@@ -1,4 +1,5 @@
-// B385 — dependency connectors must not draw phantom arrows to unscheduled (blank-date) tasks.
+// B386 — dependency connectors must not draw phantom arrows to unscheduled (blank-date) tasks.
+// (Filed as B385; renumbered B386 — a concurrent main took B385 for an unrelated feature.)
 //
 // Repro mirrors the Pappadoupolos report: a blank stub task has no bar/diamond (xOf("") is NaN),
 // yet a dependency link still terminated at/from it, so the arrow landed in empty space ("purple
