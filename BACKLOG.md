@@ -22,6 +22,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" — Gantt label alignment + uniform ink,
+     printed-Gantt missing names, and serpentine dependency arrows. First minted B390/B391/B392, but a
+     concurrent `main` (PR #293, the PDF/Print Exhibit table-layout batch below) took B390/B391/B392
+     while this was in flight, so **renumbered B393 / B394 / B395** (the real next free IDs). Deduped:
+     all NET-NEW — no existing item covered Gantt label alignment / in-chart PDF names / orthogonal
+     connectors; the prior "NEW-1"s (B383/B385–B388) were Site-Planner or Schedule-toolbar items, and
+     the B390–B392 collision is the exhibit batch (a different surface). Per STANDING RULE #1 all three
+     were filed AND fixed + headless-verified + shipped the SAME session (branch
+     `claude/zen-ramanujan-14sak9`) — they share ONE label/render pass in GanttView + buildGanttSVG, so
+     landed together. Full [x] blocks live in BACKLOG-DONE.md; headless harness V114
+     (`ui-audit/verify-gantt-labels-deps.mjs`, all checks across right/center/left). -->
+
 <!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
      screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
      (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free
@@ -39,6 +51,7 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
        • B392 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
                        reflowing live + persisted (data.exportColWidths) + a Reset.
      Deduped: net-new. B392 RECONCILED with B160 (see its note) — complementary, not a dup. -->
+
 
 <!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
      Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on

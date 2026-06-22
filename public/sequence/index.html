@@ -457,7 +457,7 @@ const buildHolidaySet = holidays => {
   for (let y = y0-5; y <= y0+15; y++) HOLIDAY_DEFS.forEach(h => { if(holidays[h.k]) s.add(h.fn(y)); });
   return s;
 };
-const DEFAULT_SETTINGS = {defaultSplit:60, snapDefault:true, holidays:{...DEFAULT_HOLIDAYS}, customHealth:[], healthLabelOverrides:{}, barLabels:{left:"start", right:"end", year:true, nameAlign:"left"}, rowHeight:24};
+const DEFAULT_SETTINGS = {defaultSplit:60, snapDefault:true, holidays:{...DEFAULT_HOLIDAYS}, customHealth:[], healthLabelOverrides:{}, barLabels:{left:"start", right:"end", year:true}, rowHeight:24};   // task-name alignment is per-project (proj.labelAlign), not here (B393)
 // Gantt bar-label helpers — one source of truth for the on-screen chart and the PDF exhibit
 const fmtBarDate = (s, withYear) => { if(!s) return ""; const d = new Date(s+"T12:00:00"); return isNaN(d) ? "" : `${d.getMonth()+1}/${d.getDate()}` + (withYear===false ? "" : `/${String(d.getFullYear()).slice(2)}`); };
 const barLabelText = (t, field, withYear) => {
@@ -6918,6 +6918,125 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
   }
 }
 
+// ── B393/B394/B395 — shared Gantt label + dependency-connector geometry ──────────────
+// Pure helpers used by BOTH render paths — the on-screen <GanttView> and the print
+// <buildGanttSVG> — so the two can never drift (the recurring "both paths" rule of
+// B210/B211/B222). No React/DOM here.
+
+// One uniform near-black ink for EVERY in-chart Gantt label (leaf bar, summary bracket,
+// milestone), both paths. B320 eye-comfort: hierarchy comes from WEIGHT, never from
+// fading text toward the background — so the B210 depth-navy is removed from label TEXT
+// (it stays on the bracket GRAPHIC, which is not text). (B393)
+const GANTT_INK = "#1a1a1a";
+
+// Per-project label alignment (view-level, one choice per chart), persisted on the
+// project record and riding the existing cloud-save path — same shape as the B212
+// column config. Default "right" (name trailing just after the bar end). (B393)
+const resolveLabelAlign = proj => {
+  const a = proj && proj.labelAlign;
+  return (a === "left" || a === "center" || a === "right") ? a : "right";
+};
+const writeLabelAlign = (setData, pid, align) => setData(d =>
+  (d.projects && d.projects[pid]) ? {...d, projects: {...d.projects, [pid]: {...d.projects[pid], labelAlign: align}}} : d);
+
+// Weight ramp: top-level summary boldest → child summaries medium → leaf/milestone
+// regular. Color is uniform (GANTT_INK); only the weight steps. An explicit per-task
+// bold lifts to at least 700. (B393)
+const ganttNameWeight = (depth, kind, bold) => {
+  const d = Math.min(depth || 0, 3);
+  let w;
+  if (kind === "summary") w = [800, 700, 600, 600][d];
+  else if (kind === "milestone") w = 600;
+  else w = 500;                       // leaf — regular
+  return bold ? Math.max(w, 700) : w;
+};
+
+// Estimated label width (px) from char count × per-char width (~0.6·fontSize, a slight
+// over-estimate so a flip/lift triggers before a real clip, never after). (B393)
+const estLabelWidth = (s, fs) => Math.max(1, String(s == null ? "" : s).length) * fs * 0.6 + 4;
+
+// THE placement helper. Given a bar/bracket/diamond's geometry, the label width, the
+// chosen alignment and the row-band height, decide where the name goes and how — never
+// on the fill. Mirrors the overflow-outside logic of site-planner/lib/labelLayout.js
+// (can't import it — the /sequence/ iframe is a separate bundle). Pure geometry. (B393)
+//   kind     "leaf" | "summary" | "milestone"
+//   align    "left" | "center" | "right"
+//   bx,bw    bar left x + width (px); milestone passes its diamond center as bx, bw 0
+//   rowTop   y of the row band's top
+//   barMidY  vertical center of the bar/diamond (for inline labels)
+//   barTopY  top y of the bar/span/diamond (so an "above" caption clears it)
+//   labelW   estimated label width
+//   padBefore/padAfter  px already taken by a data label hugging that side of the bar
+//   chartL/chartR  horizontal clip — a label must stay within (no horizontal scroll)
+//   gap, capHalf   spacing + caption half-height
+// Returns { x, y, anchor:"start"|"middle"|"end", mode:"after"|"before"|"plate"|"above" }.
+const placeGanttLabel = ({kind, align, bx, bw, rowTop, barMidY, barTopY, labelW,
+                          padBefore = 0, padAfter = 0, chartL, chartR, gap = 6, capHalf = 6}) => {
+  const barStart = bx, barEnd = bx + bw;
+  // An "above" caption is vertically centered in the upper part of the row band: it sits
+  // just above the bar/span (clear air) but never rides above the row top (which, for the
+  // topmost summary, is the timeline header).
+  const aboveY = Math.max(rowTop + capHalf,
+                          Math.min(rowTop + capHalf + 1, (barTopY != null ? barTopY : rowTop) - 1 - capHalf));
+  const clampX = (x, anchor) => {
+    let x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+    const x1 = x0 + labelW;
+    if (x1 > chartR) x -= (x1 - chartR);          // shift left so the right edge fits
+    x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+    if (x0 < chartL) x += (chartL - x0);          // then shift right so the left edge fits
+    return x;
+  };
+  const above = (x, anchor) => ({ x: clampX(x, anchor), y: aboveY, anchor, mode: "above" });
+
+  if (kind === "summary")            // caption ALWAYS above the thin span; align anchors it
+    return align === "left"  ? above(barStart, "start")
+         : align === "right" ? above(barEnd,   "end")
+         :                      above(barStart + bw / 2, "middle");
+
+  if (kind === "milestone") {        // Left = before / Center = above / Right = after
+    const lo = barStart - 5, hi = barEnd + 5;     // diamond half-width ≈ 5
+    if (align === "center") return above(bx, "middle");
+    if (align === "left") {
+      const x = lo - gap - padBefore;
+      return (x - labelW < chartL) ? above(bx, "middle") : { x, y: barMidY, anchor: "end", mode: "before" };
+    }
+    const x = hi + gap + padAfter;                // right
+    if (x + labelW <= chartR) return { x, y: barMidY, anchor: "start", mode: "after" };
+    const xl = lo - gap - padBefore;
+    return (xl - labelW >= chartL) ? { x: xl, y: barMidY, anchor: "end", mode: "before" } : above(bx, "middle");
+  }
+
+  // leaf
+  if (align === "center")
+    return (labelW <= bw - 4) ? { x: barStart + bw / 2, y: barMidY, anchor: "middle", mode: "plate" }
+                              : above(barStart + bw / 2, "middle");
+  if (align === "left") {
+    const x = barStart - gap - padBefore;
+    return (x - labelW < chartL) ? above(barStart, "start") : { x, y: barMidY, anchor: "end", mode: "before" };
+  }
+  const x = barEnd + gap + padAfter;              // right (default)
+  if (x + labelW <= chartR) return { x, y: barMidY, anchor: "start", mode: "after" };
+  const xl = barStart - gap - padBefore;          // flip left
+  return (xl - labelW >= chartL) ? { x: xl, y: barMidY, anchor: "end", mode: "before" } : above(barEnd, "end");
+};
+
+// Orthogonal "elbow" dependency router — only horizontal + vertical segments, square
+// corners — keyed on the link's exit/entry anchors. exitDir/enterDir are +1 (right) /
+// −1 (left). ≤2 bends for a normal forward link; a backward link routes out → vertical →
+// back across → into the successor (around the bars, never diagonally). Returns the
+// polyline points; pure geometry from bar coordinates (works for off-screen rows). (B395)
+const depElbow = (x1, y1, x2, y2, exitDir, enterDir, stub = 9) => {
+  const ax = x1 + exitDir * stub;                 // tip of the short exit stub
+  const fwd = enterDir > 0 ? (x2 >= ax) : (x2 <= ax);   // a single vertical run reaches it?
+  if (fwd) return [[x1, y1], [ax, y1], [ax, y2], [x2, y2]];
+  const bx = x2 - enterDir * stub, my = (y1 + y2) / 2;
+  return [[x1, y1], [ax, y1], [ax, my], [bx, my], [bx, y2], [x2, y2]];
+};
+const depElbowD = pts => "M" + pts.map(p => `${Math.round(p[0] * 10) / 10},${Math.round(p[1] * 10) / 10}`).join(" L");
+// Exit/entry directions per dependency type (FS/SS/FF/SF): which edge the link leaves the
+// predecessor from and which edge (+ arrow direction) it enters the successor. (B395)
+const DEP_DIRS = { FS: [1, 1], SS: [-1, 1], FF: [1, -1], SF: [-1, -1] };
+
 // ── GanttView ─────────────────────────────────────────────
 function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings}) {
   const [scrollTop, setScrollTop] = useState(0);
@@ -7004,13 +7123,42 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
       // blank-date endpoints) — depLines was the one draw path that lacked it.
       if (!pred.start || !pred.end || !task.start || !task.end) return null;
       const type = (p.type||"FS").toUpperCase();
-      const x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
-      const x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
+      const [exitDir, enterDir] = DEP_DIRS[type] || DEP_DIRS.FS;
+      // Endpoint x = the bar EDGE the link leaves/enters (per type); a milestone has no
+      // bar edge, so anchor to its diamond TIP (center ± half-width) in the travel dir (B395).
+      let x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
+      let x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
+      if (pred.duration === 0) x1 = xOf(pred.start) + exitDir*5;
+      if (task.duration === 0) x2 = xOf(task.start) - enterDir*5;
       const y1 = tasks.indexOf(pred)*ROW_H+ROW_H/2;
       const y2 = tasks.indexOf(task)*ROW_H+ROW_H/2;
-      return {key:`${p.id}-${task.id}-${type}`, x1, y1, x2, y2, type};
+      // Orthogonal elbow (square corners), not a serpentine bezier. Pure geometry, so it
+      // computes correctly even when an endpoint row is scrolled out of the window (B395).
+      const d = depElbowD(depElbow(x1, y1, x2, y2, exitDir, enterDir));
+      return {key:`${p.id}-${task.id}-${type}`, d, x2, y2, enterDir, type};
     }).filter(Boolean))
   , [tasks, minD, ppd]);
+
+  // ── In-chart name labels (B393) ──────────────────────────
+  // Per-project alignment; the chart's horizontal clip is [0, totalW] (a label past it
+  // would add horizontal scroll — the gotcha — so the helper flips/lifts instead).
+  const labelAlign = resolveLabelAlign(proj);
+  const chartL = 0, chartR = Math.max(totalW, 400);
+  const NAME_SIZE = lvl => [9.5, 8.5, 8.5, 8][Math.min(lvl || 0, 3)];
+  const padOf = txt => (txt ? estLabelWidth(txt, 8) + 6 : 0);   // room a hugging data label needs
+  // One name renderer for all three kinds: uniform near-black ink, weight-by-level, an
+  // optional contrast plate for the centered-on-bar case. (x,y) is the alignment anchor +
+  // vertical center, in the row's local space; the transform seats the box on it.
+  const GanttName = ({task, kind, place, fs}) => {
+    const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
+    const plate = place.mode === "plate";
+    return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
+      left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
+      fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold),
+      fontStyle:task.italic?"italic":"normal", color:GANTT_INK,
+      fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7,
+      ...(plate ? {background:"rgba(255,255,255,0.85)", padding:"0 3px", borderRadius:2} : {})}}>{task.name}</span>;
+  };
 
   const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
   const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
@@ -7142,12 +7290,10 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
           <svg style={{position:"absolute",top:0,left:0,width:totalW,height:tasks.length*ROW_H,pointerEvents:"none",zIndex:3,overflow:"visible"}}>
             {depLines.map(l => {
             const color = l.type==="SS"?"#7c3aed":l.type==="FF"?"#0891b2":l.type==="SF"?"#be185d":"#0969da";
-            const arrowRight = l.x2 >= l.x1;
-            const aDir = arrowRight ? 1 : -1;
+            const aDir = l.enterDir;   // arrowhead points along the entry direction (B395)
             return (
               <g key={l.key}>
-                <path d={`M${l.x1},${l.y1} C${l.x1+32*aDir},${l.y1} ${l.x2-32*aDir},${l.y2} ${l.x2},${l.y2}`}
-                  stroke={color} strokeWidth="1.2" fill="none" strokeDasharray="4 3" opacity=".55" />
+                <path d={l.d} stroke={color} strokeWidth="1.2" fill="none" strokeDasharray="4 3" opacity=".55" />
                 <path d={`M${l.x2},${l.y2} L${l.x2-5*aDir},${l.y2-3} L${l.x2-5*aDir},${l.y2+3}Z`} fill={color} opacity=".55" />
               </g>
             );
@@ -7209,7 +7355,14 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     milestones (z5, the data layer) → bar + name labels (z6–7, top). */}
                 {(() => { return null; })()}
                 {isMilestone ? (<>
-                  {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; return <span style={{position:"absolute",left:bx,transform:"translateX(-50%)",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
+                  {(() => {                                    // milestone name: Left=before / Center=above / Right=after the diamond (B393)
+                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels;
+                    const place = placeGanttLabel({kind:"milestone", align:labelAlign, bx, bw:0, rowTop:0,
+                      barMidY:ROW_H-7.5, barTopY:ROW_H-10.5, labelW:estLabelWidth(task.name, fs),
+                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
+                    return <GanttName task={task} kind="milestone" place={place} fs={fs} />;
+                  })()}
                   {(() => {
                     // Milestone diamond — same monochrome language as task bars (B211): the task
                     // gray, filled when complete, hollow outline otherwise. B222: the hue is the
@@ -7227,27 +7380,29 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     </>); })()}
                 </>) : isSummary ? (
                   (() => {
-                    // Depth-stepped BRACKET (B210): a thin navy span with straight-down legs at
-                    // each end (no triangles). Three cues step together, top-of-tree strongest —
-                    // darkness (navy → lighter navy tint), span thickness, and leg length. Beyond
-                    // ~4 levels the ramp stops deepening (the table's indented name carries depth
-                    // from there). Neutral navy only: status hue is reserved for task bars (B211).
-                    // B222: the bracket keeps its depth-navy independent of the row fill (rowColor
-                    // is the row background only) so a fill can't swallow it; navy reads on any of
-                    // the (all-light) fill swatches.
+                    // Depth-stepped BRACKET (B210): a thin span with straight-down legs at each
+                    // end. The GRAPHIC keeps its top-of-tree-strongest ramp — darkness, span
+                    // thickness and leg length all step together (depth 0 = #2B3340, darkest +
+                    // thickest, stepping lighter/thinner as nesting deepens; B222 keeps it
+                    // independent of the row fill). B393: the navy was REMOVED from the name TEXT
+                    // (see GanttName — uniform near-black, weight carries hierarchy) but stays on
+                    // this graphic, which is not text; magnitudes are compressed a touch vs B210
+                    // so the always-above caption has clear air within the row.
                     const d    = Math.min(task.level||0, 3);
-                    const NAVY = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
-                    const col  = NAVY;
-                    const SPAN = [7,5,4,4][d];                    // horizontal span thickness, px
-                    const LEG  = [0.30,0.22,0.16,0.13][d]*ROW_H;  // downward leg length, steps by depth
+                    const col  = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
+                    const SPAN = [6,5,4,4][d];                    // horizontal span thickness, px
+                    const LEG  = [0.16,0.12,0.09,0.07][d]*ROW_H;  // downward leg length, steps by depth
                     const legW = 1.5;                             // vertical leg stroke width
                     const botY = ROW_H - 2;                       // baseline shared with leaf bars
                     const spanTop = botY - LEG - SPAN;            // span sits above its legs
-                    const lg  = [{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][d];
-                    const ctr = settings?.barLabels?.nameAlign === "center";
+                    const fs = NAME_SIZE(task.level);
+                    // Summary caption ALWAYS above the thin span (a near-full-width top summary
+                    // has no side room); alignment anchors it L/center/R (B393 — the top-summary fix).
+                    const place = placeGanttLabel({kind:"summary", align:labelAlign, bx, bw, rowTop:0,
+                      barMidY:spanTop+SPAN/2, barTopY:spanTop, labelW:estLabelWidth(task.name, fs),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
                     return (<>
-                      {/* Label centered over the span in the bar's own level-navy (no fill to print white onto) */}
-                      <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:Math.max(0,spanTop-10),fontSize:lg.fontSize,color:col,fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>
+                      <GanttName task={task} kind="summary" place={place} fs={fs} />
                       <div style={{position:"absolute",left:bx,width:bw,top:spanTop,height:SPAN+LEG,zIndex:5,pointerEvents:"none"}}>
                         <div style={{position:"absolute",left:0,right:0,top:0,height:SPAN,background:col,borderRadius:1}} />
                         <div style={{position:"absolute",left:0,top:0,width:legW,height:SPAN+LEG,background:col}} />
@@ -7256,7 +7411,14 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     </>);
                   })()
                 ) : (<>
-                  {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; const ctr=settings?.barLabels?.nameAlign==="center"; return <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
+                  {(() => {                                    // leaf name: Right=after / Left=before / Center=on a plate; auto-flip/lift, never on the fill (B393)
+                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels, barTopY = ROW_H-LEAF_H-1;
+                    const place = placeGanttLabel({kind:"leaf", align:labelAlign, bx, bw, rowTop:0,
+                      barMidY:barTopY+LEAF_H/2, barTopY, labelW:estLabelWidth(task.name, fs),
+                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
+                    return <GanttName task={task} kind="leaf" place={place} fs={fs} />;
+                  })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
                     return (<>
@@ -7566,11 +7728,13 @@ function FormatPanel({data, setData, onClose}) {
           <Toggle on={(s.barLabels||{}).year!==false} onChange={v=>upd({barLabels:{...(s.barLabels||{}),year:v}})} />
         </div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 2px 0"}}>
-          <span style={{fontSize:12,color:"var(--txt)"}}>Task name above bar</span>
-          <SegBtn options={[{l:"Left",v:"left"},{l:"Centered",v:"center"}]} value={(s.barLabels||{}).nameAlign||"left"} onChange={v=>upd({barLabels:{...(s.barLabels||{}),nameAlign:v}})} />
+          <span style={{fontSize:12,color:"var(--txt)"}}>Task name alignment</span>
+          <SegBtn options={[{l:"Left",v:"left"},{l:"Center",v:"center"},{l:"Right",v:"right"}]}
+            value={resolveLabelAlign(data.projects?.[data.aPid])}
+            onChange={v=>writeLabelAlign(setData, data.aPid, v)} />
         </div>
         <div style={{fontSize:10,color:"var(--mut)",marginTop:6,lineHeight:1.4}}>
-          Bar labels show beside task bars and milestones — on screen and in the PDF exhibit. Row height applies on screen; the exhibit keeps its own print density.
+          Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.
         </div>
       </div>
     </div>
@@ -8536,11 +8700,12 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       const done = pct>=100;
       barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else if(isParent){
-      // Depth-stepped BRACKET (B210): a thin navy span + straight-down legs (no triangles);
-      // darkness, span thickness and leg length step together, top-of-tree strongest, to ~4 levels.
+      // Depth-stepped BRACKET (B210): a thin span + straight-down legs (no triangles). The
+      // GRAPHIC keeps its ramp (depth 0 = #2B3340, darkest/thickest, stepping lighter/thinner);
+      // magnitudes compressed a touch vs B210 so the always-above caption has clear air (B393).
       const dd=Math.min(depth,3);
       const NAVY=["#2B3340","#46506A","#6E7790","#8A93A8"][dd];
-      const SPAN=[4.5,3.5,3,3][dd], LEG=[0.42,0.30,0.22,0.18][dd]*ROW_H, legW=1.1;
+      const SPAN=[4,3.5,3,3][dd], LEG=[0.14,0.10,0.08,0.06][dd]*ROW_H, legW=1.1;
       const sTop=y+ROW_H-2-LEG-SPAN;
       barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/>`
         +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
@@ -8558,9 +8723,35 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           +`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
       }
     }
+    // In-chart NAME on the bar/bracket/diamond (B394) — the layer GanttView draws but the
+    // exhibit used to omit. Same placement helper, alignment, uniform ink and weight ramp as
+    // on-screen so the two paths can't drift; uniform near-black (no B210 depth-navy here
+    // either); escaped via escapeHtml (B248). Default on (opts.barNames !== false).
+    let nameSvg="";
+    if(opts.barNames!==false){
+      const kind = isMilestone?"milestone":isParent?"summary":"leaf";
+      const align = opts.labelAlign || resolveLabelAlign(proj);
+      const fs = [9,8.5,8,7.5][Math.min(depth,3)];
+      let barTopY, barMidY, bwN=bw;
+      if(isMilestone){ barTopY=midY-5; barMidY=midY; bwN=0; }
+      else if(isParent){ const dd=Math.min(depth,3); const SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H; barTopY=y+ROW_H-2-LG-SP; barMidY=barTopY+SP/2; }
+      else { const LH=ROW_H*0.30; barTopY=midY-LH/2; barMidY=midY; }
+      const pad = txt => txt ? estLabelWidth(txt,6.5)+5 : 0;
+      const bl = (opts.barLabels && !isParent) ? opts.barLabels : null;
+      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barMidY, barTopY,
+        labelW:estLabelWidth(t.name, fs), padBefore:pad(bl?barLabelText(t,bl.left,bl.year):""),
+        padAfter:pad(bl?barLabelText(t,bl.right,bl.year):""), chartL:LABEL_W, chartR:svgWidth,
+        gap:5, capHalf:Math.round(fs*0.6)});
+      const nm = t.name==null?"":String(t.name);
+      const lw = estLabelWidth(nm, fs);
+      const plate = place.mode==="plate"
+        ? `<rect x="${(place.x-lw/2-2).toFixed(1)}" y="${(place.y-fs*0.72).toFixed(1)}" width="${(lw+4).toFixed(1)}" height="${(fs*1.44).toFixed(1)}" rx="2" fill="#fff" opacity="0.85"/>`
+        : "";
+      nameSvg = plate + `<text x="${place.x.toFixed(1)}" y="${place.y.toFixed(1)}" font-size="${fs}" font-weight="${ganttNameWeight(depth, kind, t.bold)}" fill="${GANTT_INK}" text-anchor="${place.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${t.italic?' font-style="italic"':''}>${escapeHtml(nm)}</text>`;
+    }
     return `<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>
 ${labelHtml}
-${barSvg}${blText}`;
+${barSvg}${blText}${nameSvg}`;
   }).join("");
   // Dependency connectors — same curved style as the in-app Gantt (cubic bezier,
   // direction-flipped 32px handles, type colors, dashed). Opacity lifted .55 -> .7 for print.
@@ -8580,13 +8771,16 @@ ${barSvg}${blText}`;
           const pi=ix.get(pr.id), si=ix.get(t.id);
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
-          const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
-          const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
+          const [exitDir, enterDir]=DEP_DIRS[type]||DEP_DIRS.FS;
+          let x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
+          let x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
+          if(pt.duration===0) x1=xOf(pt.start)+exitDir*5;   // anchor to the milestone diamond tip (B395)
+          if(t.duration===0)  x2=xOf(t.start)-enterDir*5;
           const y1=HEADER_H+pi*ROW_H+ROW_H*0.5, y2=HEADER_H+si*ROW_H+ROW_H*0.5;
-          const aDir=x2>=x1?1:-1;
           const color=DEP_C[type]||DEP_C.FS;
-          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${x2-32*aDir},${y2} ${x2},${y2}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${y2} L${x2-5*aDir},${y2-3} L${x2-5*aDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
+          // Clean orthogonal elbow (square corners), same router as on-screen — not a serpentine bezier (B395).
+          arrows+=`<path class="dep" d="${depElbowD(depElbow(x1,y1,x2,y2,exitDir,enterDir))}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
+            +`<path d="M${x2},${y2} L${x2-5*enterDir},${y2-3} L${x2-5*enterDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
         }
       }
       base+=p.tasks.length;
@@ -8780,7 +8974,7 @@ function buildPDFHtml(cfg, data, forPreview) {
         return `<tr class="${i%2?"alt":""}">${cells}</tr>`;
       }).join("");
       const ganttProj={...proj, tasks}; // Gantt task list matches the table
-      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels});
+      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels, barNames:cfg.barNames!==false, labelAlign:cfg.labelAlign});
       bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}
         <div class="split-view">
           <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
@@ -9181,6 +9375,8 @@ function PDFExportModal({data, activePid, onClose, setData}) {
     includeGantt: true,
     showToday: true,
     showArrows: true,
+    barNames: true,                                              // in-chart Gantt names ON by default (B394)
+    labelAlign: resolveLabelAlign(activePid!=null ? data.projects?.[activePid] : null),  // seed from the on-screen choice
     healthFilter: "all",
     confidential: "",
     collapsedIds: seedCollapsed,
@@ -9424,6 +9620,14 @@ function PDFExportModal({data, activePid, onClose, setData}) {
             )}
             {cfg.includeGantt && (
               <Row label="Dep. arrows"><Toggle on={cfg.showArrows!==false} onChange={v=>upd({showArrows:v})} /></Row>
+            )}
+            {cfg.includeGantt && (
+              <Row label="Bar names"><Toggle on={cfg.barNames!==false} onChange={v=>upd({barNames:v})} /></Row>
+            )}
+            {cfg.includeGantt && cfg.barNames!==false && (
+              <Row label="Name align">
+                <SegBtn small options={[{l:"Left",v:"left"},{l:"Center",v:"center"},{l:"Right",v:"right"}]} value={cfg.labelAlign||"right"} onChange={v=>upd({labelAlign:v})} />
+              </Row>
             )}
             </>)}
 
