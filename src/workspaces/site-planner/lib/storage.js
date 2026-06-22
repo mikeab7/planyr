@@ -24,7 +24,7 @@ export function setActiveUser(uid) {
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 
-// Session tombstone (per-tab): ids deleted in THIS tab. The bug it kills (B366): when you delete
+// Session tombstone (per-tab): ids deleted in THIS tab. The bug it kills (B372): when you delete
 // a site from the map, the planner that's still MOUNTED (hidden) for that site unmounts, and its
 // persist-on-leave / beforeunload / debounced-autosave flush fires AFTER the delete — re-writing
 // the row we just removed (it "reappears", and then pullCloud's heal-the-split re-pushes it to the
@@ -185,7 +185,7 @@ export function stageLegacySite(uid, siteId) {
   if (!rec) return null;
   const local = createSiteModel(rec);
   if (!local.id) return null;
-  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B366)
+  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
   let cloud = {};
   try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   cloud[local.id] = local;
@@ -232,7 +232,7 @@ export async function importOneSiteToCloud(uid, siteId) {
   if (!rec) return { ok: false, error: "not found" };
   const local = createSiteModel(rec);
   if (!local.id) return { ok: false, error: "invalid record" };
-  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B366)
+  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
   let cloud = {};
   try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   cloud[local.id] = local; // stage in cache so it shows immediately
@@ -476,7 +476,7 @@ export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
   const existing = sites[partial.id];
-  // Resurrection guard (B366): once a site is deleted in this tab, a late flush from the
+  // Resurrection guard (B372): once a site is deleted in this tab, a late flush from the
   // unmounting planner (persist-on-leave / beforeunload) or an already-queued debounced autosave
   // must NOT re-insert it. Block ONLY a re-create of a deleted, currently-absent row — a normal
   // edit-save (existing present) and a brand-new site (id never deleted) both pass through.
@@ -498,12 +498,12 @@ export function saveSite(partial) {
 // Remove a site locally (instant/optimistic) AND from the cloud when signed in. Returns the
 // cloud-delete promise ({ ok, error?, removed? }) so the caller can AWAIT it and surface a loud
 // error if the cloud removal actually failed (the row would otherwise silently survive and
-// reappear on reload — B366). Logged out, it resolves ok (nothing to remove server-side).
+// reappear on reload — B372). Logged out, it resolves ok (nothing to remove server-side).
 export function deleteSite(id) {
   const sites = readSites();
   delete sites[id];
   writeSites(sites);
-  recentlyDeleted.add(id); // tombstone so no in-flight flush can resurrect it (B366)
+  recentlyDeleted.add(id); // tombstone so no in-flight flush can resurrect it (B372)
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
   return activeUser ? cloudDelete(activeUser, id) : Promise.resolve({ ok: true, skipped: true });
 }

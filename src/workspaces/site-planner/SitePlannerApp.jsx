@@ -62,7 +62,7 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // is global in the shell; here we just react to auth to switch cloud↔local storage.
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
-  const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B366)
+  const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
   // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
@@ -315,7 +315,7 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
     const hadActive = plans.some((s) => s.id === activeSiteId);
     const label = rec.site || rec.name || "this site";
     // Unmount the (now tombstone-protected) planner BEFORE removing rows so its persist-on-leave
-    // can't race the delete; the storage guard (B366) makes it safe even if the order shifts.
+    // can't race the delete; the storage guard (B372) makes it safe even if the order shifts.
     if (hadActive) setActiveSiteId(null);
     const results = await Promise.all(plans.map((s) => deleteSite(s.id)));
     refreshSites();
@@ -323,7 +323,7 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   };
 
   // If a cloud delete actually ERRORED (not just a 0-row no-op), the row may survive server-side
-  // and reappear on reload — say so LOUDLY (never a phantom success, B366) and re-pull so the list
+  // and reappear on reload — say so LOUDLY (never a phantom success, B372) and re-pull so the list
   // reflects the honest truth instead of showing it gone when it isn't.
   const reportDeleteResult = async (results, label) => {
     if (!results.some((r) => r && r.ok === false)) return;

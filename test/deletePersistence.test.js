@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { saveSite, loadSite, deleteSite, clearRecentlyDeleted } from "../src/workspaces/site-planner/lib/storage.js";
 import { interpretDelete } from "../src/workspaces/site-planner/lib/cloudSync.js";
 
-// B366 — "a deleted site reappears". Two repro paths, ONE root cause: the site you delete from the
+// B372 — "a deleted site reappears". Two repro paths, ONE root cause: the site you delete from the
 // map is still MOUNTED (hidden) in the planner; deleting it unmounts the planner, whose
 // persist-on-leave / beforeunload flush then fires AFTER the delete and re-writes the row. It comes
 // back mid-session (path B) and, because pullCloud's heal-the-split re-pushes any local-only site,
@@ -24,7 +24,7 @@ function mockLocalStorage() {
   };
 }
 
-describe("interpretDelete — a delete that removed nothing is distinguishable from one that did (B366)", () => {
+describe("interpretDelete — a delete that removed nothing is distinguishable from one that did (B372)", () => {
   it("a real error → ok:false (the caller surfaces it loudly; the row may survive server-side)", () => {
     const r = interpretDelete(null, { message: "permission denied" });
     expect(r.ok).toBe(false);
@@ -41,7 +41,7 @@ describe("interpretDelete — a delete that removed nothing is distinguishable f
   });
 });
 
-describe("delete is durable — a late flush can't resurrect a just-deleted site (B366)", () => {
+describe("delete is durable — a late flush can't resurrect a just-deleted site (B372)", () => {
   beforeEach(() => { mockLocalStorage(); clearRecentlyDeleted(); });
 
   it("saveSite refuses to re-create a site deleted in this tab (the unmount-flush resurrection)", () => {

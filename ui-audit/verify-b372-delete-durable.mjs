@@ -1,4 +1,4 @@
-/* B366 verification: a deleted site STAYS deleted — it does not reappear mid-session
+/* B372 verification: a deleted site STAYS deleted — it does not reappear mid-session
  * (no reload) nor after a reload. Reproduces the exact root cause: the site being deleted
  * is the one whose planner is still MOUNTED (you opened it, then went back to the map), so
  * deleting it unmounts the planner whose persist-on-leave flush used to re-write the row.
@@ -100,5 +100,5 @@ check("no uncaught page errors", pageErrors.length === 0, pageErrors.join(" | ")
 
 await browser.close();
 const passed = results.filter((r) => r.pass).length;
-console.log(`\nB366 delete-durability: ${passed}/${results.length} checks passed. Screens in ui-audit/screens/`);
+console.log(`\nB372 delete-durability: ${passed}/${results.length} checks passed. Screens in ui-audit/screens/`);
 process.exit(passed === results.length ? 0 : 1);

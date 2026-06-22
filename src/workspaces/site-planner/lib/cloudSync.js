@@ -82,7 +82,7 @@ export async function cloudDelete(uid, id) {
   delete siteVersions[id]; // stop tracking a removed row's version
   // Scope by user_id AND id (defense-in-depth — don't rely on RLS alone). `.select()` returns the
   // rows actually removed, so a 0-row no-op (ownership/RLS mismatch, or an already-deleted row) is
-  // DISTINGUISHABLE from a real removal — a bare `.delete()` reports success on both (B366).
+  // DISTINGUISHABLE from a real removal — a bare `.delete()` reports success on both (B372).
   try {
     const { data, error } = await supabase.from("sites").delete().eq("user_id", uid).eq("id", id).select("id");
     return interpretDelete(data, error);
