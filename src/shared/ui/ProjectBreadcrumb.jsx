@@ -102,7 +102,11 @@ export default function ProjectBreadcrumb({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [internalProjects, setInternalProjects] = useState([]);
-  const projects = controlled ? controlledProjects : internalProjects;
+  // Single data-entry guard (B380): drop any falsy entry before it reaches a `p.id` /
+  // `p.name` read below — so a controlled caller (e.g. the Schedule module bridging its
+  // embedded app's project list) that hasn't fully resolved its data can never trip a
+  // "Cannot read properties of undefined" crash in this shared header.
+  const projects = (controlled ? controlledProjects : internalProjects).filter(Boolean);
   const [hoverRow, setHoverRow] = useState(null);
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const anchorRef = useRef(null);

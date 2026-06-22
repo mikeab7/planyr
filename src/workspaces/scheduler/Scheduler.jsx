@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
+import { parseNavState, deriveCurrentProject } from "./lib/navState.js";
 
 export default function Scheduler({ shellModule, onShellSwitch, authControl, accountActive = false } = {}) {
   const iframeRef = useRef(null);
@@ -30,11 +31,13 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
       // Same-origin embedded iframe only — ignore messages from any other window so a
       // cross-origin page can't spoof the scheduler's project list into the breadcrumb.
       if (e.origin !== window.location.origin) return;
-      const m = e.data;
-      if (!m || m.source !== "planar-seq" || m.type !== "planar:nav-state") return;
-      setProjects(Array.isArray(m.projects) ? m.projects : []);
-      setActiveId(m.activeId ?? null);
-      setSection(m.section || "projects");
+      // parseNavState validates source/type and SANITIZES the project list to plain
+      // {id,name} objects (B380), so the breadcrumb can never deref an undefined entry.
+      const nav = parseNavState(e.data);
+      if (!nav) return;
+      setProjects(nav.projects);
+      setActiveId(nav.activeId);
+      setSection(nav.section);
       setReady(true);   // first nav-state ⇒ the embedded app is interactive
     };
     window.addEventListener("message", onMsg);
@@ -64,10 +67,11 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
   };
 
   // On the Dashboard (reports) view no single project is "current" — the Dashboard
-  // crumb reads as current and the project crumb invites a pick.
-  const currentProject = section === "reports"
-    ? null
-    : (projects.find((p) => p.id === activeId) || null);
+  // crumb reads as current and the project crumb invites a pick. deriveCurrentProject
+  // (B380) never throws and never returns undefined, so the first-render-before-nav-
+  // state window resolves to null (empty/loader state) instead of dereferencing a
+  // not-yet-resolved record.
+  const currentProject = deriveCurrentProject(projects, activeId, section);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
