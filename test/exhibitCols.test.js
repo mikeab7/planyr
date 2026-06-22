@@ -87,9 +87,9 @@ describe("anti-drift: the exhibit-cols helpers still match public/sequence/index
     expect(src).toMatch(/type:'planarColResize'/);
   });
   it("buildGanttSVG layers vertical rules BEHIND the bars (B397 paint order)", () => {
-    // bands → grid → left edge → today → dependency (main's curved B396) → bars → header labels → bar labels
-    expect(src).toMatch(/\$\{rowBands\.join\(""\)\}\$\{gridRules\}\$\{leftEdge\}\$\{todayLine\}\$\{arrows\}\$\{barLayer\.join\(""\)\}\$\{yearLabels\}\$\{monthLabels\}\$\{headerLines\}\$\{taskHeaderText\}\$\{labelLayer\.join\(""\)\}/);
-    expect(src).toMatch(/const rowBands=\[\], barLayer=\[\], labelLayer=\[\];/);
+    // bands → grid → left edge → today → dependency (curved B396/B402) → bars → header labels → bar labels → de-collided names (B402)
+    expect(src).toMatch(/\$\{rowBands\.join\(""\)\}\$\{gridRules\}\$\{leftEdge\}\$\{todayLine\}\$\{arrows\}\$\{barLayer\.join\(""\)\}\$\{yearLabels\}\$\{monthLabels\}\$\{headerLines\}\$\{taskHeaderText\}\$\{labelLayer\.join\(""\)\}\$\{nameLayer\}/);
+    expect(src).toMatch(/const rowBands=\[\], barLayer=\[\], labelLayer=\[\], nameRecords=\[\];/);
   });
   it("buildGanttSVG draws ONE continuous full-height left chart-edge boundary, not per-row (B398)", () => {
     expect(src).toMatch(/const leftEdge=`<line x1="\$\{LABEL_W\}" y1="0" x2="\$\{LABEL_W\}" y2="\$\{svgH\}"/);

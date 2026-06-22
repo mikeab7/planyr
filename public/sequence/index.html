@@ -8646,18 +8646,71 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const dates=allTasks.flatMap(t=>[t.start,t.end]).filter(d=>d&&!isNaN(pd(d))).sort();
   if(!dates.length) return "";
   const minD=dates[0], maxD=dates[dates.length-1];
-  const totalDays=Math.ceil((pd(maxD)-pd(minD))/86400000)+2;
-  const ppd=ganttW/totalDays;
-  const xOf=d=>LABEL_W+Math.round((pd(d)-pd(minD))/86400000*ppd);
+  const DAY=86400000;
+  const addDays=(s,n)=>fd(new Date(pd(s).getTime()+Math.round(n)*DAY));
   const getDepth=(tasks,id)=>{let dep=0,t=tasks.find(x=>x.id===id);while(t&&t.parentId!==null){dep++;t=tasks.find(x=>x.id===t.parentId);}return Math.min(dep,3);};
+  // ── Visible time window: auto-fit by default (B401), optional timescale + pan (B361) ──
+  // Start from the natural [minD,maxD]; EXTEND it just enough that every start/end label
+  // sits on the sheet without clipping (frame it — never move the labels); then apply the
+  // owner's timescale unit / fine-zoom / pan if set. Default (no unit, mul 1, pan 0) = pure
+  // auto-fit. The discrete unit and the continuous multiplier compose into ONE span, so the
+  // sidebar selector and the toolbar control can't fight each other.
+  let winStart, winEnd, totalDays, ppd;
+  {
+    const td0=Math.max(1,Math.ceil((pd(maxD)-pd(minD))/DAY)+2), ppd0=ganttW/td0;
+    const xo0=d=>LABEL_W+Math.round((pd(d)-pd(minD))/DAY*ppd0);
+    let leadPx=0, trailPx=0;
+    try{
+      const padOf=txt=>txt?estLabelWidth(txt,6.5)+5:0;
+      allTasks.forEach(t=>{
+        if(!t||!t.start||!t.end||isNaN(pd(t.start))||isNaN(pd(t.end))) return;
+        const proj=projects.find(p=>p.tasks.some(x=>x.id===t.id));
+        const depth=proj?getDepth(proj.tasks,t.id):0;
+        const isMile=t.duration===0, isParent=proj?proj.tasks.some(x=>x.parentId===t.id):false;
+        if(opts.barNames===false) return;
+        const bx=xo0(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/DAY*ppd0));
+        const kind=isMile?"milestone":isParent?"summary":"leaf";
+        const align=opts.labelAlign||resolveLabelAlign(proj);
+        const fs=[9,8.5,8,7.5][Math.min(depth,3)];
+        const nm=t.name==null?"":String(t.name), lw=estLabelWidth(nm,fs);
+        const bl=(opts.barLabels&&!isParent)?opts.barLabels:null;
+        const place=placeGanttLabel({kind,align,bx,bw:isMile?0:bw,rowTop:0,barMidY:0,barTopY:0,labelW:lw,
+          padBefore:padOf(bl?barLabelText(t,bl.left,bl.year):""),padAfter:padOf(bl?barLabelText(t,bl.right,bl.year):""),
+          chartL:-1e9,chartR:1e9,gap:5,capHalf:Math.round(fs*0.6)});
+        const x0=place.anchor==="start"?place.x:place.anchor==="middle"?place.x-lw/2:place.x-lw, x1=x0+lw;
+        if(LABEL_W-x0>leadPx) leadPx=LABEL_W-x0;
+        if(x1-svgWidth>trailPx) trailPx=x1-svgWidth;
+      });
+    }catch(_){ leadPx=0; trailPx=0; }
+    // Cap the lead/trail so a long label can't crush the schedule into a sliver of the page —
+    // give breathing room, then let an over-long label clamp/flip as before (B401 intent).
+    const cap=Math.max(8,Math.ceil(td0*0.22));
+    const leadD=Math.min(cap,Math.max(0,Math.ceil((leadPx+4)/ppd0))), trailD=Math.min(cap,Math.max(0,Math.ceil((trailPx+4)/ppd0)));
+    const afStart=addDays(minD,-leadD), afEnd=addDays(maxD,trailD+2);
+    const afDays=Math.max(1,Math.ceil((pd(afEnd)-pd(afStart))/DAY));
+    const PPU={days:14,weeks:3.7,months:1.5,quarters:0.57};   // target px/day per discrete unit
+    const mul=(typeof opts.zoomMul==="number"&&opts.zoomMul>0)?opts.zoomMul:1;
+    let vis=(opts.timeUnit&&PPU[opts.timeUnit])?(ganttW/PPU[opts.timeUnit]):afDays;
+    vis=Math.max(3,Math.min(vis/mul,afDays*16));
+    const panFrac=(typeof opts.panFrac==="number"?opts.panFrac:0);
+    const scroll=afDays-vis;
+    // When zoomed in, default the landing to center on TODAY (clamped) so it lands on current
+    // work rather than a far-back empty stretch; the user's pan is an offset from there (B361).
+    const todayDays=(pd(fdLocal(new Date()))-pd(afStart))/DAY;
+    const todayFrac=scroll>0?Math.max(0,Math.min(1,(todayDays-vis/2)/scroll)):0;
+    const eff=Math.max(0,Math.min(1,todayFrac+panFrac));
+    const start=scroll>0?addDays(afStart,Math.round(eff*scroll)):addDays(afStart,Math.round(scroll/2));
+    winStart=start; winEnd=addDays(start,vis); totalDays=Math.max(1,vis); ppd=ganttW/totalDays;
+  }
+  const xOf=d=>LABEL_W+Math.round((pd(d)-pd(winStart))/DAY*ppd);
   const HC={gray:"#94a3b8",yellow:"#d97706",red:"#dc2626",green:"#16a34a",paused:"#9ca3af"};
   // Build full month list with date metadata for the axis + adaptive label density.
-  const months=[], cur2=new Date(pd(minD));cur2.setDate(1);
+  const months=[], cur2=new Date(pd(winStart));cur2.setDate(1);
   // Bound the header loop: a valid-but-extreme end date (e.g. a typo'd year 9999, or
   // imported far-future data) would otherwise build ~95k month cells. 12000 months =
   // 1000 years, far beyond any real schedule.
   let _mGuard=12000;
-  while(cur2<=pd(maxD) && _mGuard-->0){
+  while(cur2<=pd(winEnd) && _mGuard-->0){
     months.push({x:xOf(fd(cur2)), mo:cur2.getMonth(), yr:cur2.getFullYear(),
       label:cur2.toLocaleDateString("en-US",{month:"short"})});   // "Jun" — the YEAR is its own tier now (B399)
     cur2.setMonth(cur2.getMonth()+1);
@@ -8678,7 +8731,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   // on-screen Gantt's z-order, B222): row bands (bottom) → grid / today / dependency lines →
   // bars + milestones → text labels (top). The per-row string is split into separate buckets
   // (the old `${gridLines}${rows}${yearLines}${arrows}${todayLine}` put the rules over the bars).
-  const rowBands=[], barLayer=[], labelLayer=[];
+  const rowBands=[], barLayer=[], labelLayer=[], nameRecords=[];
   allTasks.forEach((t,i)=>{
     const y=HEADER_H+i*ROW_H, bg=i%2?"#f6f6f6":"#fff";
     const bx=xOf(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/86400000*ppd));
@@ -8740,8 +8793,11 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     // exhibit used to omit. Same placement helper, alignment, uniform ink and weight ramp as
     // on-screen so the two paths can't drift; uniform near-black (no B210 depth-navy here
     // either); escaped via escapeHtml (B248). Default on (opts.barNames !== false).
-    let nameSvg="";
-    if(opts.barNames!==false){
+    // Skip a name whose bar is fully OUTSIDE the visible window (B361 zoom/pan) — otherwise its
+    // label would clamp onto the chart edge with no bar (no-op for the auto-fit default, where
+    // every bar is in view).
+    const nameInView = isMilestone ? (bx>=LABEL_W-2 && bx<=svgWidth+2) : (bx+bw>=LABEL_W-2 && bx<=svgWidth+2);
+    if(opts.barNames!==false && nameInView){
       const kind = isMilestone?"milestone":isParent?"summary":"leaf";
       const align = opts.labelAlign || resolveLabelAlign(proj);
       const fs = [9,8.5,8,7.5][Math.min(depth,3)];
@@ -8751,20 +8807,20 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       else { const LH=ROW_H*0.30; barTopY=midY-LH/2; barMidY=midY; }
       const pad = txt => txt ? estLabelWidth(txt,6.5)+5 : 0;
       const bl = (opts.barLabels && !isParent) ? opts.barLabels : null;
-      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barMidY, barTopY,
-        labelW:estLabelWidth(t.name, fs), padBefore:pad(bl?barLabelText(t,bl.left,bl.year):""),
-        padAfter:pad(bl?barLabelText(t,bl.right,bl.year):""), chartL:LABEL_W, chartR:svgWidth,
-        gap:5, capHalf:Math.round(fs*0.6)});
       const nm = t.name==null?"":String(t.name);
       const lw = estLabelWidth(nm, fs);
-      const plate = place.mode==="plate"
-        ? `<rect x="${(place.x-lw/2-2).toFixed(1)}" y="${(place.y-fs*0.72).toFixed(1)}" width="${(lw+4).toFixed(1)}" height="${(fs*1.44).toFixed(1)}" rx="2" fill="#fff" opacity="0.85"/>`
-        : "";
-      nameSvg = plate + `<text x="${place.x.toFixed(1)}" y="${place.y.toFixed(1)}" font-size="${fs}" font-weight="${ganttNameWeight(depth, kind, t.bold)}" fill="${GANTT_INK}" text-anchor="${place.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${t.italic?' font-style="italic"':''}>${escapeHtml(nm)}</text>`;
+      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barMidY, barTopY,
+        labelW:lw, padBefore:pad(bl?barLabelText(t,bl.left,bl.year):""),
+        padAfter:pad(bl?barLabelText(t,bl.right,bl.year):""), chartL:LABEL_W, chartR:svgWidth,
+        gap:5, capHalf:Math.round(fs*0.6)});
+      // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
+      // co-dated labels never overprint each other (B402), then drawn on the top layer.
+      nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
+        weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, str:escapeHtml(nm)});
     }
     rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
     barLayer.push(barSvg);
-    labelLayer.push(`${labelHtml}${blText}${nameSvg}`);   // task-column name + bar labels + in-chart names (top, B394)
+    labelLayer.push(`${labelHtml}${blText}`);   // task-column name + bar labels (in-chart names → nameLayer, B402)
   });
   // Dependency connectors — same curved style as the in-app Gantt (cubic bezier,
   // direction-flipped 32px handles, type colors, dashed). Opacity lifted .55 -> .7 for print.
@@ -8775,8 +8831,9 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     for(const p of projects){
       const ix=new Map();
       p.tasks.forEach((t,i)=>ix.set(t.id, base+i));
-      // Bar vertical center per kind (leaf/milestone are centered at midY here; a summary
-      // sits on its span) so the curve binds to the bar, not the row mid-line (B396).
+      // Source departs from its bar CENTER; target is entered at 12 o'clock — the TOP-CENTER
+      // of its glyph — so the curve descends into the bar/diamond from above and clears the
+      // endpoint date label that sits at 9 o'clock (B402). Curves kept (owner pick, B396).
       const ycOf=(task,gidx)=>{
         const yTop=HEADER_H+gidx*ROW_H;
         if(task.duration!==0 && p.tasks.some(x=>x.parentId===task.id)){
@@ -8784,6 +8841,16 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           return yTop+(ROW_H-2-LG-SP)+SP/2;
         }
         return yTop+ROW_H*0.5;
+      };
+      const topOf=(task,gidx)=>{
+        const yTop=HEADER_H+gidx*ROW_H, midY=yTop+ROW_H*0.5;
+        const sx=xOf(task.start), bwT=Math.max(3,Math.round((pd(task.end)-pd(task.start))/DAY*ppd));
+        if(task.duration===0) return {x:sx, y:midY-5};                          // diamond top vertex
+        if(p.tasks.some(x=>x.parentId===task.id)){                              // summary bracket top
+          const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
+          return {x:sx+bwT/2, y:yTop+(ROW_H-2-LG-SP)};
+        }
+        const LH=ROW_H*0.30; return {x:sx+bwT/2, y:midY-LH/2};                  // leaf bar top
       };
       for(const t of p.tasks){
         const preds=Array.isArray(t.predecessors)?t.predecessors:[];
@@ -8795,13 +8862,14 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
           const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
-          const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
-          const y1=ycOf(pt,pi), y2=ycOf(t,si);            // bound to the bar centers (B396)
-          const aDir=x2>=x1?1:-1;
+          const y1=ycOf(pt,pi);                            // source: bar center (B396)
+          const tgt=topOf(t,si), tx=tgt.x, ty=tgt.y;       // target: 12 o'clock top-center (B402)
+          const aDir=tx>=x1?1:-1;
           const color=DEP_C[type]||DEP_C.FS;
-          // Curved (cubic bézier) connector — owner-preferred (B396), matching the on-screen Gantt.
-          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${x2-32*aDir},${y2} ${x2},${y2}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${y2} L${x2-5*aDir},${y2-3} L${x2-5*aDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
+          // Curved (cubic bézier): leaves the source horizontally, descends into the target's
+          // TOP, clearing the endpoint date label (curves kept per B396; reroute per B402).
+          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${tx.toFixed(1)},${(ty-26).toFixed(1)} ${tx.toFixed(1)},${ty.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
+            +`<path d="M${tx.toFixed(1)},${ty.toFixed(1)} L${(tx-3).toFixed(1)},${(ty-5.5).toFixed(1)} L${(tx+3).toFixed(1)},${(ty-5.5).toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
         }
       }
       base+=p.tasks.length;
@@ -8821,7 +8889,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const leftEdge=`<line x1="${LABEL_W}" y1="0" x2="${LABEL_W}" y2="${svgH}" stroke="#c4c8ce" stroke-width="0.8"/>`;
   // Today marker — red dashed line + a small tick at the bottom of the header band.
   const todayStr=fdLocal(new Date());
-  const todayLine=(opts.showToday!==false && todayStr>=minD&&todayStr<=maxD)
+  const todayLine=(opts.showToday!==false && todayStr>=winStart&&todayStr<=winEnd)
     ? `<line x1="${xOf(todayStr)}" y1="${HEADER_H}" x2="${xOf(todayStr)}" y2="${svgH}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2"/>
 <polygon points="${xOf(todayStr)-3.5},${HEADER_H-5} ${xOf(todayStr)+3.5},${HEADER_H-5} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>`
     : "";
@@ -8833,6 +8901,34 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const headerLines=`<line x1="${LABEL_W}" y1="${YEAR_TIER}" x2="${svgWidth}" y2="${YEAR_TIER}" stroke="#d4d8de" stroke-width="0.7"/>`
     +`<line x1="${LABEL_W}" y1="${HEADER_H}" x2="${svgWidth}" y2="${HEADER_H}" stroke="#b9c0c9" stroke-width="1"/>`;
   const taskHeaderText = noLabels ? "" : `<text x="4" y="${HEADER_H-6}" font-size="8" font-weight="bold" fill="#3a4452" font-family="Arial,sans-serif">TASK</text>`;
+  // ── B402: de-collide in-chart name labels ──────────────────────────────────────────
+  // Co-dated labels must never overprint each other. Sweep top→down; if a label's box hits
+  // one already placed, nudge it down until clear (capped). A pure no-op when nothing
+  // overlaps (the common per-row case), so existing layouts are untouched. Defensive: any
+  // failure falls back to the un-nudged labels.
+  let nameLayer="";
+  const emitName=r=>{
+    const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;
+    const plate=r.mode==="plate"?`<rect x="${(x0-2).toFixed(1)}" y="${(r.y-r.fs*0.72).toFixed(1)}" width="${(r.lw+4).toFixed(1)}" height="${(r.fs*1.44).toFixed(1)}" rx="2" fill="#fff" opacity="0.85"/>`:"";
+    return plate+`<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}>${r.str}</text>`;
+  };
+  try{
+    const boxOf=r=>{const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;return {x0,x1:x0+r.lw,y0:r.y-r.fs*0.72,y1:r.y+r.fs*0.72};};
+    const recs=nameRecords.map(r=>({...r,_y0:r.y})).sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+    const placed=[];
+    for(const r of recs){
+      let b=boxOf(r),tries=0;
+      while(tries<8){
+        const hit=placed.find(p=>b.x0<p.x1&&b.x1>p.x0&&b.y0<p.y1&&b.y1>p.y0);
+        if(!hit) break;
+        r.y+=(hit.y1-b.y0)+1.5;
+        if(r.y-r._y0>ROW_H*2.2){ r.y=r._y0; break; }   // give up rather than fling it far
+        b=boxOf(r); tries++;
+      }
+      placed.push(b);
+    }
+    nameLayer=recs.map(emitName).join("");
+  }catch(_){ nameLayer=nameRecords.map(emitName).join(""); }
   // B400 — a viewBox makes the whole 0..svgWidth content scale to fill the container width EXACTLY
   // (with style:width:100%), so the full min→max timeline always fits the page Gantt column with no
   // right-edge clipping. Render is 1:1 at the export widths, so per-page slicing is unchanged (the
@@ -8842,7 +8938,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" viewBox="0 0 ${svgWidth} ${svgH}" style="width:100%;display:block">
 <rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
 ${headerBg}
-${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}</svg>`;
+${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}${nameLayer}</svg>`;
 }
 
 // ── Exhibit column sizing (B390 content-fit + B392 drag-resize) ─────────────────────
@@ -9008,7 +9104,7 @@ function buildPDFHtml(cfg, data, forPreview) {
         return `<tr class="${i%2?"alt":""}">${cells}</tr>`;
       }).join("");
       const ganttProj={...proj, tasks}; // Gantt task list matches the table
-      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels, barNames:cfg.barNames!==false, labelAlign:cfg.labelAlign});
+      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels, barNames:cfg.barNames!==false, labelAlign:cfg.labelAlign, timeUnit:cfg.timeUnit, zoomMul:cfg.zoomMul, panFrac:cfg.panFrac});
       bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}
         <div class="split-view">
           <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
@@ -9386,6 +9482,15 @@ const Row = ({label,children}) => (
     {children}
   </div>
 );
+// B403 — silently persist & restore the export screen's settings across opens (no badge).
+// Per browser/user via localStorage (the column WIDTH state already rides data.exportColWidths,
+// B392; task-specific selection/collapse is intentionally NOT persisted). docDate is left to
+// default to "today" each open rather than freezing a stale date onto an exhibit.
+const EXPORT_PREFS_KEY = "planar:exportPrefs:v1";
+const EXPORT_PERSIST_KEYS = ["orientation","pageSize","margins","columns","includeGantt","showToday","showArrows","barNames","labelAlign","healthFilter","exhibitLabel","projectTitle","preparedBy","preparedFor","confidential","timeUnit","zoomMul","panFrac"];
+function loadExportPrefs(){ try { return JSON.parse(localStorage.getItem(EXPORT_PREFS_KEY) || "{}") || {}; } catch { return {}; } }
+function saveExportPrefs(obj){ try { localStorage.setItem(EXPORT_PREFS_KEY, JSON.stringify(obj)); } catch (_) {} }
+
 function PDFExportModal({data, activePid, onClose, setData}) {
   const projs = Object.values(data.projects);
   const now = new Date();
@@ -9396,36 +9501,51 @@ function PDFExportModal({data, activePid, onClose, setData}) {
     }));
     return out;
   }, []);
-  const [cfg, setCfg] = useState({
-    exhibitLabel: "",
-    projectTitle: "",
-    preparedBy: "", preparedFor: "",
-    docDate: now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}),
-    orientation: "landscape",
-    pageSize: "letter",
-    margins: {top:"0.75", right:"0.75", bottom:"0.75", left:"0.75"},
-    selProjects: activePid ? [String(activePid)] : projs.map(p => String(p.id)),
-    columns: (() => { const PRINTABLE=new Set(["id","name","start","end","duration","health","percentComplete","responsibleParty","predecessors"]); const mc=(data.masterCols||[]).filter(k=>PRINTABLE.has(k)); return mc.length>0?mc:["id","name","start","end","duration","health","responsibleParty"]; })(),
-    includeGantt: true,
-    showToday: true,
-    showArrows: true,
-    barNames: true,                                              // in-chart Gantt names ON by default (B394)
-    labelAlign: resolveLabelAlign(activePid!=null ? data.projects?.[activePid] : null),  // seed from the on-screen choice
-    healthFilter: "all",
-    confidential: "",
-    collapsedIds: seedCollapsed,
-    detailLevel: seedCollapsed.length ? "custom" : "all",
-    // B392 — per-column width overrides from dragging a column edge in the preview;
-    // seeded from the last-saved exhibit so a tuned layout comes back. Empty = content-fit.
-    colWidths: data.exportColWidths || {},
+  const initPrefs = useMemo(() => loadExportPrefs(), []);   // B403
+  const [cfg, setCfg] = useState(() => {
+    const base = {
+      exhibitLabel: "",
+      projectTitle: "",
+      preparedBy: "", preparedFor: "",
+      docDate: now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}),
+      orientation: "landscape",
+      pageSize: "letter",
+      margins: {top:"0.75", right:"0.75", bottom:"0.75", left:"0.75"},
+      selProjects: activePid ? [String(activePid)] : projs.map(p => String(p.id)),
+      columns: (() => { const PRINTABLE=new Set(["id","name","start","end","duration","health","percentComplete","responsibleParty","predecessors"]); const mc=(data.masterCols||[]).filter(k=>PRINTABLE.has(k)); return mc.length>0?mc:["id","name","start","end","duration","health","responsibleParty"]; })(),
+      includeGantt: true,
+      showToday: true,
+      showArrows: true,
+      barNames: true,                                              // in-chart Gantt names ON by default (B394)
+      labelAlign: resolveLabelAlign(activePid!=null ? data.projects?.[activePid] : null),  // seed from the on-screen choice
+      healthFilter: "all",
+      confidential: "",
+      collapsedIds: seedCollapsed,
+      detailLevel: seedCollapsed.length ? "custom" : "all",
+      // B392 — per-column width overrides from dragging a column edge in the preview.
+      colWidths: data.exportColWidths || {},
+      // B361 time axis: discrete unit (null = auto-fit), continuous fine multiplier, pan 0..1.
+      timeUnit: null, zoomMul: 1, panFrac: 0,
+    };
+    // B403 — overlay the persisted choices (only the safe-to-restore keys).
+    EXPORT_PERSIST_KEYS.forEach(k => { if (initPrefs[k] !== undefined) base[k] = initPrefs[k]; });
+    return base;
   });
   const upd = patch => setCfg(c => ({...c, ...patch}));
   const cfgRef = useRef(cfg);
   useEffect(() => { cfgRef.current = cfg; }, [cfg]);
-  const [headerOpen, setHeaderOpen] = useState(false);
+  const [headerOpen, setHeaderOpen] = useState(() => !!initPrefs.headerOpen);   // B403
   // Collapsible sidebar sections — default open; clicking a section header toggles it
-  const [secOpen, setSecOpen] = useState({});
+  const [secOpen, setSecOpen] = useState(() => initPrefs.secOpen || {});        // B403
   const secIsOpen = k => secOpen[k] !== false;
+
+  // B403 — silently persist the restorable settings on any change (no badge). Written
+  // synchronously (not debounced) so closing the modal right after a change still saves it.
+  useEffect(() => {
+    const out = {}; EXPORT_PERSIST_KEYS.forEach(k => { out[k] = cfg[k]; });
+    out.secOpen = secOpen; out.headerOpen = headerOpen;
+    saveExportPrefs(out);
+  }, [cfg, secOpen, headerOpen]);
 
   // Debounced config for preview (avoids re-render on every keystroke)
   const [previewCfg, setPreviewCfg] = useState(cfg);
@@ -9528,23 +9648,40 @@ function PDFExportModal({data, activePid, onClose, setData}) {
   const [previewZoom, setPreviewZoom] = useState(1);
   const scale = fitScale * previewZoom;
   const zoomTo = z => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
-  const fitWidth = () => setPreviewZoom(1); // previewZoom 1 → scale = fitScale → the whole sheet (full timeline) fits the pane
+  // "Fit" resets BOTH the page magnification AND the time axis back to the auto-fit whole-
+  // schedule frame (B361/B401) — one button that says "show everything, nicely framed".
+  const fitWidth = () => { setPreviewZoom(1); upd({timeUnit:null, zoomMul:1, panFrac:0}); };
 
-  // B400 — "Move" (pan) mode. The iframe boundary swallows wheel + drag, so to let the owner slide
-  // the exhibit around and zoom, a transparent overlay over the iframe captures them WHILE pan mode
-  // is on. When OFF (default) the overlay is click-through (pointer-events:none) so the in-preview
-  // collapse triangles and column drag-handles keep working under a real mouse.
+  // B361 — time-axis controls. The discrete unit and the continuous fine multiplier feed ONE
+  // span inside buildGanttSVG (they compose, never fight); picking a unit snaps the multiplier.
+  const setTimeUnit = u => upd({timeUnit:u, zoomMul:1, panFrac:0});
+  const bumpScale = f => upd({zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul||1) * f))});
+
+  // B361 — "Pan" mode (renamed from "Move"): a hand-cursor drag slides the visible TIME window
+  // left/right (horizontal → cfg.panFrac) and scrolls the sheet vertically; the wheel magnifies
+  // the page. A transparent overlay captures these only WHILE pan is on, so the in-preview
+  // collapse triangles / column drag-handles keep working under a real mouse when it's off.
   const [panMode, setPanMode] = useState(false);
   const panRef = useRef(null);
   const overlayRef = useRef(null);
+  const flushRef = useRef(0);
   useEffect(() => {
     const el = overlayRef.current;
     if (!el || !panMode) return;
     const pane = previewPaneRef.current;
+    const PAN_SPAN = 520;   // px of horizontal drag = the full time range
     const onWheel = e => { e.preventDefault(); e.stopPropagation(); setPreviewZoom(z => Math.min(4, Math.max(0.25, z * (e.deltaY < 0 ? 1.1 : 1/1.1)))); };
-    const onDown = e => { if (e.button !== 0 || !pane) return; e.preventDefault(); panRef.current = { x:e.clientX, y:e.clientY, sl:pane.scrollLeft, st:pane.scrollTop }; el.style.cursor = "grabbing"; };
-    const onMove = e => { const p = panRef.current; if (!p || !pane) return; pane.scrollLeft = p.sl - (e.clientX - p.x); pane.scrollTop = p.st - (e.clientY - p.y); };
-    const onUp = () => { panRef.current = null; if (el) el.style.cursor = "grab"; };
+    const onDown = e => { if (e.button !== 0) return; e.preventDefault(); panRef.current = { x:e.clientX, y:e.clientY, pf:(cfgRef.current.panFrac||0), st:pane?pane.scrollTop:0 }; el.style.cursor = "grabbing"; };
+    const onMove = e => {
+      const p = panRef.current; if (!p) return;
+      if (pane) pane.scrollTop = p.st - (e.clientY - p.y);                            // vertical → scroll the sheet
+      const pf = Math.max(-1.2, Math.min(1.2, p.pf - (e.clientX - p.x) / PAN_SPAN));  // horizontal → slide the window (offset from today-center)
+      const next = {...cfgRef.current, panFrac: pf};
+      setCfg(next);
+      const now = Date.now();
+      if (now - flushRef.current > 170) { setPreviewCfg(next); flushRef.current = now; }  // throttled live update
+    };
+    const onUp = () => { if (panRef.current) setPreviewCfg(cfgRef.current); panRef.current = null; if (el) el.style.cursor = "grab"; };
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
@@ -9579,6 +9716,12 @@ function PDFExportModal({data, activePid, onClose, setData}) {
         transition:"transform .2s",display:"inline-block",lineHeight:1}}>▾</span>}
     </div>
   );
+
+  // Shared styles for the floating preview toolbar (B361).
+  const TB_BTN={width:22,height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.16)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",lineHeight:1,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"};
+  const TB_LBL={height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.16)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 8px",cursor:"pointer",fontFamily:"inherit"};
+  const TB_TAG={color:"#aab2bd",fontSize:8,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase"};
+  const TB_DIV={width:1,height:16,background:"rgba(255,255,255,0.22)",margin:"0 2px"};
 
   return (
     <div style={{position:"fixed",inset:0,background:"#000000a0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
@@ -9663,6 +9806,11 @@ function PDFExportModal({data, activePid, onClose, setData}) {
             )}
             {cfg.includeGantt && (
               <Row label="Dep. arrows"><Toggle on={cfg.showArrows!==false} onChange={v=>upd({showArrows:v})} /></Row>
+            )}
+            {cfg.includeGantt && (
+              <Row label="Time scale">
+                <SegBtn small options={[{l:"Fit",v:"fit"},{l:"Qtr",v:"quarters"},{l:"Mo",v:"months"},{l:"Wk",v:"weeks"},{l:"Day",v:"days"}]} value={cfg.timeUnit||"fit"} onChange={v=>setTimeUnit(v==="fit"?null:v)} />
+              </Row>
             )}
             {cfg.includeGantt && (
               <Row label="Bar names"><Toggle on={cfg.barNames!==false} onChange={v=>upd({barNames:v})} /></Row>
@@ -9755,59 +9903,61 @@ function PDFExportModal({data, activePid, onClose, setData}) {
 
           </div>
 
-          {/* Preview pane. When zoomed wider than the pane, align to the start so scroll + drag-pan
-              can reach BOTH edges — centered overflow strands the left side. */}
-          <div ref={previewPaneRef}
-            style={{flex:1,background:"#e8eaed",overflow:"auto",display:"flex",alignItems:"flex-start",
-              justifyContent: (pageW*scale > paneW-48) ? "flex-start" : "center", padding:24,position:"relative"}}>
-            {/* B400 — discoverable zoom + "Move" (drag-to-pan) controls. Fit = the whole timeline
-                fits the page width (the viewBox in buildGanttSVG guarantees no clipping). */}
+          {/* Preview area = a NON-scrolling relative wrapper holding the scroller + a pinned
+              toolbar. The toolbar lives OUTSIDE the scroller as an absolute overlay so it is
+              always visible AND clickable (the old float/sticky-inside-flex toolbar was dead +
+              intermittently visible — B361 bug fix). */}
+          <div style={{flex:1,position:"relative",display:"flex",minWidth:0,background:"#e8eaed"}}>
+            <div ref={previewPaneRef}
+              style={{flex:1,overflow:"auto",display:"flex",alignItems:"flex-start",
+                justifyContent: (pageW*scale > paneW-48) ? "flex-start" : "center", padding:24}}>
+              {previewUrl && (
+                <div style={{
+                  width: pageW * scale, height: iframeH * scale, flexShrink: 0,
+                  overflow: "hidden", background: "transparent", position: "relative",
+                }}>
+                  <iframe
+                    ref={iframeRef}
+                    key={previewUrl}
+                    src={previewUrl}
+                    style={{ width: pageW, height: iframeH, border: "none",
+                      transformOrigin: "top left", transform: `scale(${scale})`, display: "block" }}
+                    title="PDF Preview"
+                  />
+                  {/* Overlay captures drag-pan + wheel-zoom ONLY in Pan mode; otherwise it is
+                      click-through so the preview's own collapse / column-resize controls work. */}
+                  <div ref={overlayRef}
+                    style={{position:"absolute",inset:0,zIndex:2,background:"transparent",
+                      pointerEvents: panMode ? "auto" : "none", cursor: panMode ? "grab" : "default"}} />
+                </div>
+              )}
+              {!previewUrl && (
+                <div style={{color:"#888",fontSize:12,marginTop:60}}>Generating preview…</div>
+              )}
+            </div>
+
+            {/* Floating controls (B361): page Zoom · time-axis Time stretch · Fit · Pan. */}
             {previewUrl && (
-              <div style={{position:"sticky",top:8,right:8,float:"right",zIndex:10,display:"flex",gap:3,alignItems:"center",
-                marginBottom:-30,background:"rgba(20,22,26,0.80)",borderRadius:6,padding:"3px 4px",userSelect:"none",fontFamily:"inherit"}}>
-              {[["−",()=>zoomTo(previewZoom/1.2),"Zoom out"],["+",()=>zoomTo(previewZoom*1.2),"Zoom in"]].map(([lbl,fn,ttl])=>(
-                <button key={ttl} onClick={fn} title={ttl}
-                  style={{width:22,height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.14)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>{lbl}</button>
-              ))}
-              <span onClick={fitWidth} title="Reset to fit" style={{color:"#fff",fontSize:10,fontWeight:600,padding:"0 5px",cursor:"pointer",minWidth:32,textAlign:"center"}}>{Math.round(previewZoom*fitScale*100)}%</span>
-              <button onClick={fitWidth} title="Fit the whole timeline to the page width"
-                style={{height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.14)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 7px",cursor:"pointer",fontFamily:"inherit"}}>Fit</button>
-              <button onClick={()=>setPanMode(m=>!m)} title={panMode?"Stop moving (re-enable clicking in the preview)":"Move/pan: drag to slide the chart around"}
-                style={{height:20,border:"none",borderRadius:4,background:panMode?"var(--amber)":"rgba(255,255,255,0.14)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 8px",cursor:"pointer",fontFamily:"inherit"}}>Move</button>
+              <div style={{position:"absolute",top:12,right:12,zIndex:30,display:"flex",gap:5,alignItems:"center",
+                background:"rgba(20,22,26,0.88)",borderRadius:7,padding:"4px 7px",userSelect:"none",fontFamily:"inherit",
+                boxShadow:"0 2px 10px rgba(0,0,0,0.30)"}}>
+                <span style={TB_TAG}>Zoom</span>
+                <button onClick={()=>zoomTo(previewZoom/1.2)} title="Zoom out — magnify the page less" style={TB_BTN}>−</button>
+                <span onClick={fitWidth} title="Reset to fit" style={{color:"#fff",fontSize:10,fontWeight:600,padding:"0 2px",cursor:"pointer",minWidth:30,textAlign:"center"}}>{Math.round(previewZoom*fitScale*100)}%</span>
+                <button onClick={()=>zoomTo(previewZoom*1.2)} title="Zoom in — magnify the page more" style={TB_BTN}>+</button>
+                {cfg.includeGantt && (<>
+                  <span style={TB_DIV} />
+                  <span style={TB_TAG}>Time</span>
+                  <button onClick={()=>bumpScale(1/1.25)} title="Compress the time axis — fit more months across the chart" style={TB_BTN}>−</button>
+                  <button onClick={()=>bumpScale(1.25)} title="Expand the time axis — fewer months, stretched wider" style={TB_BTN}>+</button>
+                </>)}
+                <span style={TB_DIV} />
+                <button onClick={fitWidth} title="Fit the whole timeline & reset zoom" style={TB_LBL}>Fit</button>
+                {cfg.includeGantt && (
+                  <button onClick={()=>setPanMode(m=>!m)} title={panMode?"Stop panning (re-enable clicking in the preview)":"Pan — drag to slide the visible time window left/right"}
+                    style={{...TB_LBL, background: panMode?"var(--amber)":"rgba(255,255,255,0.16)"}}>✋ Pan</button>
+                )}
               </div>
-            )}
-            {previewUrl && (
-              <div style={{
-                width: pageW * scale,
-                height: iframeH * scale,
-                flexShrink: 0,
-                overflow: "hidden",
-                background: "transparent",
-                position: "relative",
-              }}>
-                <iframe
-                  ref={iframeRef}
-                  key={previewUrl}
-                  src={previewUrl}
-                  style={{
-                    width: pageW,
-                    height: iframeH,
-                    border: "none",
-                    transformOrigin: "top left",
-                    transform: `scale(${scale})`,
-                    display: "block",
-                  }}
-                  title="PDF Preview"
-                />
-                {/* Overlay captures drag-pan + wheel-zoom ONLY in Move mode; otherwise it is
-                    click-through so the preview's own collapse / column-resize controls work. */}
-                <div ref={overlayRef}
-                  style={{position:"absolute",inset:0,zIndex:2,background:"transparent",
-                    pointerEvents: panMode ? "auto" : "none", cursor: panMode ? "grab" : "default"}} />
-              </div>
-            )}
-            {!previewUrl && (
-              <div style={{color:"#888",fontSize:12,marginTop:60}}>Generating preview…</div>
             )}
           </div>
 

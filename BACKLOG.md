@@ -993,45 +993,25 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
 <!-- 2026-06-22: owner-dropped corrected chat batch (Scheduler PDF/Print Exhibit export quality) —
-     amended NEW-1/NEW-2/NEW-4/NEW-5 (NEW-3 unchanged). Highest B# across both files was B400, so
-     NEW-2/NEW-4/NEW-5 minted **B401/B402/B403**; the amended NEW-1 was folded into B361 (its explicit
-     home — "the continuous companion to B159's discrete selector"). All four touch ONE surface:
-     public/sequence/index.html (buildGanttSVG + PDFExportModal + buildPDFHtml). Per STANDING RULE #1
-     filed AND fixed this session on branch `claude/vigilant-brown-5dqcog`. -->
-
-### B401 — Export default time window auto-fits all labels (extend the frame, never move the labels) `[Scheduler / Export]` (bug)  *(arrived as the corrected owner "NEW-2"; minted **B401** — next free ID after B400)*
-`[ ]` On entering the PDF/Print Exhibit screen, the default visible time window must **auto-extend its left edge earlier in time** (and the right edge as needed) so **every** label — including those at the very start of the schedule — fits on the sheet without clipping. This auto-fit framing is the clearest exhibit, so it's the **default on open**, not something the user sets up each time.
-- **NO per-label repositioning.** Do **not** add a label gutter and do **not** flip any task/milestone label to the other side of its glyph. A centered label stays centered; a left label stays left — placement is untouched.
-- **Solve it at the framing level**, not by moving labels: the root cause is the timeline starting too tight/late, clipping start-of-schedule labels.
-- The user can still adjust afterward via the timescale/pan controls (B361) — auto-fit sets the *starting* frame, it doesn't lock it.
-- **Acceptance:** open the export → the first/last tasks' labels sit fully on the sheet with breathing room, no clipping, and no label has moved relative to its bar/diamond.
-
-### B402 — De-conflict co-dated labels + route dependency curves into the TOP (12 o'clock) of the target `[Scheduler / Export]` (bug)  *(arrived as the corrected owner "NEW-4"; minted **B402**)*
-`[ ]` Two parts, one item:
-- **Label collision:** co-dated milestone/bar labels must not overprint each other or their glyphs — nudge/stack them vertically, or suppress a duplicate-date label and rely on the table column. (Worst case today: the right-hand cluster near 09/02/27.)
-- **Connector routing (corrected — keep the curves):** keep dependency connectors **curved** (do NOT convert to orthogonal/jogged right angles). The change is the **termination point**: instead of the curve entering the target task/milestone at **9 o'clock** (the left/side edge, where the endpoint date label sits), it should approach and terminate at **12 o'clock** (top-center) of the target glyph — the curve comes down into the top of the bar/diamond, clearing the date text at the endpoint.
-- The existing **"Dep. arrows" toggle stays** the escape hatch (connectors fully off).
-- **Acceptance:** with arrows on, endpoint dates stay fully readable; connectors read as smooth curves entering targets from above; co-dated labels don't overprint.
-
-### B403 — Silently persist & restore ALL export-screen state (no badge) `[Scheduler / Export]` (feature)  *(arrived as the corrected owner "NEW-5"; minted **B403**)*
-`[ ]` On reopening the PDF/Print Exhibit, restore the user's last choices across **every** control, defaulting to them. **No visible indicator** — drop any "Restored from last export" badge entirely; restoration is silent.
-- Restore: **page size, orientation, margins** (preset + custom values), **name-align**.
-- Every **column toggle** (ID, Task Name, Start, End, Duration, Status, % Done, Owner, Predecessors, Cost).
-- **Header/Cover** options.
-- The **expanded/collapsed state of each sidebar section** (Margins, Header/Cover, Columns, etc.).
-- The **timescale/pan/width** state from B361 (NEW-1) + B160 where feasible.
-- **Persist per-project if that pattern already exists in the codebase; otherwise per-user/session, and note which was used.**
-- **Acceptance:** change paper to 11×17 landscape, turn Owner off, collapse a section → close without printing → reopen → all of it comes back exactly, with no badge announcing it.
-
-### B361 — Export Gantt time-axis controls: discrete scale selector + continuous timescale zoom + horizontal pan + fix the dead preview toolbar (PDF/Print Exhibit) `[Scheduler / Export]` (feature + bug)  *(renumbered from a colliding B159 → B361, 2026-06-21; the surviving B159 is the Task-names visibility toggle. **Amended 2026-06-22** to absorb the owner's corrected "NEW-1" — the continuous timescale zoom + horizontal pan + the dead-toolbar bug — because NEW-1 is explicitly "the continuous companion to this discrete selector, wired to the same scale state." Owner: "items 1–2 overlap B159/B160 — extend those, don't duplicate.")*
-
-- [ ] **Discrete time-scale selector** (original B361) in the export sidebar: **Days · Weeks · Months · Quarters**, controlling the density of the Gantt time axis in the export. Re-renders the preview in real time. Export-only (never the live schedule).
-- [ ] **Continuous timescale expand/contract** (amended NEW-1): a toolbar control that stretches/compresses the time axis so more or fewer months fit across the chart width — the continuous companion to the discrete selector, **wired to the SAME underlying scale state** so the two never fight.
-- [ ] **Horizontal pan** (amended NEW-1): move the visible time window left/right. Rename the toolbar's **"Move" → "Pan"** with a hand cursor on the preview.
-- [ ] **Bug (amended NEW-1):** the floating preview toolbar (was "＋ 82% Fit Move") is **dead (clicks no-op) and intermittently visible** — fix BOTH, independent of the new behavior. (Root cause = the toolbar's fragile `float`/`position:sticky`-inside-a-flexbox layout shipped in B400.)
-- [ ] **Distinct from B160** — that's the column-table-vs-chart width split (the panel divider); THIS is the time axis *inside* the chart. Keep the two controls separate.
-
-<!-- Filed 2026-06-18 from owner NEW-2 (discrete selector). Amended 2026-06-22 to absorb the corrected owner "NEW-1" (continuous timescale + pan + dead-toolbar bug) per "extend B159/B160, don't duplicate." -->
+     amended NEW-1/NEW-2/NEW-4/NEW-5 (NEW-3 unchanged). Minted **B401/B402/B403**; the amended NEW-1
+     folded into **B361** (its explicit home — "the continuous companion to B159's discrete selector").
+     Per STANDING RULE #1 all four were filed AND fixed + headless-verified (V116, 16/16) + committed
+     this session on branch `claude/vigilant-brown-5dqcog`. All touch ONE surface:
+     public/sequence/index.html (buildGanttSVG + PDFExportModal + buildPDFHtml). Full [x] blocks live
+     in BACKLOG-DONE.md:
+       • B361 — export time-axis controls: a discrete Days/Wk/Mo/Qtr selector (sidebar) + a continuous
+                Time −/+ (toolbar) wired to the SAME span state + Pan (renamed from Move, drags the
+                time window, today-centered default) + FIXED the dead/intermittent floating toolbar
+                (rebuilt as a pinned absolute overlay). Page Zoom + Fit kept.
+       • B401 — the default time window auto-fits so every start/end label sits on the sheet (extend the
+                frame, never move a label; capped at ~22% of span/side so a long label can't crush it).
+       • B402 — dependency connectors stay CURVED but now terminate at 12 o'clock (descend into the bar/
+                diamond TOP, clearing the endpoint date) + a vertical de-collision pass for co-dated names.
+       • B403 — silently persist & restore ALL export-screen state (orientation/size/margins/columns/
+                name-align/header/section-collapse/timescale/pan) via localStorage `planar:exportPrefs:v1`,
+                synchronously, NO badge. Column width keeps riding data.exportColWidths (B392).
+     B160 (the whole-split table-vs-chart divider ratio) left Open by design — distinct from B361's
+     in-chart time axis; B392's per-column drag-resize already covers most of the need. -->
 
 ---
 
