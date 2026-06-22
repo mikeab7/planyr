@@ -10,16 +10,25 @@
  * pure so it's unit-tested directly.
  */
 import { emptyPlacementFacts, mergePlacementFacts } from "../../../shared/placement/placementFacts.js";
+import { categoryFor, FILE_STATES } from "../../../shared/files/fileFacts.js";
 
 /* Build the one index row to persist from a filing decision's `facts` (server-side shape).
  * `id` keys the row (use the review id so it 1:1-tracks the filed review); snake_case to match
- * the Postgres columns. Placement is stored as a complete, safe object. */
+ * the Postgres columns. Placement is stored as a complete, safe object.
+ *
+ * Work Item B: the filing decision now WRITES the canonical `category` (top-level tree node,
+ * derived from discipline + item when not given) and `state` (needs_filing | filed). The
+ * subcategory reuses `discipline` (no duplicate column). A no/low-confidence file is
+ * needs_filing — never a guessed category (misfiled is worse than unfiled). */
 export function toFactsRow(facts = {}, { id, reviewId = null, sourceFile = "" } = {}) {
+  const discipline = facts.discipline || "Other";
+  const needsFiling = !!facts.needsFiling; // the caller decides this (it knows the project context)
   return {
     id,
     review_id: reviewId,
     project_id: facts.projectId || null,
-    discipline: facts.discipline || "Other",
+    category: facts.category || categoryFor(discipline, facts.item, facts.sheetTitle),
+    discipline, // = the data-driven subcategory (reused, not duplicated)
     item: facts.item || "",
     sheet_number: facts.sheetNumber || "",
     sheet_title: facts.sheetTitle || "",
@@ -27,7 +36,8 @@ export function toFactsRow(facts = {}, { id, reviewId = null, sourceFile = "" } 
     doc_date: facts.docDate || null,
     source_file: sourceFile || "",
     match_confidence: typeof facts.matchConfidence === "number" ? facts.matchConfidence : null,
-    needs_filing: !!facts.needsFiling,
+    needs_filing: needsFiling,
+    state: facts.state || (needsFiling ? FILE_STATES.NEEDS_FILING : FILE_STATES.FILED),
     placement: mergePlacementFacts(emptyPlacementFacts(), facts.placement),
     updated_at: new Date().toISOString(),
   };
@@ -43,6 +53,9 @@ export function factsRowToPatch(row = {}) {
     sheetNumber: row.sheet_number || "",
     sheetTitle: row.sheet_title || "",
     matchConfidence: typeof row.match_confidence === "number" ? row.match_confidence : null,
+    // Work Item B IA fields surfaced onto the review row → toFileFact reads them.
+    category: row.category || null,
+    state: row.state || null,
   };
 }
 

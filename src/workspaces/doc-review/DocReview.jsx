@@ -13,7 +13,7 @@ import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sa
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
+import FileBrowser from "./components/FileBrowser.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
@@ -162,7 +162,10 @@ export default function DocReview({
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
+  // Work Item B: the file browser is the LANDING surface. `browsing` true = show the
+  // tree/facets/list; opening or starting a file flips to the review canvas; the 🗂 Files
+  // button (or selecting a project) brings the browser back.
+  const [browsing, setBrowsing] = useState(true);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
   // The project the header breadcrumb points at in Markup now comes from the URL route
   // (Work Item A) — so it survives a module switch instead of resetting to "Select a
@@ -286,7 +289,7 @@ export default function DocReview({
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
     // file would otherwise be read via arrayBuffer() and only then fail).
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setBrowsing(false); // opening a PDF → show the review canvas
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
@@ -476,6 +479,7 @@ export default function DocReview({
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
+    setBrowsing(false); // a review is opening → leave the browser for the review canvas
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
@@ -492,6 +496,7 @@ export default function DocReview({
     await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
+    setBrowsing(false); // "New" → a fresh blank review canvas (still in the current project)
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
@@ -541,6 +546,10 @@ export default function DocReview({
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
     if (bootDocIntentRef.current) return;
+    // Work Item B: with a project active, Markup lands on the FILE BROWSER (the last file is
+    // one click away in the list) — don't auto-open it into the canvas. Resume-into-canvas
+    // stays only for the project-less single-file workflow (e.g. a logged-out local review).
+    if (projectId) return;
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -946,27 +955,28 @@ export default function DocReview({
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
-      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
-        projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
-        // picking a project browses its files in place (opens the Files drawer scoped
-        // to it); New project is born in the Site Planner. Save state from persistence.
+        // picking a project browses its files in place (the file browser, scoped to it);
+        // New project is born in the Site Planner. Save state from persistence.
         onDashboard={onGoDashboard}
         currentProject={markupProject}
         cross={crossProject}
-        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setFilesOpen(true); }}
+        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setBrowsing(true); }}
         onNewProject={onNewProject}
         saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
         centerContent={
-          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
-          // a shelf every workspace reaches into, so it lives next to the project name.
-          // The project name itself is NOT repeated here — the Row-1 breadcrumb is its one
-          // canonical home (B357); a second copy in the centre was the "crowded centre".
-          <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+          // The 🗂 Files button returns to the file browser landing from the review canvas
+          // (B6). It reads as active while browsing. The project name itself isn't repeated
+          // here — the Row-1 breadcrumb is its one canonical home (B357).
+          <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
+            aria-pressed={browsing}
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+              border: `1px solid ${browsing ? "var(--accent-markup)" : "var(--chrome-divider)"}`,
+              background: browsing ? "var(--accent-markup)" : "var(--chrome-bg-elev)",
+              color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
             🗂 Files
           </button>
         }
@@ -1003,12 +1013,25 @@ export default function DocReview({
       {openErr && (
         <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {openErr}</span>
-          <button onClick={() => { setOpenErr(""); setFilesOpen(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => { setOpenErr(""); setBrowsing(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
           <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
-      {!pdfRef.current ? (
+      {browsing ? (
+        // Work Item B — the file browser IS the landing surface (a project's tree, facets,
+        // and badged list), not an empty "drop a PDF" screen. Opening a file flips to the
+        // review canvas; the 🗂 Files button brings the browser back.
+        <FileBrowser
+          projectId={projectId}
+          projectName={markupProject?.name || ""}
+          signedIn={signedIn}
+          cross={crossProject}
+          indexProvider={autofilingProvider}
+          onOpenReview={openReview}
+          onNavigate={onNavigate}
+        />
+      ) : !pdfRef.current ? (
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>

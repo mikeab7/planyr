@@ -80,6 +80,13 @@ export function toFileFact(row = {}) {
     updatedAt: row.updatedAt || row.updated_at || null,
     kind: row.kind || "single",
     docClass: classifyDocClass(discipline, item, title),
+    // Work Item B IA fields. `category` (canonical top-level) + `state` are written by the
+    // auto-filer / a re-file; when absent they're derived (categoryOf / stateOf) so the
+    // tree works BEFORE the migration runs (graceful, like project_library). `subcategory`
+    // reuses `discipline` (don't duplicate a column) — a manually-typed one overrides it.
+    category: row.category || null,
+    subcategory: row.subcategory || discipline,
+    state: row.state || null,
     // NEW-2 placement-readiness flags (captured at filing time by the backend; until
     // then this is the empty shape merged with whatever the row already carries).
     placement: mergePlacementFacts(emptyPlacementFacts(), row.placement),
@@ -89,6 +96,8 @@ export function toFileFact(row = {}) {
     placed: row.placed === true || row.placed === "true",
     hasFile: !!(row.storageKey || row.hasFile) || row.oversize === false,
     unfiled: !(row.projectId || row.project_id),
+    // An explicit needs-filing flag from the file-facts index (low/no-confidence match).
+    needsFiling: row.needsFiling === true || row.needs_filing === true,
   };
 }
 
@@ -143,6 +152,124 @@ export function groupByDiscipline(facts) {
  * that's unfiled files; once the backend reports a match confidence, low-confidence /
  * multi-match files land here too (an explicit `needsFiling` flag overrides). */
 export const needsFiling = (facts) => facts.filter((f) => f.unfiled || f.needsFiling);
+
+/* ===================== Work Item B — the file-browser IA =====================
+ *
+ * Three SEPARATE axes (the old flat chip row jammed them into one):
+ *   • Folder tree   = WHAT KIND of document it is — the one true hierarchy. A canonical,
+ *                     code-defined top level (so a manual filer always has a target) with
+ *                     data-driven second level (the disciplines actually present).
+ *   • State facet   = WHAT STATE it's in (needs_filing | filed | superseded).
+ *   • Usage facet   = HOW IT'S USED (on the map | reference).
+ * State/usage are filters + per-file badges, never folders.
+ */
+
+// Canonical top-level categories. Code-defined + stable so the tree never wanders and a
+// manual filer always has a clean target (a hardcoded discipline list would strand the
+// first "Demolition" or "Process" set — disciplines are the DATA-driven second level).
+export const CATEGORIES = [
+  "Drawings", "Surveys", "Plats", "Title", "Geotechnical",
+  "Environmental", "Permits/Entitlements", "Reports/Studies", "Agreements",
+];
+
+// Disciplines whose default home is the drawing set.
+const DRAWING_DISCIPLINES = new Set([
+  "Architectural", "Structural", "Civil", "Mechanical", "Electrical",
+  "Plumbing", "Landscape", "Fire Alarm", "Fire Sprinkler", "CAD",
+]);
+const isPlat = (item, title) => /\b(re)?plat\b|subdivision\s*plat|final\s*plat|preliminary\s*plat/i.test(`${item || ""} ${title || ""}`);
+const isPermit = (item, title) => /\bpermit\b|zoning|entitlement|variance\b|\bSUP\b|special\s*use|site\s*plan\s*approval|plat\s*application/i.test(`${item || ""} ${title || ""}`);
+const isAgreement = (item, title) => /agreement|\bcontract\b|\bMOU\b|covenant|\bCC&Rs?\b|deed\s*restriction|easement\s*(agreement|grant)/i.test(`${item || ""} ${title || ""}`);
+const isReport = (item, title) => /\breport\b|\bstudy\b|\banalysis\b|assessment|memorandum|\bmemo\b/i.test(`${item || ""} ${title || ""}`);
+
+/* Map a file to its canonical category from discipline + item/title. Most-specific first
+ * (a plat/title is its own category even though it's a survey product). Pure; deterministic
+ * so the tree can derive a category when one wasn't stored. */
+export function categoryFor(discipline, item, title) {
+  if (isTitleCommitment(item, title)) return "Title";
+  if (isPlat(item, title)) return "Plats";
+  if (discipline === "Survey" || isLegalDescription(item, title)) return "Surveys";
+  if (discipline === "Geotech") return "Geotechnical";
+  if (discipline === "Environmental") return "Environmental";
+  if (isPermit(item, title)) return "Permits/Entitlements";
+  if (isAgreement(item, title)) return "Agreements";
+  if (DRAWING_DISCIPLINES.has(discipline)) return "Drawings";
+  if (isReport(item, title)) return "Reports/Studies";
+  return "Reports/Studies"; // a read-pile fallback — never a phantom drawing node
+}
+
+// The file's category: an explicit stored one (auto-filer / re-file) wins; else derived.
+export const categoryOf = (f) => f.category || categoryFor(f.discipline, f.item, f.title);
+export const subcategoryOf = (f) => f.subcategory || f.discipline || "Other";
+
+/* Filing-lifecycle state (the STATE facet). Explicit `superseded`/`needs_filing` win; an
+ * unfiled / low-confidence file is needs_filing; everything else is filed. */
+export const FILE_STATES = { NEEDS_FILING: "needs_filing", FILED: "filed", SUPERSEDED: "superseded" };
+export function stateOf(f) {
+  if (f.state === FILE_STATES.SUPERSEDED) return FILE_STATES.SUPERSEDED;
+  if (f.state === FILE_STATES.NEEDS_FILING || f.unfiled || f.needsFiling) return FILE_STATES.NEEDS_FILING;
+  return FILE_STATES.FILED;
+}
+
+// Usage facet predicates: on-the-map (placed spatial) vs. reference (read-only class).
+export const onMap = (f) => isSpatial(f) && !!f.placed;
+export const isReference = (f) => f.docClass === DOC_CLASS.REFERENCE;
+
+/* The usage/state facet row above the list. "Needs filing" is handled separately (it's the
+ * holding area, not a filter over the tree node) so it carries its own live count. */
+export const FACETS = [
+  { id: "all", label: "All", match: () => true },
+  { id: "on-map", label: "On the map", match: onMap },
+  { id: "reference", label: "Reference", match: isReference },
+];
+
+// A file belongs to the tree (a real category node) only once it's filed; needs-filing
+// lives in the holding area and superseded is hidden unless asked for.
+const inTree = (f, includeSuperseded) => {
+  const st = stateOf(f);
+  return st === FILE_STATES.FILED || (includeSuperseded && st === FILE_STATES.SUPERSEDED);
+};
+
+/* Derive the category tree from facts (metadata only — never touches file bytes). Canonical
+ * order; EMPTY categories don't render; each node carries a count and its data-driven
+ * subcategories (the disciplines present), also with counts. */
+export function deriveTree(facts, { includeSuperseded = false } = {}) {
+  const byCat = new Map(); // category -> Map(subcategory -> count)
+  for (const f of facts) {
+    if (!inTree(f, includeSuperseded)) continue;
+    const cat = categoryOf(f), sub = subcategoryOf(f);
+    if (!byCat.has(cat)) byCat.set(cat, new Map());
+    const subs = byCat.get(cat);
+    subs.set(sub, (subs.get(sub) || 0) + 1);
+  }
+  return CATEGORIES.filter((c) => byCat.has(c)).map((category) => {
+    const subs = [...byCat.get(category).entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { category, count: subs.reduce((n, s) => n + s.count, 0), subs };
+  });
+}
+
+// Does a fact fall under the selected tree node (category / subcategory)?
+export function nodeMatch(f, { category = null, subcategory = null } = {}) {
+  if (category && categoryOf(f) !== category) return false;
+  if (subcategory && subcategoryOf(f) !== subcategory) return false;
+  return true;
+}
+
+/* The file list for the current tree node + facet, newest-first. Excludes the holding area
+ * (needs-filing) and, by default, superseded files. Pure + metadata-only. */
+export function browseFiles(facts, { category = null, subcategory = null, facet = "all", includeSuperseded = false } = {}) {
+  const facetFn = (FACETS.find((x) => x.id === facet) || FACETS[0]).match;
+  return facts
+    .filter((f) => inTree(f, includeSuperseded) && nodeMatch(f, { category, subcategory }) && facetFn(f))
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+}
+
+// The project's needs-filing holding area (a loud, truthful to-do — a stuck/invisible
+// needs-filing item is a silent failure).
+export const holdingArea = (facts) => facts.filter((f) => stateOf(f) === FILE_STATES.NEEDS_FILING)
+  .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
 /* --------------------------- index provider ------------------------------ */
 /* The auto-filing index (read a title block → match a project → capture facts incl. the
