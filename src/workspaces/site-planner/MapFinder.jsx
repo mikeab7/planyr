@@ -3,13 +3,13 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
-import { recordSourceResult, filterHealthyCandidates } from "./lib/sourceHealth.js";
+import { recordSourceResult, filterHealthyCandidates, isSourceOpen } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelDetailed,
+  identifyParcelEager,
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -592,16 +592,61 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lazily add a county's visible parcel-outline layer (zoom-gated, county-bounded
-  // so it only paints where that county has coverage). Idempotent per county.
+  // How long to wait for a county's outline layer to actually draw before treating its
+  // CAD host as hung. A live host (HCAD/TxGIO) answers in ~2s; FBCAD's whole server has
+  // gone dark for 15s+ at a stretch (B244, recurred 2026-06-22) with the outline layer
+  // — which, unlike the click path, had no timeout — spinning "forever". Past this we
+  // drop the dead layer, lean on the always-present statewide TxGIO outlines for that
+  // ground, and remember the host is failing so CLICKS skip it too (keeping what you
+  // SEE and what you can SELECT the same source — the B137 rule).
+  const DISPLAY_LOAD_TIMEOUT_MS = 8000;
+
+  // Lazily add a county's visible parcel-outline layer (zoom-gated). Skips a county
+  // whose CAD breaker is already open (its tiles would only hang); the statewide TxGIO
+  // outline layer still covers that area. Idempotent per county.
   const addDisplay = (key) => {
     const map = mapRef.current;
     const url = layerUrlsRef.current[key];
     if (!map || !url || displaysRef.current[key]) return;
+    const statewide = STATEWIDE_KEYS.includes(key);
+    // A county we already know is down: don't add a layer that will only spin — the
+    // statewide outlines cover it. Never skip the statewide source itself (the
+    // universal fallback).
+    if (!statewide && isSourceOpen(key)) return;
+
     const fl = makeParcelLayer(url);
-    fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
     fl.addTo(map);
     displaysRef.current[key] = fl;
+    // The statewide TxGIO layer is the UNIVERSAL fallback — let it load even when it's
+    // slow, and NEVER pull it on a hiccup. A slow statewide outline still beats no
+    // outline (that "took a while to load but worked" wait IS this layer); removing it
+    // would leave the user with nothing to see OR click. Only a real county layer gets
+    // the hang-guard below.
+    if (statewide) {
+      fl.on("requesterror", () => setErr("Statewide parcel outlines are slow right now — clicking a lot still adds it."));
+      return;
+    }
+
+    let settled = false; // health of this county layer's first real draw, decided once
+    let timer = null;
+    const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const markDown = () => {
+      if (settled) return; settled = true; stopTimer();
+      // A real county's outline request hung/errored → pull the dead layer (so the map
+      // stops spinning), record the host as failing so CLICKS skip it too, and rely on
+      // the TxGIO statewide outlines for this area (keep what you SEE == what you can
+      // SELECT, the B137 rule).
+      try { map.removeLayer(fl); } catch (_) {}
+      delete displaysRef.current[key];
+      recordSourceResult(key, false);
+      setErr("That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.");
+    };
+    // Arm the hang-timer only once a request to the host is actually in flight, so we
+    // never false-flag a county just because we're zoomed out below the outline zoom
+    // (no request made). A live host fires 'load' well within the window.
+    fl.on("requeststart", () => { if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS); });
+    fl.on("load", () => { if (!settled) { settled = true; stopTimer(); } }); // drew fine — healthy
+    fl.on("requesterror", markDown);
   };
   const clearDisplays = () => {
     const map = mapRef.current;
@@ -690,8 +735,13 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
     setBusy(true); setErr(""); setBackupNotice(null);
     try {
-      const res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
-      res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
+      // Eager identify: take the first source that returns a lot (≈2-3s via the
+      // statewide layer) instead of stalling on a hung county server's full 8s timeout.
+      // The breaker is fed for EVERY source via onSettled once they all finish — even
+      // the slow ones we didn't wait for — so the next click skips a dead host (B244).
+      const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
+      });
       if (!res.hits.length) {
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
@@ -732,11 +782,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (!candidates.length) { setParcelInfo({ status: "unavailable", label }); return; }
     let res;
     try {
-      res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
+      res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)), // feed the circuit breaker
+      });
     } catch (_) {
       setParcelInfo({ status: "unavailable", label }); return;
     }
-    res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
     if (!res.hits.length) {
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
