@@ -5,6 +5,12 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V106 — Embedded Schedule module renders its FULL action toolbar, not just the Columns button (B381) ✅ (self-verified headless — fully done)
+- **Harness:** `ui-audit/verify-schedule-toolbar.mjs` (chromium-1228, `--ignore-certificate-errors`). Loads the app, switches to the Schedule module, reaches into the same-origin `/sequence/` iframe and probes the `.app-header` toolbar.
+- **Result:** PASS 2026-06-22, **15/15.** The sequence toolbar is visible in the iframe; the shell-duplicated nav (logo / Dashboard-Projects toggle / project picker) is correctly hidden; the action controls render (View switcher, Review, Format, Export, Save, Version History, Contacts, Automation, Settings); the in-grid Columns button still present (grid not broken).
+- **Proven working, not just present:** switching to Gantt reveals the timeline zoom controls; zoom-in changes the displayed % (17→33, not a no-op); Contacts opens its panel. So a button that renders but no-ops would fail here.
+- **Scope check:** Site + Markup toolbars confirmed present + unaffected (they aren't iframes; they feed the shell's `toolbarContent` slot, which the `.in-iframe` rule can't reach).
+
 ### V105 — Schedule load doesn't trip the workspace ErrorBoundary on the first-render-before-data race (B380) ✅ (self-verified headless — fully done)
 - **Harness:** `ui-audit/verify-scheduler-no-crash.mjs` (chromium-1228). The Scheduler's nav-state listener accepts a same-origin `window.postMessage`, so the EXACT embedded-app contract is driven synthetically with controlled timing. Three scenarios: (1) cold-boot `#/schedule` with nav-state held back past first paint; (2) a deliberately MALFORMED nav-state (`undefined`/null/primitive entries + an `activeId` not in the list) with the breadcrumb dropdown opened to force the `p.id`/`p.name` render; (3) a SIGNED-IN variant (seeded fake session) with the profiles fetch failing so `profile` resolves after first paint.
 - **Result:** PASS 2026-06-22, **9/9** (6/6 logged-out; the signed-in trio runs when the preview is Supabase-configured). No ErrorBoundary on the race, loader/"Select a project" empty state shown; the malformed nav-state does NOT crash the header and the valid projects (Goose Creek, Grand Port) still render with the bad entries dropped; signed-in-with-late-profile shows no boundary.
