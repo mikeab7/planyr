@@ -9,7 +9,7 @@ import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups, pointInPoly } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
@@ -776,25 +776,43 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; t = Math.max(0, Math.min(1, t));
       return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
     };
-    let best = null, bd = Infinity;
+    const bboxArea = (pts) => { // tie-break for interior hits (the smaller shape wins)
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+      return (x1 - x0) * (y1 - y0);
+    };
+    // Among interior (d===0) hits, prefer the SMALLEST shape so a small markup sitting on top of a
+    // big filled area stays selectable instead of being swallowed by the area underneath it (B374).
+    let best = null, bd = Infinity, bArea = Infinity;
     for (const m of pageMarks) {
       const pts = m.pts || [];
-      let d = Infinity;
+      let d = Infinity, interior = false;
       if (m.kind === "rect" || m.kind === "cloud") {
         // shape-aware: a box is selectable across its whole body, not just its 2 corners (B33)
         const a = pts[0], b = pts[1]; if (!a || !b) continue;
         const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) d = 0;
+        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
       } else if (m.kind === "text") {
         // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
         const q = pts[0]; if (!q) continue;
         const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
-        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) d = 0;
+        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
+      } else if (m.kind === "area") {
+        // B33 generalized to the AREA polygon (B374): its FILLED interior is grabbable, so a click
+        // anywhere inside selects it — not just an edge/vertex (the dead-centre bug Michael hit). A
+        // thin / degenerate (<3-pt) area still selects by its edge or vertex via the fallback.
+        if (pts.length >= 3 && pointInPoly(p, pts)) { d = 0; interior = true; }
+        else {
+          for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+          if (pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
+        }
       } else {
-        // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
+        // distance / perimeter / count: nearest vertex OR segment (so the line body selects)
         for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+        if (m.kind === "perimeter" && pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
       }
-      if (d < bd) { bd = d; best = m.id; }
+      const a = interior ? bboxArea(pts) : Infinity;
+      if (d < bd - 1e-6 || (d <= bd + 1e-6 && a < bArea)) { bd = d; best = m.id; bArea = a; }
     }
     return bd <= tol ? best : null;
   };
@@ -835,6 +853,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   /* ---------------- render ---------------- */
   const f0 = (n) => Math.round(n).toLocaleString();
   const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Right-hand value for a row in the per-sheet markup list (B376): a measurement shows its
+  // measured value; a text note shows its words; a redline shape has none. Every markup is listed
+  // so it can always be found + deleted from the panel, independent of clicking it on the canvas.
+  const markRowValue = (m) => MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : m.kind === "text" ? ((m.text || "").trim() || "empty note") : "";
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
   // + tightened padding for density on the single header row (B305).
   const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
@@ -1110,6 +1132,25 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
                 {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
                 {drawDraft()}
               </svg>
+              {/* On-canvas delete affordance (B375): a clear × on the selected markup so removing it
+                  doesn't depend on knowing the Delete key. Lives OUTSIDE the pointerEvents:none overlay
+                  (like the inline editors) so it takes its own click; stopPropagation keeps that click
+                  from starting a pan/draw on the canvas underneath. Anchored at the markup's top-right. */}
+              {sel && !editing && !calInput && (() => {
+                const m = pageMarks.find((mm) => mm.id === sel);
+                const src = (dragPreview && dragPreview.id === sel ? dragPreview.pts : m && m.pts) || [];
+                if (!m || !src.length) return null;
+                const sp = src.map((q) => ({ x: q.x * view.scale, y: q.y * view.scale }));
+                let rx = -Infinity, ty = Infinity;
+                for (const q of sp) { rx = Math.max(rx, q.x); ty = Math.min(ty, q.y); }
+                if (m.kind === "text") { rx = sp[0].x + ((m.text || "").length * 6.5 + 6); ty = sp[0].y - 12; }
+                return (
+                  <button title="Delete this markup (Del)" aria-label="Delete this markup"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); pushHistory(); setMarkups((a) => a.filter((mm) => mm.id !== sel)); setSel(null); }}
+                    style={{ position: "absolute", left: rx + 6, top: ty - 2, width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: "var(--danger-text)", color: "var(--on-accent)", cursor: "pointer", fontSize: 15, fontWeight: 800, lineHeight: 1, boxShadow: "0 2px 8px rgba(0,0,0,0.35)", zIndex: 7, padding: 0, fontFamily: "inherit" }}>×</button>
+                );
+              })()}
               {editing && (
                 <input autoFocus value={editing.text}
                   onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
@@ -1161,12 +1202,21 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
               })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
-            {pageMarks.filter((m) => MEASURE.has(m.kind)).length === 0
-              ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>No measurements yet.</div>
-              : <div style={{ marginBottom: 10 }}>{pageMarks.filter((m) => MEASURE.has(m.kind)).map((m) => (
-                  <div key={m.id} onClick={() => { setTool("select"); setSel(m.id); }} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 6px", borderRadius: 6, cursor: "pointer", background: m.id === sel ? "#fbf3ee" : "transparent", fontSize: 11.5 }}>
-                    <span style={{ color: PAL.muted, textTransform: "capitalize" }}>{m.kind}</span>
-                    <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{measureLabel(m, ftPerUnit)}</span>
+            {/* Every markup on the sheet (measures + redlines + notes), each click-to-select with its
+                own × delete — so anything can be removed from the list even if it's hard to click on a
+                dense sheet or you're not in Select mode (B376). */}
+            {pageMarks.length === 0
+              ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
+              : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
+                    <button onClick={() => { setTool("select"); setSel(m.id); }} title="Select this markup on the sheet"
+                      style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
+                      <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>
+                      <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{markRowValue(m)}</span>
+                    </button>
+                    <button onClick={() => { pushHistory(); setMarkups((a) => a.filter((x) => x.id !== m.id)); if (sel === m.id) setSel(null); }}
+                      title="Delete this markup" aria-label="Delete this markup"
+                      style={{ flex: "none", width: 22, height: 22, display: "grid", placeItems: "center", border: "none", background: "transparent", cursor: "pointer", color: "var(--danger-text)", fontSize: 13, fontWeight: 800, lineHeight: 1, borderRadius: 5, fontFamily: "inherit" }}>×</button>
                   </div>
                 ))}</div>}
 
