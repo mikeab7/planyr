@@ -1,13 +1,12 @@
-/* B393–B396 — exported Gantt quality, verified end-to-end against the live Scheduler.
+/* B397–B400 — exported Gantt quality (z-order, single left edge, two-tier weighted header, fit/pan),
  *
  * Drives page → sequence iframe → Export → PDF/Print Exhibit → the (blob:) preview iframe and
  * asserts on the REAL rendered exhibit SVG + the parent preview controls:
- *   B393  the vertical rules (grid / year / today / dependency lines) all paint BEHIND the bars
+ *   B397  the vertical rules (grid / today / dependency) all paint BEHIND the bars (SVG order).
  *         — every <line>/<path class=dep> precedes every bar/bracket/milestone in SVG order.
- *   B394  the left chart-edge boundary is ONE continuous full-height line, not per-row segments.
- *   B395  dependency connectors are orthogonal ELBOWS — zero curves, every segment axis-aligned,
- *         and the purple SS link color is preserved.
- *   B396  the gantt has a viewBox and fully fits its column (no horizontal clip = whole timeline);
+ *   B398  the left chart-edge boundary is ONE continuous full-height line, not per-row segments.
+ *   B399  two-tier light Year-over-Month header + weighted year>quarter>month grid rules; rows aligned.
+ *   B400  viewBox fits the whole timeline (no clip); preview Fit + Move (drag-pan). Connectors stay main B396 curved.
  *         the preview exposes Fit + Move controls and Move-drag pans the chart.
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
@@ -100,15 +99,14 @@ try {
   });
   console.log(`  svg: ${g.childCount} els · lastRule@${g.lastRule} firstBar@${g.firstBar} · deps=${g.depCount} curved=${g.curved} nonOrtho=${g.nonOrtho} · colors=[${g.colors.join(",")}] · ruleWidths=[${g.ruleW.join(",")}]`);
 
-  ok("B393 — every vertical rule is painted BEHIND the bars (rules before bars in SVG order)", g.lastRule >= 0 && g.firstBar < Infinity && g.lastRule < g.firstBar, `lastRule@${g.lastRule} < firstBar@${g.firstBar}`);
-  ok("B396 — weighted grid rules present (year 1.3 > quarter 0.8 > month 0.4)", g.weighted, `widths=[${g.ruleW.join(",")}]`);
-  ok("B396 — two-tier light header shows a year-band label", g.yearLabel);
-  ok("B394 — exactly ONE continuous full-height left-edge line (not per-row)", g.edgeCount === 1 && g.edgeFull, `count=${g.edgeCount} full=${g.edgeFull}`);
-  ok("B395 — dependency connectors have ZERO curves (no bezier)", g.depCount > 0 && g.curved === 0, `${g.depCount} deps, ${g.curved} curved`);
-  ok("B395 — every dependency segment is axis-aligned (true elbows)", g.depCount > 0 && g.nonOrtho === 0, `${g.nonOrtho} diagonal segments`);
-  ok("B395 — connector colors stay within the FS/SS/FF/SF palette (purple SS preserved)", g.colors.length > 0 && g.colors.every((c) => ["#0969da", "#7c3aed", "#0891b2", "#be185d"].includes(c)), g.colors.join(","));
-  ok("B396 — gantt SVG has a viewBox", g.hasViewBox);
-  ok("B396 — the whole timeline fits its column (no horizontal clip)", g.svgW > 0 && Math.abs(g.svgRight - g.ganttRight) <= 2 && g.svgW <= g.ganttW + 2, `svg ${g.svgW}px fits gantt ${g.ganttW}px`);
+  ok("B397 — every vertical rule is painted BEHIND the bars (rules before bars in SVG order)", g.lastRule >= 0 && g.firstBar < Infinity && g.lastRule < g.firstBar, `lastRule@${g.lastRule} < firstBar@${g.firstBar}`);
+  ok("B398 — exactly ONE continuous full-height left-edge line (not per-row)", g.edgeCount === 1 && g.edgeFull, `count=${g.edgeCount} full=${g.edgeFull}`);
+  ok("B399 — weighted grid rules present (year 1.3 > quarter 0.8 > month 0.4)", g.weighted, `widths=[${g.ruleW.join(",")}]`);
+  ok("B399 — two-tier light header shows a year-band label", g.yearLabel);
+  ok("B400 — gantt SVG has a viewBox", g.hasViewBox);
+  ok("B400 — the whole timeline fits its column (no horizontal clip)", g.svgW > 0 && Math.abs(g.svgRight - g.ganttRight) <= 2 && g.svgW <= g.ganttW + 2, `svg ${g.svgW}px fits gantt ${g.ganttW}px`);
+  // Connectors are intentionally main's CURVED bézier (owner's B396 pick) — confirm they're still curved + on-palette, NOT re-elbowed.
+  ok("main B396 preserved — dependency connectors stay CURVED (bézier), on-palette", g.depCount > 0 && g.curved > 0 && g.colors.every((c) => ["#0969da", "#7c3aed", "#0891b2", "#be185d"].includes(c)), `${g.curved}/${g.depCount} curved, colors=[${g.colors.join(",")}]`);
 
   // The taller two-tier header must not desync table rows from their bars — the table column
   // header and the gantt header have to be the same height. Compare the first table row's top
@@ -120,15 +118,15 @@ try {
     if (!tr || !band) return null;
     return { diff: Math.round(Math.abs(tr.getBoundingClientRect().top - band.getBoundingClientRect().top)) };
   });
-  ok("B396 — table rows stay aligned with their gantt bars (header heights match)", align && align.diff <= 2, align ? `Δ${align.diff}px` : "n/a");
+  ok("B399 — table rows stay aligned with their gantt bars (header heights match)", align && align.diff <= 2, align ? `Δ${align.diff}px` : "n/a");
 
   // ── B396 preview controls (live in the SEQUENCE iframe, where the modal renders) ──
   const ctrls = await frame.evaluate(() => {
     const btns = [...document.querySelectorAll("button")];
     return { fit: btns.some((b) => b.textContent.trim() === "Fit"), move: btns.some((b) => b.textContent.trim() === "Move") };
   });
-  ok("B396 — preview exposes a Fit control", ctrls.fit);
-  ok("B396 — preview exposes a Move (drag-to-pan) control", ctrls.move);
+  ok("B400 — preview exposes a Fit control", ctrls.fit);
+  ok("B400 — preview exposes a Move (drag-to-pan) control", ctrls.move);
 
   // Zoom in, enter Move mode, drag — the preview must scroll (pan). Scope the zoom button to the
   // PREVIEW toolbar (the Move button's own toolbar) — the live Scheduler behind the modal also
@@ -152,7 +150,7 @@ try {
     const after = await frame.evaluate(() => { const f = document.querySelector('iframe[title="PDF Preview"]'); return f.parentElement.parentElement.scrollLeft; });
     return { ok: after > before + 8, before, after };
   })();
-  ok("B396 — Move mode: dragging pans the preview horizontally", panned.ok, `scrollLeft ${panned.before}→${panned.after}`);
+  ok("B400 — Move mode: dragging pans the preview horizontally", panned.ok, `scrollLeft ${panned.before}→${panned.after}`);
 
   // Capture the corrected exhibit for the record.
   await blob.locator(".split-gantt").first().screenshot({ path: "ui-audit/screens/gantt-export-after.png" }).catch(() => {});
@@ -163,5 +161,5 @@ try {
   const passed = results.filter((r) => r.pass).length;
   console.log(`\n=== ${passed}/${results.length} checks passed ===`);
   await browser.close();
-  process.exit(passed === results.length && results.length >= 14 ? 0 : 1);
+  process.exit(passed === results.length && results.length >= 12 ? 0 : 1);
 }

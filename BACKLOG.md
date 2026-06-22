@@ -22,6 +22,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat batch (exported Gantt QUALITY) — arrived NEW-1..NEW-4, first minted
+     B393–B396, but a CONCURRENT session shipped its OWN B393–B396 (Gantt labels + curved connectors) to
+     `main` while this was in flight, so **renumbered B397–B400**. Per STANDING RULE #1 filed AND fixed +
+     headless-verified (V115, 12/12) + merged the SAME session on branch `claude/gifted-hypatia-na62be`:
+     B397 (vertical rules behind bars), B398 (one continuous left edge), B399 (light two-tier Year▸Month
+     header + weighted year>quarter>month grid rules, owner-art-directed), B400 (viewBox fit-to-width +
+     Move/zoom drag-pan in the preview). The owner approved ELBOW connectors here, but the concurrent
+     session had already settled connectors with later, more-informed owner feedback ("the serpentine ones
+     were fine, I preferred those, revert — they just weren't bound to the bars"), so on owner confirmation
+     this session the elbow work was DROPPED and main's curved-bound connectors (their B396) kept. Full [x]
+     blocks in BACKLOG-DONE.md. -->
+
 <!-- 2026-06-22: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" — Gantt label alignment + uniform ink,
      printed-Gantt missing names, and serpentine dependency arrows. First minted B390/B391/B392, but a
      concurrent `main` (PR #293, the PDF/Print Exhibit table-layout batch below) took B390/B391/B392
