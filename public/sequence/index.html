@@ -6918,6 +6918,35 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
   }
 }
 
+// ── Dependency connector routing (B395) ───────────────────
+// Orthogonal "elbow" routing in the P6 / MS-Project exhibit convention: a connector leaves the
+// predecessor horizontally, drops/rises through a ROW GUTTER, then enters the successor
+// horizontally — right angles only, so a link never slashes diagonally across a bar. Shared by
+// both render paths (GanttView on-screen + buildGanttSVG export) so they stay identical. Pure:
+// returns the SVG path `d`; the caller draws the arrowhead pointing in the entry direction.
+// `type` is the dependency kind (FS/SS/FF/SF); anchor x's are pre-resolved by the caller
+// (finish- vs start-anchored), this just routes between them.
+function depElbowDir(type){
+  const t=(type||"FS").toUpperCase();
+  return { exit: t[0]==="F" ? 1 : -1, entry: t[1]==="S" ? 1 : -1 };   // leave finish→right/start→left; enter start→from-left/finish→from-right
+}
+function depElbowPath(x1, y1, x2, y2, type, rowH){
+  const { exit, entry } = depElbowDir(type);
+  const STUB = 9;                          // short horizontal stub off each bar end
+  const xa = x1 + exit  * STUB;            // end of the predecessor exit stub
+  const xb = x2 - entry * STUB;            // start of the successor entry stub
+  if (Math.abs(y1 - y2) < 0.5)             // same row: a flat hop, no vertical detour
+    return `M${x1},${y1} L${xa},${y1} L${xb},${y2} L${x2},${y2}`;
+  // Long horizontal leg runs along the gutter just OUTSIDE the successor row (its top edge when
+  // descending, bottom edge when ascending) so it never crosses the successor's own bar.
+  const gY = y2 + (y1 <= y2 ? -rowH*0.5 : rowH*0.5);
+  return `M${x1},${y1} L${xa},${y1} L${xa},${gY} L${xb},${gY} L${xb},${y2} L${x2},${y2}`;
+}
+function depArrowHead(x2, y2, type){       // triangle tip at (x2,y2), pointing in the entry direction
+  const { entry } = depElbowDir(type);
+  return `${x2},${y2} ${x2-6*entry},${y2-3} ${x2-6*entry},${y2+3}`;
+}
+
 // ── GanttView ─────────────────────────────────────────────
 function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings}) {
   const [scrollTop, setScrollTop] = useState(0);
@@ -7142,13 +7171,13 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
           <svg style={{position:"absolute",top:0,left:0,width:totalW,height:tasks.length*ROW_H,pointerEvents:"none",zIndex:3,overflow:"visible"}}>
             {depLines.map(l => {
             const color = l.type==="SS"?"#7c3aed":l.type==="FF"?"#0891b2":l.type==="SF"?"#be185d":"#0969da";
-            const arrowRight = l.x2 >= l.x1;
-            const aDir = arrowRight ? 1 : -1;
+            // B395 — orthogonal elbow routing (P6/MSP style), thin + light, behind the bars
+            // (this <svg> is z3; bars are z5) so a link never slashes across a bar.
             return (
               <g key={l.key}>
-                <path d={`M${l.x1},${l.y1} C${l.x1+32*aDir},${l.y1} ${l.x2-32*aDir},${l.y2} ${l.x2},${l.y2}`}
-                  stroke={color} strokeWidth="1.2" fill="none" strokeDasharray="4 3" opacity=".55" />
-                <path d={`M${l.x2},${l.y2} L${l.x2-5*aDir},${l.y2-3} L${l.x2-5*aDir},${l.y2+3}Z`} fill={color} opacity=".55" />
+                <path d={depElbowPath(l.x1,l.y1,l.x2,l.y2,l.type,ROW_H)}
+                  stroke={color} strokeWidth="1" fill="none" opacity=".6" />
+                <polygon points={depArrowHead(l.x2,l.y2,l.type)} fill={color} opacity=".75" />
               </g>
             );
           })}
@@ -8485,7 +8514,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const xOf=d=>LABEL_W+Math.round((pd(d)-pd(minD))/86400000*ppd);
   const getDepth=(tasks,id)=>{let dep=0,t=tasks.find(x=>x.id===id);while(t&&t.parentId!==null){dep++;t=tasks.find(x=>x.id===t.parentId);}return Math.min(dep,3);};
   const HC={gray:"#94a3b8",yellow:"#d97706",red:"#dc2626",green:"#16a34a",paused:"#9ca3af"};
-  // Build full month list with date metadata for adaptive filtering
+  // Build full month list with date metadata for the axis + adaptive label density.
   const months=[], cur2=new Date(pd(minD));cur2.setDate(1);
   // Bound the header loop: a valid-but-extreme end date (e.g. a typo'd year 9999, or
   // imported far-future data) would otherwise build ~95k month cells. 12000 months =
@@ -8493,15 +8522,29 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   let _mGuard=12000;
   while(cur2<=pd(maxD) && _mGuard-->0){
     months.push({x:xOf(fd(cur2)), mo:cur2.getMonth(), yr:cur2.getFullYear(),
-      label:cur2.toLocaleDateString("en-US",{month:"short",year:"2-digit"})});
+      label:cur2.toLocaleDateString("en-US",{month:"short"})});   // "Jun" — the YEAR is its own tier now (B396)
     cur2.setMonth(cur2.getMonth()+1);
   }
-  // Adaptive label density — skip labels that would overlap (~28px each at 7.5px font)
+  // Each month's right edge = next month's start (last → chart right edge) so tier labels center.
+  months.forEach((m,i)=>{ m.x1 = months[i+1] ? months[i+1].x : svgWidth; m.cx=(m.x+m.x1)/2; });
+  // Year spans for the top tier (group the months by calendar year).
+  const yearSpans=[];
+  months.forEach(m=>{ const last=yearSpans[yearSpans.length-1]; if(last&&last.yr===m.yr) last.x1=m.x1; else yearSpans.push({yr:m.yr,x0:m.x,x1:m.x1}); });
+  yearSpans.forEach(y=>y.cx=(y.x0+y.x1)/2);
+  // Adaptive month-label density — drop labels that would overlap (~26px each at 7.5px font);
+  // single-letter when months get tight.
   const monthPx=ppd*30.4;
-  const visibleMonths=monthPx>=26?months:monthPx>=13?months.filter(m=>[0,2,4,6,8,10].includes(m.mo)):monthPx>=7?months.filter(m=>[0,3,6,9].includes(m.mo)):months.filter(m=>m.mo===0);
-  const yearMarkers=months.filter(m=>m.mo===0);
-  const HEADER_H=22, svgH=HEADER_H+ROW_H*allTasks.length;
-  const rows=allTasks.map((t,i)=>{
+  const monLabel = m => monthPx>=30 ? m.label : m.label[0];
+  const visibleMonths=monthPx>=22?months:monthPx>=12?months.filter(m=>m.mo%2===0):monthPx>=6?months.filter(m=>[0,3,6,9].includes(m.mo)):months.filter(m=>m.mo===0);
+  // B396 (owner pick "D") — a two-tier LIGHT header: a YEAR band over a MONTH band, HEADER_H tall.
+  const YEAR_TIER=14, MON_TIER=16, HEADER_H=YEAR_TIER+MON_TIER, svgH=HEADER_H+ROW_H*allTasks.length;
+  // B393 — paint in explicit LAYERS so the data sits ON TOP of the vertical rules (mirrors the
+  // on-screen Gantt's z-order, B222): row bands (bottom) → grid / year / today / dependency
+  // lines → bars + milestones → text labels (top). Collecting each row's pieces into separate
+  // buckets — instead of one interleaved per-row string — is what lets the rules render UNDER
+  // the bars (the old `${gridLines}${rows}${yearLines}${arrows}${todayLine}` put them on top).
+  const rowBands=[], barLayer=[], labelLayer=[];
+  allTasks.forEach((t,i)=>{
     const y=HEADER_H+i*ROW_H, bg=i%2?"#f6f6f6":"#fff";
     const bx=xOf(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/86400000*ppd));
     const color=HC[t.health]||"#94a3b8";
@@ -8509,26 +8552,24 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     const proj=projects.find(p=>p.tasks.some(x=>x.id===t.id));
     const depth=proj?getDepth(proj.tasks,t.id):0;
     const isParent=proj?proj.tasks.some(x=>x.parentId===t.id):false;
-    const labelHtml = noLabels ? "" :
-      (() => {
-        const indent=depth*8, nameX=4+indent;
-        const maxCh=Math.floor((LABEL_W-nameX-4)/5.2);
-        const nm=t.name==null?"":String(t.name);   // a nameless task must not crash the exhibit (was: t.name.length on undefined)
-        const nameStr=nm.length>maxCh?nm.slice(0,maxCh-1)+"…":nm;
-        const fw=depth===0?"bold":depth===1?"600":"normal", fs=depth===0?9:depth===1?8.5:8;
-        return `<text x="${nameX}" y="${y+ROW_H*0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>
-<line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y+ROW_H}" stroke="#e0e0e0" stroke-width="0.5"/>`;
-      })();
-    const barY=y+ROW_H*0.22, barH=ROW_H*0.55, midY=y+ROW_H*0.5;
-    let blText="";
+    rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
+    if(!noLabels){
+      const indent=depth*8, nameX=4+indent;
+      const maxCh=Math.floor((LABEL_W-nameX-4)/5.2);
+      const nm=t.name==null?"":String(t.name);   // a nameless task must not crash the exhibit (was: t.name.length on undefined)
+      const nameStr=nm.length>maxCh?nm.slice(0,maxCh-1)+"…":nm;
+      const fw=depth===0?"bold":depth===1?"600":"normal", fs=depth===0?9:depth===1?8.5:8;
+      labelLayer.push(`<text x="${nameX}" y="${y+ROW_H*0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>`);
+    }
+    const midY=y+ROW_H*0.5;
     if(opts.barLabels && !isParent){
       const L=barLabelText(t,opts.barLabels.left,opts.barLabels.year), R=barLabelText(t,opts.barLabels.right,opts.barLabels.year);
       const lx=isMilestone?bx-8:bx-3, rx=isMilestone?bx+8:bx+bw+3;
-      if(L) blText+=`<text x="${lx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`;
-      if(R) blText+=`<text x="${rx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" font-family="Arial,sans-serif">${escapeHtml(R)}</text>`;
+      if(L) labelLayer.push(`<text x="${lx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`);
+      if(R) labelLayer.push(`<text x="${rx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" font-family="Arial,sans-serif">${escapeHtml(R)}</text>`);
     }
-    // B210/B211 — match the on-screen Gantt: navy depth-stepped brackets for summaries,
-    // a single gray fill treatment (hollow → partial → solid) for task status.
+    // B210/B211 — navy depth-stepped brackets for summaries, a single gray fill treatment
+    // (hollow → partial → solid) for task status.
     const GRAY="#94a3b8";
     const pct = t.health==="green" ? 100 : Math.max(0, Math.min(100, t.percentComplete||0));
     let barSvg;
@@ -8558,10 +8599,8 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           +`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
       }
     }
-    return `<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>
-${labelHtml}
-${barSvg}${blText}`;
-  }).join("");
+    barLayer.push(barSvg);
+  });
   // Dependency connectors — same curved style as the in-app Gantt (cubic bezier,
   // direction-flipped 32px handles, type colors, dashed). Opacity lifted .55 -> .7 for print.
   let arrows="";
@@ -8583,38 +8622,52 @@ ${barSvg}${blText}`;
           const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
           const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
           const y1=HEADER_H+pi*ROW_H+ROW_H*0.5, y2=HEADER_H+si*ROW_H+ROW_H*0.5;
-          const aDir=x2>=x1?1:-1;
           const color=DEP_C[type]||DEP_C.FS;
-          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${x2-32*aDir},${y2} ${x2},${y2}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${y2} L${x2-5*aDir},${y2-3} L${x2-5*aDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
+          // B395 — orthogonal elbow (P6/MSP style), thin + light, solid; same router as the
+          // on-screen Gantt. Drawn before the bars below so it never crosses over a bar.
+          arrows+=`<path class="dep" d="${depElbowPath(x1,y1,x2,y2,type,ROW_H)}" stroke="${color}" stroke-width="1" fill="none" opacity="0.75"/>`
+            +`<polygon points="${depArrowHead(x2,y2,type)}" fill="${color}" opacity="0.85"/>`;
         }
       }
       base+=p.tasks.length;
     }
   }
-  // Month gridlines sit BEHIND the opaque row bands, so in the chart body they read only
-  // faintly; their real job is the labels in the dark header strip. January labels are
-  // emphasized (bold + white) so each year's start is legible on the axis itself.
-  const gridLines=months.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="${m.mo===0?'#bbb':'#eee'}" stroke-width="${m.mo===0?0.8:0.4}"/>`).join("")
-    +visibleMonths.map(m=>`<text x="${m.x+3}" y="15" font-size="${m.mo===0?8.5:7.5}" font-weight="${m.mo===0?'bold':'normal'}" fill="${m.mo===0?'#ffffff':'#e8e8e8'}" font-family="Arial,sans-serif">${m.label}</text>`).join("");
-  // B391 — year-boundary dividers: a heavier vertical line at each Jan 1, drawn OVER the
-  // row bands (the month lines are hidden behind them) so the split between calendar years
-  // reads at a glance. Solid medium slate keeps it distinct from the red dashed Today line
-  // and the colored dependency arrows. A single-year exhibit has no January boundary in
-  // range → no divider, which is correct.
-  const yearLines=yearMarkers.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="#7b8290" stroke-width="1.3"/>`).join("");
-  // Today marker — red dashed line with a tick in the header band
+  // ── Weighted vertical grid rules (B396, owner spec) — ONE line per month boundary, RANKED
+  //    year > quarter > month, each thicker + a touch darker than the next, so hierarchy reads by
+  //    line weight (no quarter LABEL, just the rule). Year rules drop from the very top; quarter
+  //    + month rules from below the year tier — all the way down THROUGH the body, kept light and
+  //    painted BEFORE the bars (B393) so nothing ever crosses over a bar / bracket / milestone.
+  const gridRules=months.map(m=>{
+    if(m.mo===0)   return `<line x1="${m.x}" y1="0" x2="${m.x}" y2="${svgH}" stroke="#8b95a3" stroke-width="1.3"/>`;            // YEAR — thickest
+    if(m.mo%3===0) return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#c2c9d2" stroke-width="0.8"/>`; // QUARTER — medium (line only)
+    return                `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#e7ebf0" stroke-width="0.4"/>`; // MONTH — thinnest
+  }).join("");
+  // B394 — ONE continuous left chart-edge boundary, full height, drawn once (not per-row).
+  const leftEdge=`<line x1="${LABEL_W}" y1="0" x2="${LABEL_W}" y2="${svgH}" stroke="#c4c8ce" stroke-width="0.8"/>`;
+  // Today marker — red dashed line + a small tick at the bottom of the header band.
   const todayStr=fdLocal(new Date());
   const todayLine=(opts.showToday!==false && todayStr>=minD&&todayStr<=maxD)
     ? `<line x1="${xOf(todayStr)}" y1="${HEADER_H}" x2="${xOf(todayStr)}" y2="${svgH}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2"/>
-<polygon points="${xOf(todayStr)-3.5},${HEADER_H-6} ${xOf(todayStr)+3.5},${HEADER_H-6} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>`
+<polygon points="${xOf(todayStr)-3.5},${HEADER_H-5} ${xOf(todayStr)+3.5},${HEADER_H-5} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>`
     : "";
-  const taskHeaderText = noLabels ? "" : `<text x="4" y="15" font-size="8" font-weight="bold" fill="#fff" font-family="Arial,sans-serif">TASK</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" style="width:100%;display:block">
+  // ── Two-tier LIGHT header (owner pick "D"): a year band over a month band ──
+  const headerBg=`<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${HEADER_H}" fill="#f6f8fa"/>`
+    +`<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${YEAR_TIER}" fill="#e9edf2"/>`;
+  const yearLabels=yearSpans.map(y=>`<text x="${y.cx}" y="${YEAR_TIER-3.5}" font-size="9.5" font-weight="700" fill="#3a4452" font-family="Arial,sans-serif" text-anchor="middle" letter-spacing="0.6">${y.yr}</text>`).join("");
+  const monthLabels=visibleMonths.map(m=>{const strong=m.mo%3===0;return `<text x="${m.cx}" y="${HEADER_H-5}" font-size="7.5" font-weight="${strong?700:500}" fill="${strong?"#3a4452":"#69727f"}" font-family="Arial,sans-serif" text-anchor="middle">${monLabel(m)}</text>`;}).join("");
+  const headerLines=`<line x1="${LABEL_W}" y1="${YEAR_TIER}" x2="${svgWidth}" y2="${YEAR_TIER}" stroke="#d4d8de" stroke-width="0.7"/>`
+    +`<line x1="${LABEL_W}" y1="${HEADER_H}" x2="${svgWidth}" y2="${HEADER_H}" stroke="#b9c0c9" stroke-width="1"/>`;
+  const taskHeaderText = noLabels ? "" : `<text x="4" y="${HEADER_H-6}" font-size="8" font-weight="bold" fill="#3a4452" font-family="Arial,sans-serif">TASK</text>`;
+  // B396 — a viewBox makes the whole 0..svgWidth content scale to fill the container width EXACTLY
+  // (with style:width:100%), so the full min→max timeline always fits the page Gantt column with
+  // no right-edge clipping. At the export widths the render is 1:1, so per-page slicing is
+  // unchanged (the paginator's GANTT_HEAD must match HEADER_H).
+  // Paint order (B393): white → header band → row bands → grid rules → left edge → today →
+  // dependency → bars → header labels/lines (axis text always on top) → bar labels.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" viewBox="0 0 ${svgWidth} ${svgH}" style="width:100%;display:block">
 <rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
-<rect x="0" y="0" width="${svgWidth}" height="${HEADER_H}" fill="#1a1a1a"/>
-${taskHeaderText}
-${gridLines}${rows}${yearLines}${arrows}${todayLine}</svg>`;
+${headerBg}
+${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}</svg>`;
 }
 
 // ── Exhibit column sizing (B390 content-fit + B392 drag-resize) ─────────────────────
@@ -8872,7 +8925,7 @@ body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in
 .split-view{display:flex;align-items:flex-start;width:100%;border:1px solid #d4d4d4}
 .split-table{border-right:1px solid #d4d4d4}
 .split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
-.split-table table.aligned thead th{position:relative;height:22px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+.split-table table.aligned thead th{position:relative;height:30px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
 /* B392 — drag-to-resize handle on each header cell's right edge (preview only). */
 .col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
 .col-rs:hover{background:rgba(99,102,241,.5)}
@@ -8911,7 +8964,7 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
   var MT=${mTopPx}, MB=${mBotPx}, ML=${mLeftPx}, MR=${mRightPx};
   var PW=${pageWpx}, PH=${pageHpx};
   var CW=PW-ML-MR, CH=Math.max(160,PH-MT-MB)-2;  /* printable height, 2px sub-pixel slack */
-  var GANTT_HEAD=22, GANTT_ROW=18;               /* must match buildGanttSVG */
+  var GANTT_HEAD=30, GANTT_ROW=18;               /* must match buildGanttSVG HEADER_H (YEAR_TIER+MON_TIER) + ROW_H */
   var FRAME='#d4d4d4';
 
   function outerH(el){
@@ -9297,21 +9350,30 @@ function PDFExportModal({data, activePid, onClose, setData}) {
   const fitScale = Math.min(1, (paneW - 48) / pageW);
   const [previewZoom, setPreviewZoom] = useState(1);
   const scale = fitScale * previewZoom;
+  const zoomTo = z => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
+  const fitWidth = () => setPreviewZoom(1); // previewZoom 1 → scale = fitScale → the whole sheet (full timeline) fits the pane
 
-  // Transparent overlay sits on top of the iframe so wheel events aren't swallowed by the iframe boundary
+  // B396 — "Move" (pan) mode. The iframe boundary swallows wheel + drag, so to let the owner
+  // slide the exhibit around and zoom, a transparent overlay over the iframe captures them WHILE
+  // pan mode is on. When it is OFF (default) the overlay is click-through (pointer-events:none),
+  // so the in-preview collapse triangles and column drag-handles keep working under a real mouse.
+  const [panMode, setPanMode] = useState(false);
+  const panRef = useRef(null);
   const overlayRef = useRef(null);
   useEffect(() => {
     const el = overlayRef.current;
-    if (!el) return;
-    const handler = e => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setPreviewZoom(z => Math.min(4, Math.max(0.2, z * (e.deltaY < 0 ? 1.1 : 1/1.1))));
-    };
-    el.addEventListener('wheel', handler, {passive: false});
-    return () => el.removeEventListener('wheel', handler);
-  }, []);
+    if (!el || !panMode) return;
+    const pane = previewPaneRef.current;
+    const onWheel = e => { e.preventDefault(); e.stopPropagation(); setPreviewZoom(z => Math.min(4, Math.max(0.25, z * (e.deltaY < 0 ? 1.1 : 1/1.1)))); };
+    const onDown = e => { if (e.button !== 0 || !pane) return; e.preventDefault(); panRef.current = { x:e.clientX, y:e.clientY, sl:pane.scrollLeft, st:pane.scrollTop }; el.style.cursor = "grabbing"; };
+    const onMove = e => { const p = panRef.current; if (!p || !pane) return; pane.scrollLeft = p.sl - (e.clientX - p.x); pane.scrollTop = p.st - (e.clientY - p.y); };
+    const onUp = () => { panRef.current = null; if (el) el.style.cursor = "grab"; };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('mousedown', onDown); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [panMode]);
 
   const COL_OPTS = [
     {k:"id",label:"ID"},{k:"name",label:"Task Name"},{k:"start",label:"Start"},
@@ -9508,16 +9570,25 @@ function PDFExportModal({data, activePid, onClose, setData}) {
 
           </div>
 
-          {/* Preview pane */}
+          {/* Preview pane. When zoomed wider than the pane, align to the start so the scroll
+              (and drag-pan) can reach BOTH edges — centered overflow strands the left side. */}
           <div ref={previewPaneRef}
-            style={{flex:1,background:"#e8eaed",overflow:"auto",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:24,position:"relative"}}>
-            {previewZoom !== 1 && (
-              <div onClick={()=>setPreviewZoom(1)}
-                style={{position:"sticky",top:8,right:8,float:"right",zIndex:10,background:"rgba(0,0,0,0.55)",color:"#fff",
-                  fontSize:10,fontWeight:600,padding:"3px 8px",borderRadius:4,cursor:"pointer",letterSpacing:".03em",
-                  fontFamily:"inherit",userSelect:"none",marginBottom:-24}}
-                title="Click to reset zoom">
-                {Math.round(previewZoom * fitScale * 100)}%
+            style={{flex:1,background:"#e8eaed",overflow:"auto",display:"flex",alignItems:"flex-start",
+              justifyContent: (pageW*scale > paneW-48) ? "flex-start" : "center", padding:24,position:"relative"}}>
+            {/* B396 — discoverable zoom + "Move" (drag-to-pan) controls. Fit = the whole timeline
+                fits the page width (the viewBox in buildGanttSVG guarantees no clipping). */}
+            {previewUrl && (
+              <div style={{position:"sticky",top:8,right:8,float:"right",zIndex:10,display:"flex",gap:3,alignItems:"center",
+                marginBottom:-30,background:"rgba(20,22,26,0.80)",borderRadius:6,padding:"3px 4px",userSelect:"none",fontFamily:"inherit"}}>
+              {[["−",()=>zoomTo(previewZoom/1.2),"Zoom out"],["+",()=>zoomTo(previewZoom*1.2),"Zoom in"]].map(([lbl,fn,ttl])=>(
+                <button key={ttl} onClick={fn} title={ttl}
+                  style={{width:22,height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.14)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",lineHeight:1,fontFamily:"inherit"}}>{lbl}</button>
+              ))}
+              <span onClick={fitWidth} title="Reset to fit" style={{color:"#fff",fontSize:10,fontWeight:600,padding:"0 5px",cursor:"pointer",minWidth:32,textAlign:"center"}}>{Math.round(previewZoom*fitScale*100)}%</span>
+              <button onClick={fitWidth} title="Fit the whole timeline to the page width"
+                style={{height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.14)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 7px",cursor:"pointer",fontFamily:"inherit"}}>Fit</button>
+              <button onClick={()=>setPanMode(m=>!m)} title={panMode?"Stop moving (re-enable clicking in the preview)":"Move/pan: drag to slide the chart around"}
+                style={{height:20,border:"none",borderRadius:4,background:panMode?"var(--amber)":"rgba(255,255,255,0.14)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 8px",cursor:"pointer",fontFamily:"inherit"}}>Move</button>
               </div>
             )}
             {previewUrl && (
@@ -9543,9 +9614,11 @@ function PDFExportModal({data, activePid, onClose, setData}) {
                   }}
                   title="PDF Preview"
                 />
-                {/* Transparent overlay intercepts wheel events — iframe boundary swallows them otherwise */}
+                {/* Overlay captures drag-pan + wheel-zoom ONLY in Move mode; otherwise it is
+                    click-through so the preview's own collapse / column-resize controls work. */}
                 <div ref={overlayRef}
-                  style={{position:"absolute",inset:0,zIndex:2,background:"transparent",cursor:"default"}} />
+                  style={{position:"absolute",inset:0,zIndex:2,background:"transparent",
+                    pointerEvents: panMode ? "auto" : "none", cursor: panMode ? "grab" : "default"}} />
               </div>
             )}
             {!previewUrl && (

@@ -22,6 +22,60 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat batch (exported Gantt quality) — four items from one annotated
+     PDF/Print Exhibit screenshot + voice note. Arrived labelled NEW-1..NEW-4; highest B# across both
+     files was B392, so minted **B393–B396**. Per STANDING RULE #1 all four are filed here AND
+     fixed + verified + merged the SAME session. Dedupe notes are on each block below. -->
+
+### B393 — Vertical date / today rules paint OVER the Gantt bars in the export `[Scheduler / Gantt]` (bug)  *(arrived as "NEW-1"; minted **B393** — highest B# across both files was B392)*
+`[ ]` **Repro:** open the PDF/Print Exhibit export with the Gantt on, save/print. The dark vertical
+month-boundary / today rules (e.g. the Jan boundary + the red dashed today line) render *on top of* the
+task bars, summary brackets and milestone diamonds, slashing across them.
+**Expected:** those vertical rules sit BEHIND the data layer — the same stacking order already shipped
+for the on-screen Gantt in **B222**: row fill (bottom) → grid / today / dependency lines → bars +
+milestones → labels (top). The export path (`buildGanttSVG` in `public/sequence/index.html`) composes
+its SVG as `${gridLines}${rows}${yearLines}${arrows}${todayLine}` — the `rows` bundle (which contains
+the bars) is emitted *before* yearLines/today/arrows, so they land on top. Re-layer it: bands → grid /
+year / today / dependency → bars → labels (earlier element = lower in the SVG stack). Keep the today
+line visible (just behind the bars, not gone).
+- **Dedupe:** net-new — the EXPORT twin of B222 (which fixed only the on-screen path, z-index based).
+  NOT B391 (that ADDED the year-divider lines; this fixes their *stacking* vs the bars).
+
+### B394 — Left-edge chart boundary renders as broken segments, should be one continuous rule `[Scheduler / Gantt]` (bug)  *(arrived as "NEW-2"; minted **B394**)*
+`[ ]` **Repro:** in the exported Gantt, the vertical line at the left edge of the plot area (the seam
+where the task-name/columns meet the chart) reads as a series of disjoint per-row segments rather than
+one unbroken vertical line.
+**Expected:** one continuous vertical stroke spanning the full chart-body height, drawn once — not
+stitched per-row. Likely cause: a divider emitted inside the per-row loop in `buildGanttSVG` (and/or the
+dashed today line sitting at the far-left because *today ≈ schedule start*, reading as broken). Fix to a
+single full-height rule; verify visually which line the owner is pointing at and make it cohesive. If the
+same fragmentation shows on any other full-height rule, fix those the same way.
+- **Dedupe:** net-new.
+
+### B395 — Dependency connectors look unprofessional; switch to right-angle (elbow) routing `[Scheduler / Gantt]` (feature)  *(arrived as "NEW-3"; minted **B395**)*
+`[ ]` **Problem:** dependency links draw as long straight diagonals that slash across the chart and over
+bars — reads as amateur on a printed exhibit.
+**Design (P6 / MS-Project exhibit convention):** replace the point-to-point diagonals with orthogonal
+"elbow" routing — right-angle segments only (a short stub off the predecessor, a run through the row
+gutter, a stub into the successor) so a connector never crosses a bar. Thin, light stroke (lighter than
+the bars); keep the finish-to-start arrowhead. Apply to BOTH render paths — `buildGanttSVG` (export) and
+`GanttView` (on-screen) — so they stay consistent. Preserve the purple SS (start-to-start) link color
+already in the code.
+- **Dedupe:** net-new. NOT B386 (that *suppressed phantom* connectors to unscheduled tasks — a guard, not
+  a routing style); this restyles the connectors that ARE drawn.
+
+### B396 — Export preview: horizontal pan / "fit whole timeline" control `[Scheduler / Gantt]` (feature)  *(arrived as "NEW-4"; minted **B396**)*
+`[ ]` **Need:** in the export preview the user wants to be sure the chart encompasses the full project
+date range, and to be able to reposition/read it. Add (a) a reliable **"fit entire timeline to page
+width"** (auto-scale so start→end fits the printable width with no clipping) and (b) the ability to
+**move the Gantt horizontally** in the preview (scroll/drag) to frame/read it.
+- **Design points:** horizontal scroll/drag of the chart region in the preview + a fit-to-timeline
+  option. Export-only; the live schedule view is unaffected.
+- **Dedupe / cross-ref:** distinct from **B160** (Gantt-vs-columns *width split* — how much page width the
+  chart gets) and **B361** (time-scale density: Days/Weeks/Months/Quarters). All three shape how much
+  timeline lands on the page and must co-exist without fighting. *(The owner's note cited "B159" for the
+  time-scale selector; that is actually **B361** — B159 is the task-names visibility toggle.)*
+
 <!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
      screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
      (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free
