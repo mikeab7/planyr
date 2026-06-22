@@ -273,7 +273,7 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("the shell message handler validates origin and the Gantt month loop is bounded", () => {
     expect(src).toMatch(/if \(e\.origin !== window\.location\.origin\) return;/);
     expect(src).toMatch(/let _mGuard=12000;/);
-    expect(src).toMatch(/while\(cur2<=pd\(maxD\) && _mGuard-->0\)/);
+    expect(src).toMatch(/while\(cur2<=pd\(winEnd\) && _mGuard-->0\)/);   // B401: month axis now walks the visible window
   });
   it("the Scheduler shell wrapper validates message origin too", () => {
     const sjsx = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");

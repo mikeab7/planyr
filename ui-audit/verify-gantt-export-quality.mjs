@@ -6,8 +6,9 @@
  *         — every <line>/<path class=dep> precedes every bar/bracket/milestone in SVG order.
  *   B398  the left chart-edge boundary is ONE continuous full-height line, not per-row segments.
  *   B399  two-tier light Year-over-Month header + weighted year>quarter>month grid rules; rows aligned.
- *   B400  viewBox fits the whole timeline (no clip); preview Fit + Move (drag-pan). Connectors stay main B396 curved.
- *         the preview exposes Fit + Move controls and Move-drag pans the chart.
+ *   B400  viewBox fits the whole timeline (no clip). Connectors stay curved (B396/B402).
+ *         the preview exposes Fit + Pan controls (B361 renamed Move→Pan; Pan-drag behaviour
+ *         is verified in verify-export-timeaxis.mjs).
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -120,37 +121,15 @@ try {
   });
   ok("B399 — table rows stay aligned with their gantt bars (header heights match)", align && align.diff <= 2, align ? `Δ${align.diff}px` : "n/a");
 
-  // ── B396 preview controls (live in the SEQUENCE iframe, where the modal renders) ──
+  // ── preview controls (live in the SEQUENCE iframe, where the modal renders). B361 renamed
+  //    "Move" → "Pan" and the toolbar now also carries page Zoom + a Time-axis stretch; the
+  //    Pan drag-behaviour (slides the time window) is covered by verify-export-timeaxis.mjs. ──
   const ctrls = await frame.evaluate(() => {
     const btns = [...document.querySelectorAll("button")];
-    return { fit: btns.some((b) => b.textContent.trim() === "Fit"), move: btns.some((b) => b.textContent.trim() === "Move") };
+    return { fit: btns.some((b) => b.textContent.trim() === "Fit"), pan: btns.some((b) => b.textContent.includes("Pan")) };
   });
   ok("B400 — preview exposes a Fit control", ctrls.fit);
-  ok("B400 — preview exposes a Move (drag-to-pan) control", ctrls.move);
-
-  // Zoom in, enter Move mode, drag — the preview must scroll (pan). Scope the zoom button to the
-  // PREVIEW toolbar (the Move button's own toolbar) — the live Scheduler behind the modal also
-  // has a "Zoom in" control, and a flat search would hit that one instead.
-  const panned = await (async () => {
-    for (let i = 0; i < 4; i++) { await frame.evaluate(() => { const mv = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Move"); const bar = mv && mv.parentElement; const b = bar && [...bar.querySelectorAll("button")].find((x) => x.getAttribute("title") === "Zoom in"); if (b) b.click(); }); await page.waitForTimeout(80); }
-    await frame.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Move"); if (b) b.click(); });
-    await page.waitForTimeout(200);
-    // Drag from the VISIBLE pane center (the zoomed iframe is wider than the pane, so its own
-    // center sits in the clipped overflow region — off-screen — and wouldn't receive the drag).
-    const paneH = await frame.evaluateHandle(() => { const f = document.querySelector('iframe[title="PDF Preview"]'); return f.parentElement.parentElement; });
-    const pbox = await paneH.boundingBox().catch(() => null); // page-relative coords
-    if (!pbox) return { ok: false, before: "?", after: "?" };
-    const before = await frame.evaluate(() => { const f = document.querySelector('iframe[title="PDF Preview"]'); return f.parentElement.parentElement.scrollLeft; });
-    const cx = pbox.x + pbox.width / 2, cy = pbox.y + pbox.height / 2;
-    await page.mouse.move(cx, cy);
-    await page.mouse.down();
-    await page.mouse.move(cx - 170, cy - 40, { steps: 10 });
-    await page.mouse.up();
-    await page.waitForTimeout(150);
-    const after = await frame.evaluate(() => { const f = document.querySelector('iframe[title="PDF Preview"]'); return f.parentElement.parentElement.scrollLeft; });
-    return { ok: after > before + 8, before, after };
-  })();
-  ok("B400 — Move mode: dragging pans the preview horizontally", panned.ok, `scrollLeft ${panned.before}→${panned.after}`);
+  ok("B361 — preview exposes a Pan control (renamed from Move)", ctrls.pan);
 
   // Capture the corrected exhibit for the record.
   await blob.locator(".split-gantt").first().screenshot({ path: "ui-audit/screens/gantt-export-after.png" }).catch(() => {});
