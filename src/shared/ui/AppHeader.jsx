@@ -39,6 +39,7 @@ import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
+import ThemePicker from "../theme/ThemePicker.jsx";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -52,25 +53,20 @@ const TAB_IDLE = "var(--chrome-tab-inactive)";
 const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-markup)" };
 const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
 
-// Light / Dark / System theme options. The picker now lives inside the row-1 Settings
-// gear popover (B342) rather than sitting open in the header — decluttered, but still one
-// click and reachable signed-out. Pure local theme switch (reads/sets the ThemeProvider,
-// whose matchMedia "System" listener is independent of where this control mounts). (B317)
-const THEME_OPTS = [
-  { id: "light",  label: "Light",  hint: "Always light",            icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
-  { id: "dark",   label: "Dark",   hint: "Always dark",             icon: <path d="M13 9.4A5.2 5.2 0 0 1 6.6 3 5.2 5.2 0 1 0 13 9.4Z" /> },
-  { id: "system", label: "System", hint: "Match your computer",     icon: <><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.4h4M8 11.4v2" /></> },
-];
-
+// The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
+// for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
+// visitor can still switch (preserves B342's "reachable signed-out" without duplicating the
+// control when signed in). The picker UI itself is the shared <ThemePicker/>. (B317/B342/B389)
 const settingsPanel = {
   padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 
-// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Always
-// present, signed in or out, so the theme switch never depends on the account menu. (B342)
-function SettingsMenu({ mode, setMode }) {
+// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Rendered
+// only when signed OUT (B389): signed-in users get the theme control in account → Settings,
+// so the gear isn't duplicated; signed out, this keeps the switch one click away. (B342/B389)
+function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
   return (
@@ -96,36 +92,7 @@ function SettingsMenu({ mode, setMode }) {
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
         placement="below-right" width={206} gap={8} panelStyle={settingsPanel}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-tertiary)", padding: "4px 8px 6px" }}>
-          Display theme
-        </div>
-        {THEME_OPTS.map((o) => {
-          const on = mode === o.id;
-          return (
-            <button
-              key={o.id}
-              onClick={() => setMode(o.id)}
-              aria-pressed={on}
-              style={{
-                display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-                padding: "8px 9px", borderRadius: 7, border: "none", cursor: "pointer",
-                fontFamily: "inherit", background: on ? "var(--hover-ghost)" : "transparent", color: "var(--text-primary)",
-              }}
-              onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--hover-ghost)"; }}
-              onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}
-            >
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}>
-                {o.icon}
-              </svg>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>{o.label}</span>
-                <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)" }}>{o.hint}</span>
-              </span>
-              {on && <span aria-hidden style={{ color: "var(--accent-site-text)", fontWeight: 800, fontSize: 13 }}>✓</span>}
-            </button>
-          );
-        })}
+        <ThemePicker />
       </AnchoredMenu>
     </>
   );
@@ -276,7 +243,7 @@ export default function AppHeader({
   accountActive = false,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
-  const { mode, resolved, setMode } = useTheme();
+  const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
 
   useEffect(() => {
@@ -393,7 +360,8 @@ export default function AppHeader({
               "always green", and it renders a LOUD error state instead of silently vanishing. */}
           <CloudSyncBadge state={saveState} onRetry={onRetrySave} detail={saveDetail} />
           {saveSlot}
-          <SettingsMenu mode={mode} setMode={setMode} />
+          {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
+          {!accountActive && <SettingsMenu />}
           {authControl}
         </div>
       </div>

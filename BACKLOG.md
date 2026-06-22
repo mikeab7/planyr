@@ -22,6 +22,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
+     Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
+     branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the Light/Dark/System picker moved from the row-1 ⚙ gear into account → Settings
+     (AuthPanel), next to Change password. Extracted a shared `src/shared/theme/ThemePicker.jsx`
+     (one picker, used by both the Settings panel and the gear). The row-1 gear is KEPT only when
+     signed out (`{!accountActive && <SettingsMenu/>}`) so a logged-out visitor can still switch
+     (B342 preserved) without duplicating it for signed-in users. Pure relocation — ThemeProvider /
+     data-theme / System listener unchanged. lint 0 · 1201 tests · build green; B387/B388 harnesses
+     still green (the logged-out gear they rely on is preserved). -->
+
 <!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
      AppHeader so Schedule has ONE header like Site/Markup (built on the B387 center slot). Filed
      B386, **renumbered B388** — a concurrent `main` (PRs #289/#290) took B385/B386 while this was in
