@@ -48,6 +48,27 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 `[ ]` **Open.** B369 made `src/shared/gis/sources.js` the single source of truth for the **Site Analysis screen + jurisdiction identify** endpoints (zero inline URLs there, CI-guarded). The **map-display** layers — the Leaflet/esri-leaflet tile + vector overlays in `lib/layers.js`, `lib/counties.js` (`JURISDICTION_LAYERS`, incl. the COH `geogimstest` host), `lib/evidenceLayers.js`, `lib/vectorLayers.js` — still hold their service URLs inline. Migrate them into the registry too, so the tier-guard (no `/Test/`/`geogimstest` without an acknowledged exception) and the drift/coverage checks cover the **whole** GIS surface, not just the screen.
 - **Why not done in the B366–B369 session:** the map-tile path is a **separate, large surface** (many layers across 4 files) and is explicitly **out of the reported bug's blast radius** — the brief notes map tiles load as `<img>` (no CORS, no screening logic) and says to leave them alone. Rushing a live-map-wide URL refactor into the same session risked breaking a working map with no fast headless way to re-verify every layer. Filing it as its own focused pass (own branch, per-layer verify) is the safe call, not a silent omission.
 - **Plan:** add map-layer rows to the registry (reuse the same `tier`/`provider`/`coverage` shape); repoint `layers.js`/`counties.js`/`evidenceLayers.js`/`vectorLayers.js` to read `serviceUrl` from the registry; extend `ui-audit/gis-source-audit.mjs`'s inline-URL scan to those files; re-verify the map renders every layer (the existing `gis-verify/coverage-picker-verify.mjs` + a tile-load check). The known COH `geogimstest` **TEST** host (a long-standing KNOWN ISSUE) becomes a registered `monitored-exception` — finally machine-tracked.
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — a deleted site (HOLLISTER) reappears (delete not
+     persisting), both on reload (path A) AND mid-session without a reload (path B). First filed B366,
+     renumbered **B372** — a concurrent `main` (PR #277) took B366–B371 (GIS Site Analysis resilience +
+     source registry) while this was in flight, so B372 is the real next free ID. **Filed AND fixed +
+     headless-verified + pushed THIS session per STANDING RULE #1** (branch `claude/cool-ride-pm0m2l`) —
+     full [x] block in BACKLOG-DONE.md.
+     KEPT AS ONE ITEM (owner said split only if path B has an independent cause): both paths share ONE
+     root cause — the site you delete from the map is the one whose planner is still MOUNTED (you opened
+     it, then went Back to map; it renders hidden, not unmounted). Deleting it unmounts that planner,
+     whose persist-on-leave / beforeunload flush fired AFTER the delete and RE-WROTE the row → it returns
+     mid-session on the next list refresh (B), and pullCloud's heal-the-split then re-pushes that
+     local-only row to the cloud so it survives a reload too (A). Explains "only that project" — it's the
+     one he had open. Deduped — NOT a dup of B276 (per-ITEM overlay tombstones inside one site) nor B127
+     (cross-tab stale-write fold); this is whole-SITE delete durability + a loud cloud-delete failure.
+     Fix: a per-tab delete tombstone in storage.js (saveSite refuses to re-create a deleted, absent row —
+     the single chokepoint every resurrection path funnels through), deleteSite returns the cloud result,
+     the App AWAITS it and shows a LOUD banner + re-pulls on a genuine cloud-delete error, and cloudDelete
+     uses `.select()` so a 0-row no-op is distinguishable from a real removal. 9 new unit tests +
+     headless V102 (`ui-audit/verify-b372-delete-durable.mjs`, 6/6, proven to FAIL with the guard off). -->
+
 <!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
      hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
      Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child

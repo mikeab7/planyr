@@ -62,6 +62,7 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // is global in the shell; here we just react to auth to switch cloud↔local storage.
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
+  const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
   // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
@@ -286,17 +287,18 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
   // Never removes the last plan in a group (that's the map's whole-site delete). If the
   // deleted plan was the one open, switch to a sibling so the planner lands somewhere valid.
-  const deletePlan = (id) => {
+  const deletePlan = async (id) => {
     const rec = loadSite(id);
     if (!rec) return;
     const siblings = loadPlansOfGroup(groupOf(rec));
     if (siblings.length <= 1) return; // keep at least one plan per site
     const wasActive = id === activeSiteId;
     const next = siblings.find((s) => s.id !== id);
-    deleteSite(id);
+    const res = await deleteSite(id);
     refreshSites();
     if (wasActive && next) goPlan(next.id);
     else if (wasActive) { setActiveSiteId(null); setMode("map"); }
+    await reportDeleteResult([res], "that plan");
   };
 
   const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
@@ -307,13 +309,26 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
 
   // Delete a whole site (every plan in its group) — used from the map, where each
   // entry represents a location, not an individual plan.
-  const deleteSiteGroup = (id) => {
+  const deleteSiteGroup = async (id) => {
     const rec = loadSite(id); if (!rec) return;
     const plans = loadPlansOfGroup(groupOf(rec));
     const hadActive = plans.some((s) => s.id === activeSiteId);
-    plans.forEach((s) => deleteSite(s.id));
+    const label = rec.site || rec.name || "this site";
+    // Unmount the (now tombstone-protected) planner BEFORE removing rows so its persist-on-leave
+    // can't race the delete; the storage guard (B372) makes it safe even if the order shifts.
     if (hadActive) setActiveSiteId(null);
+    const results = await Promise.all(plans.map((s) => deleteSite(s.id)));
     refreshSites();
+    await reportDeleteResult(results, `"${label}"`);
+  };
+
+  // If a cloud delete actually ERRORED (not just a 0-row no-op), the row may survive server-side
+  // and reappear on reload — say so LOUDLY (never a phantom success, B372) and re-pull so the list
+  // reflects the honest truth instead of showing it gone when it isn't.
+  const reportDeleteResult = async (results, label) => {
+    if (!results.some((r) => r && r.ok === false)) return;
+    setDeleteError(`Couldn't delete ${label} from the cloud — it may reappear when you reload. Check your connection and try again.`);
+    if (signedInUid) { await pullCloud(signedInUid).catch(() => {}); refreshSites(); }
   };
 
   // Set a site's project status (B7/B8). The map shows one marker per SITE group,
@@ -431,6 +446,12 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {deleteError && (
+        <div role="alert" style={{ position: "fixed", top: cloudError ? 136 : 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          <span style={{ flex: 1 }}>{deleteError}</span>
+          <button onClick={() => setDeleteError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
