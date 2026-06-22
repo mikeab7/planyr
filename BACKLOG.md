@@ -22,6 +22,50 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
+     Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
+     branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the Light/Dark/System picker moved from the row-1 ⚙ gear into account → Settings
+     (AuthPanel), next to Change password. Extracted a shared `src/shared/theme/ThemePicker.jsx`
+     (one picker, used by both the Settings panel and the gear). The row-1 gear is KEPT only when
+     signed out (`{!accountActive && <SettingsMenu/>}`) so a logged-out visitor can still switch
+     (B342 preserved) without duplicating it for signed-in users. Pure relocation — ThemeProvider /
+     data-theme / System listener unchanged. lint 0 · 1201 tests · build green; B387/B388 harnesses
+     still green (the logged-out gear they rely on is preserved). -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
+     AppHeader so Schedule has ONE header like Site/Markup (built on the B387 center slot). Filed
+     B386, **renumbered B388** — a concurrent `main` (PRs #289/#290) took B385/B386 while this was in
+     flight, so B387/B388 are the real next free IDs (branch commit titles still say B385/B386).
+     Owner GREENLIT building it the same session, so per STANDING RULE #1 it was fixed + headless-
+     verified (V111, 17/17) on branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the embedded Gantt app's action toolbar now renders up in the shell's Row-2 header —
+     Grid/Split/Gantt + review inbox in B387's `toolbarCenter`; zoom/export/save/history/contacts/
+     automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker was
+     UNFOUNDED: the embedded app already renders its panels as self-positioned fixed modals/drawers
+     (never anchored to buttons), so lifting the trigger buttons is clean — buttons post `planar:*`
+     commands, panels still open in the iframe. The B203 bridge was extended (planar:toolbar-state +
+     command messages), strict same-origin guards kept, iframe stays source-of-truth (badge = reported
+     count, never fabricated). `.in-iframe .app-header{display:none}` hides the whole in-embed header
+     (re-widening what B381 narrowed); standalone /sequence/ untouched (inShell-gated). Two settings
+     gears kept separate (B342 vs Schedule view); "share" = the existing Contacts control. SUPERSEDES
+     B381's harness `verify-schedule-toolbar.mjs` (retired). New `ScheduleToolbar.jsx`; edits to
+     Scheduler.jsx + index.html. lint 0 · 1201 tests · build green · JSX OK · lazy chunks intact. -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
+     Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 centers
+     the project name). Filed B385, **renumbered B387** — concurrent `main` (PR #289) took B385 while
+     this was in flight; canonical IDs for this pair are B387 + B388. Per STANDING RULE #1 it was fixed +
+     headless-verified (V110, 9/9) the SAME session on branch `claude/inspiring-bohr-46gql9` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
+     becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — center TRULY
+     centered like Row 1 (mid-x 719 vs 720); it wraps on narrow widths and never overlaps. Absent
+     (Site/Markup) → the original 2-zone layout renders byte-for-byte unchanged. Generic + additive;
+     B388 (the Schedule toolbar lift) is its first consumer. Deduped: net-new — NOT the CloudSyncBadge
+     "NEW-1" (a Row-1 saveState concern), NOT the Markup toolbarContent move. lint 0 · 1201 tests ·
+     build green · AppHeader/Scheduler/SitePlannerApp lazy chunks intact. -->
+
 <!-- 2026-06-22: cross-chat "NEW-1" — Schedule Gantt drew phantom dependency arrows into empty
      space, pointing at unscheduled (blank-date) tasks. First filed B385, **renumbered B386** — a
      concurrent `main` (PR #289) took B385 for the Site Planner parcel-identify feature while this

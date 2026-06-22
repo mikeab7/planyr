@@ -6,6 +6,7 @@
  * the profile hook's save/reload passed in via `profileApi`. */
 import { useEffect, useRef, useState } from "react";
 import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";
+import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
@@ -104,6 +105,9 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
           <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.5, marginTop: 14 }}>
             Your sites and reviews are saved to your account in the cloud and sync across your devices.
           </div>
+          {/* Display theme (B389) — moved here from the row-1 gear so it lives with your account settings */}
+          <div style={{ height: 1, background: PAL.line, margin: "16px 0 12px" }} />
+          <ThemePicker />
         </div>
       )}
 
