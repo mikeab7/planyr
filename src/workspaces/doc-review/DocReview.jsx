@@ -18,6 +18,7 @@ import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
+import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
@@ -83,7 +84,14 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null } = {}) {
+export default function DocReview({
+  shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null,
+  // Work Item A — the active project comes from the URL route (so it survives a module
+  // switch), not module-local state. `projectId` is the route's Site-group id (null =
+  // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
+  // is the all-projects browse mode.
+  projectId = null, onNavigate, crossProject = false,
+} = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -156,17 +164,19 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const [signedIn, setSignedIn] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
-  // The project the header breadcrumb points at in Markup (B191). Follows the open
-  // review's project; picking another project here browses its files in place (it does
-  // NOT re-file the open review — browsing ≠ filing).
-  // Seed from a fresh cross-workspace open intent so the project context carries through the
-  // switch (no "Select a project" flash); loadSingleReview/openReview confirm it after load.
-  // project_id covers a listReviews row (snake_case), projectId a loaded record (camelCase).
-  const [markupProject, setMarkupProject] = useState(() => {
-    const r = bootDocIntentRef.current && bootDocIntentRef.current.row;
-    const pid = r && (r.project_id ?? r.projectId);
-    return pid ? { id: pid, name: r.project || r.title || "Project" } : null;
-  }); // { id, name } | null
+  // The project the header breadcrumb points at in Markup now comes from the URL route
+  // (Work Item A) — so it survives a module switch instead of resetting to "Select a
+  // project". Picking another project navigates the hash; opening a review navigates to
+  // that review's project (below). Its display name resolves from the local site list
+  // (instant; the per-user cloud cache feeds it), falling back to the open review's own
+  // project label, then the id. { id, name } | null.
+  const markupProject = useMemo(() => {
+    if (!projectId) return null;
+    let name = "";
+    try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) name = p.name; } catch (_) {}
+    if (!name && meta.projectId === projectId && meta.project) name = meta.project;
+    return { id: projectId, name: name || "Project" };
+  }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
   const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
@@ -472,7 +482,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
@@ -485,7 +495,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
-    setMarkupProject(null);
+    // Keep the current project context: "New" starts a fresh blank review still filed
+    // under the project you're in (it does NOT drop you back to "Select a project").
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
@@ -505,8 +516,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       return;
     }
     // Carry the project context through so the breadcrumb reflects the opened file (single
-    // reviews are also set inside loadSingleReview; this also covers stitch).
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    // reviews also navigate inside loadSingleReview; this also covers stitch).
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
     if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
@@ -538,13 +549,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
       } catch (_) {}
       const uid = await currentUid();
+      // Respect an explicit deep link (Work Item A): if the URL named a project, don't
+      // auto-resume a review that belongs to a DIFFERENT project — show the linked
+      // project's browser instead. No URL project → resume freely (it reflects into the URL).
+      const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
       if (lastMode === "stitch" && lastStitch) {
         const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
-        if (rec && rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+        if (rec && rec.kind === "stitch" && !wrongProject(rec)) { setPendingStitch(rec); setMode("stitch"); return; }
       }
       if (lastSingle) {
         const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
-        if (rec && rec.kind === "single") await loadSingleReview(rec);
+        if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -941,7 +956,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         // to it); New project is born in the Site Planner. Save state from persistence.
         onDashboard={onGoDashboard}
         currentProject={markupProject}
-        onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
+        cross={crossProject}
+        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setFilesOpen(true); }}
         onNewProject={onNewProject}
         saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
         centerContent={

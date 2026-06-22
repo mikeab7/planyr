@@ -247,6 +247,8 @@ export default function AppHeader({
   // scheduler's own projects) and a home-crumb label override (B204 — Site → "Map").
   projects,
   homeLabel,
+  // Cross-project mode (Work Item A) — the breadcrumb reads "All projects" when on.
+  cross = false,
   // Whether a real account is signed in. The same-project-in-another-tab warning
   // (B313) only applies to signed-in accounts: a logged-out, device-only session
   // starts fresh and should never see the cross-tab conflict banner — it protects
@@ -338,6 +340,7 @@ export default function AppHeader({
                 saveState={saveState}
                 projects={projects}
                 homeLabel={homeLabel}
+                cross={cross}
               />
             </>
           )}
