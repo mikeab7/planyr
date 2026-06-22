@@ -22,6 +22,25 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — a deleted site (HOLLISTER) reappears (delete not
+     persisting), both on reload (path A) AND mid-session without a reload (path B). Minted **B366**
+     (highest B# across both files was B365 — the hex-colour "B2543/B3340/B5263" hits in BACKLOG-DONE
+     are CSS values, not IDs). **Filed AND fixed + headless-verified + pushed THIS session per STANDING
+     RULE #1** (branch `claude/cool-ride-pm0m2l`) — full [x] block in BACKLOG-DONE.md.
+     KEPT AS ONE ITEM (owner said split only if path B has an independent cause): both paths share ONE
+     root cause — the site you delete from the map is the one whose planner is still MOUNTED (you opened
+     it, then went Back to map; it renders hidden, not unmounted). Deleting it unmounts that planner,
+     whose persist-on-leave / beforeunload flush fired AFTER the delete and RE-WROTE the row → it returns
+     mid-session on the next list refresh (B), and pullCloud's heal-the-split then re-pushes that
+     local-only row to the cloud so it survives a reload too (A). Explains "only that project" — it's the
+     one he had open. Deduped — NOT a dup of B276 (per-ITEM overlay tombstones inside one site) nor B127
+     (cross-tab stale-write fold); this is whole-SITE delete durability + a loud cloud-delete failure.
+     Fix: a per-tab delete tombstone in storage.js (saveSite refuses to re-create a deleted, absent row —
+     the single chokepoint every resurrection path funnels through), deleteSite returns the cloud result,
+     the App AWAITS it and shows a LOUD banner + re-pulls on a genuine cloud-delete error, and cloudDelete
+     uses `.select()` so a 0-row no-op is distinguishable from a real removal. 9 new unit tests +
+     headless V101 (`ui-audit/verify-b366-delete-durable.mjs`, 6/6, proven to FAIL with the guard off). -->
+
 <!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
      hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
      Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
