@@ -4890,7 +4890,7 @@ function App() {
         <NotesModal task={liveNotesTask} projectId={notesCtx.projectId} initChar={notesCtx?.initChar||null} updateTask={updateTask} onClose={() => setNotesCtx(null)} />
       )}
       {pdfExportOpen && (
-        <PDFExportModal data={data} activePid={data.aPid} onClose={() => setPdfExportOpen(false)} />
+        <PDFExportModal data={data} activePid={data.aPid} setData={setData} onClose={() => setPdfExportOpen(false)} />
       )}
 
       {taskCtx && (
@@ -8489,10 +8489,17 @@ ${barSvg}${blText}`;
       base+=p.tasks.length;
     }
   }
-  // Grid lines every month (subtle), labels only at computed density, year boundaries emphasized
+  // Month gridlines sit BEHIND the opaque row bands, so in the chart body they read only
+  // faintly; their real job is the labels in the dark header strip. January labels are
+  // emphasized (bold + white) so each year's start is legible on the axis itself.
   const gridLines=months.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="${m.mo===0?'#bbb':'#eee'}" stroke-width="${m.mo===0?0.8:0.4}"/>`).join("")
-    +visibleMonths.map(m=>`<text x="${m.x+3}" y="15" font-size="7.5" fill="#e8e8e8" font-family="Arial,sans-serif">${m.label}</text>`).join("")
-    +(monthPx<26?yearMarkers.map(m=>`<line x1="${m.x}" y1="0" x2="${m.x}" y2="${HEADER_H}" stroke="#999" stroke-width="1"/>`).join(""):"");
+    +visibleMonths.map(m=>`<text x="${m.x+3}" y="15" font-size="${m.mo===0?8.5:7.5}" font-weight="${m.mo===0?'bold':'normal'}" fill="${m.mo===0?'#ffffff':'#e8e8e8'}" font-family="Arial,sans-serif">${m.label}</text>`).join("");
+  // B386 — year-boundary dividers: a heavier vertical line at each Jan 1, drawn OVER the
+  // row bands (the month lines are hidden behind them) so the split between calendar years
+  // reads at a glance. Solid medium slate keeps it distinct from the red dashed Today line
+  // and the colored dependency arrows. A single-year exhibit has no January boundary in
+  // range → no divider, which is correct.
+  const yearLines=yearMarkers.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="#7b8290" stroke-width="1.3"/>`).join("");
   // Today marker — red dashed line with a tick in the header band
   const todayStr=fdLocal(new Date());
   const todayLine=(opts.showToday!==false && todayStr>=minD&&todayStr<=maxD)
@@ -8504,7 +8511,58 @@ ${barSvg}${blText}`;
 <rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
 <rect x="0" y="0" width="${svgWidth}" height="${HEADER_H}" fill="#1a1a1a"/>
 ${taskHeaderText}
-${gridLines}${rows}${arrows}${todayLine}</svg>`;
+${gridLines}${rows}${yearLines}${arrows}${todayLine}</svg>`;
+}
+
+// ── Exhibit column sizing (B385 content-fit + B387 drag-resize) ─────────────────────
+// Minimum px the Gantt timeline keeps in the split exhibit, so widening columns can never
+// collapse the chart. Shared by buildPDFHtml and the live drag-resize script it embeds.
+const EXHIBIT_MIN_GANTT = 240;
+// Approximate the rendered width (px) of `str` at font-size `fs` for the exhibit's
+// Inter/Arial face. Per-character advances run slightly generous so a fixed-format value
+// (a date, a duration, a percent) is never clipped by an under-sized column. Pure +
+// DOM-free so the preview, the print window, and the unit tests all agree.
+function approxTextPx(str, fs){
+  let w=0; const s=String(str==null?"":str);
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(c===' '||/[.,:;'!|il]/.test(c)) w+=0.30*fs;
+    else if(/[fjt()/\-]/.test(c)) w+=0.38*fs;
+    else if(/[0-9]/.test(c)) w+=0.58*fs;
+    else if(c==='M'||c==='W') w+=0.92*fs;
+    else if(/[A-Z]/.test(c)) w+=0.70*fs;
+    else if(c==='m'||c==='w') w+=0.86*fs;
+    else w+=0.54*fs;
+  }
+  return w;
+}
+// Lay the exhibit columns out from their content-fit base widths, letting a user's
+// per-column drag override (cfg.colWidths) win, each clamped to its [min,max]. The table
+// block is exactly its columns' total and the Gantt takes the rest, but never less than
+// EXHIBIT_MIN_GANTT — if the columns would crowd the chart, flexible columns shrink toward
+// their min first, then a uniform scale as a last resort. Returns { widths:{k:px}, tableW,
+// ganttW }. Pure + DOM-free, so the preview, the print window, and the tests all agree.
+function layoutExhibitCols(specs, opts){
+  const ov = opts.override || {};
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const widths={};
+  for(const s of specs) widths[s.k]=Math.round(clamp(ov[s.k]!=null?ov[s.k]:s.base, s.min, s.max));
+  const total=()=>specs.reduce((a,s)=>a+widths[s.k],0);
+  const budget=Math.max(160, opts.budget-EXHIBIT_MIN_GANTT); // reserve room for the chart
+  if(total()>budget){
+    const flex=specs.filter(s=>s.flex);
+    const slack=flex.reduce((a,s)=>a+(widths[s.k]-s.min),0);
+    if(slack>0){
+      const need=Math.min(total()-budget, slack);
+      for(const s of flex) widths[s.k]-=Math.round((widths[s.k]-s.min)/slack*need);
+    }
+    if(total()>budget){ // no flex slack left → uniform scale as a last resort
+      const f=budget/total();
+      for(const s of specs) widths[s.k]=Math.max(s.min, Math.round(widths[s.k]*f));
+    }
+  }
+  const tableW=total();
+  return { widths, tableW, ganttW: Math.max(EXHIBIT_MIN_GANTT, opts.budget-tableW) };
 }
 
 function buildPDFHtml(cfg, data, forPreview) {
@@ -8554,34 +8612,114 @@ function buildPDFHtml(cfg, data, forPreview) {
   const mRightPx=Math.round(parseFloat(cfg.margins.right||0.75)*96);
   const pageWpx=Math.round(pgW*96), pageHpx=Math.round(pgR*96);
 
-  let bodyHtml="";
+  let bodyHtml="", resizeScript="";
   if(cfg.includeGantt) {
-    // Side-by-side: grid on left, Gantt timeline on right — like MS Project / Excel split view
-    selProjs.forEach(proj=>{
+    // Side-by-side: a content-fit grid on the left, the Gantt timeline on the right —
+    // like MS Project / Excel split view. The exhibit stacks every selected project under
+    // one shared header, so the columns are sized once against the widest value of each
+    // visible column across them all (B385) — no dead gap before the dates, no clipped
+    // start/end/duration. cfg.colWidths (a user's drag, B387) overrides a column's width.
+    const projTaskLists = selProjs.map(proj=>{
       let tasks=visibleTasks(proj);
       if(cfg.healthFilter==="active") tasks=tasks.filter(t=>t.health==="yellow"||t.health==="red");
       if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>t.health==="green");
-      const thCols=colDefs.map(c=>`<th${c.w?` style="width:${c.w}px"`:""}>${COL_LABELS[c.k]}</th>`).join("");
+      return {proj, tasks};
+    });
+    // Plain-text form of each cell, for width measurement (cellVal returns marked-up HTML).
+    const cellText=(t,k,tasks)=>{ switch(k){
+      case "start": case "end": return fmtD(t[k]);
+      case "duration": return `${t.duration}d`;
+      case "percentComplete": return `${t.percentComplete||0}%`;
+      case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
+      case "health": { const h=HC[t.health]; return h?h.l:(t.health||""); }
+      case "name": return t.name==null?"":String(t.name);
+      case "cost": { const v=costOfIn(tasks,t.id); return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):""; }
+      default: return t[k]==null?"":String(t[k]);
+    }};
+    // Per-column fit profile: font px, clamp range, whether it may shrink (flex), and any
+    // non-text px (the Status dot+gap). Short fixed-format columns are NOT flex — a date or
+    // a duration must never be the value that gets clipped to make room.
+    const COL_FIT={
+      id:{fs:8,min:22,max:64,flex:false,extra:0}, name:{fs:10.5,min:96,max:280,flex:true,extra:0},
+      start:{fs:9,min:50,max:96,flex:false,extra:0}, end:{fs:9,min:50,max:96,flex:false,extra:0},
+      duration:{fs:9,min:34,max:74,flex:false,extra:0}, health:{fs:9,min:62,max:132,flex:false,extra:13},
+      percentComplete:{fs:9,min:34,max:74,flex:false,extra:0}, responsibleParty:{fs:9,min:52,max:144,flex:true,extra:0},
+      predecessors:{fs:9,min:40,max:120,flex:true,extra:0}, cost:{fs:9,min:50,max:132,flex:true,extra:0},
+    };
+    const PADX=12, SLACK=3; // td horizontal padding (6+6) + a hair of safety
+    const specs=colDefs.map(c=>{
+      const f=COL_FIT[c.k]||{fs:9,min:30,max:130,flex:false,extra:0};
+      const lbl=COL_LABELS[c.k]||c.k;
+      let base=approxTextPx(lbl.toUpperCase(),8)*1.04+lbl.length*0.45; // header is bold + .05em tracked
+      for(const {proj,tasks} of projTaskLists){
+        for(const t of tasks){
+          let w;
+          if(c.k==='name'){
+            const dep=getDepth(proj.tasks,t.id), fs=dep===0?10.5:dep===1?10:9.5;
+            const tri=forPreview&&proj.tasks.some(x=>x.parentId===t.id)?15:0; // collapse triangle (preview only)
+            w=approxTextPx(cellText(t,'name',proj.tasks),fs)+dep*14+tri;
+          } else {
+            w=approxTextPx(cellText(t,c.k,proj.tasks),f.fs)+f.extra;
+          }
+          if(w>base) base=w;
+        }
+      }
+      return {k:c.k, base:base+PADX+SLACK, min:f.min, max:f.max, flex:f.flex};
+    });
+    const fit=layoutExhibitCols(specs,{override:cfg.colWidths||{}, budget:contentPx-2});
+    const colW=fit.widths, canResize=!!forPreview;
+    // One shared header for every project. In the preview each column carries a drag
+    // handle (B387); the print output never does.
+    const thCols=colDefs.map(c=>`<th data-k="${c.k}" style="width:${colW[c.k]}px">${COL_LABELS[c.k]}${canResize?`<span class="col-rs" data-rs="${c.k}" title="Drag to resize"></span>`:""}</th>`).join("");
+    projTaskLists.forEach(({proj,tasks})=>{
       const rows=tasks.map((t,i)=>{
         const cells=colDefs.map(c=>`<td class="c-${c.k}">${cellVal(t,c.k,proj.tasks,proj.id)}</td>`).join("");
         return `<tr class="${i%2?"alt":""}">${cells}</tr>`;
       }).join("");
-      // Filter the project for Gantt to match the table's task list
-      const ganttProj={...proj, tasks};
-      // Allocate ~50% to the table, the rest to Gantt — the 1px frame on each
-      // side of .split-view consumes 2px of the printable width
-      const splitInner=contentPx-2;
-      const tableW=Math.min(Math.round(splitInner*0.5), Math.max(280, splitInner - 320));
-      const ganttW=splitInner - tableW;
-      const ganttSvg=buildGanttSVG([ganttProj], ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels});
+      const ganttProj={...proj, tasks}; // Gantt task list matches the table
+      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels});
       bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}
         <div class="split-view">
-          <div class="split-table" style="width:${tableW}px;flex-shrink:0">
+          <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
             <table class="aligned"><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table>
           </div>
-          <div class="split-gantt" style="width:${ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
+          <div class="split-gantt" style="width:${fit.ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
         </div></div>`;
     });
+    // B387 — live drag-to-resize. Handles live in the preview header; this script (preview
+    // only) resizes the dragged column across every page in real time, trading the width
+    // against the Gantt (which keeps EXHIBIT_MIN_GANTT), then posts the final width to the
+    // parent on release so it persists and the Gantt re-fits cleanly.
+    if(forPreview){
+      resizeScript=`<script>(function(){
+  var W=${JSON.stringify(colW)}, MINc=${JSON.stringify(Object.fromEntries(specs.map(s=>[s.k,s.min])))}, MAXc=${JSON.stringify(Object.fromEntries(specs.map(s=>[s.k,s.max])))};
+  var ORDER=${JSON.stringify(colDefs.map(c=>c.k))}, SPLIT=${fit.tableW+fit.ganttW}, MING=${EXHIBIT_MIN_GANTT};
+  function sum(){var t=0;for(var i=0;i<ORDER.length;i++)t+=W[ORDER[i]];return t;}
+  function apply(){
+    var tw=sum(), gw=Math.max(MING,SPLIT-tw);
+    document.querySelectorAll('.split-table').forEach(function(e){e.style.width=tw+'px';});
+    document.querySelectorAll('.split-gantt').forEach(function(e){e.style.width=gw+'px';});
+    ORDER.forEach(function(k){document.querySelectorAll('th[data-k="'+k+'"]').forEach(function(e){e.style.width=W[k]+'px';});});
+  }
+  var drag=null;
+  document.addEventListener('mousedown',function(ev){
+    var h=ev.target&&ev.target.closest?ev.target.closest('[data-rs]'):null; if(!h) return;
+    ev.preventDefault(); ev.stopPropagation();
+    var k=h.getAttribute('data-rs'); drag={k:k,x:ev.clientX,w0:W[k]};
+    document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
+  },true);
+  document.addEventListener('mousemove',function(ev){
+    if(!drag) return;
+    var mn=MINc[drag.k]||30, others=sum()-W[drag.k], cap=Math.min(MAXc[drag.k]||9999,Math.max(mn,(SPLIT-MING)-others));
+    W[drag.k]=Math.round(Math.max(mn,Math.min(drag.w0+(ev.clientX-drag.x),cap))); apply();
+  });
+  document.addEventListener('mouseup',function(){
+    if(!drag) return; var k=drag.k, w=W[k]; drag=null;
+    document.body.style.cursor=''; document.body.style.userSelect='';
+    try{window.parent.postMessage({type:'planarColResize',key:k,w:w},'*');}catch(_){}
+  });
+})();<\/script>`;
+    }
   } else {
     // Tables only (no Gantt) — full width
     selProjs.forEach(proj=>{
@@ -8631,7 +8769,11 @@ body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in
 .split-view{display:flex;align-items:flex-start;width:100%;border:1px solid #d4d4d4}
 .split-table{border-right:1px solid #d4d4d4}
 .split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
-.split-table table.aligned thead th{height:22px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+.split-table table.aligned thead th{position:relative;height:22px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+/* B387 — drag-to-resize handle on each header cell's right edge (preview only). */
+.col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
+.col-rs:hover{background:rgba(99,102,241,.5)}
+@media print{.col-rs{display:none}}
 .split-table table.aligned tbody tr{height:18px}
 .split-table table.aligned tbody tr.alt{background:#f6f6f6}
 .split-table table.aligned tbody td{padding:0 6px;vertical-align:middle;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #ebebeb}
@@ -8803,6 +8945,7 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
           left.appendChild(tbl);
           framed.appendChild(left);
           var right=document.createElement('div');
+          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B387) */
           right.style.cssText='width:'+pr.ganttW+'px;flex-shrink:0';
           right.appendChild(svgWindow(pr.svgEl,0,GANTT_HEAD,pr.ganttW));                                  /* date band: repeats every page */
           if(pg.r1>pg.r0) right.appendChild(svgWindow(pr.svgEl,GANTT_HEAD+pg.r0*GANTT_ROW,(pg.r1-pg.r0)*GANTT_ROW,pr.ganttW));
@@ -8873,6 +9016,7 @@ ${bodyHtml}
   <span>planar</span>
 </div>
 ${forPreview?`<script>(function(){document.addEventListener("click",function(e){var el=e.target.closest&&e.target.closest("[data-collapse]");if(!el)return;e.preventDefault();e.stopPropagation();try{window.parent.postMessage({type:"planarToggleCollapse",key:el.getAttribute("data-collapse")},"*");}catch(_){}}, true);})();<\/script>`:""}
+${resizeScript}
 </body></html>`;
 }
 
@@ -8911,7 +9055,7 @@ const Row = ({label,children}) => (
     {children}
   </div>
 );
-function PDFExportModal({data, activePid, onClose}) {
+function PDFExportModal({data, activePid, onClose, setData}) {
   const projs = Object.values(data.projects);
   const now = new Date();
   const seedCollapsed = useMemo(() => {
@@ -8938,6 +9082,9 @@ function PDFExportModal({data, activePid, onClose}) {
     confidential: "",
     collapsedIds: seedCollapsed,
     detailLevel: seedCollapsed.length ? "custom" : "all",
+    // B387 — per-column width overrides from dragging a column edge in the preview;
+    // seeded from the last-saved exhibit so a tuned layout comes back. Empty = content-fit.
+    colWidths: data.exportColWidths || {},
   });
   const upd = patch => setCfg(c => ({...c, ...patch}));
   const cfgRef = useRef(cfg);
@@ -8985,6 +9132,27 @@ function PDFExportModal({data, activePid, onClose}) {
     window.addEventListener("message", onToggle);
     return () => window.removeEventListener("message", onToggle);
   }, []);
+
+  // Column drag-resize (B387) fired from a header handle inside the preview iframe: stash
+  // the new width as an override (flush the preview immediately, like collapse) and persist
+  // it on the schedule so the tuned exhibit comes back next time.
+  useEffect(() => {
+    const onResize = e => {
+      if (!e.data || e.data.type !== "planarColResize") return;
+      const { key, w } = e.data;
+      if (!key || !(w > 0)) return;
+      const c = cfgRef.current, next = {...c, colWidths: {...(c.colWidths || {}), [key]: Math.round(w)}};
+      setCfg(next); setPreviewCfg(next);
+      if (setData) setData(d => ({...d, exportColWidths: {...(d.exportColWidths || {}), [key]: Math.round(w)}}));
+    };
+    window.addEventListener("message", onResize);
+    return () => window.removeEventListener("message", onResize);
+  }, []);
+  const hasColOverrides = Object.keys(cfg.colWidths || {}).length > 0;
+  const resetColWidths = () => {
+    const next = {...cfg, colWidths: {}}; setCfg(next); setPreviewCfg(next);
+    if (setData) setData(d => { const n = {...d}; delete n.exportColWidths; return n; });
+  };
 
   // Blob URL for iframe preview
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -9222,6 +9390,16 @@ function PDFExportModal({data, activePid, onClose}) {
                   <span style={{fontSize:11,color:"var(--txt)"}}>{c.label}</span>
                 </label>
               ))}
+              {/* B387 — column widths auto-fit to content; drag a header edge in the preview to tune one. */}
+              {cfg.includeGantt && (
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
+                  <span style={{fontSize:10,color:"var(--mut)",lineHeight:1.3}}>Drag a column's right edge in the preview to resize it.</span>
+                  {hasColOverrides && (
+                    <span onClick={resetColWidths} title="Reset all columns to auto-fit"
+                      style={{fontSize:10,fontWeight:600,color:"#4f46e5",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Reset</span>
+                  )}
+                </div>
+              )}
             </div>
             )}
 

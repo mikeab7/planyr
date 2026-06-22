@@ -22,6 +22,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items minted from
+     one screenshot+voice note. Highest B# across both files was B384, so **B385/B386/B387**. Per
+     STANDING RULE #1 all three were filed AND fixed + headless-verified (V109, 10/10) + merged the
+     SAME session on branch `claude/practical-edison-ggcm1k` — full [x] blocks live in BACKLOG-DONE.md:
+       • B385 (bug)  — exhibit columns mis-sized: oversized Task-Name gap + truncated Start/End/Dur.
+                       Root cause: split table used table-layout:fixed at hardcoded ~50% width with
+                       fixed per-column px and Name at w:null (absorbed the slack → the gap; dates
+                       clipped in the too-narrow fixed cols). Replaced with a content-fit width model
+                       (approxTextPx + layoutExhibitCols, pure helpers); dates/dur never flex.
+       • B386 (feat) — year-boundary divider lines on the exhibit Gantt (the month lines were drawn
+                       behind the opaque row bands, so the body had no visible gridlines). Heavier
+                       slate line at each Jan 1, drawn over the bands; January labels emphasized.
+       • B387 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
+                       reflowing live + persisted per schedule (data.exportColWidths) + a Reset.
+     Deduped: net-new. B387 RECONCILED with B160 (see its note below) — complementary, not a dup. -->
+
 <!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
      left-hand panel so you never have to back out to the map to assemble more land. Highest B#
      across both files was B382, so minted **B383** (+ filed the deferred "Add by address" stretch
@@ -898,6 +914,15 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Export-only; live schedule layout unaffected.
 
 <!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
+<!-- RECONCILE w/ B387 (DONE 2026-06-22): B387 shipped per-column drag-resize in the exhibit. Because
+     the table block is now exactly the sum of its (content-fit or dragged) column widths and the Gantt
+     auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already shifts the
+     column-block-vs-Gantt ratio — so B387 PARTIALLY covers this item's user need without a slider.
+     B160 remains a distinct control (one ratio handle for the whole split). If built, implement it as
+     the OVERALL budget that B387's per-column widths fit within (don't fight: B387 already clamps the
+     table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
+<!-- NB on numbering: B385/B386/B387 (the 2026-06-22 exhibit-layout batch) were the next free IDs;
+     B387 is the per-column drag this note reconciles against. -->
 
 ---
 
