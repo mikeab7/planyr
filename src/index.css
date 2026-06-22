@@ -50,7 +50,7 @@
   --danger-text:  #B3361B;
   --info-text:    #1D4ED8;
 
-  /* Project-status palette (B234; re-hued B362) as tokens so DOM badges theme live.
+  /* Project-status palette (B234; re-hued B365) as tokens so DOM badges theme live.
      The canonical hexes mirror src/shared/ui/statusTokens.js (map pins read those
      directly — pins sit on the aerial map, a theme-neutral surface). Salience tracks
      importance: Pursuit = warm coral (loudest), Active = blue (NOT green, so it never

@@ -9,13 +9,34 @@ describe("classifyDiscipline — plain-code doc-type detection, no LLM (B312)", 
   it("maps common sheet types to disciplines", () => {
     expect(classifyDiscipline("BOUNDARY SURVEY")).toMatchObject({ discipline: "Survey", item: "Boundary Survey" });
     expect(classifyDiscipline("OVERALL GRADING PLAN")).toMatchObject({ discipline: "Civil", item: "Grading Plan" });
-    expect(classifyDiscipline("FIRE SPRINKLER PLAN")).toMatchObject({ item: "Fire Sprinkler" });
     expect(classifyDiscipline("LANDSCAPE PLANTING PLAN")).toMatchObject({ discipline: "Landscape" });
     expect(classifyDiscipline("FINAL PLAT OF ...")).toMatchObject({ discipline: "Survey", item: "Plat" });
+  });
+  it("routes the expanded discipline buckets (owner taxonomy 2026-06-21)", () => {
+    // Fire is split; Structural/Mechanical/Electrical/Plumbing get their own buckets (were "Other").
+    expect(classifyDiscipline("FIRE SPRINKLER PLAN")).toMatchObject({ discipline: "Fire Sprinkler" });
+    expect(classifyDiscipline("FIRE PROTECTION PLAN")).toMatchObject({ discipline: "Fire Sprinkler" });
+    expect(classifyDiscipline("FIRE ALARM RISER DIAGRAM")).toMatchObject({ discipline: "Fire Alarm" });
+    expect(classifyDiscipline("FOUNDATION PLAN — STRUCTURAL")).toMatchObject({ discipline: "Structural" });
+    expect(classifyDiscipline("MECHANICAL HVAC PLAN")).toMatchObject({ discipline: "Mechanical" });
+    expect(classifyDiscipline("ELECTRICAL POWER PLAN")).toMatchObject({ discipline: "Electrical" });
+    expect(classifyDiscipline("PLUMBING PLAN")).toMatchObject({ discipline: "Plumbing" });
+  });
+  it("classifies by WEIGHTED dominance — a stray cross-reference can't steal it (B360 corpus)", () => {
+    // Real failure: a Jacintoport STRUCTURAL set said "structural" 71× but a deep "grading" 2× filed
+    // it Civil (rule order); a Jacintoport ARCH set said "structural" 61× (cross-refs) but "floor
+    // plan" 22× and read Structural. Definitive sheet-types outweigh bare cross-reference names.
+    const structural = "FOUNDATION PLAN  FRAMING PLAN  STRUCTURAL NOTES  SEE CIVIL GRADING PLAN  SEE ARCHITECTURAL DRAWINGS";
+    expect(classifyDiscipline(structural).discipline).toBe("Structural");
+    const arch = "FLOOR PLAN  ROOF PLAN  REFLECTED CEILING PLAN  BUILDING ELEVATIONS  SEE STRUCTURAL  STRUCTURAL  STRUCTURAL";
+    expect(classifyDiscipline(arch).discipline).toBe("Architectural");
   });
   it("falls back to the sheet-number prefix when keywords miss, else Other (never a guess)", () => {
     expect(classifyDiscipline("just some notes", "C-2.01")).toMatchObject({ discipline: "Civil" });
     expect(classifyDiscipline("just some notes", "A7.10")).toMatchObject({ discipline: "Architectural" });
+    expect(classifyDiscipline("just some notes", "S-101")).toMatchObject({ discipline: "Structural" });
+    expect(classifyDiscipline("just some notes", "E-601")).toMatchObject({ discipline: "Electrical" });
+    expect(classifyDiscipline("just some notes", "SV-1")).toMatchObject({ discipline: "Survey" }); // SV before bare S
     expect(classifyDiscipline("nothing recognizable here")).toEqual({ discipline: "Other", item: "Document" });
   });
 });
@@ -32,6 +53,12 @@ describe("findDates / latestDate — 'search all dates and date itself' (owner)"
   });
   it("returns '' when there's no real date (no fabrication)", () => {
     expect(latestDate("no dates here, just 13/45/9999 nonsense")).toBe("");
+  });
+  it("a mixed-separator dimension is NOT a date (B360 — '5-29/32' once parsed as 2032)", () => {
+    // Real failure: a Jacintoport MEP sheet's "DEGREES AT 5-29/32" parsed as 2032-05-29 and poisoned
+    // the latest-date pick. Same separator is required, so the dimension is ignored, the real date kept.
+    expect(findDates("DEGREES AT 5-29/32")).toEqual([]);
+    expect(latestDate("ISSUED 10/08/2024  BEVEL 5-29/32")).toBe("2024-10-08");
   });
 });
 
@@ -51,6 +78,17 @@ describe("parseRevision", () => {
     expect(parseRevision("Rev 3")).toBe("REV 3");
     expect(parseRevision("no revision label")).toBe("");
   });
+  it("maps the spelled-out issue phrase to its code, even without the 'D' (B360 corpus)", () => {
+    // The owner's Jacintoport sheets print "ISSUE FOR CONSTRUCTION" (no D) with no short code.
+    expect(parseRevision("JACINTOPORT  ARCHITECTURAL  ISSUE FOR CONSTRUCTION")).toBe("IFC");
+    expect(parseRevision("ISSUE FOR PERMIT")).toBe("IFP");
+    expect(parseRevision("ISSUED FOR BID")).toBe("IFB");
+  });
+  it("does NOT read the heading 'REVISIONS' as 'Rev S' (B360 — Mesa title blocks)", () => {
+    expect(parseRevision("SUBMITTALS / REVISIONS:  NO. DATE DESCRIPTION")).toBe("");
+    expect(parseRevision("GENERAL REVISIONS")).toBe("");
+    expect(parseRevision("Rev 10")).toBe("REV 10"); // a real lone value still reads
+  });
 });
 
 describe("readTitleBlockText — the deterministic field bundle", () => {
@@ -62,5 +100,14 @@ describe("readTitleBlockText — the deterministic field bundle", () => {
   it("flags an empty/scanned page so the caller falls back to the AI", () => {
     expect(readTitleBlockText("").hasText).toBe(false);
     expect(readTitleBlockText("   ").hasText).toBe(false);
+  });
+  it("surfaces the stated scale in the same pass (one reader — B360)", () => {
+    // ONE reader: filing fields + the Markup auto-calibration scale come from a single read.
+    const civil = readTitleBlockText("OVERALL GRADING PLAN  SHEET C-3  06/30/2025  SCALE: 1\"=40'");
+    expect(civil.scale).toMatchObject({ ftPerInch: 40, form: "engineer" });
+    const arch = readTitleBlockText("FLOOR PLAN  SHEET A-2  10/24/2025  1/8\"=1'-0\"");
+    expect(arch.scale).toMatchObject({ ftPerInch: 8, form: "arch" });
+    // a sheet with no stated scale → null (never fabricated)
+    expect(readTitleBlockText("BOUNDARY SURVEY  SHEET V-1  06/30/2025").scale).toBeNull();
   });
 });

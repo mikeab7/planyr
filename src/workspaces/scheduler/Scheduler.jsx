@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 
-export default function Scheduler({ shellModule, onShellSwitch, authControl } = {}) {
+export default function Scheduler({ shellModule, onShellSwitch, authControl, accountActive = false } = {}) {
   const iframeRef = useRef(null);
   const [projects, setProjects] = useState([]);   // [{id, name}] from the embedded app
   const [activeId, setActiveId] = useState(null);  // its active project id (aPid)
@@ -75,6 +75,7 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl } = 
         module={shellModule || "scheduler"}
         onSwitch={onShellSwitch}
         authControl={authControl}
+        accountActive={accountActive}
         homeLabel="Dashboard"
         // The breadcrumb drives the EMBEDDED scheduler (its own projects), not the
         // Site Planner: pick a project → switch to its Gantt; Dashboard → the reports

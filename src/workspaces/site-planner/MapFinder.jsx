@@ -94,7 +94,7 @@ const REMOVE_CURSOR =
 // The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
 // never raster). Keyed off the token `shape`, and drawn CENTERED on (cx,cy) — each
 // glyph's bounding box is balanced about that point so it sits dead-center in the
-// marker head regardless of the body shape. B362.
+// marker head regardless of the body shape. B365.
 function statusGlyph(shape, cx, cy) {
   const n = (v) => +v.toFixed(2);
   switch (shape) {
@@ -115,7 +115,7 @@ function statusGlyph(shape, cx, cy) {
   }
 }
 
-/* Status map pin (B362): a FLAT-TOP shield "Planyr site" marker (flat top edge,
+/* Status map pin (B365): a FLAT-TOP shield "Planyr site" marker (flat top edge,
  * tapering to a point at the bottom that lands on the exact spot), kept constant
  * across states so it always reads as a site — only the FILL color, white halo, size
  * tier, glyph, and opacity vary, and they vary WITH importance (Pursuit loudest →
@@ -513,7 +513,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const status = statusOf(site);
       if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
       // Lost/passed deals recede off the map unless the user explicitly filters to
-      // Dead — a settled stage shouldn't clutter the active picture (B362).
+      // Dead — a settled stage shouldn't clutter the active picture (B365).
       if (status === "dead" && !statusFilter.has("dead")) return;
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
@@ -556,7 +556,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       } else {
         // zoomed out: a status-aware map pin at the site origin. Z-order by IMPORTANCE
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
-        // pursuit where they overlap; the open site floats above its tier (B362).
+        // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
         const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });

@@ -15,16 +15,12 @@ import { readTitleBlockText } from "../../../shared/files/titleBlockParse.js";
 import { matchProjectInText } from "../../../shared/files/matchProject.js";
 
 // Read the first couple of pages' text — the title block / cover identifies the project & set.
-// pdf.js is imported lazily (it pulls a Vite-only worker URL) so this module loads anywhere and
-// pdf.js only spins up when a file is actually read.
+// The extractor itself is pdf.js `firstPagesText` (the ONE embedded-text reader, B360); pdf.js is
+// imported lazily (it pulls a Vite-only worker URL) so this module loads anywhere and pdf.js only
+// spins up when a file is actually read.
 async function firstPagesText(file, maxPages = 2) {
-  const { loadPdf, extractPageText } = await import("./pdf.js");
-  const pdf = await loadPdf(file);
-  const n = Math.min(maxPages, pdf.numPages || 1);
-  const parts = [];
-  for (let p = 1; p <= n; p++) parts.push(await extractPageText(pdf, p));
-  try { pdf.destroy(); } catch (_) { /* best-effort */ }
-  return parts.join(" ");
+  const { firstPagesText: read } = await import("./pdf.js");
+  return read(file, maxPages);
 }
 
 /* Read + match a dropped PDF locally. Returns:

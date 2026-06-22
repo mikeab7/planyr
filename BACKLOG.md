@@ -24,8 +24,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
      hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
-     Complete shouted). Minted **B362** (highest B# across both files was B361). Filed AND shipped +
-     headless-verified (15/15, V98) THIS session per STANDING RULE #1 — full [x] block in BACKLOG-DONE.md
+     Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
+     rotation, scanned/DWG — while this was in flight, so B365 is the real next free ID; renumbered from a
+     first-filed B362). Filed AND shipped + headless-verified (19/19, V98) THIS session per STANDING RULE #1
+     — full [x] block in BACKLOG-DONE.md
      (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
      building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
      status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
@@ -33,6 +35,29 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
      MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
      z-order by importance, fixed hit box); Dead hidden by default. -->
+
+### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
+`[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
+- **Tier-2 AI/OCR** (B299 `server/filing/` + B352 OCR) — server-side title-block read for scanned sheets. Owner deploy: `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. The proxy 503s until then (graceful skip) — purely additive, no regression.
+- **DWG → DXF** (B238 `server/convert/`, LibreDWG → APS) — so a `.dwg` drop can be read at all.
+Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision + deploy + verify the read on a real scanned set and a real `.dwg`. Until then the text path covers the common case and the rest holds safely.
+
+### B360 — Title-block intelligence: unify the readers, expand the discipline taxonomy, tune on the real corpus (V79 filing + V67 scale) `[Doc Review]` (task)  *(2026-06-21; filed B356, renumbered **B360** — `main` #268 took B356–B359 while in flight)*
+`[x]` **Done + tuned on the owner's real drawings — merging via PR #270 (branch `claude/bold-cori-okbxu5`).** The Drive connector was re-authed to michael@planyr.io mid-session, so the empirical tuning ran here (no second session needed). 1078 tests, lint 0, build green, lazy chunks intact.
+
+**Unify (one reader, one extractor).** Relocated `parseSheetScale` → `src/shared/files/sheetScale.js` (re-exported from `overlayScale.js` for back-compat); `sheetMeta` imports it from shared (removes the shared→workspace import). `readTitleBlockText` returns `scale` in the same pass; `readSheetMeta` consumes that one read. `firstPagesText` folded into `doc-review/lib/pdf.js`. Civil-only `parseScaleNote` untouched.
+
+**Scale-reader bug (V67).** `parseSheetScale` returned null on an architectural scale when a number (a date) was printed right before it (`…10/24/2025  1/8"=1'-0"`) — the mixed-number branch swallowed the date digits + fraction. Fixed with `(?<!\d)` + a ≤2-digit mixed whole-inch.
+
+**Discipline taxonomy (owner decision 2026-06-21).** Added dedicated buckets in the owner's order: Architectural, Structural, Civil, Mechanical, Electrical, Plumbing, Landscape, Fire Alarm, Fire Sprinkler (+ Survey/Environmental/Geotech/CAD/Other). Fire split (Alarm vs Sprinkler); Structural/M/E/P out of "Other"/"MEP". Canonical list now in `titleBlockParse.js`, re-exported by `reviewStore` (+ the walled-off server reader kept in lockstep) so the reader / store / filing-UI can't drift.
+
+**Corpus tuning** (`ui-audit/lib/filingScore.mjs` + `score-filing.mjs`; Jacintoport + Mesa sets read via the Drive connector, ground truth = the descriptive filename). Reader fixes the real sheets drove:
+- `classifyDiscipline` → WEIGHTED dominance (a definitive sheet-type like "floor plan"/"foundation plan" ≫ a bare cross-reference name like "structural"); dropped bare "elevation(s)" as a keyword (a structural sheet is full of spot elevations). Fixes a real STRUCTURAL set misfiled Civil (deep stray "grading") **and** the inverse ARCH case.
+- `findDates` requires a consistent separator → a dimension "5-29/32" no longer parses as 2032 and poisons the latest-date pick.
+- `parseRevision` maps "ISSUE FOR CONSTRUCTION" (no "D") → IFC, and no longer reads the heading "REVISIONS" as "Rev S".
+**Result (8 readable sheets): project 8/8, discipline 6/7, date 3/6, revision 3/5.** Remaining misses are ground-truth nuances (a sheet's latest revision date vs the owner's package date; a mixed-revision "make-ready" package) or genuine data gaps (image-only scans with no text layer) — not reader bugs. Real-snippet unit tests lock every fix in.
+
+**Remaining tail (separate, not a regression):** image-only / scanned sets (e.g. Mesa Plumbing/Electrical have ~no text layer) and the `.dwg` files can't be Tier-1 text-read — they fall to the already-built-but-dormant Tier-2 AI/OCR (B299/B352) + the DWG→DXF server path. Eligible to move to BACKLOG-DONE on merge.
 
 ### B309 — Retire client-side Mapillary token paths once the proxy lands `[Site Planner]` (task) — depends on B308  *(arrived as coworker-chat "NEW-2" 2026-06-20; first filed B304 then renumbered **B309** — concurrent `main`'s Doc Review batch took B303–B307)*
 `[~]` **Partly done via B308 (2026-06-21).** The same-origin proxy is now the DEFAULT path and the in-app `MLY|…` box is already reframed as an **optional power-user override** (no token entry required). **Remaining, only AFTER B308 is confirmed live on Production:** drop the now-dead `VITE_MAPILLARY_TOKEN` read in `evidenceLayers.mapillaryToken()` (a baked VITE var would re-expose a token — the audit finding), and make the final call on the override box (keep as advanced, or remove). Held until B308's live confirm so the only working path isn't removed before the proxy is proven.

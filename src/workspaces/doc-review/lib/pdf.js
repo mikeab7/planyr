@@ -28,6 +28,24 @@ export async function extractPageText(pdf, pageNum) {
   }
 }
 
+/* Pull the first `maxPages` pages' embedded text as one joined string — the title block / cover
+ * identifies the project & set (the filing read, B312). The ONE embedded-text reader (B360):
+ * localRead's own first-pages loop folded into here so the doc-review workspace has a single
+ * extractor. Accepts a File/Blob/ArrayBuffer (loads + destroys its own pdf) OR an already-loaded
+ * pdf (reads it, leaves the caller's pdf open). Returns "" for a scanned/no-text set. */
+export async function firstPagesText(fileOrPdf, maxPages = 2) {
+  const owned = !(fileOrPdf && typeof fileOrPdf.getPage === "function");
+  const pdf = owned ? await loadPdf(fileOrPdf) : fileOrPdf;
+  try {
+    const n = Math.min(maxPages, pdf.numPages || 1);
+    const parts = [];
+    for (let p = 1; p <= n; p++) parts.push(await extractPageText(pdf, p));
+    return parts.join(" ");
+  } finally {
+    if (owned) { try { pdf.destroy(); } catch (_) { /* best-effort */ } }
+  }
+}
+
 /* Pull a page's embedded text WITH per-item positions (B336) — the sheet-metadata reader
  * needs to know WHERE each string sits to find the title-block band, the sheet title, and
  * the match-line labels (a plain joined string can't). pdf.js gives each text run a

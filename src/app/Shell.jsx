@@ -252,6 +252,7 @@ export default function Shell() {
               shellModule={active}
               onShellSwitch={setActive}
               authControl={authControl}
+              accountActive={!!user}
               navIntent={navIntent}
               docIntent={docIntent}
               onGoDashboard={goDashboard}

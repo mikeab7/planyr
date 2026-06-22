@@ -43,7 +43,8 @@ import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./lib/jurisdiction.js";
 import { formatAge } from "./lib/gisCache.js";
-import { buildingNumbers, isBuilding, roadTravelWidth } from "./lib/siteModel.js";
+import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./lib/siteModel.js";
+import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone } from "./lib/dockZones.js";
@@ -88,8 +89,7 @@ const ppfToZoom = (ppf, lat) =>
 const SQFT_PER_ACRE = 43560;
 const POND_ADD_MIN_SF = 50; // B157: below this, an expansion is too small to seat its own added-area label
 const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — a lighter tint of the cartographic teal pond, distinct from the existing basin
-const DOGEAR_W = 55; // dog-ear / corner bump-out: span along the dock wall
-const DOGEAR_D = 60; // dog-ear projection out from the dock face
+// Corner bump-out (dog-ear) defaults + geometry live in lib/dogEar.js (pure, unit-tested — B362).
 // B225: the building feature-add buttons (+/− dock, sidewalk, parking, bump-out) are
 // FIXED-PIXEL overlays inset ~22px inside each wall. When a building's rendered
 // footprint shrinks below them (zoomed out) the cluster grows larger than the
@@ -771,7 +771,7 @@ const EyeOffIcon = () => (
   </svg>
 );
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl } = {}) {
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false } = {}) {
   // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
   // used). Maps the active theme's tokens onto this file's existing PAL keys, so the
   // ~70 canvas color usages below stay untouched. (B317/B319)
@@ -1303,11 +1303,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
   // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
   const applyPinch = () => {
-    if (!pinchRef.current || pointersRef.current.size < 2) return;
+    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
+    // between scheduling this update and React running the updater, so reading pinchRef.current
+    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
+    const p = pinchRef.current;
+    if (!p || pointersRef.current.size < 2) return;
     const [a, b] = [...pointersRef.current.values()];
     const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / pinchRef.current.dist;
-    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, pinchRef.current.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    const factor = dist / p.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, p.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
     pinchRef.current = { mid, dist };
   };
   // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
@@ -2764,13 +2768,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         target = snapOn ? Math.round(target / 15) * 15 : Math.round(target);
         delta = target - prim.rot;
       }
-      setEls((a) => a.map((el) => {
+      setEls((a) => resyncBondedRot(a.map((el) => {
         const s = d.start.find((x) => x.id === el.id);
         if (!s) return el;
         if (s.points) return { ...el, points: s.points.map((p) => { const r = rot2(p.x - d.pivot.x, p.y - d.pivot.y, delta); return { x: d.pivot.x + r.x, y: d.pivot.y + r.y }; }) };
         const r = rot2(s.cx - d.pivot.x, s.cy - d.pivot.y, delta);
         return { ...el, cx: d.pivot.x + r.x, cy: d.pivot.y + r.y, rot: ((s.rot + delta) % 360 + 360) % 360 };
-      }));
+      }), rootIdOf(d.id)));
       return;
     }
   };
@@ -3222,6 +3226,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // move and rotate as one assembly and can't be separated by dragging.
   const rootIdOf = (id) => { const el = els.find((x) => x.id === id); return (el && el.attachedTo) || id; };
   const assemblyOf = (id) => { const r = rootIdOf(id); return els.filter((e) => e.id === r || e.attachedTo === r); };
+  // Re-derive every bonded box child's angle from its host (B363): a child's rot is always
+  // host.rot + its fixed quarter-turn offset, so this removes any stored drift. Pure; preserves
+  // object identity for children that are already in sync. Called from EVERY host-geometry path
+  // (resize via refitChildren, rotate via rotateAssemblyTo + the rotate drag) so a child can't
+  // be left visibly off-angle from its building.
+  const resyncBondedRot = (list, hostId) => {
+    const host = list.find((x) => x.id === hostId);
+    if (!host || host.points || typeof host.rot !== "number") return list;
+    return list.map((x) => {
+      if (x.attachedTo !== hostId || x.points || typeof x.rot !== "number") return x;
+      const want = bondedChildRot(x.rot, host.rot);
+      return Math.abs((((x.rot % 360) + 360) % 360) - want) > 1e-6 ? { ...x, rot: want } : x;
+    });
+  };
   // Axis-aligned bounding box of a rect element at any quarter-turn (0/90/180/270),
   // swapping w/h for 90/270. Returns {cx,cy,w,h,rot:0} or null if not orthogonal.
   const ortho = (el) => {
@@ -3314,26 +3332,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // dock side. A dog-ear is part of the building: it sits flush at the end of the
   // dock wall and projects out into the court, taking that span out of dock use.
   // It's a building element (adds to SF), with no docks/label of its own.
-  // Geometry of a dog-ear (size + center offset) for a given building box.
-  const dogEarGeom = (bx, side, sign) => {
-    const [nx, ny] = SIDE_N[side];
-    const alongIsX = ny !== 0; // horizontal (top/bottom) dock wall → corners spread along X
-    const w = alongIsX ? DOGEAR_W : DOGEAR_D;
-    const h = alongIsX ? DOGEAR_D : DOGEAR_W;
-    // outer edge flush with the building corner (inset half its along-span), and
-    // projecting DOGEAR_D out past the dock face.
-    const lx = alongIsX ? sign * (bx.w / 2 - DOGEAR_W / 2) : nx * (bx.w / 2 + DOGEAR_D / 2);
-    const ly = alongIsX ? ny * (bx.h / 2 + DOGEAR_D / 2) : sign * (bx.h / 2 - DOGEAR_W / 2);
-    const off = rot2(lx, ly, bx.rot);
-    return { cx: bx.cx + off.x, cy: bx.cy + off.y, w, h, rot: ((bx.rot % 360) + 360) % 360 };
-  };
+  // Bump-out box geometry (dogEarGeom) + the size-by-wall helper (dogEarSize) are pure, in
+  // lib/dogEar.js (B362). `de` carries the corner (side/sign) and, once resized, its stored
+  // span along the wall + projection (`along`/`proj`); absent → the 55′×60′ default.
   const makeDogEar = (b, side, sign) => ({
-    id: uid(), type: "building", ...dogEarGeom(b, side, sign),
+    id: uid(), type: "building", ...dogEarGeom(b, { side, sign }),
     attachedTo: b.id, noFit: true, noLabel: true, dock: "none", dogEar: { side, sign },
   });
-  // Re-anchor a dog-ear to the building corner when the building is resized
-  // (keeps its fixed 55′×60′ size, slides to the new corner / dock face).
-  const fitDogEar = (nb, de) => dogEarGeom(nb, de.side, de.sign);
+  // Re-anchor a dog-ear to the building corner when the building is resized: slides to the
+  // new corner / dock face and re-derives the host angle, while KEEPING its size — the
+  // user's if it was resized (B362), else the 55′×60′ default.
+  const fitDogEar = (nb, de) => dogEarGeom(nb, de);
   // Commit a batch of building-attached elements in one history step.
   const addBuildingEls = (list, hostId) => { if (!list.length) return; pushHistory(); setEls((a) => [...a, ...list]); setSel({ kind: "el", id: hostId }); };
   // Remove a building feature (and anything that hangs off it — a court's trailer, a
@@ -3588,7 +3597,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const refitChildren = (a, buildingId, nb, kids) => {
     const resized = a.find((x) => x.id === buildingId);
     let next = a.map((x) => {
-      if (x.id === buildingId) return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
+      if (x.id === buildingId) {
+        const moved = { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
+        // B362: a bump-out resized on its own remembers its new size (span along the dock wall +
+        // projection) on its dogEar tag, so a later host refit re-anchors it AT that size instead
+        // of snapping it back to the 55′×60′ default.
+        if (x.dogEar) moved.dogEar = { ...x.dogEar, ...dogEarSize(x.dogEar, nb.w, nb.h) };
+        return moved;
+      }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
@@ -3613,7 +3629,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         next = relayoutSide(next, b, side);
       }
     }
-    return next;
+    // Keep every bonded child's angle locked to the building's (B363) — closes the gap where a
+    // strip kept a stale angle through a resize (fitKid preserves rot0, so drift would survive).
+    return resyncBondedRot(next, resized && resized.attachedTo ? resized.attachedTo : buildingId);
   };
   // Trailer parking flush against the FAR (outer) edge of a truck court — where trailers
   // actually back in. Routes through the stack ("+" adds the next zone, here the trailer).
@@ -4001,11 +4019,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Only ACTIVE parcels drive the yield/area math (default active; inactive = excluded but visible) (B100).
   const siteSqft = parcels.reduce((s, p) => s + (p.active !== false ? polyArea(p.points) : 0), 0);
   let bldg = 0, paving = 0, parkArea = 0, trailArea = 0, pondArea = 0, stalls = 0, trailers = 0;
-  let bumpCount = 0, bumpArea = 0; // dog-ear / bump-out tally (counted within bldg)
+  let bumpCount = 0, bumpArea = 0, bumpsUniform = true; // dog-ear / bump-out tally (counted within bldg)
   els.forEach((e) => {
     const a = e.points ? polyArea(e.points) : e.w * e.h;
     const curb = curbAreaOf(e, els); // derived curbs count in the SF / impervious math (0 for non-paved types)
-    if (e.type === "building") { bldg += a; if (e.dogEar) { bumpCount++; bumpArea += a; } }
+    if (e.type === "building") {
+      bldg += a;
+      if (e.dogEar) {
+        bumpCount++; bumpArea += a;
+        // Is this bump still the 55′×60′ default (so the summary can name the size)? (B362)
+        const horiz = e.dogEar.side === "top" || e.dogEar.side === "bottom";
+        if (Math.abs((horiz ? e.w : e.h) - DOGEAR_W) > 0.5 || Math.abs((horiz ? e.h : e.w) - DOGEAR_D) > 0.5) bumpsUniform = false;
+      }
+    }
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
     else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
@@ -5337,13 +5363,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!delta) return;
     pushHistory();
     const pivot = { x: el.cx, y: el.cy };
+    const root = rootIdOf(el.id);
     const ids = new Set(assemblyOf(el.id).map((m) => m.id));
-    setEls((a) => a.map((x) => {
+    setEls((a) => resyncBondedRot(a.map((x) => {
       if (!ids.has(x.id)) return x;
       if (x.points) return { ...x, points: x.points.map((p) => { const r = rot2(p.x - pivot.x, p.y - pivot.y, delta); return { x: pivot.x + r.x, y: pivot.y + r.y }; }) };
       const r = rot2(x.cx - pivot.x, x.cy - pivot.y, delta);
       return { ...x, cx: pivot.x + r.x, cy: pivot.y + r.y, rot: ((x.rot + delta) % 360 + 360) % 360 };
-    }));
+    }), root));
   };
   const rotateSelTo = (newRot) => { if (selEl) rotateAssemblyTo(selEl, newRot); };
   const bumpRot = (d) => { if (selEl && !selEl.points) rotateSelTo((((Math.round(selEl.rot) + d) % 360) + 360) % 360); };
@@ -5636,6 +5663,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         centerContent={plannerCenterContent}
         saveSlot={plannerSaveSlot}
         authControl={authControl}
+        accountActive={accountActive}
         toolbarContent={plannerToolbar}
       />
 
@@ -7817,7 +7845,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <YieldPanel
             siteSqft={siteSqft} bldg={bldg} cov={cov} far={far} stalls={stalls} ratio={ratio}
             trailers={trailers} impPct={impPct} pondArea={pondArea} detPct={detPct} open={open}
-            bumpCount={bumpCount} bumpArea={bumpArea}
+            bumpCount={bumpCount} bumpArea={bumpArea} bumpsUniform={bumpsUniform}
             inactiveCount={parcels.filter((p) => p.active === false).length}
             easeAll={easeAll} easeArea={easeArea} easeBldgArea={easeBldgArea} easePaveArea={easePaveArea}
           />
@@ -8369,9 +8397,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     sides.forEach((s) => {
       const horiz = s === "top" || s === "bottom";
       const L = horiz ? el.w : el.h; // wall length (ft)
-      // Don't draw doors where a dog-ear takes up the end of the wall.
-      const startF = dogEars.some((d) => d.dogEar.side === s && d.dogEar.sign === -1) ? DOGEAR_W : 0;
-      const endF = dogEars.some((d) => d.dogEar.side === s && d.dogEar.sign === 1) ? L - DOGEAR_W : L;
+      // Don't draw doors where a dog-ear takes up the end of the wall — by its ACTUAL span
+      // along this wall (B362: a resized bump consumes more/less of the dock face than 55′).
+      const bumpAlong = (sign) => { const d = dogEars.find((g) => g.dogEar.side === s && g.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
+      const startF = bumpAlong(-1);
+      const endF = L - bumpAlong(1);
       if (endF - startF < 12) return; // no room for a door
       if (horiz) {
         const by = s === "bottom" ? h - Dpx : 0;
@@ -8523,7 +8553,7 @@ const YIELD_PAL = {
 
 function YieldPanel({
   siteSqft, bldg, cov, far, stalls, ratio, trailers, impPct, pondArea, detPct, open,
-  bumpCount, bumpArea, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+  bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
 }) {
   const [openPanel, setOpenPanel] = useState(!collapsed);
   const Y = YIELD_PAL;
@@ -8646,7 +8676,7 @@ function YieldPanel({
 
           {groupHead(Y.building, "Building")}
           {row("Building", `${f0(bldg)} sf`, bumpCount ? `incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""}` : "")}
-          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′`, true)}
+          {bumpCount > 0 && row("· Bump-outs", `${f0(bumpArea)} sf`, bumpsUniform ? `${bumpCount} × ${DOGEAR_W}′×${DOGEAR_D}′` : `${bumpCount} bump-out${bumpCount > 1 ? "s" : ""} · sizes vary`, true)}
           {row("Coverage", `${f0(cov)}%`)}
 
           {groupHead(Y.paving, "Parking")}

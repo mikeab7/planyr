@@ -22,6 +22,14 @@ const noisyOr = (cs) => 1 - cs.reduce((p, c) => p * (1 - Math.max(0, Math.min(1,
 // via the single-space normalization on both sides).
 const phraseIn = (needle, hayNorm) => { const n = norm(needle); return n.length >= 3 && ` ${hayNorm} `.includes(` ${n} `); };
 
+// Count word-bounded occurrences of a name phrase in the normalized haystack — ≥2 means a real
+// title block printed the project name several times (vs. a single coincidental mention). (B360)
+const phraseCount = (needle, hayNorm) => {
+  const n = norm(needle); if (n.length < 3) return 0;
+  const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return ((` ${hayNorm} `).match(new RegExp(`(?<= )${esc}(?= )`, "g")) || []).length;
+};
+
 /* B350 — the set of id-strings the text ACTUALLY contains, as the normId of each run of up to N
  * ADJACENT alphanumeric tokens. This lets a parcel/job number split by punctuation or spaces
  * ("1234567-000-001", "1234567 000 001") still match by EQUALITY, WITHOUT the old
@@ -65,13 +73,20 @@ export function scoreProjectInText(text, project = {}) {
     if (numTok && idIn(idWin, normId(numTok)) && hit >= 2) { push("address", 0.85, a); break; }
   }
   // Project name: the primary printed identifier. A full-PHRASE hit is strong (0.9 → auto-files on
-  // its own). The name's words merely appearing SCATTERED across the sheet is much weaker — for a
-  // 2-word common name ("Katy Grand") that easily co-occurs by chance on an unrelated Katy-area /
-  // Grand-Parkway sheet — so it scores BELOW the auto-file floor (B350): it can corroborate another
-  // signal via noisy-or but can't auto-route a file by itself ("never auto-guess").
+  // its own) ONLY when the name is DISTINCTIVE (a long/rare token like "Jacintoport") or REPEATS
+  // across the sheet (a real title block prints the project name several times). A GENERIC name
+  // mentioned once ("Mesa" on a "Mesa Verde" sheet, "Katy Grand" on a "Katy Grand Parkway" sheet)
+  // stays weak (0.5, below the auto-file floor) — it can corroborate another signal via noisy-or but
+  // can't auto-route a file by itself ("never auto-guess"; B360 stress test). The name's words merely
+  // appearing SCATTERED (not as a phrase) is weaker still.
   let nameConf = 0;
   for (const n of names) {
-    if (phraseIn(n, hay)) { nameConf = Math.max(nameConf, 0.9); continue; }
+    if (phraseIn(n, hay)) {
+      const distinctive = normId(n).length >= 10 || tokens(n).some((t) => t.length >= 9);
+      const repeats = phraseCount(n, hay) >= 2;
+      nameConf = Math.max(nameConf, distinctive || repeats ? 0.9 : 0.5);
+      continue;
+    }
     const nt = tokens(n); if (!nt.length) continue;
     const hit = nt.filter((t) => phraseIn(t, hay)).length;
     if (nt.length >= 2 && hit === nt.length) nameConf = Math.max(nameConf, 0.55); // scattered words → weak, needs corroboration

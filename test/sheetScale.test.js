@@ -48,4 +48,16 @@ describe("parseSheetScale — Document Review stated-scale auto-calibration (B26
     const r = parseSheetScale('1/16" = 1\'-0"');
     expect(ftPerPointForScale(r.ftPerInch)).toBeCloseTo(16 / 72, 6);
   });
+
+  it("reads an architectural scale even when a number (a date) is printed right before it (B360)", () => {
+    // Regression: the mixed-number alternative used to swallow the date's trailing digits + the
+    // fraction ("2025  1/8" read as a mixed number ≈ 2025"), fail the sanity range, and — since
+    // .match returns only the first hit — never try the real "1/8". A date next to the scale is
+    // the common title-block layout, so this defeated arch reads on real sheets.
+    expect(parseSheetScale('SHEET A-201  10/24/2025  1/8"=1\'-0"')).toMatchObject({ ftPerInch: 8, form: "arch" });
+    expect(parseSheetScale('SHEET A-101  05/30/2023  1/16" = 1\'-0"')).toMatchObject({ ftPerInch: 16, form: "arch" });
+    expect(parseSheetScale('DATE: 1/15/2024  SCALE: 1/4"=1\'-0"')).toMatchObject({ ftPerInch: 4, form: "arch" });
+    // a genuine mixed paper scale still reads, with or without a leading number
+    expect(parseSheetScale('05/30/2023  1 1/2"=1\'-0"').ftPerInch).toBeCloseTo(0.667, 2);
+  });
 });

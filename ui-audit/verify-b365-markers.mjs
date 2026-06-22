@@ -1,5 +1,5 @@
 /**
- * B362 — verify the redesigned project-status map markers.
+ * B365 — verify the redesigned project-status map markers.
  *
  * Seeds one site per status (status at TOP LEVEL, the logged-out path). Confirms:
  *   1. Pursuit/Active/On-hold/Complete render; Dead is HIDDEN by default.
@@ -10,13 +10,13 @@
  *   6. The hit box is fixed (≥ the old tap target) for every status.
  * Also screenshots the overview + the left rail (to eyeball the chips/list glyphs).
  *
- * Run:  npm run build && npx vite preview --port 4173 &   then   node ui-audit/verify-b362-markers.mjs
+ * Run:  npm run build && npx vite preview --port 4173 &   then   node ui-audit/verify-b365-markers.mjs
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
-const OUT = new URL("./screens/b362/", import.meta.url).pathname;
+const OUT = new URL("./screens/b365/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
 // Pursuit + Complete share a lat so the z-order test isolates the zIndexOffset.

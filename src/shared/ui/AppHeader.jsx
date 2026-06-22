@@ -247,10 +247,16 @@ export default function AppHeader({
   // scheduler's own projects) and a home-crumb label override (B204 — Site → "Map").
   projects,
   homeLabel,
+  // Whether a real account is signed in. The same-project-in-another-tab warning
+  // (B313) only applies to signed-in accounts: a logged-out, device-only session
+  // starts fresh and should never see the cross-tab conflict banner — it protects
+  // saved cloud work, not anonymous local browsing (which was falsely nagging on
+  // mobile). Defaults off so any unwired caller stays silent.
+  accountActive = false,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
   const { mode, resolved, setMode } = useTheme();
-  const multiTab = useMultiTab(currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning
+  const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
 
   useEffect(() => {
     const handle = (e) => {
@@ -390,7 +396,7 @@ export default function AppHeader({
     </header>
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}
-    {multiTab.conflictRisk && (
+    {accountActive && multiTab.conflictRisk && (
       <div role="status" style={{ position: "fixed", top: 84, left: "50%", transform: "translateX(-50%)", zIndex: 5999, maxWidth: 660, display: "flex", alignItems: "center", gap: 10, background: "#3f2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 6px 22px rgba(0,0,0,0.3)" }}>
         <span>⧉ This project is open in <b>another tab</b>. Editing it in more than one tab can conflict — work in a single tab to be safe.</span>
       </div>

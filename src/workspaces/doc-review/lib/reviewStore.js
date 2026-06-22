@@ -28,10 +28,11 @@ export const BUCKET = "doc-review-files";
 export const MAX_BYTES = 50 * 1024 * 1024; // Supabase free-tier per-file upload limit
 export const REVIEW_SCHEMA = 1;
 
-// Filing taxonomy. Disciplines are a fixed set (the library's drag-drop folders);
-// project lifecycle status is REUSED from the Site Model so both workspaces agree on
-// one source of truth (sites.data ->> status).
-export const DISCIPLINES = ["Survey", "Civil", "Architectural", "Landscape", "Environmental", "CAD", "Geotech", "Other"];
+// Filing taxonomy. Disciplines are a fixed set (the filing dropdown / library folders); the
+// canonical list lives in the reader (shared/files/titleBlockParse.js) and is re-exported here so
+// the reader's output vocabulary and this UI can't drift. Project lifecycle status is REUSED from
+// the Site Model so both workspaces agree on one source of truth (sites.data ->> status).
+export { DISCIPLINES } from "../../../shared/files/titleBlockParse.js";
 export { STATUSES, STATUS_META, statusOf };
 
 // "<Project> - <Item> - YYYY.MM.DD" — the default review/file name; each piece editable.

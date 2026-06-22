@@ -5,57 +5,132 @@
  * filing fields straight off the text — FREE and instant, no Claude API call. The AI reader
  * (server/filing/) stays as a FALLBACK only for scanned/image-only sheets that have no text.
  *
- * This module is the pure heart: text string in → { date, discipline, item, sheetNumber, … }
+ * This module is the pure heart: text string in → { date, discipline, item, sheetNumber, scale, … }
  * out. It does NOT touch pdf.js (that's localRead.js) so it's trivially unit-testable. Project
  * identification is matchProject.js's job (it searches the same text for the known projects).
  *
- * Honesty: it only reports what it can actually read. A field it can't find is left empty (the
+ * ONE reader (B360): the stated `scale` is now read in the SAME pass (shared/files/sheetScale.js),
+ * so filing and Markup auto-calibration consume a single field bundle instead of two parallel
+ * reads. The POSITIONAL superset (sheetMeta.readSheetMeta) layers sheet-title + match-line geometry
+ * on top of this for grouping/stitching — it calls readTitleBlockText, never re-parses.
+ *
+ * Honesty: it only reports what it can actually read. A field it can't find is left empty/null (the
  * matcher then routes the file to the "needs filing" tray rather than guess).
  */
+import { parseSheetScale } from "./sheetScale.js";
 
-// Disciplines are the fixed library set (mirrors reviewStore.DISCIPLINES). We never invent a
-// new one; an unrecognized doc type gets a descriptive `item` under the best-fit discipline.
-export const DISCIPLINES = ["Survey", "Civil", "Architectural", "Landscape", "Environmental", "CAD", "Geotech", "Other"];
-
-/* Document-type rules, most specific first. Each: a matcher over the (lowercased) sheet text →
- * { discipline, item }. `item` is the human "what is this" label that becomes the middle of
- * "<Project> - <Item> - YYYY.MM.DD". ALTA is called out explicitly (owner example). */
-const TYPE_RULES = [
-  [/\balta\b|alta\s*\/?\s*nsps|alta\/acsm/, "Survey", "ALTA Survey"],
-  [/\bboundary\s+survey\b/, "Survey", "Boundary Survey"],
-  [/\btopograph(ic|y)\b|\btopo\s+survey\b/, "Survey", "Topographic Survey"],
-  [/\btree\s+survey\b/, "Survey", "Tree Survey"],
-  [/\bas[-\s]?built\b/, "Survey", "As-Built Survey"],
-  [/\bfinal\s+plat\b|\bpreliminary\s+plat\b|\breplat\b|\bplat\b/, "Survey", "Plat"],
-  [/\bmetes\s+and\s+bounds\b|\blegal\s+description\b/, "Survey", "Legal Description"],
-  [/\bsurvey\b/, "Survey", "Survey"],
-  [/\bgrading(\s+(and|&)\s+drainage)?\s+plan\b|\bgrading\b/, "Civil", "Grading Plan"],
-  [/\bpaving\b/, "Civil", "Paving Plan"],
-  [/\b(storm|sanitary)\s+sewer\b|\bdrainage\s+plan\b|\butility\s+plan\b|\bwater\s+plan\b/, "Civil", "Utility Plan"],
-  [/\bdimensional?\s+control\b|\bsite\s+plan\b|\boverall\s+site\b/, "Civil", "Site Plan"],
-  [/\berosion\s+control\b|\bspcc\b|\bswppp\b/, "Civil", "Erosion Control"],
-  [/\bcivil\b/, "Civil", "Civil"],
-  [/\bfire\s+(sprinkler|protection)\b|\bsprinkler\s+plan\b/, "Other", "Fire Sprinkler"],
-  [/\bmechanical\b|\belectrical\b|\bplumbing\b|\bm\.?e\.?p\.?\b/, "Other", "MEP"],
-  [/\bfloor\s+plan\b|\broof\s+plan\b|\belevations?\b|\bbuilding\s+sections?\b|\barchitectural\b/, "Architectural", "Architectural"],
-  [/\bland\s?scape\b|\bplanting\s+plan\b|\birrigation\b/, "Landscape", "Landscape Plan"],
-  [/\bphase\s+(i|1|ii|2)\s+(environmental|esa)\b|\bwetland\b|\benvironmental\s+site\s+assessment\b|\btceq\b/, "Environmental", "Environmental"],
-  [/\bgeotechnical\b|\bsoil\s+borings?\b|\bboring\s+logs?\b|\bgeotech\b/, "Geotech", "Geotechnical Report"],
+// Disciplines are the fixed library set (the canonical source — reviewStore re-exports THIS, so the
+// reader's output vocabulary and the filing UI's folders can't drift). Owner order (2026-06-21):
+// building disciplines first, then the site/due-diligence ones, Other last (the catch-all). Fire is
+// split into Alarm vs. Sprinkler; Structural/Mechanical/Electrical/Plumbing get their own buckets
+// (were lumped under "Other"/"MEP"). We never invent a new one; an unrecognized doc type gets a
+// descriptive `item` under the best-fit discipline.
+export const DISCIPLINES = [
+  "Architectural", "Structural", "Civil", "Mechanical", "Electrical", "Plumbing",
+  "Landscape", "Fire Alarm", "Fire Sprinkler", "Survey", "Environmental", "Geotech", "CAD", "Other",
 ];
 
-// Sheet-number prefix → discipline, the tie-breaker when the text alone is ambiguous.
+/* Document-type rules. Each: [matcher over the (lowercased) sheet text, discipline, item, weight].
+ * `item` is the human "what is this" label (middle of "<Project> - <Item> - YYYY.MM.DD"). `weight`
+ * is how DEFINITIVE the keyword is for the discipline — the discipline with the highest weighted
+ * count wins (see classifyDiscipline). A specific sheet-type ("floor plan", "foundation plan",
+ * "grading plan") is strong (weight 4–5); a BARE discipline name ("structural", "architectural",
+ * "civil") is weak (weight 1) because it's usually just a cross-reference printed on ANOTHER
+ * discipline's sheet (B360 corpus: a Jacintoport ARCH set said "structural" 61× as cross-refs but
+ * "floor plan" 22× — the floor-plan signal has to win; the inverse holds for the STRUCTURAL set).
+ * ALTA is called out explicitly (owner example). */
+const TYPE_RULES = [
+  [/\balta\b|alta\s*\/?\s*nsps|alta\/acsm/, "Survey", "ALTA Survey", 5],
+  [/\bboundary\s+survey\b/, "Survey", "Boundary Survey", 5],
+  [/\btopograph(ic|y)\b|\btopo\s+survey\b/, "Survey", "Topographic Survey", 5],
+  [/\btree\s+survey\b/, "Survey", "Tree Survey", 5],
+  [/\bas[-\s]?built\b/, "Survey", "As-Built Survey", 4],
+  [/\bfinal\s+plat\b|\bpreliminary\s+plat\b|\breplat\b|\bplat\b/, "Survey", "Plat", 4],
+  [/\bmetes\s+and\s+bounds\b|\blegal\s+description\b/, "Survey", "Legal Description", 5],
+  [/\bsurvey\b/, "Survey", "Survey", 2],
+  [/\bgrading(\s+(and|&)\s+drainage)?\s+plan\b/, "Civil", "Grading Plan", 5],
+  [/\bpaving\s+plan\b|\bpaving\b/, "Civil", "Paving Plan", 3],
+  [/\b(storm|sanitary)\s+sewer\b|\bdrainage\s+plan\b|\butility\s+plan\b|\bwater\s+plan\b/, "Civil", "Utility Plan", 4],
+  [/\bdimensional?\s+control\b|\bsite\s+plan\b|\boverall\s+site\b/, "Civil", "Site Plan", 3],
+  [/\berosion\s+control\b|\bspcc\b|\bswppp\b/, "Civil", "Erosion Control", 4],
+  [/\bgrading\b/, "Civil", "Grading Plan", 2],
+  [/\bcivil\b/, "Civil", "Civil", 1],
+  // Fire — split into alarm vs. sprinkler (owner taxonomy, 2026-06-21). "fire alarm" first; the
+  // generic "fire protection"/"sprinkler"/"suppression" → Fire Sprinkler. (A combined "fire
+  // protection & alarm" set reads as Fire Sprinkler — "fire alarm" isn't adjacent there.)
+  [/\bfire\s+alarm\b/, "Fire Alarm", "Fire Alarm", 5],
+  [/\bfire\s+(sprinkler|protection|suppression)\b|\bsprinkler\s+(plan|system)\b/, "Fire Sprinkler", "Fire Sprinkler", 5],
+  // Structural / Mechanical / Electrical / Plumbing now have dedicated buckets (were "Other"/"MEP").
+  // Definitive sheet-type ("foundation/framing plan") weighs heavy; the bare name weighs 1.
+  [/\bfoundation\s+plan\b|\bframing\s+plan\b/, "Structural", "Structural", 5],
+  [/\bstructural\b/, "Structural", "Structural", 1],
+  [/\bmechanical\s+plan\b|\bhvac\b/, "Mechanical", "Mechanical", 4],
+  [/\bmechanical\b/, "Mechanical", "Mechanical", 1],
+  [/\belectrical\s+(plan|power|lighting)\b/, "Electrical", "Electrical", 4],
+  [/\belectrical\b/, "Electrical", "Electrical", 1],
+  [/\bplumbing\s+plan\b/, "Plumbing", "Plumbing", 4],
+  [/\bplumbing\b/, "Plumbing", "Plumbing", 1],
+  // NB: bare "elevation(s)" is NOT a keyword — it's an ambiguous word (a structural/civil sheet is
+  // full of top-of-steel / spot elevations), which polluted the count (B360). Require a qualified
+  // architectural elevation; the bare name "architectural" weighs 1 (cross-reference).
+  [/\bfloor\s+plan\b|\broof\s+plan\b|\b(building|exterior|interior)\s+elevations?\b|\bbuilding\s+sections?\b|\breflected\s+ceiling\b/, "Architectural", "Architectural", 4],
+  [/\barchitectural\b/, "Architectural", "Architectural", 1],
+  [/\bland\s?scape\b|\bplanting\s+plan\b|\birrigation\b/, "Landscape", "Landscape Plan", 4],
+  [/\bphase\s+(i|1|ii|2)\s+(environmental|esa)\b|\bwetland\b|\benvironmental\s+site\s+assessment\b|\btceq\b/, "Environmental", "Environmental", 5],
+  [/\bgeotechnical\b|\bsoil\s+borings?\b|\bboring\s+logs?\b|\bgeotech\b/, "Geotech", "Geotechnical Report", 5],
+];
+
+// Sheet-number prefix → discipline, the tie-breaker when the text alone is ambiguous. Order
+// matters: the Survey prefixes (SV/SU) are tested before bare S→Structural, and FA→Fire Alarm
+// before FP/FS→Fire Sprinkler, so the more specific prefix wins.
 const SHEET_PREFIX_DISC = [
   [/^(v|sv|su|bp)/i, "Survey"], [/^c/i, "Civil"], [/^a/i, "Architectural"],
-  [/^l/i, "Landscape"], [/^(fp|m|e|p)/i, "Other"], [/^g/i, "Geotech"],
+  [/^s/i, "Structural"], [/^l/i, "Landscape"],
+  [/^fa/i, "Fire Alarm"], [/^(fp|fs)/i, "Fire Sprinkler"],
+  [/^m/i, "Mechanical"], [/^e/i, "Electrical"], [/^p/i, "Plumbing"], [/^g/i, "Geotech"],
 ];
 
 const lc = (s) => (s || "").toString().toLowerCase();
 
+// How many times a rule's keywords occur in the text (capped — we only need dominance, not exact).
+function countMatches(text, re) {
+  const g = re.global ? re : new RegExp(re.source, re.flags + "g");
+  let n = 0; g.lastIndex = 0;
+  while (g.exec(text)) { if (++n >= 500) break; }
+  return n;
+}
+
 /* Classify the document's discipline + item from the sheet text (and its sheet number as a
- * tie-break). Returns { discipline, item }. Falls back to Other/Document — never a guess. */
+ * tie-break). Returns { discipline, item }. Falls back to Other/Document — never a guess.
+ *
+ * WEIGHTED DOMINANCE, not first-rule (B360, corpus finding): score each discipline by Σ(keyword
+ * count × rule weight) and let the discipline that actually dominates the sheet win — so a deep,
+ * stray cross-reference can't steal the classification. A real Jacintoport STRUCTURAL set said
+ * "structural" 71× but only "grading" 2× (the old first-rule logic filed it Civil because Civil was
+ * listed first); a real ARCH set said "structural" 61× as cross-refs but "floor plan" 22× — the
+ * definitive "floor plan" (weight 4) must beat the bare cross-reference "structural" (weight 1).
+ * The item label comes from the most DEFINITIVE matched rule (highest weight, then earliest order). */
 export function classifyDiscipline(text, sheetNumber = "") {
   const t = lc(text);
-  for (const [re, discipline, item] of TYPE_RULES) if (re.test(t)) return { discipline, item };
+  const tally = new Map(); // discipline -> { score, weight, ruleIdx, item }
+  for (let i = 0; i < TYPE_RULES.length; i++) {
+    const [re, discipline, item, weight = 1] = TYPE_RULES[i];
+    const n = countMatches(t, re);
+    if (!n) continue;
+    const cur = tally.get(discipline);
+    if (!cur) tally.set(discipline, { score: n * weight, weight, ruleIdx: i, item });
+    else {
+      cur.score += n * weight;
+      if (weight > cur.weight || (weight === cur.weight && i < cur.ruleIdx)) { cur.weight = weight; cur.ruleIdx = i; cur.item = item; }
+    }
+  }
+  let best = null;
+  for (const [discipline, v] of tally) {
+    if (!best || v.score > best.score || (v.score === best.score && v.ruleIdx < best.ruleIdx)) {
+      best = { discipline, item: v.item, score: v.score, ruleIdx: v.ruleIdx };
+    }
+  }
+  if (best) return { discipline: best.discipline, item: best.item };
   // No keyword hit: lean on the sheet-number prefix if we have one, else Other.
   const pre = (sheetNumber || "").trim();
   for (const [re, discipline] of SHEET_PREFIX_DISC) if (re.test(pre)) return { discipline, item: "Document" };
@@ -76,10 +151,12 @@ export function findDates(text) {
   const s = (text || "").toString();
   const out = [];
   let m;
-  const num = /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/g;          // MM/DD/YYYY or MM.DD.YY
-  while ((m = num.exec(s))) { const mo = +m[1], d = +m[2], y = y4(+m[3]); if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
-  const ymd = /\b(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})\b/g;            // YYYY-MM-DD
-  while ((m = ymd.exec(s))) { const y = +m[1], mo = +m[2], d = +m[3]; if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
+  // Same-separator (\2 backreference) so a mixed-punctuation dimension can't masquerade as a date —
+  // e.g. "5-29/32" (5 and 29/32") used to parse as 2032-05-29 and poison "latest date". (B360)
+  const num = /\b(\d{1,2})([\/.\-])(\d{1,2})\2(\d{2,4})\b/g;             // MM/DD/YYYY or MM.DD.YY
+  while ((m = num.exec(s))) { const mo = +m[1], d = +m[3], y = y4(+m[4]); if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
+  const ymd = /\b(\d{4})([\/.\-])(\d{1,2})\2(\d{1,2})\b/g;              // YYYY-MM-DD
+  while ((m = ymd.exec(s))) { const y = +m[1], mo = +m[3], d = +m[4]; if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
   const txt = /\b([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/gi;          // June 30, 2025
   while ((m = txt.exec(s))) { const mo = MONTHS[m[1].slice(0, 3).toLowerCase()], d = +m[2], y = +m[3]; if (mo && valid(y, mo, d)) out.push(iso(y, mo, d)); }
   const dtxt = /\b(\d{1,2})\s+([a-z]{3,9})\.?\s+(\d{4})\b/gi;           // 30 June 2025
@@ -117,15 +194,26 @@ export function parseRevision(text) {
   const s = (text || "").toString();
   const code = s.match(/\b(IFC|IFP|IFB|IFA)\b/i);                       // prefer the short canonical code
   if (code) return code[1].toUpperCase();
-  const phrase = s.match(/\b(NOT FOR CONSTRUCTION|ISSUED FOR [A-Z]+)\b/i);
-  if (phrase) return phrase[1].toUpperCase().replace(/\s+/g, " ").trim();
-  const rev = s.match(/\brev(?:ision)?\.?\s*[:#]?\s*([0-9]{1,2}|[A-Z])\b/i);
+  // Map the spelled-out issue phrase → its canonical code. The owner often drops the "D"
+  // ("ISSUE FOR CONSTRUCTION"), so accept "issue" or "issued". (B360)
+  if (/\bissue[d]?\s+for\s+construction\b/i.test(s)) return "IFC";
+  if (/\bissue[d]?\s+for\s+permit\b/i.test(s)) return "IFP";
+  if (/\bissue[d]?\s+for\s+bid(?:ding)?\b/i.test(s)) return "IFB";
+  if (/\bissue[d]?\s+for\s+approval\b/i.test(s)) return "IFA";
+  if (/\bnot\s+for\s+construction\b/i.test(s)) return "NOT FOR CONSTRUCTION";
+  // "Rev 3" / "REV: A" / "Revision 10". The rev-word is a WHOLE word (\b) followed by a real
+  // separator, so the heading "REVISIONS" can't be read as "Rev S" (B360 — Mesa title blocks
+  // print "SUBMITTALS / REVISIONS"), and the value must be a lone number/letter (\b) so
+  // "revision label" isn't read as "Rev L".
+  const rev = s.match(/\b(?:revision|rev)\b[\s.:#-]+([0-9]{1,2}|[A-Z])\b/i);
   return rev ? `Rev ${rev[1]}`.toUpperCase() : "";
 }
 
 /* Read the deterministic filing fields off the sheet text. `hasText` is false for an empty/
- * scanned page (the caller's cue to fall back to the AI reader). Project identification is NOT
- * here — matchProject.js searches the same text for the named projects. */
+ * scanned page (the caller's cue to fall back to the AI reader). `scale` is the stated-scale
+ * read (B267, shared/files/sheetScale.js): { ftPerInch, form, label } | { explicit:'nts' } |
+ * null — null when the page has no parseable scale. Project identification is NOT here —
+ * matchProject.js searches the same text for the named projects. */
 export function readTitleBlockText(text) {
   const hasText = !!(text && text.replace(/\s+/g, "").length > 30);
   const sheetNumber = hasText ? parseSheetNumber(text) : "";
@@ -136,5 +224,6 @@ export function readTitleBlockText(text) {
     discipline, item,
     sheetNumber,
     revision: hasText ? parseRevision(text) : "",
+    scale: hasText ? parseSheetScale(text) : null,
   };
 }

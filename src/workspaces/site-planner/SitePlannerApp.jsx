@@ -23,7 +23,7 @@ let lastConsumedNavToken = null;
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
-export default function App({ shellModule, onShellSwitch, authControl, navIntent, onOpenReviewInDocReview } = {}) {
+export default function App({ shellModule, onShellSwitch, authControl, accountActive = false, navIntent, onOpenReviewInDocReview } = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
@@ -349,6 +349,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
           authControl={authControl}
+          accountActive={accountActive}
           // In the Site module the home crumb is "Map" (B204). Map IS the all-projects
           // view, so no "current project" here — the Map crumb reads as current and the
           // project crumb invites a pick.
@@ -417,6 +418,7 @@ export default function App({ shellModule, onShellSwitch, authControl, navIntent
             onShellSwitch={onShellSwitch}
             onOpenReviewInDocReview={onOpenReviewInDocReview}
             authControl={authControl}
+            accountActive={accountActive}
           />
         )}
       </div>

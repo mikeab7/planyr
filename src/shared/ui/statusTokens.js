@@ -12,16 +12,16 @@
  *     status dot, chip, or pin. (Before B234 the pins wrongly borrowed the module
  *     greens/ambers for status, which is the mismatch this set closes.) These are a
  *     DELIBERATELY SEPARATE palette — never source a status color from an accent
- *     token, and vice versa (B362).
+ *     token, and vice versa (B365).
  *
- * VISUAL-HIERARCHY rule (B362): salience MUST track importance. The stage that
+ * VISUAL-HIERARCHY rule (B365): salience MUST track importance. The stage that
  * needs the eye — Pursuit — is the loudest (solid warm coral, biggest, thickest
  * halo, full opacity); settled stages recede (Complete is small, gray, semi-
  * transparent; Dead is a faint hollow outline, hidden on the map by default). The
  * earlier scheme inverted this — Pursuit was a thin dashed cool-blue outline that
  * vanished into the aerial while Complete shouted — which this set fixes.
  *
- * Color assignments (B362): Pursuit = coral (warm = advances toward the eye);
+ * Color assignments (B365): Pursuit = coral (warm = advances toward the eye);
  * Active = blue (deliberately NOT green, so it never collides with the Site module
  * accent green #1D9E75); On&nbsp;Hold = amber; Complete = neutral gray; Dead = red ✕.
  * Glyph language is intentionally paired so status reads WITHOUT color too (color-
@@ -38,7 +38,7 @@
 //   shape  — the MAP glyph selector → an inline white SVG in buildingPinIcon.
 //   hollow / dashed / struck — DOM badge treatment (hollow = outline-only dot;
 //     struck = strike-through label for a killed deal).
-//   --- map-pin only (read solely by buildingPinIcon, B362) ---
+//   --- map-pin only (read solely by buildingPinIcon, B365) ---
 //   halo       — width (px) of the white outer halo that keeps the pin legible over
 //                busy imagery; scales with importance.
 //   tier       — relative pin size (1 = largest/Pursuit → smallest/Complete).
