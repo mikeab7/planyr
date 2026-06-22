@@ -912,6 +912,26 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f1(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
+              {/* Per-measure list with a × delete (B376): the stitched canvas has no select-and-delete,
+                  so this list is the ONLY way to remove a committed measurement here — without it a
+                  stray measure (e.g. an uncalibrated "set scale" area) could never be taken off. */}
+              {measures.length > 0 && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 6 }}>
+                  {measures.map((m) => {
+                    const val = m.kind === "area"
+                      ? (ftPerUnit ? `${f2(ftToAcres(polyArea(m.pts) * ftPerUnit * ftPerUnit))} ac` : "set scale")
+                      : (ftPerUnit ? `${f1(dist(m.pts[0], m.pts[1]) * ftPerUnit)} ft` : "set scale");
+                    return (
+                      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }}>
+                        <span style={{ flex: "none", color: PAL.muted, textTransform: "capitalize", fontSize: 11.5 }}>{m.kind}</span>
+                        <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{val}</span>
+                        <button onClick={() => { pushHistory(); setMeasures((arr) => arr.filter((x) => x.id !== m.id)); }} title="Delete this measurement" aria-label="Delete this measurement"
+                          style={{ flex: "none", width: 22, height: 22, display: "grid", placeItems: "center", border: "none", background: "transparent", cursor: "pointer", color: "var(--danger-text)", fontSize: 13, fontWeight: 800, lineHeight: 1, borderRadius: 5, fontFamily: "inherit" }}>×</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>One calibration applies to the whole stitched plan (shared scale). Measures cross seams in world units.</div>
             </div>
           )}

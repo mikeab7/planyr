@@ -50,8 +50,10 @@ export function midOfPath(pts, closed = false) {
   return { x: last.x, y: last.y };
 }
 
-// Ray-cast point-in-polygon (helper for centroidOf's interior clamp).
-function pointInPoly(p, pts) {
+// Ray-cast point-in-polygon. Used by centroidOf's interior clamp AND by the Document
+// Review hit-test so a click anywhere inside a filled Area selects it (one shared test,
+// not a second copy). Handles concave / self-touching outlines.
+export function pointInPoly(p, pts) {
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
