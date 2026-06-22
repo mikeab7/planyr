@@ -23,14 +23,35 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-22: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" — Gantt label alignment + uniform ink,
-     printed-Gantt missing names, and serpentine dependency arrows. Highest B# across both files was
-     B389, so minted **B390 / B391 / B392**. Deduped: all NET-NEW (no existing item covered Gantt label
-     alignment / in-chart PDF names / orthogonal connectors; the prior "NEW-1"s — B383/B385/B386/B387/B388 —
-     were Site-Planner or Schedule-toolbar items). Per STANDING RULE #1 all three were filed AND
-     fixed + headless-verified + shipped the SAME session (branch `claude/zen-ramanujan-14sak9`) — they
-     share ONE label/render pass in GanttView + buildGanttSVG, so they were landed together. Full [x]
-     blocks live in BACKLOG-DONE.md; headless harness V113 (`ui-audit/verify-gantt-labels-deps.mjs`,
-     all checks across right/center/left). -->
+     printed-Gantt missing names, and serpentine dependency arrows. First minted B390/B391/B392, but a
+     concurrent `main` (PR #293, the PDF/Print Exhibit table-layout batch below) took B390/B391/B392
+     while this was in flight, so **renumbered B393 / B394 / B395** (the real next free IDs). Deduped:
+     all NET-NEW — no existing item covered Gantt label alignment / in-chart PDF names / orthogonal
+     connectors; the prior "NEW-1"s (B383/B385–B388) were Site-Planner or Schedule-toolbar items, and
+     the B390–B392 collision is the exhibit batch (a different surface). Per STANDING RULE #1 all three
+     were filed AND fixed + headless-verified + shipped the SAME session (branch
+     `claude/zen-ramanujan-14sak9`) — they share ONE label/render pass in GanttView + buildGanttSVG, so
+     landed together. Full [x] blocks live in BACKLOG-DONE.md; headless harness V114
+     (`ui-audit/verify-gantt-labels-deps.mjs`, all checks across right/center/left). -->
+
+<!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
+     screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
+     (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free
+     IDs (branch commit/PR titles still read B385/B386/B387). Per STANDING RULE #1 all three were filed
+     AND fixed + headless-verified (V113, 10/10) + merged via PR #293 the SAME session on branch
+     `claude/practical-edison-ggcm1k` — full [x] blocks live in BACKLOG-DONE.md:
+       • B390 (bug)  — exhibit columns mis-sized: oversized Task-Name gap + truncated Start/End/Dur.
+                       Split table used table-layout:fixed at hardcoded ~50% width with fixed per-column
+                       px and Name at w:null (absorbed the slack → the gap; dates clipped in the
+                       too-narrow fixed cols). Replaced with a content-fit model (pure approxTextPx +
+                       layoutExhibitCols); dates/dur never flex.
+       • B391 (feat) — year-boundary divider lines on the exhibit Gantt (month lines were hidden behind
+                       the opaque row bands). Heavier slate line at each Jan 1, drawn over the bands;
+                       January labels emphasized.
+       • B392 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
+                       reflowing live + persisted (data.exportColWidths) + a Reset.
+     Deduped: net-new. B392 RECONCILED with B160 (see its note) — complementary, not a dup. -->
+
 
 <!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
      Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
@@ -973,6 +994,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Export-only; live schedule layout unaffected.
 
 <!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
+<!-- RECONCILE w/ B392 (DONE 2026-06-22, PR #293): B392 shipped per-column drag-resize in the exhibit.
+     Because the table block is now exactly the sum of its (content-fit or dragged) column widths and
+     the Gantt auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already
+     shifts the column-block-vs-Gantt ratio — so B392 PARTIALLY covers this item's user need without a
+     slider. B160 remains a distinct control (one ratio handle for the whole split). If built, implement
+     it as the OVERALL budget that B392's per-column widths fit within (don't fight: B392 already clamps
+     the table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
 
 ---
 

@@ -1,11 +1,11 @@
-// B390/B391/B392 — Gantt label alignment + uniform-ink/weight hierarchy + orthogonal
+// B393/B394/B395 — Gantt label alignment + uniform-ink/weight hierarchy + orthogonal
 // dependency connectors. Verifies all three (they share one label/render pass):
-//   B390 — Left/Center/Right name alignment, uniform near-black ink, weight hierarchy,
+//   B393 — Left/Center/Right name alignment, uniform near-black ink, weight hierarchy,
 //          never-on-the-fill auto-fit (summary caption ALWAYS above the span — the
 //          reported "Utilities/Electric Transmission overlap their span" bug).
-//   B391 — buildGanttSVG (the PDF/print path) now emits in-chart names, same helper +
+//   B394 — buildGanttSVG (the PDF/print path) now emits in-chart names, same helper +
 //          alignment + ink + weights as on-screen; uniform black (no B210 depth-navy).
-//   B392 — dependency links route as clean orthogonal elbows (only H/V segments, square
+//   B395 — dependency links route as clean orthogonal elbows (only H/V segments, square
 //          corners), not serpentine beziers; milestone tips; backward links route around.
 //
 // The babel-scope helpers (placeGanttLabel/depElbow/ganttNameWeight/buildGanttSVG) are
@@ -28,7 +28,7 @@ const INJECT = `<script>(function(){try{
   d.view="gantt"; d.section="projects";
   var pid=d.aPid!=null && d.projects[d.aPid] ? d.aPid : Object.keys(d.projects)[0];
   var p=d.projects[pid] || Object.values(d.projects)[0]; if(!p) return;
-  p.labelAlign=align;                                    // per-project view setting (B390)
+  p.labelAlign=align;                                    // per-project view setting (B393)
   var mk=function(id,name,start,end,dur,parentId,level,preds,extra){return Object.assign({id:id,name:name,
     start:start,end:end,duration:dur,parentId:parentId,level:level,predecessors:preds||[],
     health:"gray",percentComplete:0,responsibleParty:"",cost:"",notes:[],isExpanded:true,pinnedStart:true},extra||{});};
@@ -133,7 +133,7 @@ async function pass(align) {
       }),
     };
 
-    // ---- B391: call buildGanttSVG directly (the print path) ----
+    // ---- B394: call buildGanttSVG directly (the print path) ----
     const proj = window.__PLANAR_DATA__.projects[window.__PL_PID__];
     const svgOn  = buildGanttSVG([proj], 900, "landscape", { barNames:true,  labelAlign:align });
     const svgOff = buildGanttSVG([proj], 900, "landscape", { barNames:false, labelAlign:align });
@@ -192,7 +192,7 @@ async function pass(align) {
   ok(segs.every(s => s.orth), `every on-screen connector is orthogonal (no diagonal segment)`);
   ok(segs.every(s => !s.nan), `no NaN in any on-screen connector path`);
 
-  // B391 PDF/print path
+  // B394 PDF/print path
   ok(probe.pdf.hasInk >= 6, `print SVG emits in-chart names in #1a1a1a (${probe.pdf.hasInk})`);
   ok(probe.pdf.navyText === 0, `print SVG has NO navy on name TEXT (${probe.pdf.navyText})`);
   ok(probe.pdf.hasUtilities && probe.pdf.hasMilestone, `print SVG includes summary + milestone names`);
@@ -210,6 +210,6 @@ await pass("center");
 await pass("left");
 
 await browser.close(); server.close();
-console.log("\n" + (fails.length === 0 ? "✅ PASS — B390/B391/B392 all verified" : `❌ FAIL — ${fails.length} assertion(s):`));
+console.log("\n" + (fails.length === 0 ? "✅ PASS — B393/B394/B395 all verified" : `❌ FAIL — ${fails.length} assertion(s):`));
 fails.forEach(f => console.log("  - " + f));
 process.exit(fails.length === 0 ? 0 : 1);
