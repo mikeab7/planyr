@@ -15,7 +15,7 @@ import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
-import { useReviewPersistence } from "./lib/usePersistence.js";
+import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -435,7 +435,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
-  const { status, suspendSave } = useReviewPersistence({
+  const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
     deps: [reviewId, meta, source, markups, calByPage, calInfo],
   });
@@ -943,7 +943,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         currentProject={markupProject}
         onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
         onNewProject={onNewProject}
-        saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
+        // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
+        // keeps the "a failed write is LOUD, never silent" contract (unit-locked).
+        saveState={docSaveState(status, signedIn, isEmpty())}
+        onRetrySave={status === "conflict" ? undefined : saveNow}
+        saveDetail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={
           // Files is opened from Row 1 (the project-name area), not a module tab (B180):
           // a shelf every workspace reaches into, so it lives next to the project name.
@@ -961,10 +965,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
-            {/* Reviews (file/save this review) now lives in the Row-2 tools row, not Row 1 (B360);
-                its truthful save chip rides with it (B358). The old 📁 Library door was removed —
-                the 🗂 Files drawer already browses by project + discipline (B359). */}
-            <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} idle={isEmpty()} />
+            {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
+                save chip was retired — the app-wide Row-1 CloudSyncBadge (NEW-1) is the single
+                save indicator now, so there's no longer a second chip competing here. The old
+                📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
+            <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}

@@ -5548,30 +5548,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </span>
   );
 
-  const plannerSaveSlot = (() => {
-    const cloudActive = isCloudActive();
-    const connOk = cloud?.state === "connected";
-    let label, dot, color = PAL.chromeMuted, spin = false, tip;
-    if (saveStatus === "saving") {
-      label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
-    } else if (saveStatus === "unsaved") {
-      color = "var(--warn-text)"; dot = "#f59e0b";
-      label = cloudActive && !connOk ? "Offline" : "Unsaved";
-      tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
-    } else if (cloudActive && connOk) {
-      label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
-    } else if (cloudActive) {
-      label = "Offline"; color = "var(--warn-text)"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
-    } else {
-      label = "Saved ✓"; dot = PAL.chromeMuted; tip = "Saved on this device. Sign in to sync across your devices.";
-    }
-    return (
-      <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
-        <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flex: "none", animation: spin ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-        {label}
-      </span>
-    );
-  })();
+  // The Row-1 save indicator is now the shared, app-wide CloudSyncBadge (NEW-1) — a
+  // compact cloud glyph driven by `headerSaveState` below, no text chip. The loud failure
+  // BANNERS (cloudSaveFailed / cloudConflict, rendered further down) stay as the
+  // can't-miss interrupt; the badge is the always-present at-a-glance state.
 
   const plannerToolbar = (
     <>
@@ -5660,8 +5640,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}
         saveState={headerSaveState}
+        // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
+        // failed write; the conflict case gets its own explanation (the loud banner handles reload).
+        onRetrySave={cloudConflict ? undefined : retryCloudSave}
+        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={plannerCenterContent}
-        saveSlot={plannerSaveSlot}
         authControl={authControl}
         accountActive={accountActive}
         toolbarContent={plannerToolbar}

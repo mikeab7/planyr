@@ -22,7 +22,8 @@ import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import { useReviewPersistence } from "./lib/usePersistence.js";
+import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
+import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
@@ -440,7 +441,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const isEmpty = useCallback(() => placed.length === 0 && measures.length === 0, [placed, measures]);
   // Pan/zoom (`view`) is captured in the snapshot but left out of the save triggers so
   // panning doesn't spam writes — the next real edit (or the flush) saves the latest view.
-  const { status, suspendSave } = useReviewPersistence({
+  const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty,
     deps: [reviewId, meta, pdfs, placed, measures, ftPerUnit],
   });
@@ -657,7 +658,15 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={btn(showRefs)} onClick={() => setShowRefs((v) => !v)} title="Show clickable detail-callout hotspots — click one to pull up that detail in a popup (B350)">{showRefs ? "✓ " : ""}Details</button>
-        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} idle={placed.length === 0} />
+        {/* The Stitcher has its own chrome (no shared AppHeader), so the app-wide save
+            indicator (NEW-1) rides here next to Reviews — same compact cloud glyph, same
+            normalized state, so a failed save is just as loud as everywhere else. */}
+        <CloudSyncBadge
+          state={docSaveState(status, signedIn, placed.length === 0)}
+          onRetry={status === "conflict" ? undefined : saveNow}
+          detail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
+        />
+        <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
