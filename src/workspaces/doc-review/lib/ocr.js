@@ -78,7 +78,11 @@ async function defaultRenderPage(doc, pageNum) {
 
 // Lazily create a Tesseract worker pinned to the CDN assets (drawing pixels stay in the browser;
 // only the WASM core + English model are fetched). SPARSE_TEXT suits scattered drawing labels.
-async function defaultMakeWorker({ cdnBase = CDN, version = TJS_VERSION, data = ENG_DATA, logger } = {}) {
+// `logger` defaults to a no-op: Tesseract invokes it on the MAIN thread for every progress packet
+// the worker posts back, and passing `logger: undefined` into createWorker clobbers Tesseract's own
+// default — so on a scanned page the worker threw "logger is not a function" on each message. A
+// callable default silences that error storm (and keeps the seam injectable for a real progress UI).
+async function defaultMakeWorker({ cdnBase = CDN, version = TJS_VERSION, data = ENG_DATA, logger = () => {} } = {}) {
   const { createWorker, OEM, PSM } = await import("tesseract.js");
   const worker = await createWorker("eng", OEM.LSTM_ONLY, {
     workerPath: `${cdnBase}/tesseract.js@${version}/dist/worker.min.js`,

@@ -22,6 +22,26 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat item — "the fact that I don't have an easy way to delete this little
+     triangle that I put there is insane … go through all the tools and figure out what we need to debug."
+     The "triangle" was an UNCALIBRATED Area measurement (its label falls back to "set scale"). Highest B#
+     across both files was B373, so minted **B374–B377**. Per STANDING RULE #1 all filed AND fixed +
+     headless-verified + shipped the SAME session (branch `claude/youthful-mccarthy-xjcotz`) — full [x]
+     blocks live in BACKLOG-DONE.md:
+       • B374 (bug) — the Area's FILLED interior was a DEAD click target (DocReview hitTest tested area by
+         vertex/segment only, while rect/cloud already had an interior test, B33), so the triangle couldn't
+         be selected to delete it. Added area point-in-poly to hitTest (reusing the now-exported
+         takeoff.pointInPoly) + a smaller-shape tie-break + the perimeter/area closing edge. SHIPPED.
+       • B375 (feature) — added an on-canvas × delete on the selected markup (deletion had been keyboard-only
+         + a button buried in the collapsible Takeoff panel). SHIPPED.
+       • B376 (feature) — the Takeoff list now lists + deletes EVERY markup (not just measures); the Stitcher
+         — which had NO committed-measure delete at all — gets a deletable measure list. SHIPPED.
+       • B377 (bug, found while verifying) — the B352 Tesseract OCR worker threw "logger is not a function" on
+         every no-text page (defaultMakeWorker passed logger:undefined, clobbering Tesseract's default no-op);
+         defaulted it to a no-op. Stitcher harness uncaught JS errors 13 → 0. SHIPPED.
+     Verified: `verify-delete-markup.mjs` 10/10 + `verify-stitch-delete-measure.mjs` ALL PASS (chromium-1228,
+     0 page errors); no regression (V72 13/13, B300–B302 green, V88 green). lint 0 · 1144 tests · build green. -->
+
 <!-- 2026-06-22: coworker live-investigation brief (Site Analysis GIS failures on Grand Port /
      Mont Belvieu) arrived as NEW-1..NEW-4. Highest B# across both files was B365, so minted
      **B366–B369**. Per STANDING RULE #1 all four were filed AND fixed + verified + (about to be)
