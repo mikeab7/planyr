@@ -42,6 +42,20 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      · 1201 tests · build green · `SitePlannerApp` lazy chunk intact. B384 (Add by address) left Open
      by design — the geocode logic lives in MapFinder and needs a clean extraction, not a rush. -->
 
+<!-- 2026-06-22: owner follow-up on B383 — "it should work like the map select parcel tool where the
+     parcel boundaries light up and you can easily click to add one or multiple." Minted **B385**.
+     Per STANDING RULE #1 filed AND fixed + headless-verified (V108 extended, 22/22) the SAME session
+     on branch `claude/determined-volta-hzjxmc` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the "Identify from county GIS" path now behaves like the map's Select-parcels tool —
+     while it's armed, the county parcel OUTLINES light up on the aerial (the SAME magenta esri-leaflet
+     `makeParcelLayer`, extracted to shared `lib/parcelDisplay.js` so map + planner share one source),
+     and each CLICK adds that lot straight to the plan (one or many); a re-click toggles a just-added
+     lot off; a drag pans (click-vs-drag resolved in onUp, mirroring B310). The old preview-card-then-
+     "＋ Add to plan" button is gone — the card now shows the just-added lot's appraisal + the kept
+     jurisdiction lookup. Reuses the single add path (`parcelsFromRings`) + the existing query; outlines
+     load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
+     (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
+
 ### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
 `[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
 

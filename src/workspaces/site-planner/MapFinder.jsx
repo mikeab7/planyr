@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
@@ -20,6 +19,7 @@ import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
+import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
@@ -58,31 +58,8 @@ const BASEMAPS = {
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
-// Parcel boundaries are drawn as styleable vector lines (same query path that
-// powers click-to-select), not a server image — so they render reliably. They
-// load once zoomed in past this level (too many to draw across a whole county).
-// Clicking to select works at ANY zoom (it's a point query); this only gates the
-// VISIBLE outlines. Kept low enough to outline big rural/industrial tracts from
-// further out, while still avoiding drawing a whole dense-urban county at once.
-const PARCEL_MINZOOM = 14;
-function makeParcelLayer(url) {
-  return EL.featureLayer({
-    url,
-    minZoom: PARCEL_MINZOOM,
-    simplifyFactor: 0.5,
-    precision: 6,
-    fields: ["OBJECTID"],
-    interactive: false, // purely visual; clicks go to the map for add/remove
-    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
-  });
-}
-
-// Custom cursors so it's obvious you're adding (+) or removing (−) a parcel.
-// Just a + / − with a white halo for contrast — no circle around it.
-const ADD_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23c2410c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
-const REMOVE_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M5 14 L23 14' stroke='%23b91c1c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
+// Parcel-outline display + the +/− cursors are shared with the in-planner "Add parcel"
+// tool (lib/parcelDisplay.js) so both surfaces light up parcels identically.
 
 /* Project-status visual language — color + glyph + shape per state come from the
  * ONE shared token set (src/shared/ui/statusTokens.js), consumed identically by the
