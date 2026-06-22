@@ -2,7 +2,7 @@
  *
  * Row 1 (35px): logo + wordmark | divider | nav links
  *               || project name (center) ||
- *               save slot | auth control
+ *               cloud-sync badge | settings | auth control
  *
  * Row 2 (44px): module tabs (Site · Schedule · Markup)
  *               || toolbar slot (workspace-specific tools) ||
@@ -15,7 +15,11 @@
  *   onSwitch      — (id) => void  — switch to another module
  *   onDashboard   — () => void    — "Dashboard" / "Projects" nav links
  *   centerContent — ReactNode     — project name + chevron dropdown (workspace provides)
- *   saveSlot      — ReactNode     — save/sync badge (workspace provides)
+ *   saveState     — normalized save/sync state — drives the shared CloudSyncBadge (NEW-1)
+ *   onRetrySave   — () => void     — optional; the badge's error popover offers "Retry now"
+ *   saveDetail    — string         — optional; overrides the badge popover's default explanation
+ *   saveSlot      — ReactNode      — optional extra Row-1 content (legacy slot; the save badge
+ *                                    is now the shared CloudSyncBadge driven by saveState)
  *   authControl   — ReactNode     — user avatar or sign-in button (Shell provides)
  *   toolbarContent — ReactNode    — module-specific toolbar buttons (workspace provides)
  *
@@ -24,6 +28,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
@@ -243,6 +248,11 @@ export default function AppHeader({
   onSelectProject,
   onNewProject,
   saveState,
+  // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
+  // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
+  // badge falls back to a sensible per-state explanation when they're omitted.
+  onRetrySave,
+  saveDetail,
   // Optional: a workspace-supplied project list (B203 — Schedule feeds in its embedded
   // scheduler's own projects) and a home-crumb label override (B204 — Site → "Map").
   projects,
@@ -353,13 +363,17 @@ export default function AppHeader({
           {centerContent}
         </div>
 
-        {/* Right zone — save · auth */}
+        {/* Right zone — cloud-sync badge · settings · auth */}
         <div
           style={{
             flex: 1, display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >
+          {/* The compact, app-wide save indicator (NEW-1): one shared component, driven by
+              the real saveState every workspace already computes — never an optimistic
+              "always green", and it renders a LOUD error state instead of silently vanishing. */}
+          <CloudSyncBadge state={saveState} onRetry={onRetrySave} detail={saveDetail} />
           {saveSlot}
           <SettingsMenu mode={mode} setMode={setMode} />
           {authControl}
