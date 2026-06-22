@@ -1,4 +1,4 @@
-/* B380 regression guard — the embedded Schedule module must render its FULL action
+/* B381 regression guard — the embedded Schedule module must render its FULL action
  * toolbar, not just the in-grid Columns button.
  *
  * The Schedule module embeds the standalone sequence app in an iframe. The shell's

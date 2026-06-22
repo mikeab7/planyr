@@ -22,15 +22,59 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B380 — Restore the missing Schedule toolbar controls (regression) `[Schedule]` (bug)  *(arrived as cross-chat "NEW-1" 2026-06-22; minted **B380** — highest B# across both files was B379)*
-`[~]` **Fixed + headless-verified (15/15) this session on branch `claude/vigilant-newton-rovl4l`; awaiting merge to `main`.** (Pushed to the branch; a PR was intentionally NOT opened — see note to owner.)
-- **Symptom (owner):** opening the Schedule module on any project, the Gantt/timeline toolbar was reduced to the single floating **Columns** button above the grid. Timeline zoom, the contacts control, Export (PDF/print), Version History, Automation, Settings, the Grid/Split/Gantt view switcher and the Review toggle were all gone.
-- **Root cause — hidden, NOT deleted (confirmed by reading the code + git, not the brief).** The Schedule module embeds the standalone sequence app (`public/sequence/index.html`) in an **iframe**; the shell's Row-1 breadcrumb takes over project nav, so the sequence app hides its own duplicated nav when `.in-iframe`. But the CSS rule was `html.in-iframe .app-header { display:none }` — it hid the **ENTIRE** header, and the action toolbar (view switch, Review, Format, Zoom, Export, Save, Version History, Contacts, Automation, Settings) lives inside that same `.app-header`. So every tool vanished; only the in-grid Columns button (rendered inside `GridView`, not the header) survived — exactly the reported symptom. All handlers were intact the whole time — purely a CSS over-reach.
-- **Fix (`public/sequence/index.html`):** narrowed the `.in-iframe` rule to hide ONLY the genuinely-duplicated branding/nav — the logo (new `.hdr-logo` class), the Dashboard/Projects toggle (`.hdr-mode`) and the project picker (`.hdr-project`), all of which the shell breadcrumb already provides (bridged via the B203 postMessage nav bridge). The rest of `.app-header` (view switcher + Review + the full action group) is visible again, in its original position, with its original handlers.
-- **Authoritative restored set (from the actual `.app-header` markup, not the brief):** Grid/Split/Gantt view switcher · Review toggle · Format · timeline Zoom −/%/+ (shown in split/gantt) · Export (PDF·Print Exhibit / Web Snapshot) · Save indicator · Version History · Contacts · Automation · Settings. **The brief's speculative "fit-to-view / today-date-jump / status-filter" controls do NOT exist in this app** — none were ever shipped, so none were restored (restoring exactly the shipped set, per "do not rebuild from a guessed list").
-- **Verified working, not just present (V105, `ui-audit/verify-schedule-toolbar.mjs`, 15/15 headless):** toolbar visible in the iframe; logo/mode/project correctly hidden; every action control renders; switching to Gantt reveals the zoom controls; zoom-in changes the % (17→33, not a no-op); Contacts opens its panel. lint 0 errors · 1186 tests green · build green · `Scheduler` lazy chunk intact. **Site + Markup checked — NOT affected** (they aren't iframes; they feed their toolbars through the shell's `toolbarContent` slot, which `.in-iframe` can't reach). New Playwright harness added so this can't silently regress again.
-- **Dedup:** NET-NEW, the completion of **B203** (DONE). B203 diagnosed the same `.in-iframe .app-header{display:none}` hide and bridged the **nav half** (project picker + Dashboard/Projects toggle) up to the shell breadcrumb — but the **action-toolbar half** that the same rule hid was never re-homed and stayed dark. B380 fixes that half. Not a dup of the B341 "hardcoded color vs token" chrome regressions, nor the Markup `toolbarContent` move (BACKLOG-DONE).
-> **Note to owner (what's left for you):** the fix is done, tested, and pushed to the branch. The only remaining step to put it on planyr.io is merging the branch to `main` — say the word and I'll open + merge the PR (I held off because PRs aren't auto-created here without your go-ahead).
+<!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
+     floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
+     Grid/Split/Gantt view switcher, Automation, Settings, Review all gone). First filed B380,
+     renumbered **B381** — concurrent main (PR #284) took B380 for the Schedule render-crash fix while
+     this was in flight, so B381 is the real next free ID. Per STANDING RULE #1 filed AND fixed +
+     headless-verified (V106, 15/15) + merged the SAME session on branch `claude/vigilant-newton-rovl4l`
+     — full [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE (hidden, NOT deleted): the Schedule module embeds /sequence/ in an iframe; the shell's
+     Row-1 breadcrumb takes over project nav, so the sequence app hides its own duplicated nav when
+     `.in-iframe`. But the rule was `.in-iframe .app-header{display:none}` — it hid the ENTIRE header,
+     and the whole action toolbar lives in that header. Only the in-grid Columns button (in GridView,
+     not the header) survived — exactly the reported symptom. Handlers were intact throughout; a pure
+     CSS over-reach.
+     FIX (public/sequence/index.html): narrowed the rule to hide ONLY the duplicated branding/nav —
+     the logo (new .hdr-logo class), .hdr-mode (Dashboard/Projects toggle) and .hdr-project (project
+     picker), all provided by the shell breadcrumb via the B203 postMessage bridge. The action toolbar
+     is visible again, original position + original handlers. Restored exactly the shipped set — the
+     brief's speculative fit-to-view / today-jump / status-filter controls do NOT exist in this app, so
+     none were invented (no rebuild-from-guess).
+     Verified: V106 `ui-audit/verify-schedule-toolbar.mjs` 15/15 (zoom % changes 17→33, Contacts opens
+     — proven not no-ops); Site + Markup checked, NOT affected (not iframes; they use the shell's
+     toolbarContent slot, which `.in-iframe` can't reach). lint 0 · tests green · build green ·
+     `Scheduler` lazy chunk intact.
+     Deduped: NET-NEW, the completion of B203 (DONE) — B203 bridged the NAV half of the same hidden
+     header; B381 restores the ACTION-TOOLBAR half it left dark. NOT a dup of main's B380 (a separate
+     Schedule render-crash race in Scheduler.jsx — different file, different cause), nor B341 (chrome
+     token regressions), nor the Markup toolbarContent move. -->
+
+<!-- 2026-06-22: cross-chat diagnosis brief "NEW-1" — intermittent render crash on Schedule load
+     ("Cannot read properties of undefined"), caught by the workspace ErrorBoundary (the non-chunk
+     "Try again" variant), recovers on re-render. Highest B# across both files was B379, so minted
+     **B380**. Per STANDING RULE #1 filed AND fixed + headless-verified (V105, regression net proven
+     to FAIL with the guard off) the SAME session on branch `claude/relaxed-dijkstra-sokq4a` — full
+     [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE confirmed by reproduction, not guessed: the Schedule shell derives its breadcrumb's
+     current project with `projects.find(p => p.id === activeId)` over the project list bridged from
+     the embedded /sequence/ iframe (the brief's #1 candidate, Scheduler.jsx). The embedded app can
+     transiently post a sparse/not-yet-resolved list (an `undefined`/null entry) during its own data
+     load; one such entry makes `p.id` throw inside the Scheduler's render → the workspace boundary.
+     A pure re-render recovers because the steady-state list is well-formed. (The brief's other
+     candidates — AppHeader/ProjectBreadcrumb p.id/p.name, useProfile/displayName — were verified
+     already null-safe; the deref that actually throws is the Scheduler's `.find`.)
+     FIX (guard at the source, not optional-chaining everywhere): new pure `scheduler/lib/navState.js`
+     — `parseNavState` validates + `sanitizeProjects` coerces the inbound list to plain `{id,name}`
+     objects (drops the throwing entries) and `deriveCurrentProject` never throws / never returns
+     undefined; Scheduler.jsx routes the message + current-project derivation through them; one
+     data-entry guard in the shared `ProjectBreadcrumb` (`.filter(Boolean)`) hardens its own `p.id`/
+     `p.name` map for any controlled caller. NOT a chunk fix (not B221/B239) and NOT an ErrorBoundary
+     auto-retry — the race is removed so a genuine future crash still stays visible.
+     Deduped: net-new. NOT B221/B239 (stale-chunk family — the brief's two tells rule that out), NOT
+     B315 (undo-after-move stale-ref race, a different surface). 12 new unit tests
+     (`test/schedulerNavState.test.js`), 1198 green, lint 0, build green, `Scheduler` lazy chunk
+     intact; existing `verify-schedule-picker.mjs` still 8/8 (no regression). -->
 
 <!-- 2026-06-22: owner report "the sheet labeling is atrocious" (a structural general-notes set)
      arrived with a two-item investigation brief (NEW-1 garbage labels, NEW-2 false auto-calibration).
