@@ -20,6 +20,21 @@ import { onAuthChange } from "../../site-planner/lib/auth.js";
 
 const DEBOUNCE_MS = 600;
 
+// Map the doc-review save `status` (+ signed-in / idle) onto the normalized saveState
+// vocabulary the shared CloudSyncBadge speaks ("synced"|"saving"|"error"|"local"|null).
+// Pure + exported so the "a failed write is LOUD, never silent" contract is unit-locked
+// (cloudSyncBadge.test.js), the same guarantee the old ReviewsBar chip carried:
+//   idle (nothing loaded) → null  → the badge shows nothing (no cry-wolf at rest);
+//   a failed/conflicting write → "error" → the badge goes LOUD and red;
+//   a signed-in user's work reads as cloud-saved ("synced"); signed-out is "local" (device).
+export function docSaveState(status, signedIn, idle) {
+  if (idle) return null;
+  if (status === "saving") return "saving";
+  if (status === "unsaved" || status === "conflict") return "error"; // a cloud write didn't land — loud, never silent
+  if (status === "saved" || signedIn) return "synced";
+  return "local"; // signed-out with content — saved on this device only
+}
+
 export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = true }) {
   const [status, setStatus] = useState("local"); // local | saving | saved | unsaved
 

@@ -34,6 +34,8 @@ jobs:
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
         run: npm run lint
+      - name: GIS source registry guard (no test/non-authoritative endpoint, no inline URLs — B369)
+        run: node ui-audit/gis-source-audit.mjs
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build

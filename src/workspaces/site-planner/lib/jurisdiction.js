@@ -28,6 +28,8 @@
  */
 
 import { gisCache as defaultCache } from "./gisCache.js";
+import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { fetchArcgisJson, gisErrorMessage } from "./gisFetch.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `kind` picks the query: "polygon" = a
@@ -38,7 +40,7 @@ import { gisCache as defaultCache } from "./gisCache.js";
 export const JURISDICTION_SOURCES = {
   county: {
     id: "county", role: "county", label: "County", kind: "polygon",
-    url: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/Texas_County_Boundaries/FeatureServer/0",
+    url: GIS_SOURCES.county.serviceUrl, // endpoint from the registry (B369) — never inline
     fields: { name: "CNTY_NM", fips: "FIPS_ST_CNTY_CD" },
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "TxDOT TPP (statewide)",
@@ -46,7 +48,7 @@ export const JURISDICTION_SOURCES = {
   },
   city: {
     id: "city", role: "city", label: "City limits", kind: "polygon",
-    url: "https://feature.geographic.texas.gov/arcgis/rest/services/City_Boundaries/Texas_City_Boundaries/MapServer/0",
+    url: GIS_SOURCES.city.serviceUrl,
     fields: { name: "city_name" },
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "TxGIO (statewide)",
@@ -59,7 +61,7 @@ export const JURISDICTION_SOURCES = {
   // touches the Austin/DFW servers (no added latency for the Houston use case).
   road: {
     id: "road", role: "road", label: "Road maintenance authority", kind: "line",
-    url: "https://services.arcgis.com/KTcxiTD9dsQw4r7Z/arcgis/rest/services/TxDOT_Roadway_Inventory/FeatureServer/0",
+    url: GIS_SOURCES.road.serviceUrl,
     fields: { route: "RIA_RTE_ID", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
     tolMeters: 40,
     ttl: 30 * 24 * 3600 * 1000,
@@ -85,7 +87,7 @@ export const ETJ_SOURCES = [
   {
     id: "etj_hgac", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
     region: "Houston–Galveston (H-GAC)", bbox: [28.3, -97.1, 31.0, -94.2],
-    url: "https://services.arcgis.com/su8ic9KbA7PYVxPS/arcgis/rest/services/HGAC_City_ETJ_Boundaries/FeatureServer/0",
+    url: GIS_SOURCES.etj_hgac.serviceUrl,
     fields: { name: "CITY" }, titleCaseName: true,
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "H-GAC (Houston-Galveston Area Council)", coverage: "13-county Houston-Galveston region (all cities)",
@@ -94,7 +96,7 @@ export const ETJ_SOURCES = [
   {
     id: "etj_austin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
     region: "Austin", bbox: [29.7, -98.4, 30.95, -97.0],
-    url: "https://services1.arcgis.com/PuB3FWUAxkScvfQy/arcgis/rest/services/COA_Jurisdiction/FeatureServer/20",
+    url: GIS_SOURCES.etj_austin.serviceUrl,
     fields: { name: null }, nameConst: "Austin",
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "City of Austin GIS", coverage: "City of Austin 2-mile & 5-mile ETJ",
@@ -103,7 +105,7 @@ export const ETJ_SOURCES = [
   {
     id: "etj_fortworth", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
     region: "Dallas–Fort Worth", bbox: [32.2, -98.3, 33.7, -96.5],
-    url: "https://services3.arcgis.com/dViPBrlsejmXK64z/arcgis/rest/services/Fort_Worth_ETJ/FeatureServer/0",
+    url: GIS_SOURCES.etj_fortworth.serviceUrl,
     fields: { name: null }, nameConst: "Fort Worth",
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "City of Fort Worth GIS", coverage: "City of Fort Worth ETJ",
@@ -166,14 +168,11 @@ export function roadAuthority(maintCode, hsys) {
 // ---------------------------------------------------------------------------
 const trimUrl = (s) => String(s).replace(/\/+$/, "");
 
-// Default browser fetch → parsed ArcGIS JSON (throws on HTTP / ArcGIS error).
-async function defaultFetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Server returned HTTP ${res.status}.`);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || "ArcGIS query error.");
-  return j;
-}
+// Default browser fetch → parsed ArcGIS JSON. The shared resilient fetch (B366):
+// AbortController timeout + jittered-backoff retry on a transient 5xx/network blip, so a
+// burst-load 503 self-heals instead of freezing the identify at "failed". Throws a typed
+// GisFetchError on a real failure.
+const defaultFetchJson = (url, opts) => fetchArcgisJson(url, opts);
 
 function buildQueryUrl(base, params) {
   const u = new URL(trimUrl(base) + "/query");
@@ -302,11 +301,9 @@ export function polylineDistMeters(geometry, lng, lat) {
 }
 
 const uniq = (a) => Array.from(new Set(a));
-function humanize(e) {
-  const m = String(e?.message || e || "");
-  if (/failed to fetch|networkerror|load failed|cors/i.test(m)) return "Couldn't reach the GIS server (network or CORS).";
-  return m || "Request failed.";
-}
+// Honest, taxonomy-based error text (B366) — a transient 503 reads "temporarily
+// unavailable," never the misleading blanket "network or CORS."
+const humanize = (e) => gisErrorMessage(e);
 
 // ---------------------------------------------------------------------------
 // B93 — jurisdiction identify (city / ETJ / county) at a point or across a parcel.

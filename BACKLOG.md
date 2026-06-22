@@ -22,6 +22,105 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner report "the sheet labeling is atrocious" (a structural general-notes set)
+     arrived with a two-item investigation brief (NEW-1 garbage labels, NEW-2 false auto-calibration).
+     Highest B# across both files was B373, so minted **B378–B379**. Per STANDING RULE #1 BOTH were
+     filed AND fixed + headless-verified (V104) the SAME session on branch `claude/ecstatic-maxwell-6y8aq1`
+     — full [x] blocks live in BACKLOG-DONE.md:
+       • B378 (NEW-1) — text-dense sheets labelled garbage: body boilerplate as the title, a body
+         cross-reference ("S202") read as the sheet number on several rows, weak sidebar gate. Fixed
+         the shared `sheetMeta` reader — title scorer now prefers short+large type (+ boilerplate
+         filter), the sheet number is read from the title-block ZONE only (band, else edge strip),
+         `reconstructLines` splits on a large horizontal gap so a title can't merge into a body line,
+         a `trustedTitle` sidebar gate, and a `markAdjacentDuplicateNumbers` dedup. SHIPPED.
+       • B379 (NEW-2) — a pure-text notes/specs sheet auto-calibrated off a stray body scale string.
+         Added a `textDense` classification; `statedCalibration` returns 0 for it (leaves it
+         uncalibrated, never silently mis-scaled). SHIPPED.
+     +10 unit tests, 1153 green · lint 0 errors · build green · `DocReview` lazy chunk intact ·
+     headless `ui-audit/verify-notes-sheet-labels.mjs` 9/9 + the B266/B348, B335–B339, B350 markup
+     harnesses still green. -->
+
+<!-- 2026-06-22: owner-dropped chat item — "the fact that I don't have an easy way to delete this little
+     triangle that I put there is insane … go through all the tools and figure out what we need to debug."
+     The "triangle" was an UNCALIBRATED Area measurement (its label falls back to "set scale"). Highest B#
+     across both files was B373, so minted **B374–B377**. Per STANDING RULE #1 all filed AND fixed +
+     headless-verified + shipped the SAME session (branch `claude/youthful-mccarthy-xjcotz`) — full [x]
+     blocks live in BACKLOG-DONE.md:
+       • B374 (bug) — the Area's FILLED interior was a DEAD click target (DocReview hitTest tested area by
+         vertex/segment only, while rect/cloud already had an interior test, B33), so the triangle couldn't
+         be selected to delete it. Added area point-in-poly to hitTest (reusing the now-exported
+         takeoff.pointInPoly) + a smaller-shape tie-break + the perimeter/area closing edge. SHIPPED.
+       • B375 (feature) — added an on-canvas × delete on the selected markup (deletion had been keyboard-only
+         + a button buried in the collapsible Takeoff panel). SHIPPED.
+       • B376 (feature) — the Takeoff list now lists + deletes EVERY markup (not just measures); the Stitcher
+         — which had NO committed-measure delete at all — gets a deletable measure list. SHIPPED.
+       • B377 (bug, found while verifying) — the B352 Tesseract OCR worker threw "logger is not a function" on
+         every no-text page (defaultMakeWorker passed logger:undefined, clobbering Tesseract's default no-op);
+         defaulted it to a no-op. Stitcher harness uncaught JS errors 13 → 0. SHIPPED.
+     Verified: `verify-delete-markup.mjs` 10/10 + `verify-stitch-delete-measure.mjs` ALL PASS (chromium-1228,
+     0 page errors); no regression (V72 13/13, B300–B302 green, V88 green). lint 0 · 1144 tests · build green. -->
+
+<!-- 2026-06-22: coworker live-investigation brief (Site Analysis GIS failures on Grand Port /
+     Mont Belvieu) arrived as NEW-1..NEW-4. Highest B# across both files was B365, so minted
+     **B366–B369**. Per STANDING RULE #1 all four were filed AND fixed + verified + (about to be)
+     merged the SAME session on branch `claude/nice-cori-ghm37q` — full [x] blocks live in
+     BACKLOG-DONE.md:
+       • B366 (NEW-1) — screening resilience + honest error taxonomy: a shared resilient ArcGIS
+         fetch (timeout + jittered-backoff retry + GET→POST), a concurrency pool (3) that ends the
+         burst, and a new UNAVAILABLE state (retryable, Retry control) — never the misleading
+         "network or CORS". SHIPPED.
+       • B367 (NEW-2) — GIS screening cache: keep last-good on a failed refresh + "couldn't refresh"
+         age badge (stale-while-revalidate), never blank a layer. The existing roadmap "GIS layer
+         caching" item, Phase 1. SHIPPED. (Phase 2 = regional snapshot → B371, Later.)
+       • B368 (NEW-3) — repointed Wells/Pipelines from the Harris-County republication (Chambers
+         14-vs-8,014 false-clean) to the authoritative statewide **RRC** service (wells L1, pipes L13);
+         Wetlands pinned as a registered monitored-exception. SHIPPED.
+       • B369 (NEW-4) — GIS Source Registry (`src/shared/gis/sources.js`) + a CI tier/inline-URL guard
+         + live coverage/schema fixtures (the 14-vs-8,014 catch) + a weekly @claude drift workflow.
+         SHIPPED for the analysis+jurisdiction surface. (Map-display-layer migration tail → B370, Open.)
+     Deduped: NEW-2 folded into the existing "GIS layer caching" roadmap item (not a duplicate). lint 0
+     · 1129 tests · build green · `SitePlannerApp` lazy chunk intact · headless V101 11/11. RRC's own
+     live coverage fixtures run in CI / on planyr.io (host not on the sandbox egress allow-list). -->
+
+### B370 — Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry `[Site Planner / Platform]` (task) — the tail of B369  *(filed 2026-06-22; minted **B370**)*
+`[ ]` **Open.** B369 made `src/shared/gis/sources.js` the single source of truth for the **Site Analysis screen + jurisdiction identify** endpoints (zero inline URLs there, CI-guarded). The **map-display** layers — the Leaflet/esri-leaflet tile + vector overlays in `lib/layers.js`, `lib/counties.js` (`JURISDICTION_LAYERS`, incl. the COH `geogimstest` host), `lib/evidenceLayers.js`, `lib/vectorLayers.js` — still hold their service URLs inline. Migrate them into the registry too, so the tier-guard (no `/Test/`/`geogimstest` without an acknowledged exception) and the drift/coverage checks cover the **whole** GIS surface, not just the screen.
+- **Why not done in the B366–B369 session:** the map-tile path is a **separate, large surface** (many layers across 4 files) and is explicitly **out of the reported bug's blast radius** — the brief notes map tiles load as `<img>` (no CORS, no screening logic) and says to leave them alone. Rushing a live-map-wide URL refactor into the same session risked breaking a working map with no fast headless way to re-verify every layer. Filing it as its own focused pass (own branch, per-layer verify) is the safe call, not a silent omission.
+- **Plan:** add map-layer rows to the registry (reuse the same `tier`/`provider`/`coverage` shape); repoint `layers.js`/`counties.js`/`evidenceLayers.js`/`vectorLayers.js` to read `serviceUrl` from the registry; extend `ui-audit/gis-source-audit.mjs`'s inline-URL scan to those files; re-verify the map renders every layer (the existing `gis-verify/coverage-picker-verify.mjs` + a tile-load check). The known COH `geogimstest` **TEST** host (a long-standing KNOWN ISSUE) becomes a registered `monitored-exception` — finally machine-tracked.
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — a deleted site (HOLLISTER) reappears (delete not
+     persisting), both on reload (path A) AND mid-session without a reload (path B). First filed B366,
+     renumbered **B372** — a concurrent `main` (PR #277) took B366–B371 (GIS Site Analysis resilience +
+     source registry) while this was in flight, so B372 is the real next free ID. **Filed AND fixed +
+     headless-verified + pushed THIS session per STANDING RULE #1** (branch `claude/cool-ride-pm0m2l`) —
+     full [x] block in BACKLOG-DONE.md.
+     KEPT AS ONE ITEM (owner said split only if path B has an independent cause): both paths share ONE
+     root cause — the site you delete from the map is the one whose planner is still MOUNTED (you opened
+     it, then went Back to map; it renders hidden, not unmounted). Deleting it unmounts that planner,
+     whose persist-on-leave / beforeunload flush fired AFTER the delete and RE-WROTE the row → it returns
+     mid-session on the next list refresh (B), and pullCloud's heal-the-split then re-pushes that
+     local-only row to the cloud so it survives a reload too (A). Explains "only that project" — it's the
+     one he had open. Deduped — NOT a dup of B276 (per-ITEM overlay tombstones inside one site) nor B127
+     (cross-tab stale-write fold); this is whole-SITE delete durability + a loud cloud-delete failure.
+     Fix: a per-tab delete tombstone in storage.js (saveSite refuses to re-create a deleted, absent row —
+     the single chokepoint every resurrection path funnels through), deleteSite returns the cloud result,
+     the App AWAITS it and shows a LOUD banner + re-pulls on a genuine cloud-delete error, and cloudDelete
+     uses `.select()` so a 0-row no-op is distinguishable from a real removal. 9 new unit tests +
+     headless V102 (`ui-audit/verify-b372-delete-durable.mjs`, 6/6, proven to FAIL with the guard off). -->
+
+<!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
+     hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
+     Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
+     rotation, scanned/DWG — while this was in flight, so B365 is the real next free ID; renumbered from a
+     first-filed B362). Filed AND shipped + headless-verified (19/19, V98) THIS session per STANDING RULE #1
+     — full [x] block in BACKLOG-DONE.md
+     (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
+     building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
+     status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
+     progress-arc encoding — a separate concern, untouched). Re-hued statusTokens.js (Pursuit→coral,
+     Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
+     MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
+     z-order by importance, fixed hit box); Dead hidden by default. -->
+
 ### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
 `[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
 - **Tier-2 AI/OCR** (B299 `server/filing/` + B352 OCR) — server-side title-block read for scanned sheets. Owner deploy: `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY` + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. The proxy 503s until then (graceful skip) — purely additive, no regression.
@@ -728,6 +827,9 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B371 — GIS screening cache Phase 2: regional Houston-metro snapshot / offline pre-cache `[Site Planner / Analysis]` (feature) — Phase 2 of B367  *(filed 2026-06-22; minted **B371**)*
+`[ ]` **Later (gated behind B367 Phase 1, which shipped).** Phase 1 (B367) keeps the last-good answer per parcel+layer and never blanks a layer on a transient outage. Phase 2 is the owner's "cache most of Houston" idea: a **regional pre-cache/snapshot** of the Houston-metro source layers (+ a coverage mask), refreshed on a schedule, so a **never-seen** parcel with no features resolves **offline** to "No <layer> mapped (source vintage <date>)" instead of waiting on (or failing) a live query. Heavier — needs storage (a Supabase table or a static snapshot) + a refresh job + a coverage mask so "no features in the snapshot" is trustworthy only inside the cached extent. Deferred deliberately behind Phase 1 per the brief; pick up once Phase 1 proves out in the field.
 
 ### B340 — Auto-assembly CV tails behind the B335–B339 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B335–B339 batch; minted **B340** — a hot `main` took B325–B334)*
 `[ ]` The B335–B339 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. (Scanned-sheet **OCR** was the 4th tail and is now **DONE → B352**, shipped + verified this session.) Three computer-vision tails remain, deferred behind clean injectable seams because each needs vector-graphics analysis we can't yet headless-verify — and the manual-Align safety net already covers them:

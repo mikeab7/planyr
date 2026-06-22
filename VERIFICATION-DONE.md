@@ -5,11 +5,22 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V104 — Sheet labels on text-dense general-notes sheets + no false auto-calibration (B378/B379) ✅ (self-verified headless, logged-out — fully done)
+- **Harness:** `ui-audit/verify-notes-sheet-labels.mjs` (chromium-1228, 0 page errors). Builds a 4-page set that reproduces the failure — a COVER, a GENERAL NOTES sheet (S-001) with a dense prose body + a body cross-reference to DWG **S202** + a copyright boilerplate line + a STRAY "1\"=20'" scale but NO plan scale, and a GRADING run (C-5/C-6) with a real stated scale — drops it into Markup, and reads the live sidebar rows.
+- **Result:** PASS 2026-06-22, **9/9**. Sidebar rows = `["COVER SHEET", "GENERAL NOTES · S-001", "▾Grading Plan · C-5–C-6 · 2 sheets", "C-5 ·≈", "C-6 ·≈"]`. B378: the notes sheet shows its OWN number + real title ("GENERAL NOTES · S-001") — **not** the S202 cross-reference, **not** a boilerplate/legend line, **no** generic "Sheet N." B379: the notes sheet is **not** auto-calibrated (no "·≈") while a real plan sheet still is ("C-5 ·≈"). Screenshot `ui-audit/screens/notes-sheet-labels.png`.
+- **Regression:** the existing markup harnesses still green in the same session — `verify-markup-sheet-labels.mjs` (B266/B348) 8/8, `verify-b335-b339.mjs`, `verify-b350.mjs` (the shared `sheetMeta`/`sheetGroups` engines power the Stitcher too).
+
 ### V99 — Mobile pinch crash fix + multi-tab banner gated to signed-in (B364) ✅ (self-verified headless)
 - **Steps/expect:** (1) `ui-audit/verify-multitab.mjs` — two logged-out tabs open the SAME project in one browser → **no** "open in another tab" banner in either tab (was: both warned). 3/3 passed. (2) Pinch crash: snapshotting `pinchRef.current` before `setView` removes the null-deref path that fired the Site Planner error boundary on mobile; build green, `test/multiTab.test.js` 10/10.
 - **Result:** PASS 2026-06-21. (Signed-in banner path unchanged but not headlessly exercisable — sandbox blocks sign-in; covered by the pure `test/multiTab.test.js`.)
 
 ## Archived 2026-06-21 — passed / superseded items swept from VERIFICATION.md
+
+### V100 — Project-status map markers redesigned for correct visual hierarchy (B365) ✅ (self-verified headless, logged-out — fully done, no signed-in check needed)
+- **Added** 2026-06-21 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-21 ✅ (headless **Chromium-1228**, built app on `vite preview`, logged-out — the saved-site map markers render from the same code path signed-in) · **Next check** — none (a map-rendering change; no auth/cloud path).
+- **✅ Live-verified (`ui-audit/verify-b365-markers.mjs`, 19/19 checks, 0 page errors):** seeded one saved site per status, then asserted against the real Leaflet markers — **Dead hidden by default** (4 markers, not 5); correct fills (coral Pursuit `#D85A30` / blue Active `#378ADD` / amber On-hold / gray Complete); **size tiers** Pursuit > Active > On-hold > Complete (21 > 18.9 > 17.2 > 15.1); a **white halo** + the right inline-SVG glyph on each (flag / pulse / pause / check); **each glyph centered on the marker head** (getBBox center ~14,16: pursuit 14.5/15.85, active 14/16, onhold 14/16, complete 14.2/15.5); **z-order** Pursuit above Complete (737 > 437); fixed **34×44 hit box** for every status.
+- **✅ Shape = flat-top shield** (owner pick from a 5-shape mockup; the brief's "flat-top hexagon" was a voice-to-text artifact). **Screenshots** (`ui-audit/screens/b365/`): the coral Pursuit pin (centered white flag) and blue Active pin (centered white pulse) read instantly over busy aerial; On-hold (amber, pause bars) and Complete (gray, check, recessive/translucent) follow the hierarchy; the white halo separates every pin from both bright (developed) and dark (forest/water) tiles.
+- **✅ `contrast-audit.mjs`** green in both themes (the re-hued `--status-*` glyph-on-card pairs all clear the 3.0 floor); **1062 unit tests** pass; lint **0 errors**; build green.
 
 ### V96 — Invisible site-name fixed + whole-app low-contrast sweep (B356) ✅ (self-verified headless BOTH themes — no signed-in check needed)
 - **Added** 2026-06-21 · **Cadence** once (bug + sweep acceptance) · **Last checked** 2026-06-21 ✅ (headless Chromium, built app on `vite preview`, logged-out, light **and** dark) · **Next check** — none (chrome/panel text legibility; no auth/cloud path).

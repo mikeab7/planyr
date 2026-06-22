@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSheetCode, consecutiveCodes, groupKey, groupSheets } from "../src/shared/files/sheetGroups.js";
+import { parseSheetCode, consecutiveCodes, groupKey, groupSheets, markAdjacentDuplicateNumbers } from "../src/shared/files/sheetGroups.js";
 
 const sheet = (sheetNumber, item, discipline = "Civil", sheetTitle = "") => ({ sheetNumber, item, discipline, sheetTitle });
 
@@ -22,6 +22,29 @@ describe("groupKey — same plan type chains, generic does not", () => {
   it("keys on discipline+item, ignoring generic 'Document'", () => {
     expect(groupKey(sheet("C5", "Grading Plan"))).toBe(groupKey(sheet("C6", "Grading Plan")));
     expect(groupKey(sheet("X1", "Document"))).toBe(""); // ungroupable
+  });
+});
+
+describe("markAdjacentDuplicateNumbers — clear cross-reference misreads (B378)", () => {
+  it("clears a sheet number that repeats on an adjacent page (the 'S202 ×4' bug)", () => {
+    const pages = [
+      { pageNum: 1, sheetNumber: "S202", confidence: 0.8 },
+      { pageNum: 2, sheetNumber: "S202", confidence: 0.8 },
+      { pageNum: 3, sheetNumber: "S202", confidence: 0.8 },
+    ];
+    const out = markAdjacentDuplicateNumbers(pages);
+    expect(out.map((p) => p.sheetNumber)).toEqual(["", "", ""]);
+    expect(out.every((p) => p.dupNumber && p.confidence <= 0.3)).toBe(true);
+  });
+  it("leaves a normal distinct run untouched (same objects)", () => {
+    const pages = [{ sheetNumber: "C-5" }, { sheetNumber: "C-6" }, { sheetNumber: "C-7" }];
+    const out = markAdjacentDuplicateNumbers(pages);
+    expect(out.map((p) => p.sheetNumber)).toEqual(["C-5", "C-6", "C-7"]);
+    expect(out[0]).toBe(pages[0]); // unchanged pages are not re-created
+  });
+  it("ignores empty numbers (two un-numbered pages are not 'duplicates')", () => {
+    const out = markAdjacentDuplicateNumbers([{ sheetNumber: "" }, { sheetNumber: "" }]);
+    expect(out.every((p) => !p.dupNumber)).toBe(true);
   });
 });
 
