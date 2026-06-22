@@ -26,6 +26,9 @@ import { formatAge } from "../lib/gisCache.js";
 const STATUS = {
   present: { dot: "#c2410c", bg: "#fbeae0", border: "#f0cdb8", label: "Present", glyph: "⚑" },
   absent: { dot: "#15803d", bg: "#e8f5ec", border: "#c4e7cf", label: "None found", glyph: "✓" },
+  // UNAVAILABLE — a retryable source failure (e.g. a transient 503). Amber + a Retry
+  // control; visually + semantically DISTINCT from "None found" (green). Never read as clear.
+  unavailable: { dot: "#b45309", bg: "#fbf0df", border: "#eccfa0", label: "Unavailable", glyph: "↻" },
   unknown: { dot: "#a16207", bg: "#fbf3df", border: "#ecdcae", label: "Unknown", glyph: "⚠" },
   info: { dot: "#1d4ed8", bg: "#e8eefb", border: "#cdd9f3", label: "Info", glyph: "ℹ" },
   pending: { dot: "#8a8473", bg: "#f1efe9", border: "#e0dacb", label: "Not connected", glyph: "○" },
@@ -121,6 +124,18 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                   <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <span style={{ fontWeight: 700, color: ink }}>{f.category}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "none" }}>
+                      {/* Retry just this source — a transient outage usually clears on a re-try.
+                          Re-runs the screen (cached-fresh sources return instantly; the failed
+                          one re-fetches with backoff). */}
+                      {(f.status === "unavailable" || f.stale) && !state.loading && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); run(); }}
+                          title="Retry this source"
+                          style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${st.dot}`, background: "transparent", color: st.dot }}>
+                          ↻ Retry
+                        </button>
+                      )}
                       {canMap && (
                         <button
                           type="button"
@@ -145,8 +160,15 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                     </span>
                   ) : (
                     <span style={{ display: "block", marginTop: 2, color: ink }}>
-                      {f.summary || (f.status === "unknown" ? (f.error || "Source unavailable — treat as unknown, not clear.") : f.status === "pending" ? "Source not yet connected." : "—")}
+                      {f.summary || (f.status === "unavailable" ? (f.error || "Source temporarily unavailable — not a clear result.") : f.status === "unknown" ? (f.error || "Source unverified — treat as unknown, not clear.") : f.status === "pending" ? "Source not yet connected." : "—")}
                       {f.ageMs != null && f.summary && <span style={{ color: muted }}> · {formatAge(f.ageMs)}</span>}
+                    </span>
+                  )}
+                  {/* Stale-while-revalidate (B367): the refresh failed but a last-good copy
+                      survived — show it with its age + an honest "couldn't refresh", never blank. */}
+                  {f.stale && f.refreshError && (
+                    <span style={{ display: "block", marginTop: 3, color: "var(--warn-text)", fontSize: 10.5, lineHeight: 1.4 }}>
+                      ⟳ Showing the last good result{f.ageMs != null ? ` (as of ${formatAge(f.ageMs)})` : ""} — couldn't refresh: {f.refreshError}
                     </span>
                   )}
                   {f.straddle && <span style={{ display: "block", marginTop: 2, color: "var(--warn-text)", fontWeight: 600 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</span>}
