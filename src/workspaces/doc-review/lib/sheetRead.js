@@ -14,7 +14,7 @@
  * tested without pdf.js (mirrors the project's DI test style).
  */
 import { readSheetMeta } from "../../../shared/files/sheetMeta.js";
-import { groupSheets } from "../../../shared/files/sheetGroups.js";
+import { groupSheets, markAdjacentDuplicateNumbers } from "../../../shared/files/sheetGroups.js";
 import { detectSheet, ftPerPointForScale } from "../../site-planner/lib/overlayScale.js";
 
 // pdf.js is imported LAZILY (it pulls a browser-only worker + DOMMatrix) so this module loads
@@ -42,7 +42,9 @@ export async function readSheets(doc, { extractItems = defaultExtractItems, ocr 
     }
     out.push({ pageNum: p, width: page.width || 0, height: page.height || 0, ...meta });
   }
-  return out;
+  // Drop duplicate adjacent sheet numbers (cross-reference misreads) so they don't read as a run
+  // of identical sheets (B374).
+  return markAdjacentDuplicateNumbers(out);
 }
 
 /* Read a PDF and collapse it into the logical sheet list (B335). Each logical entry's `pages`
@@ -58,6 +60,10 @@ export async function readAndGroup(doc, opts = {}) {
 export function statedCalibration(meta = {}) {
   const sc = meta.scale;
   if (!sc || !sc.ftPerInch) return 0;
+  // A general-notes / specifications / legend sheet has no plan scale — a scale-looking string in
+  // its body text must NOT auto-calibrate it (B375). Leave it uncalibrated (the user calibrates by
+  // hand if needed) rather than silently mis-scale a non-drawing sheet.
+  if (meta.textDense) return 0;
   if (!detectSheet(meta.width || 0, meta.height || 0).std) return 0;
   return ftPerPointForScale(sc.ftPerInch);
 }

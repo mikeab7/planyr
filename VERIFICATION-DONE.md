@@ -5,6 +5,11 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V104 — Sheet labels on text-dense general-notes sheets + no false auto-calibration (B374/B375) ✅ (self-verified headless, logged-out — fully done)
+- **Harness:** `ui-audit/verify-notes-sheet-labels.mjs` (chromium-1228, 0 page errors). Builds a 4-page set that reproduces the failure — a COVER, a GENERAL NOTES sheet (S-001) with a dense prose body + a body cross-reference to DWG **S202** + a copyright boilerplate line + a STRAY "1\"=20'" scale but NO plan scale, and a GRADING run (C-5/C-6) with a real stated scale — drops it into Markup, and reads the live sidebar rows.
+- **Result:** PASS 2026-06-22, **9/9**. Sidebar rows = `["COVER SHEET", "GENERAL NOTES · S-001", "▾Grading Plan · C-5–C-6 · 2 sheets", "C-5 ·≈", "C-6 ·≈"]`. B374: the notes sheet shows its OWN number + real title ("GENERAL NOTES · S-001") — **not** the S202 cross-reference, **not** a boilerplate/legend line, **no** generic "Sheet N." B375: the notes sheet is **not** auto-calibrated (no "·≈") while a real plan sheet still is ("C-5 ·≈"). Screenshot `ui-audit/screens/notes-sheet-labels.png`.
+- **Regression:** the existing markup harnesses still green in the same session — `verify-markup-sheet-labels.mjs` (B266/B348) 8/8, `verify-b335-b339.mjs`, `verify-b350.mjs` (the shared `sheetMeta`/`sheetGroups` engines power the Stitcher too).
+
 ### V99 — Mobile pinch crash fix + multi-tab banner gated to signed-in (B364) ✅ (self-verified headless)
 - **Steps/expect:** (1) `ui-audit/verify-multitab.mjs` — two logged-out tabs open the SAME project in one browser → **no** "open in another tab" banner in either tab (was: both warned). 3/3 passed. (2) Pinch crash: snapshotting `pinchRef.current` before `setView` removes the null-deref path that fired the Site Planner error boundary on mobile; build green, `test/multiTab.test.js` 10/10.
 - **Result:** PASS 2026-06-21. (Signed-in banner path unchanged but not headlessly exercisable — sandbox blocks sign-in; covered by the pure `test/multiTab.test.js`.)

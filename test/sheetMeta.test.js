@@ -106,6 +106,17 @@ describe("readSheetTitle — the human plan name, skipping label/data rows", () 
   it("falls back to the deterministic item label when nothing stands out", () => {
     expect(readSheetTitle([], null, "Boundary Survey")).toBe("Boundary Survey");
   });
+  it("does NOT pick a long copyright/legend body line over a short title (B374)", () => {
+    // A general-notes sheet: the real title is short + large; the copyright block and a legend
+    // row are long body prose at a smaller size. The OLD height×letters scorer picked the prose.
+    const lines = reconstructLines([
+      { str: "GENERAL NOTES", x: 1950, y: 180, w: 240, h: 22 },
+      { str: "THIS DRAWING IS THE PROPERTY OF ACME AND MAY NOT BE REPRODUCED WITHOUT WRITTEN PERMISSION", x: 1950, y: 230, w: 470, h: 10 },
+      { str: "CJ DENOTES CONSTRUCTION JOINT CONTINUED ON THIS SHEET", x: 1950, y: 260, w: 430, h: 10 },
+    ], {});
+    const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
+    expect(readSheetTitle(lines, band, "Structural")).toBe("GENERAL NOTES");
+  });
 });
 
 describe("readSheetMeta — the unified per-page record", () => {
@@ -125,5 +136,38 @@ describe("readSheetMeta — the unified per-page record", () => {
     expect(meta.hasText).toBe(false);
     expect(meta.confidence).toBe(0);
     expect(meta.matchLines).toEqual([]);
+  });
+});
+
+// A structural GENERAL-NOTES sheet: wall-to-wall prose in the body (which defeats the density-based
+// title-block detector), a body cross-reference to another sheet, and the sheet's OWN number in the
+// right-edge title-block strip. This is the set whose labels were "atrocious" (B374/B375).
+function notesSheet() {
+  const items = [
+    // body — the cross-reference the whole-page read used to grab as THIS sheet's number
+    { str: "SEE DWG S202 FOR TYPICAL FOUNDATION DETAILS", x: 200, y: 150, w: 520, h: 12 },
+  ];
+  for (let i = 0; i < 12; i++)
+    items.push({ str: `${i + 1}. ALL WORK SHALL CONFORM TO THE GOVERNING SPECIFICATIONS AND APPLICABLE CODES`, x: 200, y: 190 + i * 30, w: 760, h: 11 });
+  // right-edge title-block strip (x ≥ 0.78W): the title + the sheet's OWN number + a copyright block
+  items.push({ str: "GENERAL NOTES", x: 1960, y: 170, w: 240, h: 22 });
+  items.push({ str: "SHEET NO.", x: 1960, y: 230, w: 90, h: 12 }, { str: "S001", x: 2080, y: 230, w: 50, h: 12 });
+  items.push({ str: "THIS DRAWING IS THE PROPERTY OF ACME ENGINEERS AND MAY NOT BE REPRODUCED", x: 1960, y: 1520, w: 460, h: 8 });
+  return { items, width: W, height: H };
+}
+
+describe("readSheetMeta — text-dense general-notes sheet (B374/B375)", () => {
+  it("reads its OWN number from the title-block strip, NOT a body cross-reference", () => {
+    const meta = readSheetMeta(notesSheet());
+    expect(meta.sheetNumber).toBe("S001"); // not "S202" (the cross-reference in the body)
+  });
+  it("reads the real short title, not a long copyright line", () => {
+    expect(readSheetMeta(notesSheet()).sheetTitle).toBe("GENERAL NOTES");
+  });
+  it("flags the sheet textDense so auto-calibration is suppressed", () => {
+    expect(readSheetMeta(notesSheet()).textDense).toBe(true);
+  });
+  it("does NOT flag a normal plan sheet as textDense", () => {
+    expect(readSheetMeta(gradingSheet()).textDense).toBe(false);
   });
 });

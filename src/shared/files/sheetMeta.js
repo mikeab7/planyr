@@ -16,11 +16,24 @@
  *
  * Unit-tested with hand-built item lists (no pdf.js), mirroring the project's DI test style.
  */
-import { readTitleBlockText, classifyDiscipline } from "./titleBlockParse.js";
+import { readTitleBlockText, classifyDiscipline, parseSheetNumber } from "./titleBlockParse.js";
 import { parseDetailRefs, parseDetailAnchors } from "./detailRefs.js";
 import { parseNotes } from "./sheetNotes.js";
 
 const norm = (s) => (s || "").toString().toLowerCase().replace(/\s+/g, " ").trim();
+const wordCount = (s) => (s || "").toString().trim().split(/\s+/).filter(Boolean).length;
+// A reconstructed line whose center sits inside a rect (page units). Used to scope reads to the
+// title-block band vs. the drawing area (B374 — keep body cross-refs out of the title reads).
+const lineInRect = (ln, r) => {
+  const cx = ln.x + ln.w / 2, cy = ln.y + ln.h / 2;
+  return cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
+};
+// A raw item whose center sits inside the title-block band.
+const itemInBand = (it, band) => {
+  if (!band) return true;
+  const cx = it.x + (it.w || 0) / 2, cy = it.y + (it.h || 0) / 2;
+  return band.side === "right" ? cx >= band.x : band.side === "bottom" ? cy >= band.y : true;
+};
 
 /* Reconstruct text LINES from positioned items. CAD PDFs fragment a label across many runs
  * ("MATCH", "LINE", "SEE", "SHEET", "C-5"); grouping items that share a baseline (close y) and
@@ -40,16 +53,33 @@ export function reconstructLines(items, { yTol } = {}) {
     if (row) { row.items.push(it); row.cy = (row.cy * (row.items.length - 1) + it.cy) / row.items.length; }
     else rows.push({ cy: it.cy, items: [it] });
   }
-  return rows.map((r) => {
-    const its = r.items.slice().sort((a, b) => a.x - b.x);
-    const text = its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim();
+  // A shared baseline alone is NOT one line: a title-block label and a far-left body note can sit at
+  // the same y yet belong to different columns. Split a row wherever the horizontal gap between
+  // consecutive items is large (a title-block-to-body jump), so the title-block title can't merge
+  // into a body line and get rejected as "too wordy" (B374). The threshold is generous — far larger
+  // than any intra-phrase word gap, so "MATCH LINE SEE SHEET C-6" still joins. */
+  const gapTol = Math.max(72, medH * 10);
+  const mkLine = (its) => {
     const x = Math.min(...its.map((i) => i.x));
     const y = Math.min(...its.map((i) => i.y));
     const maxX = Math.max(...its.map((i) => i.x + (i.w || 0)));
     const maxY = Math.max(...its.map((i) => i.y + (i.h || 0)));
     const h = Math.max(...its.map((i) => i.h || 0));
-    return { text, x, y, w: maxX - x, h: maxY - y, lineH: h, items: its };
-  });
+    return { text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim(), x, y, w: maxX - x, h: maxY - y, lineH: h, items: its };
+  };
+  const out = [];
+  for (const r of rows) {
+    const its = r.items.slice().sort((a, b) => a.x - b.x);
+    let seg = [its[0]];
+    for (let k = 1; k < its.length; k++) {
+      const prev = seg[seg.length - 1];
+      const gap = its[k].x - (prev.x + (prev.w || 0));
+      if (gap > gapTol) { out.push(mkLine(seg)); seg = [its[k]]; }
+      else seg.push(its[k]);
+    }
+    out.push(mkLine(seg));
+  }
+  return out;
 }
 
 function median(nums) {
@@ -156,24 +186,49 @@ const looksLikeData = (t) =>
   /\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b/.test(t) || // a date
   /^\s*1\s*"?\s*=/.test(t) ||                          // a scale callout
   t.replace(/[^a-z]/gi, "").length < 3;               // not enough letters to be a title
+// Body boilerplate / legend prose that a long-line scorer used to pick AS the title (B374): the
+// copyright/ownership block ("…may not be reproduced…property of…written permission") and legend
+// rows ("CJ DENOTES CONTROL JOINT", "…CONTINUED"). These are never a sheet title.
+const looksLikeBoilerplate = (t) =>
+  /\b(property of|all rights reserved|copyright|reproduced|reproduction|written (consent|permission|authoriz)|may not be (copied|used|reproduced|altered)|shall not be (used|copied|reproduced)|without (the )?(prior )?written|denotes|continued|hereon|instrument of service)\b/i.test(t);
 
-/* The sheet title — the human "what is this sheet" line (e.g. "GRADING & DRAINAGE PLAN"). The
- * largest, wordiest line inside the title-block band, skipping label/data rows. Falls back to
- * the deterministic discipline `item` (titleBlockParse) when nothing readable stands out, so
- * grouping always has a key. Returns "". */
+/* The sheet title — the human "what is this sheet" line (e.g. "GRADING & DRAINAGE PLAN" or
+ * "GENERAL NOTES"). A real title is SHORT and LARGE-TYPE, not a long sentence — so we keep only
+ * short candidate lines (a few words) and pick the TALLEST, breaking ties toward more letters.
+ * The old scorer multiplied height × letter-count, which rewarded long copyright/legend prose over
+ * the actual title (B374). Skips label/data/boilerplate rows; falls back to the deterministic
+ * discipline `item` (titleBlockParse) when nothing readable stands out, so grouping always has a
+ * key. Returns "". */
 export function readSheetTitle(lines, band, fallback = "") {
-  const inBand = (ln) => {
-    if (!band) return true;
-    const cx = ln.x + ln.w / 2, cy = ln.y + ln.h / 2;
-    return band.side === "right" ? cx >= band.x : band.side === "bottom" ? cy >= band.y : true;
+  const inBand = (ln) => (band ? itemInBand(ln, band) : true);
+  const isTitleish = (ln) => {
+    const t = ln.text;
+    if (!t || TITLE_SKIP.test(t) || looksLikeData(t) || looksLikeBoilerplate(t)) return false;
+    if (wordCount(t) > 7) return false;                       // a title is a few words, not a sentence
+    return t.replace(/[^a-z]/gi, "").length <= 48;            // nor a long run-on line
   };
   const cand = lines
     .filter(inBand)
-    .filter((ln) => ln.text && !TITLE_SKIP.test(ln.text) && !looksLikeData(ln.text))
-    .map((ln) => ({ ln, score: (ln.lineH || ln.h || 0) * Math.min(40, ln.text.replace(/[^a-z]/gi, "").length) }))
+    .filter(isTitleish)
+    // Height dominates (×100 so a taller line always wins); letters only break ties between equal-
+    // height lines (prefer a real title over a stray 3-letter token), capped so they can't override
+    // a clearly larger-type line.
+    .map((ln) => ({ ln, score: (ln.lineH || ln.h || 0) * 100 + Math.min(24, ln.text.replace(/[^a-z]/gi, "").length) }))
     .sort((a, b) => b.score - a.score);
   const top = cand[0] && cand[0].ln.text.replace(/\s+/g, " ").trim();
   return top || fallback || "";
+}
+
+/* Read the label-anchored sheet number from the TITLE-BLOCK ZONE only, so a body cross-reference
+ * ("SEE DWG S202") can't masquerade as the sheet's own number (B374). Prefer a detected band;
+ * otherwise fall back to the right edge strip, then the bottom edge strip — where title blocks live
+ * — because a dense notes sheet often defeats the density-based band detector yet still keeps its
+ * number in that strip. Returns the code or "". */
+function readSheetNumberInZone(items, dims, band) {
+  const join = (pred) => parseSheetNumber(items.filter(pred).map((i) => i.str).join(" "));
+  if (band) return join((it) => itemInBand(it, band));
+  const W = dims.width || 0, H = dims.height || 0;
+  return join((it) => it.x + (it.w || 0) / 2 >= W * 0.78) || join((it) => it.y + (it.h || 0) / 2 >= H * 0.82);
 }
 
 /* ----------------------------- the reader -------------------------------------- */
@@ -191,15 +246,29 @@ export function readSheetMeta(page = {}) {
       hasText: false, confidence: 0,
       sheetNumber: "", sheetTitle: "", discipline: "Other", item: "Document", revision: "", date: "",
       scale: null, titleBlock: null, drawingArea: drawingAreaOf(dims, null), matchLines: [],
-      detailRefs: [], detailAnchors: [], notes: [],
+      detailRefs: [], detailAnchors: [], notes: [], textDense: false,
     };
   }
   const lines = reconstructLines(items);
   const band = detectTitleBlock(items, dims);
+  const drawingArea = drawingAreaOf(dims, band);
   const scale = fields.scale; // one parse pass — readTitleBlockText already read the stated scale (B360)
   const matchLines = parseMatchLines(lines, dims);
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   const sheetTitle = readSheetTitle(lines, band, item);
+  // Is this a pure-text sheet (general notes / specifications / legend), not a drawing? Such a
+  // sheet has no plan scale — auto-calibration must NOT fire on it (B375). Signals: a notes/specs
+  // title, or a drawing area saturated with sentence-like prose (plans carry only short labels).
+  const proseLines = lines.filter((ln) => lineInRect(ln, drawingArea) && wordCount(ln.text) >= 6).length;
+  const NOTES_TITLE = /general\s+notes|^notes\b|abbreviations|legend|specifications?|sheet\s+index|^index\b/i;
+  const textDense = proseLines >= 10 || NOTES_TITLE.test(sheetTitle || "") || NOTES_TITLE.test(item || "");
+  // Sheet number, read from the TITLE-BLOCK ZONE only — never the drawing body (B374). The body of
+  // a text-dense sheet is full of cross-references ("SEE DWG S202") that the whole-page read grabs
+  // as the number (the same wrong code on several sheets). We read from the detected band, or — when
+  // a dense notes sheet defeats the density-based band detector — from the right/bottom edge strip
+  // where title blocks live. Only a NON-dense sheet may fall back to the whole-page read.
+  let sheetNumber = readSheetNumberInZone(items, dims, band);
+  if (!sheetNumber && !textDense) sheetNumber = fields.sheetNumber || "";
   // Detail-callout bubbles + where details are defined (B350, Bluebeam click-to-detail) and the
   // notes/legend blocks (B350, keep every sheet's notes through the crop).
   const detailRefs = parseDetailRefs(items, lines, dims);
@@ -209,7 +278,7 @@ export function readSheetMeta(page = {}) {
   // Confidence: a blend of the spatial reads we actually got — used to surface low-confidence
   // sheets to the user rather than silently mis-group/mis-stitch them ("never auto-guess").
   let confidence = 0.3;
-  if (fields.sheetNumber) confidence += 0.25;
+  if (sheetNumber) confidence += 0.25;
   if (band) confidence += 0.2;
   if (sheetTitle && sheetTitle !== "Document") confidence += 0.15;
   if (scale && (scale.ftPerInch || scale.explicit)) confidence += 0.1;
@@ -217,9 +286,9 @@ export function readSheetMeta(page = {}) {
 
   return {
     hasText: true, confidence,
-    sheetNumber: fields.sheetNumber || "", sheetTitle,
+    sheetNumber: sheetNumber || "", sheetTitle,
     discipline, item, revision: fields.revision || "", date: fields.date || "",
-    scale, titleBlock: band, drawingArea: drawingAreaOf(dims, band), matchLines,
-    detailRefs, detailAnchors, notes,
+    scale, titleBlock: band, drawingArea, matchLines,
+    detailRefs, detailAnchors, notes, textDense,
   };
 }
