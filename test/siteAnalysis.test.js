@@ -91,8 +91,8 @@ describe("summarizers", () => {
   it("wetlandSummary lists distinct NWI types", () => {
     expect(wetlandSummary([{ WETLAND_TYPE: "Freshwater Forested/Shrub Wetland" }])).toContain("Freshwater");
   });
-  it("pipelineSummary counts + names operators (real RRC field OPER_NM, B189)", () => {
-    expect(pipelineSummary([{ OPER_NM: "Kinder Morgan" }, { OPER_NM: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
+  it("pipelineSummary counts + names operators (RRC layer-13 field OPERATOR, B368)", () => {
+    expect(pipelineSummary([{ OPERATOR: "Kinder Morgan" }, { OPERATOR: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
   });
 });
 
@@ -120,8 +120,9 @@ describe("classifyStatus — the silent-error guard", () => {
   it("UNKNOWN for an unverified source returning empty (never a fabricated all-clear)", () => {
     expect(classifyStatus([], { error: null, verified: false })).toBe("unknown");
   });
-  it("UNKNOWN on any error, even verified", () => {
-    expect(classifyStatus(null, { error: "boom", verified: true })).toBe("unknown");
+  it("UNAVAILABLE on any error, even verified (retryable; never read as clear — B366)", () => {
+    expect(classifyStatus(null, { error: "boom", verified: true })).toBe("unavailable");
+    expect(classifyStatus(null, { error: "503", verified: false })).toBe("unavailable");
   });
 });
 
@@ -143,12 +144,44 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     expect(f.status).toBe("absent");
     expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
   });
-  it("error → unknown, surfaced not thrown", async () => {
+  it("error → unavailable, surfaced not thrown (honest, not 'CORS' — B366)", async () => {
     const cache = freshCache();
     const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => new Error("Failed to fetch") });
     const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
-    expect(f.status).toBe("unknown");
-    expect(f.error).toMatch(/network|reach/i);
+    expect(f.status).toBe("unavailable");
+    expect(f.error).toMatch(/reach|unavailable/i);
+    expect(f.error).not.toMatch(/CORS/);
+  });
+  it("a failed REFRESH keeps the last-good copy (stale, not blanked — B367)", async () => {
+    const cache = freshCache();
+    // First, a good read populates the cache (ttl 0 ⇒ always revalidate next time).
+    const src0 = { ...flood, ttl: 0 };
+    const ok = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "AE" } }] });
+    const good = await analyzeSource(src0, [SQUARE], { cache, fetchJson: ok });
+    expect(good.status).toBe("present");
+    // Now the refresh fails — the last-good "present" must survive, flagged stale.
+    const boom = fakeFetch({ "/NFHL/MapServer/28/query": () => new Error("Failed to fetch") });
+    const f = await analyzeSource(src0, [SQUARE], { cache, fetchJson: boom });
+    expect(f.status).toBe("present");           // NOT downgraded to unavailable
+    expect(f.stale).toBe(true);
+    expect(f.refreshError).toMatch(/reach|unavailable/i);
+    expect(f.summary).toBe("Zone AE");
+  });
+  it("falls back to a mirror endpoint when the primary errors (B369 #6)", async () => {
+    const cache = freshCache();
+    const src = {
+      id: "fb", category: "X", label: "x", kind: "polygon",
+      url: "https://primary/MapServer", layer: 0, fields: { a: "A" }, verified: true,
+      fallbacks: [{ url: "https://mirror/MapServer", layer: 0, fields: { a: "A" } }],
+      summarize: () => "from mirror", detail: () => [], absentLabel: "none",
+    };
+    const fetchJson = fakeFetch({
+      "https://primary/MapServer/0/query": () => new Error("Failed to fetch"),
+      "https://mirror/MapServer/0/query": () => [{ attributes: { A: 1 } }],
+    });
+    const f = await analyzeSource(src, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toBe("from mirror");
   });
   it("empty from a now-VERIFIED wetlands query → absent (none found), post-B189 fix", async () => {
     const cache = freshCache();
@@ -188,15 +221,22 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     expect(f.status).toBe("present");
     expect(f.summary).toMatch(/Freshwater Emergent/);
   });
-  it("pipelines query asks for the REAL fields, not the 400-ing OPERATOR/COMMODITY (B189)", async () => {
+  it("pipelines query asks for the RRC layer-13 fields (authoritative source, B368)", async () => {
     const pipe = ANALYSIS_SOURCES.find((s) => s.id === "pipelines");
     const params = buildAnalysisParams(pipe, [SQUARE]);
-    expect(params.outFields).toBe("OPER_NM,CMDTY_DESC,DIAMETER");
-    expect(params.outFields).not.toMatch(/OPERATOR|COMMODITY\b/);
+    expect(params.outFields).toBe("OPERATOR,COMMODITY_DESCRIPTION,DIAMETER,STATUS,SYSTEM_NAME,COUNTY_NAME");
+    expect(params.outFields).not.toMatch(/OPER_NM|CMDTY_DESC/); // not the retired Harris-GIS columns
   });
-  it("oil & gas wells query drops the non-existent LEASE_NAME field (B189)", async () => {
+  it("wells/pipelines now point at the authoritative statewide RRC service, not Harris-County GIS (B368)", () => {
     const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
-    expect(buildAnalysisParams(wells, [SQUARE]).outFields).not.toMatch(/LEASE_NAME/);
+    const pipe = ANALYSIS_SOURCES.find((s) => s.id === "pipelines");
+    for (const s of [wells, pipe]) {
+      expect(s.url).toMatch(/gis\.rrc\.texas\.gov/);
+      expect(s.url).not.toMatch(/gis\.hctx\.net/); // the retired ~99.8%-incomplete republication
+    }
+    expect(wells.layer).toBe(1);
+    expect(pipe.layer).toBe(13);
+    expect(buildAnalysisParams(wells, [SQUARE]).outFields).toBe("API,SYMNUM,GIS_SYMBOL_DESCRIPTION,GIS_WELL_NUMBER");
   });
   it("findings carry their map-overlay layer id for the show-on-map toggle (B190)", async () => {
     const cache = freshCache();
@@ -248,8 +288,8 @@ describe("runSiteAnalysis — orchestration", () => {
     const fetchJson = fakeFetch({
       "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X" } }],
       "Wetlands_gdb_split": () => [],
-      "TXRRC/Wells": () => [],
-      "TXRRC/Pipelines": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
     });
     const identifyJurisdiction = async () => ({
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
@@ -268,8 +308,8 @@ describe("runSiteAnalysis — orchestration", () => {
     const fetchJson = fakeFetch({
       "/NFHL/MapServer/28/query": () => [],
       "Wetlands_gdb_split": () => [],
-      "TXRRC/Wells": () => [],
-      "TXRRC/Pipelines": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
+      "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],
     });
     const identifyJurisdiction = async () => { throw new Error("down"); };
     const identifyRoadAuthority = async () => { throw new Error("down"); };

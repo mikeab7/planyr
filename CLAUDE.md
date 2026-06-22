@@ -151,6 +151,18 @@ server/                   # placeholder README only — NOT built or deployed; b
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
+- **The required `build` check often does NOT auto-start on a PR you open via the GitHub
+  MCP / automation — un-stick it yourself with a nudge commit; NEVER hand this to Michael.**
+  GitHub suppresses `pull_request`/`push` workflow triggers for PRs opened or pushed by the
+  automation's app token, so the required `build` check sits **"Expected — Waiting for status
+  to be reported"** and **auto-merge waits forever** (it will NOT merge on its own). A
+  `workflow_dispatch` build _runs_ but its check does **not** satisfy the required context, and
+  a direct merge is rejected with `Required status check "build" is expected`. **Fix:** after
+  opening the PR + enabling auto-merge, push a tiny **empty nudge commit** to the PR branch
+  (`git commit --allow-empty -m "Nudge CI" && git push`) — that fires the real `pull_request`
+  build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
+  involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
+  of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
