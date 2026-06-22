@@ -25,7 +25,7 @@ describe("groupKey — same plan type chains, generic does not", () => {
   });
 });
 
-describe("markAdjacentDuplicateNumbers — clear cross-reference misreads (B374)", () => {
+describe("markAdjacentDuplicateNumbers — clear cross-reference misreads (B378)", () => {
   it("clears a sheet number that repeats on an adjacent page (the 'S202 ×4' bug)", () => {
     const pages = [
       { pageNum: 1, sheetNumber: "S202", confidence: 0.8 },

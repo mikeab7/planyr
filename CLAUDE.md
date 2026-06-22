@@ -298,7 +298,7 @@ server/                   # placeholder README only — NOT built or deployed; b
 - Both REUSE the B336 reader (`readSheetMeta` → each page carries `notes`/`detailRefs`/`detailAnchors`;
   placed sheets persist them). 14 unit tests; V92 headless (`ui-audit/verify-b350.mjs`).
 
-### Document Review — robust labels on text-dense (general-notes / specs) sheets (B374/B375) — LIVE
+### Document Review — robust labels on text-dense (general-notes / specs) sheets (B378/B379) — LIVE
 - A structural general-notes set labelled atrociously (body boilerplate as the title, a body
   cross-reference read as the sheet number on several rows, false "·≈" auto-cal). All from one
   mismatch: the reader was tuned for a drawing (sparse plan + one dense title-block strip); a notes
@@ -314,7 +314,7 @@ server/                   # placeholder README only — NOT built or deployed; b
     merge into a far-left body line. `markAdjacentDuplicateNumbers` (sheetGroups) clears a number
     that repeats on an adjacent page. Sidebar uses a `trustedTitle` gate (band OR zone-number OR
     text-page corroboration) → real title, else item, else number, else "Sheet N".
-  - **B375:** `readSheetMeta` flags a **`textDense`** sheet (notes/specs/legend title, or a prose-
+  - **B379:** `readSheetMeta` flags a **`textDense`** sheet (notes/specs/legend title, or a prose-
     saturated drawing area); `statedCalibration` returns 0 for it — a pure-text sheet is left
     uncalibrated, never silently mis-scaled off a stray body scale string. Real plan sheets unchanged.
   - +10 unit tests (1153 green); headless **V104** (`ui-audit/verify-notes-sheet-labels.mjs`, 9/9).

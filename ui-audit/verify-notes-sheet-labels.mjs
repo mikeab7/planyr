@@ -1,4 +1,4 @@
-/* Verify B374 + B375 — sheet labelling on TEXT-DENSE (general-notes / specs) sheets.
+/* Verify B378 + B379 — sheet labelling on TEXT-DENSE (general-notes / specs) sheets.
  *
  * The "atrocious labels" report: a structural general-notes set showed body boilerplate AS the
  * label ("…reproduced or used without…", "CJ DENOTES…"), the same cross-referenced sheet number on
@@ -10,9 +10,9 @@
  *     copyright boilerplate line, and a STRAY "1\"=20'" scale string — but NO plan scale.
  *   • a GRADING PLAN run (C-5/C-6) with a real stated scale.
  * and asserts the Markup sidebar:
- *   B374 — the notes sheet reads its OWN number (S-001) + real title ("GENERAL NOTES"), never the
+ *   B378 — the notes sheet reads its OWN number (S-001) + real title ("GENERAL NOTES"), never the
  *          body cross-reference S202 and never a boilerplate/legend line; no generic "Sheet N".
- *   B375 — the notes sheet does NOT auto-calibrate (no "·≈"); a real plan sheet still DOES.
+ *   B379 — the notes sheet does NOT auto-calibrate (no "·≈"); a real plan sheet still DOES.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
  *       node ui-audit/verify-notes-sheet-labels.mjs            (another)
@@ -101,13 +101,13 @@ await sleep(500);
 const rows = await allRows();
 console.log("\nsidebar rows:", JSON.stringify(rows));
 
-console.log("\nB374 — the notes sheet reads its OWN number + real title (not a cross-ref / body line):");
+console.log("\nB378 — the notes sheet reads its OWN number + real title (not a cross-ref / body line):");
 check(rows.some((t) => /GENERAL NOTES/i.test(t) && /S-?001/i.test(t)), "notes sheet labelled 'GENERAL NOTES · S-001'");
 check(!rows.some((t) => /S202/i.test(t)), "no row shows the body cross-reference S202");
 check(!rows.some((t) => /property of|reproduced|denotes/i.test(t)), "no row shows a copyright/legend body line");
 check(!rows.some((t) => /^Sheet \d/.test(t)), "no generic 'Sheet N' labels");
 
-console.log("\nB375 — auto-calibration fires on a plan sheet but NOT on the notes sheet:");
+console.log("\nB379 — auto-calibration fires on a plan sheet but NOT on the notes sheet:");
 const notesRow = rows.find((t) => /GENERAL NOTES/i.test(t)) || "";
 check(!/≈/.test(notesRow), `notes sheet is NOT auto-calibrated (no '·≈'): "${notesRow}"`);
 check(rows.some((t) => /Grading Plan\s*·\s*C-5–C-6/.test(t)), `grading run grouped: "${rows.find((t) => /Grading/.test(t)) || "(none)"}"`);

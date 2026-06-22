@@ -106,7 +106,7 @@ describe("readSheetTitle — the human plan name, skipping label/data rows", () 
   it("falls back to the deterministic item label when nothing stands out", () => {
     expect(readSheetTitle([], null, "Boundary Survey")).toBe("Boundary Survey");
   });
-  it("does NOT pick a long copyright/legend body line over a short title (B374)", () => {
+  it("does NOT pick a long copyright/legend body line over a short title (B378)", () => {
     // A general-notes sheet: the real title is short + large; the copyright block and a legend
     // row are long body prose at a smaller size. The OLD height×letters scorer picked the prose.
     const lines = reconstructLines([
@@ -141,7 +141,7 @@ describe("readSheetMeta — the unified per-page record", () => {
 
 // A structural GENERAL-NOTES sheet: wall-to-wall prose in the body (which defeats the density-based
 // title-block detector), a body cross-reference to another sheet, and the sheet's OWN number in the
-// right-edge title-block strip. This is the set whose labels were "atrocious" (B374/B375).
+// right-edge title-block strip. This is the set whose labels were "atrocious" (B378/B379).
 function notesSheet() {
   const items = [
     // body — the cross-reference the whole-page read used to grab as THIS sheet's number
@@ -156,7 +156,7 @@ function notesSheet() {
   return { items, width: W, height: H };
 }
 
-describe("readSheetMeta — text-dense general-notes sheet (B374/B375)", () => {
+describe("readSheetMeta — text-dense general-notes sheet (B378/B379)", () => {
   it("reads its OWN number from the title-block strip, NOT a body cross-reference", () => {
     const meta = readSheetMeta(notesSheet());
     expect(meta.sheetNumber).toBe("S001"); // not "S202" (the cross-reference in the body)

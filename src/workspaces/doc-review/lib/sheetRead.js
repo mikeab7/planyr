@@ -43,7 +43,7 @@ export async function readSheets(doc, { extractItems = defaultExtractItems, ocr 
     out.push({ pageNum: p, width: page.width || 0, height: page.height || 0, ...meta });
   }
   // Drop duplicate adjacent sheet numbers (cross-reference misreads) so they don't read as a run
-  // of identical sheets (B374).
+  // of identical sheets (B378).
   return markAdjacentDuplicateNumbers(out);
 }
 
@@ -61,7 +61,7 @@ export function statedCalibration(meta = {}) {
   const sc = meta.scale;
   if (!sc || !sc.ftPerInch) return 0;
   // A general-notes / specifications / legend sheet has no plan scale — a scale-looking string in
-  // its body text must NOT auto-calibrate it (B375). Leave it uncalibrated (the user calibrates by
+  // its body text must NOT auto-calibrate it (B379). Leave it uncalibrated (the user calibrates by
   // hand if needed) rather than silently mis-scale a non-drawing sheet.
   if (meta.textDense) return 0;
   if (!detectSheet(meta.width || 0, meta.height || 0).std) return 0;

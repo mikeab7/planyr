@@ -23,7 +23,7 @@ import { parseNotes } from "./sheetNotes.js";
 const norm = (s) => (s || "").toString().toLowerCase().replace(/\s+/g, " ").trim();
 const wordCount = (s) => (s || "").toString().trim().split(/\s+/).filter(Boolean).length;
 // A reconstructed line whose center sits inside a rect (page units). Used to scope reads to the
-// title-block band vs. the drawing area (B374 — keep body cross-refs out of the title reads).
+// title-block band vs. the drawing area (B378 — keep body cross-refs out of the title reads).
 const lineInRect = (ln, r) => {
   const cx = ln.x + ln.w / 2, cy = ln.y + ln.h / 2;
   return cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
@@ -56,7 +56,7 @@ export function reconstructLines(items, { yTol } = {}) {
   // A shared baseline alone is NOT one line: a title-block label and a far-left body note can sit at
   // the same y yet belong to different columns. Split a row wherever the horizontal gap between
   // consecutive items is large (a title-block-to-body jump), so the title-block title can't merge
-  // into a body line and get rejected as "too wordy" (B374). The threshold is generous — far larger
+  // into a body line and get rejected as "too wordy" (B378). The threshold is generous — far larger
   // than any intra-phrase word gap, so "MATCH LINE SEE SHEET C-6" still joins. */
   const gapTol = Math.max(72, medH * 10);
   const mkLine = (its) => {
@@ -186,7 +186,7 @@ const looksLikeData = (t) =>
   /\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b/.test(t) || // a date
   /^\s*1\s*"?\s*=/.test(t) ||                          // a scale callout
   t.replace(/[^a-z]/gi, "").length < 3;               // not enough letters to be a title
-// Body boilerplate / legend prose that a long-line scorer used to pick AS the title (B374): the
+// Body boilerplate / legend prose that a long-line scorer used to pick AS the title (B378): the
 // copyright/ownership block ("…may not be reproduced…property of…written permission") and legend
 // rows ("CJ DENOTES CONTROL JOINT", "…CONTINUED"). These are never a sheet title.
 const looksLikeBoilerplate = (t) =>
@@ -196,7 +196,7 @@ const looksLikeBoilerplate = (t) =>
  * "GENERAL NOTES"). A real title is SHORT and LARGE-TYPE, not a long sentence — so we keep only
  * short candidate lines (a few words) and pick the TALLEST, breaking ties toward more letters.
  * The old scorer multiplied height × letter-count, which rewarded long copyright/legend prose over
- * the actual title (B374). Skips label/data/boilerplate rows; falls back to the deterministic
+ * the actual title (B378). Skips label/data/boilerplate rows; falls back to the deterministic
  * discipline `item` (titleBlockParse) when nothing readable stands out, so grouping always has a
  * key. Returns "". */
 export function readSheetTitle(lines, band, fallback = "") {
@@ -220,7 +220,7 @@ export function readSheetTitle(lines, band, fallback = "") {
 }
 
 /* Read the label-anchored sheet number from the TITLE-BLOCK ZONE only, so a body cross-reference
- * ("SEE DWG S202") can't masquerade as the sheet's own number (B374). Prefer a detected band;
+ * ("SEE DWG S202") can't masquerade as the sheet's own number (B378). Prefer a detected band;
  * otherwise fall back to the right edge strip, then the bottom edge strip — where title blocks live
  * — because a dense notes sheet often defeats the density-based band detector yet still keeps its
  * number in that strip. Returns the code or "". */
@@ -257,12 +257,12 @@ export function readSheetMeta(page = {}) {
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
   const sheetTitle = readSheetTitle(lines, band, item);
   // Is this a pure-text sheet (general notes / specifications / legend), not a drawing? Such a
-  // sheet has no plan scale — auto-calibration must NOT fire on it (B375). Signals: a notes/specs
+  // sheet has no plan scale — auto-calibration must NOT fire on it (B379). Signals: a notes/specs
   // title, or a drawing area saturated with sentence-like prose (plans carry only short labels).
   const proseLines = lines.filter((ln) => lineInRect(ln, drawingArea) && wordCount(ln.text) >= 6).length;
   const NOTES_TITLE = /general\s+notes|^notes\b|abbreviations|legend|specifications?|sheet\s+index|^index\b/i;
   const textDense = proseLines >= 10 || NOTES_TITLE.test(sheetTitle || "") || NOTES_TITLE.test(item || "");
-  // Sheet number, read from the TITLE-BLOCK ZONE only — never the drawing body (B374). The body of
+  // Sheet number, read from the TITLE-BLOCK ZONE only — never the drawing body (B378). The body of
   // a text-dense sheet is full of cross-references ("SEE DWG S202") that the whole-page read grabs
   // as the number (the same wrong code on several sheets). We read from the detected band, or — when
   // a dense notes sheet defeats the density-based band detector — from the right/bottom edge strip

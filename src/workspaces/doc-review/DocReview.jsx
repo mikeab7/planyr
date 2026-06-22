@@ -267,7 +267,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
   // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
   // The read pages in order, with duplicate adjacent sheet numbers cleared (cross-reference
-  // misreads — B374). This ONE cleaned array feeds both the grouping and every per-page label
+  // misreads — B378). This ONE cleaned array feeds both the grouping and every per-page label
   // lookup, so the sidebar never shows the same wrong number on several rows. `metaOf(n)` reads it.
   const orderedMeta = useMemo(
     () => markAdjacentDuplicateNumbers(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
@@ -845,7 +845,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
   const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
   const sheetShort = (n) => metaOf(n)?.sheetNumber || `Sheet ${n}`;
-  // Do we trust the read title enough to surface it as the label (B374)? A title is trustworthy
+  // Do we trust the read title enough to surface it as the label (B378)? A title is trustworthy
   // when it came from a detected title-block band, OR is corroborated by a real sheet number read
   // from the title-block zone, OR the sheet is a recognized text page (general notes / specs, where
   // the title IS its identity). A bare band — or nothing — no longer authorizes a body line as the
@@ -1055,7 +1055,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
                 if (g.kind === "single") {
                   const n = g.pages[0].pageNum, active = n === page;
                   // The label: the real title-block title + number, else "Sheet N" — never a random
-                  // body-text line (B266) and never a cross-referenced/duplicate number (B374).
+                  // body-text line (B266) and never a cross-referenced/duplicate number (B378).
                   const lbl = sheetLabel(n).label;
                   return (
                     <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"

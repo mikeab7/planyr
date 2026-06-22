@@ -79,7 +79,7 @@ function toLogical(run) {
 }
 
 /* A sheet number that repeats on an ADJACENT page is almost always a cross-reference misread —
- * a real plan set never prints the same sheet # on two pages in a row (B374). When the band-scoped
+ * a real plan set never prints the same sheet # on two pages in a row (B378). When the band-scoped
  * read can't isolate the number (a no-title-block notes sheet), the whole-page read can still grab
  * the same body cross-reference ("SEE DWG S202") on several sheets at once, producing identical
  * duplicate rows. Clear such numbers (and lower confidence) so each page falls back to a clean
