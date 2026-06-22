@@ -22,6 +22,29 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
+     left-hand panel so you never have to back out to the map to assemble more land. Highest B#
+     across both files was B382, so minted **B383** (+ filed the deferred "Add by address" stretch
+     as **B384**, still Open). Per STANDING RULE #1 B383 was filed AND fixed + headless-verified
+     (V108, 14/14) + merged the SAME session on branch `claude/determined-volta-hzjxmc` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a primary **＋ Add parcel** control (accent chip) at the top of the Parcel
+     `Section` opens an `AnchoredMenu` with (1) "Identify from county GIS" (arms the existing
+     `identifyMode`; disabled-copy gate when `origin` is null) and (2) "Draw a new boundary"
+     (`selectTool("parcel")`, always enabled — the no-GIS-frame fallback). The standalone
+     "🔍 Identify parcel" toggle was CONSOLIDATED into that menu (no duplicate entry point); the
+     armed-status row (the off-switch) + the identify result card / ＋ Add to plan / ⚖︎ Jurisdiction
+     stay intact as the body of that path. Pure surfacing — reuses `addIdentifiedParcel` /
+     `setParcels` / `identifyMode` / the parcel draw tool (no new add pipeline; same single-pipeline
+     rule as B232/B233); added parcels keep `locked:true` (B99).
+     Deduped: net-new. NOT B233 (that's the *map's* address→select+info card), NOT B231/B36c (the
+     multipart-import pipeline it reuses), NOT B99/B100 (the lock/active model it inherits). lint 0
+     · 1201 tests · build green · `SitePlannerApp` lazy chunk intact. B384 (Add by address) left Open
+     by design — the geocode logic lives in MapFinder and needs a clean extraction, not a rush. -->
+
+### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
+`[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
+
 <!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
      floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
      Grid/Split/Gantt view switcher, Automation, Settings, Review all gone). First filed B380,

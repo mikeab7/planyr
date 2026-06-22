@@ -810,6 +810,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
+  const [addParcelMenu, setAddParcelMenu] = useState(false); // B383: ＋ Add parcel flyout in the Parcel panel
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-layout dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
@@ -830,7 +831,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null);
+    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -7580,8 +7581,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
+              {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
+                  planner, so you never have to back out to the map. Opens a menu of add methods
+                  (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
+              <div ref={addParcelAnchor} style={{ position: "relative", marginBottom: 9 }}>
+                <button
+                  aria-haspopup="menu" aria-expanded={addParcelMenu}
+                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
+                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — identify from county GIS or draw a boundary">
+                  ＋ Add parcel <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
+                </button>
+                <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
+                  {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
+                  {origin ? (
+                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                      <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Click a spot on the map to pull the county record, then add it to the plan.</div>
+                    </button>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
+                  {/* Draw a new boundary — always available (no GIS frame needed). */}
+                  <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
+                    <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
+                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Trace a lot by clicking points on the canvas; close on the first dot.</div>
+                  </button>
+                </AnchoredMenu>
+              </div>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Boundary tool (right rail).</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Boundary tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {parcels.map((pc, i) => {
@@ -7618,17 +7649,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
                 </div>
               )}
-              {/* identify any parcel from the county GIS (no import unless you add it) */}
-              <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
-                {origin ? (
-                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); setJurInfo(null); }}>
-                    {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
+              {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
+                  "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
+                  no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
+              {(identifyMode || identifyRes) && (
+                <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
+                {identifyMode && (
+                  <button style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent }}
+                    onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop identifying">
+                    Identifying — click a spot (Esc to stop)
                   </button>
-                ) : (
-                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5 }}>Identify needs a georeferenced plan. Bring the parcel in from the map to enable it.</div>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: 8, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>Querying county GIS…</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : <>
@@ -7658,6 +7691,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 )}
               </div>
+              )}
             </Section>
           )}
           {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it
