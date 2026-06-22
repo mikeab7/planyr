@@ -22,6 +22,16 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-22: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" — Gantt label alignment + uniform ink,
+     printed-Gantt missing names, and serpentine dependency arrows. Highest B# across both files was
+     B389, so minted **B390 / B391 / B392**. Deduped: all NET-NEW (no existing item covered Gantt label
+     alignment / in-chart PDF names / orthogonal connectors; the prior "NEW-1"s — B383/B385/B386/B387/B388 —
+     were Site-Planner or Schedule-toolbar items). Per STANDING RULE #1 all three were filed AND
+     fixed + headless-verified + shipped the SAME session (branch `claude/zen-ramanujan-14sak9`) — they
+     share ONE label/render pass in GanttView + buildGanttSVG, so they were landed together. Full [x]
+     blocks live in BACKLOG-DONE.md; headless harness V113 (`ui-audit/verify-gantt-labels-deps.mjs`,
+     all checks across right/center/left). -->
+
 <!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
      Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
      branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
