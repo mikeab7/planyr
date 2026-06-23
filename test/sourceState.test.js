@@ -3,9 +3,9 @@ import {
   CLOUD_FILE_LIMIT_MB, classifySource, sourceUnavailableMessage, fileWarn,
 } from "../src/workspaces/doc-review/lib/sourceState.js";
 
-// The bug B402 fixes: every open failure collapsed into one "Couldn't fetch …" string, and a
+// The bug B405 fixes: every open failure collapsed into one "Couldn't fetch …" string, and a
 // missing source returned SILENTLY (no banner). These assert each cause is now distinct.
-describe("classifySource — distinct unavailable states (B402)", () => {
+describe("classifySource — distinct unavailable states (B405)", () => {
   it("a fetchable source (has a storage key) returns null", () => {
     expect(classifySource({ name: "A", storageKey: "u/x.pdf" })).toBe(null);
     expect(classifySource({ name: "A", driveKey: "p/x.pdf" })).toBe(null);
@@ -30,7 +30,7 @@ describe("classifySource — distinct unavailable states (B402)", () => {
   });
 });
 
-describe("sourceUnavailableMessage — precise, durable, distinct copy (B402)", () => {
+describe("sourceUnavailableMessage — precise, durable, distinct copy (B405)", () => {
   const msg = (s) => sourceUnavailableMessage(s, { name: "Civil C-100" });
   it("names the 50 MB cap for oversize (durable — no 'coming soon')", () => {
     const m = msg("oversize");

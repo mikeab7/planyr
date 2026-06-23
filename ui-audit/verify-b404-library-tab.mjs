@@ -1,4 +1,4 @@
-/* Verify B401 — the Document Review module tab is renamed "Markup" → "Library" (label only;
+/* Verify B404 — the Document Review module tab is renamed "Markup" → "Library" (label only;
  * the route/module id `doc-review` is unchanged). Logged out (sandbox can't sign in), which
  * is fine: the module tabs render in the shared shell header regardless of auth.
  *

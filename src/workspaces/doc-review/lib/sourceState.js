@@ -1,7 +1,7 @@
 /* Source-availability taxonomy — the ONE owner of every "this file's bytes aren't
  * available" message across Document Review (the single-sheet banner in DocReview, the
  * Stitcher placeholder note, and the Files browser / drawer queue warns), so the surfaces
- * can't drift and each failure names its PRECISE, distinct cause (B402).
+ * can't drift and each failure names its PRECISE, distinct cause (B405).
  *
  * The states are hard-distinct — "source unavailable" is NOT one bucket. Collapsing them
  * (the old behaviour) made every failure read "Couldn't fetch …", which hid whether a file

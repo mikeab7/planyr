@@ -25,15 +25,16 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- 2026-06-23: owner-dropped COMBINED chat brief (it explicitly supersedes three earlier separate briefs —
      the Markup→Library rename, "open any file fails", and the standalone oversize-banner-copy item — so filed
      from the combined version to avoid double-filing; deduped: no existing Open item covered these). Highest
-     B# across both files was B400, so minted B401–B402; the brief's B207 item was an AMENDMENT (no new B#).
-     Per STANDING RULE #1 both new items were filed AND fixed + verified + merged the SAME session (branch
-     `claude/brave-brown-jb1n2l`) — full [x] blocks live in BACKLOG-DONE.md:
-       • B401 (NEW-1) — module tab "Markup" → "Library" (label ONLY; route id `doc-review`/`/markup`, storage
+     B# across both files was B400 when filed, but a concurrent `main` (#297) took B401–B403 for a Scheduler/
+     Export batch while this was in flight, so **renumbered B404–B405** (the real next free IDs); the brief's
+     B207 item was an AMENDMENT (no new B#). Per STANDING RULE #1 both new items were filed AND fixed + verified
+     + merged the SAME session (branch `claude/brave-brown-jb1n2l`) — full [x] blocks live in BACKLOG-DONE.md:
+       • B404 (NEW-1) — module tab "Markup" → "Library" (label ONLY; route id `doc-review`/`/markup`, storage
          keys, and the amber accent token names unchanged). The only user-facing "Markup" string was the tab;
          the SitePlanner "Markup line/rect" tool hints are a different feature, left alone. Finish-the-job tail:
          ~15 ui-audit harnesses selected the tab by visible text → repointed to "Library". New
-         `verify-b401-library-tab.mjs` 4/4 + repointed `verify-new1-header-integration` 5/5.
-       • B402 (NEW-2) — the Files-browser "open any file fails" was ONE conflated banner + a SILENT missing-source
+         `verify-b404-library-tab.mjs` 4/4 + repointed `verify-new1-header-integration` 5/5.
+       • B405 (NEW-2) — the Files-browser "open any file fails" was ONE conflated banner + a SILENT missing-source
          path. Grounded against real code FIRST: the brief's "the browser reshape drops storageKey/driveKey"
          hypothesis was REFUTED at the open hop (`openReview` → `loadReview(row.id)` re-fetches the full Postgres
          record by id, so the lightweight browser row is never the src) — flagged, not rebuilt. Real fix = a
@@ -1020,14 +1021,26 @@ product switcher) already shipped for the *planner* context bar and explicitly l
 physical row is a later polish," so **B104** is that remaining polish for the *map* view
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
-### B361 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)  *(renumbered from a colliding B159 → B361, 2026-06-21; the surviving B159 is the Task-names visibility toggle; B355 was taken by the concept-names feature)*
-
-- [ ] Add a **time scale selector** to the PDF/Print Exhibit export sidebar, controlling the density of the Gantt chart's time axis in the exported output.
-- Options: **Days · Weeks · Months · Quarters** — matching common schedule exhibit conventions.
-- Changing the selection re-renders the Gantt preview in real time before the user prints/saves.
-- Export-only control; does not affect the live schedule view.
-
-<!-- Filed 2026-06-18 from owner-submitted NEW-2. No prior Scheduler/Gantt items to dedup against. -->
+<!-- 2026-06-22: owner-dropped corrected chat batch (Scheduler PDF/Print Exhibit export quality) —
+     amended NEW-1/NEW-2/NEW-4/NEW-5 (NEW-3 unchanged). Minted **B401/B402/B403**; the amended NEW-1
+     folded into **B361** (its explicit home — "the continuous companion to B159's discrete selector").
+     Per STANDING RULE #1 all four were filed AND fixed + headless-verified (V116, 16/16) + committed
+     this session on branch `claude/vigilant-brown-5dqcog`. All touch ONE surface:
+     public/sequence/index.html (buildGanttSVG + PDFExportModal + buildPDFHtml). Full [x] blocks live
+     in BACKLOG-DONE.md:
+       • B361 — export time-axis controls: a discrete Days/Wk/Mo/Qtr selector (sidebar) + a continuous
+                Time −/+ (toolbar) wired to the SAME span state + Pan (renamed from Move, drags the
+                time window, today-centered default) + FIXED the dead/intermittent floating toolbar
+                (rebuilt as a pinned absolute overlay). Page Zoom + Fit kept.
+       • B401 — the default time window auto-fits so every start/end label sits on the sheet (extend the
+                frame, never move a label; capped at ~22% of span/side so a long label can't crush it).
+       • B402 — dependency connectors stay CURVED but now terminate at 12 o'clock (descend into the bar/
+                diamond TOP, clearing the endpoint date) + a vertical de-collision pass for co-dated names.
+       • B403 — silently persist & restore ALL export-screen state (orientation/size/margins/columns/
+                name-align/header/section-collapse/timescale/pan) via localStorage `planar:exportPrefs:v1`,
+                synchronously, NO badge. Column width keeps riding data.exportColWidths (B392).
+     B160 (the whole-split table-vs-chart divider ratio) left Open by design — distinct from B361's
+     in-chart time axis; B392's per-column drag-resize already covers most of the need. -->
 
 ---
 
@@ -1038,8 +1051,9 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Preview updates in real time as the user drags/adjusts.
 - **Interacts with B361 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
 - Export-only; live schedule layout unaffected.
+- **Amended-NEW-1 boundary (2026-06-22):** the owner's corrected NEW-1 explicitly keeps this item DISTINCT from the in-chart time-axis controls (timescale zoom + pan) — those live in **B361**. B160 is purely the **panel divider** (one ratio handle for the whole table-vs-chart split). The per-column drag-resize (**B392**, shipped) already lets a user trade table width against chart width column-by-column; B160 remains the single whole-split ratio handle if still wanted.
 
-<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
+<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). Annotated 2026-06-22 with the amended-NEW-1 boundary (time-axis controls → B361; divider → here). -->
 <!-- RECONCILE w/ B392 (DONE 2026-06-22, PR #293): B392 shipped per-column drag-resize in the exhibit.
      Because the table block is now exactly the sum of its (content-fit or dragged) column widths and
      the Gantt auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already

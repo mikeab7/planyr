@@ -468,7 +468,7 @@ export default function DocReview({
   const fetchSourceBytes = async (src, tok) => {
     const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
     if (superseded()) return; // superseded before fetching
-    // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B402).
+    // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B405).
     // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
     const pre = classifySource(src, { signedIn });
     if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }

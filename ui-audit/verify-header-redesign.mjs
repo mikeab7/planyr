@@ -81,7 +81,7 @@ console.log("\nB358 — no cry-wolf save state on an empty Markup:");
 check(!/not saved/i.test(emptyHdr), `header does not say "Not saved" when there's nothing to save`);
 
 console.log("\nB359 — the redundant Library entry point is gone:");
-// The module tab is now legitimately labelled "Library" (B401), so "Library" should appear
+// The module tab is now legitimately labelled "Library" (B404), so "Library" should appear
 // exactly ONCE in the header (that tab) — a second occurrence would be the redundant
 // header button B359 removed.
 const libCount = (emptyHdr.match(/library/gi) || []).length;
