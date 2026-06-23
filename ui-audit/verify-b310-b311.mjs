@@ -82,8 +82,10 @@ const clickToggle = () => page.evaluate((src) => {
   const b = [...document.querySelectorAll("button")].find((x) => fn(x));
   b && b.click();
 }, findToggle.toString());
-// A point inside the parcel but ABOVE its centre, dodging the draggable acreage chip at the centroid.
-const clickPt = (pc) => ({ x: pc.cx, y: pc.top + pc.h * 0.25 });
+// B417: a parcel now grabs by its BOUNDARY edge (its interior is click-through), so target the
+// TOP edge — on the fat boundary hit-stroke, a few px in from the rect top, clear of the centroid
+// acreage chip. (B310's click-vs-drag + B311's toggle logic are unchanged; only the grab point moved.)
+const clickPt = (pc) => ({ x: pc.cx, y: pc.top + 3 });
 const deselect = async () => { await page.keyboard.press("Escape"); await page.waitForTimeout(250); };
 
 const result = { errors: [] };

@@ -77,8 +77,10 @@ for (const name of Object.keys(SHAPES)) {
   await page.waitForTimeout(700);
 
   // Select the parcel by clicking the midpoint of its first edge (always on the stroke).
+  // B417: the parcel's grab target moved to a fat boundary hit-stroke, so the visible polygon is
+  // now pointer-events:none — locate it by its parcel/selection stroke colour instead.
   const poly = await page.evaluate(() => {
-    const p = document.querySelector('polygon[pointer-events="all"]');
+    const p = document.querySelector('polygon[stroke="#5b6650" i], polygon[stroke="#c2410c" i]');
     return p ? p.getAttribute("points") : null;
   });
   if (!poly) { ok(`${name}: parcel rendered`, false); continue; }
@@ -97,7 +99,7 @@ for (const name of Object.keys(SHAPES)) {
   await page.screenshot({ path: OUT + `irregular-${name}.png` });
 
   const data = await page.evaluate(() => {
-    const polyEl = document.querySelector('polygon[pointer-events="all"]');
+    const polyEl = document.querySelector('polygon[stroke="#5b6650" i], polygon[stroke="#c2410c" i]'); // B417: parcel polygon by stroke colour (was pointer-events="all")
     const ring = polyEl.getAttribute("points").trim().split(/\s+/).map((s) => { const [x, y] = s.split(",").map(Number); return { x, y }; });
     const inPoly = (pt) => { let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y; if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi)) inside = !inside; } return inside; };
     const pills = [...document.querySelectorAll('rect[stroke="#b45309"]')].map((r) => ({ x: +r.getAttribute("x") + 13, y: +r.getAttribute("y") + 9 }));

@@ -22,6 +22,35 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — a parcel grabbed by its empty INTERIOR, not just its
+     boundary/setback, so a press in the open interior near (but not on) a footprint selected the LOT
+     instead of letting you work on a building sitting there. Highest real B# across both files was B419
+     (B416 Split-a-parcel, B417 paste-at-cursor/trailer-parking, B418 building-depth/"Review" label, B419
+     token rename — all taken by concurrent PRs #313/#314/#316 while this was in flight), so minted
+     **B420** = the next free ID. (The branch/commits/harness/code tags first read B417 per the
+     collision-renumber convention, renamed to B420 on the merge-in of main.) Deduped: net-new — the
+     INVERSE of B155/B156 (those make small markup-shape interiors grabbable, correct for annotations; a
+     parcel is a CONTAINER, so boundary-grab is the right inverse, not a contradiction). LAYERS ON
+     B310/B311 (does not replace them): their click-vs-drag intent + "Select parcels" toggle are keyed on
+     startMoveParcel, which now simply fires from the boundary hit-stroke instead of the whole fill.
+     Reuses B146's fat-invisible-hit-stroke; NOT B213 (inactive parcels already draw no setback line).
+     Per STANDING RULE #1 filed AND fixed + headless-verified the SAME session on branch
+     `claude/vigilant-cerf-6rvxga` — full [x] block lives in BACKLOG-DONE.md.
+     FIX (boundary-only hit model, SitePlanner.jsx): the visible parcel <polygon> is now
+     pointerEvents="none" (its fill never grabs, even with a translucent fill toggled on) + a companion
+     transparent fat hit-stroke (rgba(0,0,0,0.001), 12 px, pointerEvents="stroke") on the same ring is the
+     only grab target; the setback outline gets the same fat hit-stroke (owner: "boundary OR setback"); a
+     shared onParcelContext opens the menu from either. Interior = click-through → falls to whatever
+     element is painted on top, else the background pan. ~12 px is zoom-independent because f2p already
+     projects feet→screen pixels (matches the existing easement-edge picker's flat 12). Preserved +
+     re-verified: B310/B311, Shift-merge, align-edge pick, unlocked drag-to-move, B230 vertex editing
+     (hit-tests at the svg root, independent of the fill). B311 tooltip reworded "click a lot" → "click a
+     lot's edge or setback line" (label only). New regression harness
+     `ui-audit/verify-b420-parcel-boundary-grab.mjs` 7/7; repointed verify-b310-b311 / verify-edge-runs /
+     verify-edge-runs-irregular off the now-dead interior / `pointer-events="all"` selectors → all green,
+     plus verify-b221-b222 / verify-parcel-split-control / verify-b383-add-parcel /
+     verify-parcel-resilience still pass. lint 0 · 1320 tests · build green. -->
+
 ### B413 — Auto-stitch scanned, scale-less survey sheets that carry NO match-line text `[Doc Review / stitching]` (feature)  *(owner-dropped 2026-06-23 with a real upload "get it to stitch these together correctly"; owner picked approach (A) "build the real OCR auto-stitch"; minted **B413** = highest B# (B412) + 1; IN PROGRESS)*
 `[ ]` **Phase 1 (foundation) BUILT + unit-tested (`src/shared/files/ocrMatchLines.js`, 8 tests); NOT yet wired into the live stitch — see remaining blockers below. Do NOT present a topology-only placement as "aligned" (a wrong stitch is worse than an unstitched one).** The owner's GPL topo slice (C-2/C-3/C-4, "TOPO SURVEY I/II/III", NOT TO SCALE, FOR REFERENCE ONLY, 9-item text layer) carries its "MATCH LINE … SHEET N" labels only in the RASTER — so `autoPlaceGroup` (B337) gets nothing.
 - **DONE — OCR match-line recovery design, proven on the real pages.** `recoverMatchLines(passes, dims)` runs `parseMatchLines` in EACH orientation pass's own upright frame, then maps the label centre back to page space to pick the edge (`framePointToPage`). Verified against real Tesseract reads: C-2's bottom "MATCH LINE ~ SHEET 2" → side bottom; C-4's left (rotated 90°) "MATCH LINE ~ SHEET 2" → side left. Adjacency for the L-layout (C-2 over C-3, C-4 right of C-3) is fully recoverable.
