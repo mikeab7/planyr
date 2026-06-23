@@ -79,7 +79,7 @@ log(c.text === "Mesa", `1. Site breadcrumb shows "Mesa" — got "${c.text}"`);
 await page.screenshot({ path: OUT + "pi-1-site.png" });
 
 // 2. Switch to Markup — project must carry over.
-await clickTab(page, "Markup");
+await clickTab(page, "Library");
 h = await hash(page); c = await crumbInfo(page);
 log(/#\/project\/.+\/markup/.test(h), `2. Markup keeps the project in the URL — hash="${h}"`);
 log(c.text === "Mesa", `2. Markup breadcrumb STILL shows "Mesa" (not "Select a project") — got "${c.text}"`);
@@ -91,7 +91,7 @@ await clickTab(page, "Site");
 await clickTab(page, "Schedule");
 h = await hash(page);
 log(/#\/project\/.+\/schedule/.test(h), `3. Schedule preserves the project segment — hash="${h}"`);
-await clickTab(page, "Markup");
+await clickTab(page, "Library");
 h = await hash(page); c = await crumbInfo(page);
 log(/#\/project\/.+\/markup/.test(h), `3. Markup after Schedule still carries the project — hash="${h}"`);
 log(c.text === "Mesa", `3. still "Mesa" after the round-trip — got "${c.text}"`);

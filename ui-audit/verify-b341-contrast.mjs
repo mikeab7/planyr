@@ -46,7 +46,7 @@ const PROBE = `(() => {
     probe('button[title="Switch project"]', 'project crumb (selected)', 4.5),
     probe('button[aria-current="page"]', 'active module tab', 4.5),
     measure(tabByText('Schedule'), 'inactive module tab (Schedule)', 4.5),
-    measure(tabByText('Markup'), 'inactive module tab (Markup)', 4.5),
+    measure(tabByText('Library'), 'inactive module tab (Markup)', 4.5),
   ];
 })()`;
 

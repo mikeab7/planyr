@@ -32,7 +32,7 @@ await page.goto(BASE, { waitUntil: "load" });
 await sleep(1200);
 
 // Enter Document Review (Markup), then switch to the Stitch view.
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 }); // "Stitch ▸"
 await sleep(800);

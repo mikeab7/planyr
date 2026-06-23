@@ -78,7 +78,7 @@ const imageRects = () => page.evaluate(() => {
 });
 const svgRect = () => page.evaluate(() => { const s = [...document.querySelectorAll("svg")].find((x) => x.querySelector("image")) || document.querySelector("svg"); const r = s.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
 
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
 await sleep(700);
@@ -159,7 +159,7 @@ const p2 = await ctx2.newPage();
 p2.on("pageerror", (e) => pageErrors.push(String(e)));
 await p2.goto(BASE, { waitUntil: "load" });
 await sleep(1200);
-await p2.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await p2.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 await p2.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
 await sleep(700);

@@ -58,7 +58,7 @@ await page.goto(BASE, { waitUntil: "load" });
 await sleep(1200);
 
 // Enter Document Review (Markup)
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 
 // rects of the placed-sheet <image> elements in the stitcher canvas (DOM order = placed order)

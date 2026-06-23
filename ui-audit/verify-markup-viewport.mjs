@@ -76,7 +76,7 @@ const drag = async (x0, y0, dx, dy, opts = {}) => {
 try {
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1000);
-  await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+  await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
   await page.waitForTimeout(700);
   await page.setInputFiles('input[type="file"]', PDF_PATH, { timeout: 8000 });
   await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0 && c.getBoundingClientRect().width > 0; }, { timeout: 12000 });

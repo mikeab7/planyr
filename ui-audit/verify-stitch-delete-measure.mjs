@@ -55,7 +55,7 @@ page.on("pageerror", (e) => pageErrors.push(String(e)));
 try {
   await page.goto(BASE, { waitUntil: "load" });
   await sleep(1200);
-  await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+  await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
   await sleep(700);
   // Enter Stitch and place the auto-aligned base sheet
   await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });

@@ -81,7 +81,7 @@ const svgRect = () => page.evaluate(() => { const s = [...document.querySelector
 const toolAlive = () => page.evaluate(() => !!([...document.querySelectorAll("button")].find((b) => /^Calibrate$/.test(b.textContent.trim()))));
 const zoomPct = () => page.evaluate(() => { const m = document.body.innerText.match(/(\d+)%/); return m ? +m[1] : null; });
 
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
 await sleep(700);

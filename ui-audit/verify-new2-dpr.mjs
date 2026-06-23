@@ -53,8 +53,8 @@ async function openViewerAndMeasure(browser, dsf) {
   const page = await ctx.newPage();
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(1200);
-  // Switch to the Document Review workspace (its module tab is labelled "Markup").
-  await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+  // Switch to the Document Review workspace (its module tab is labelled "Library").
+  await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
   await page.waitForTimeout(900);
   // Load the generated PDF through the real hidden file input.
   await page.setInputFiles('input[type="file"]', PDF_PATH, { timeout: 8000 });

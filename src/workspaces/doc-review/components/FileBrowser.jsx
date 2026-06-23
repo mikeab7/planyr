@@ -22,6 +22,7 @@ import {
   upsertFileFacts, deleteReview, DISCIPLINES,
 } from "../lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
+import { fileWarn } from "../lib/sourceState.js";
 import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
@@ -137,10 +138,7 @@ export default function FileBrowser({
       const factsIn = (route && route.facts) ? { ...route.facts } : { discipline, item: item_, docDate };
       factsIn.projectId = pid; factsIn.needsFiling = needsFiling;
       try { await upsertFileFacts(toFactsRow(factsIn, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ }
-      let warn = null;
-      if (r.oversize) warn = "too large to store (50 MB cap) — re-drop on open";
-      else if (r.uploadFailed) warn = "couldn’t be stored — re-drop on open";
-      else if (r.driveError) warn = "filed; Drive copy failed";
+      const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError });
       patchItem(item.uploadId, { status: needsFiling ? QUEUE_STATUS.NEEDS_FILING : QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: pid ? projName(pid) : "Holding area" });
     } catch (e) {
       patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (e && e.message) || "Couldn't file." });

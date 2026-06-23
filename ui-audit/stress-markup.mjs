@@ -45,7 +45,7 @@ page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text(
 
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(900);
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await page.waitForTimeout(500);
 await page.setInputFiles('input[type="file"][accept*="pdf"]', PDF, { timeout: 8000 });
 await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0; }, { timeout: 20000 });
