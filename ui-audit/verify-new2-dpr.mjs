@@ -1,16 +1,18 @@
-/* Verify B247 — Doc Review page render now honours devicePixelRatio.
+/* Verify B247 — Doc Review page render honours devicePixelRatio (now via the B415 two-layer
+ * render, which carries the HiDPI-crispness guarantee forward on the DETAIL canvas).
  *
- * The bug: renderPageToCanvas sized the canvas backing store to (scale × base) with NO
- * devicePixelRatio factor and gave the canvas no CSS size, so on a HiDPI display the
- * bitmap was upscaled by the screen → blurry note text. The fix renders the backing
- * store dpr× denser while keeping the on-screen (CSS) size — and the markup overlay —
- * unchanged.
+ * The original bug: the page canvas sized its backing store to (scale × base) with NO
+ * devicePixelRatio factor, so on a HiDPI display the bitmap was upscaled by the screen →
+ * blurry note text. B415 replaced the single whole-page canvas with a fixed-density BACKDROP
+ * (the no-white floor) + a DETAIL canvas that renders the visible window at full device dpr.
+ * The HiDPI guarantee now lives on the DETAIL canvas — so we measure THAT (the 2nd canvas in
+ * the page box, the one positioned over the backdrop).
  *
- * This drives the REAL built viewer at deviceScaleFactor:2 (the HiDPI case) with a
- * generated one-page PDF and asserts:
- *   1. canvas backing width ≈ 2 × canvas CSS width   (the fix: dense bitmap)
- *   2. SVG overlay width == canvas CSS width          (no geometry regression)
- * and at deviceScaleFactor:1 the backing == CSS (never worse than before).
+ * This drives the REAL built viewer at deviceScaleFactor:2 (the HiDPI case) with a generated
+ * one-page PDF and asserts:
+ *   1. detail backing width ≈ 2 × detail CSS width   (HiDPI: a dense bitmap → crisp text)
+ *   2. at deviceScaleFactor:1 the backing == CSS      (never worse than before)
+ *   3. the detail CSS size is DPR-invariant           (overlay geometry binds to it, unchanged)
  *
  * Run:  npm run build && npx vite preview --port 4173   (in one shell)
  *       node ui-audit/verify-new2-dpr.mjs               (in another)
@@ -19,7 +21,8 @@ import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
-const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// chromium-1228: pdf.js needs Map.prototype.getOrInsertComputed, which the older 1194 lacks.
+const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1228/chrome-linux64/chrome";
 const PDF_PATH = "/tmp/new2-test.pdf";
 
 /* A minimal but structurally-valid one-page PDF (612×792, Letter) with fine text, xref
@@ -58,19 +61,22 @@ async function openViewerAndMeasure(browser, dsf) {
   await page.waitForTimeout(900);
   // Load the generated PDF through the real hidden file input.
   await page.setInputFiles('input[type="file"]', PDF_PATH, { timeout: 8000 });
-  // Wait for the canvas to render at a concrete (non-zero) backing size.
+  // Wait for BOTH layers (backdrop + detail) to render at a concrete (non-zero) backing size.
   await page.waitForFunction(() => {
-    const c = document.querySelector("canvas");
-    return c && c.width > 0 && c.getBoundingClientRect().width > 0;
+    const box = document.querySelector('[data-testid="markup-overlay"]')?.parentElement;
+    const cs = box ? box.querySelectorAll("canvas") : [];
+    return cs.length >= 2 && cs[0].width > 0 && cs[1].width > 0 && cs[1].getBoundingClientRect().width > 0;
   }, { timeout: 12000 });
   await page.waitForTimeout(400);
   const m = await page.evaluate(() => {
-    const c = document.querySelector("canvas");
+    // The DETAIL canvas (2nd in the page box, over the backdrop) carries the device-density render.
+    const box = document.querySelector('[data-testid="markup-overlay"]').parentElement;
+    const c = box.querySelectorAll("canvas")[1];
     const cr = c.getBoundingClientRect();
     return {
       dpr: window.devicePixelRatio,
       backingW: c.width, backingH: c.height,                    // bitmap (device) px
-      cssW: Math.round(cr.width), cssH: Math.round(cr.height),  // on-screen px (what the markup overlay binds to via dims.w/h)
+      cssW: Math.round(cr.width), cssH: Math.round(cr.height),  // on-screen px (DPR-invariant; the overlay binds to view.scale)
     };
   });
   await page.screenshot({ path: new URL(`./screens/new2-dpr${dsf}.png`, import.meta.url).pathname });

@@ -22,6 +22,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped chat pair "NEW-1/NEW-2" — the Document Review drawing render vs Bluebeam
+     (white flash on zoom + softer linework on big sheets). First minted B412/B413, but a concurrent
+     `main` (PR #311) took **B412** (title-block reader) + **B413** (auto-stitch surveys) while this was
+     in flight, so **renumbered B414** (NEW-1, the flash) + **B415** (NEW-2, the sharpness) — the real
+     next free IDs. Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified the
+     SAME session on branch `claude/confident-edison-lpbco9` — full [x] blocks live in BACKLOG-DONE.md.
+     Deduped: net-new; B415 SUPERSEDES the whole-page raster path B247/B265/B327/B329 (extends it, not a
+     fork). Headless harness `ui-audit/verify-b414-b415-render.mjs` 11/11 (detail 2.00× vs would-be
+     whole-page 0.95× = 2.11× sharper; backdrop never re-rasters on zoom; detail never blanks through a
+     settle) + the B329 viewport harness still 13/13. 1273 tests · lint 0 · build green. -->
+
 ### B413 — Auto-stitch scanned, scale-less survey sheets that carry NO match-line text `[Doc Review / stitching]` (feature)  *(owner-dropped 2026-06-23 with a real upload "get it to stitch these together correctly"; minted **B413** = highest B# (B412) + 1; PENDING owner decision on approach)*
 `[?]` The owner dropped a real 3-page GPL topo slice ("Pages_from_GPL_Civil_Compressed_topo.pdf"). **B412 (shipped) now reads their bare title-block codes (C-2/C-3/C-4) so the three group as one "Topographic Survey · C-2–C-4 · 3 sheets" set** — but they still won't AUTO-stitch, and that's data-limited, not a bug: each sheet says **"NOT TO SCALE" + "FOR REFERENCE ONLY"**, has a **tiny text layer (9 items)**, and its **"MATCH LINE … SHEET N" labels live in the RASTER image, not the text** — the signal `autoPlaceGroup` (B337) needs. EVIDENCE (this session, rendered + OCR'd the real pages): adjacency IS recoverable but only via OCR — C-2 bottom→"SHEET 2", C-4 left (rotated 90°)→"SHEET 2", so the tiling is an L: C-2 over C-3, C-4 right of C-3. Tesseract read the horizontal label cleanly, the vertical one only after rotation, and the *exact seam line* sits inside each page (above the title block), not at the drawing-area edge autoStitch assumes. So a CORRECT auto-stitch needs: (1) OCR edge bands at 0/90/270°, (2) locate the actual match-line, (3) position-aware seam placement, (4) non-linear tiling. Real CV feature; do NOT ship a guessed stitch ("a wrong stitch is worse than an unstitched one"). Options for the owner:
 - **(A) OCR-assisted match-line auto-stitch (the real fix).** Multi-orientation OCR of edge bands → recover each "MATCH LINE … SHEET N" + its edge/position → feed the existing seam-graph autoStitch (handles the L-tiling). Verify by rendering the composite headlessly. The genuinely-correct automatic answer; biggest build.
