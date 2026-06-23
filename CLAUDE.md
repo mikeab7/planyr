@@ -358,6 +358,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   says/dictates "Planner" (or "Planner Fit") — read these as the brand **Planyr** (and
   the old name **Planar_Fit**), not the literal word "planner." Don't reintroduce a
   "Planner"/"Planar" spelling for the brand.
+- **Module naming — the Document Review workspace is user-facing "Review" (owner rule, B418, 2026-06-23).**
+  The canonical **user-facing** name for this module is **"Review"** — the row-2 tab, the loader caption, the
+  empty-state heading, and the error-boundary label all say "Review". The **internal id stays `doc-review`**,
+  the folder is `src/workspaces/doc-review/`, the route is `/markup`, and the data-model field is `markups` —
+  none of those change (renaming them would orphan routes/storage). The module accent token is
+  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**,
+  **"Document Review"**, and **"Library"** ALL mean this same module — don't treat them as separate features.
+  Distinct from this: the in-module **🗂 Files** drawer (the `FileBrowser` / `ProjectLibrary` file explorer)
+  and the Site Planner's **"Markup line/rect"** drawing tools are their own things — leave their labels alone.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and

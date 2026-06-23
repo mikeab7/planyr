@@ -25,6 +25,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { centerOn } from "../../shared/geometry/pasteGeom.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -881,6 +882,37 @@ export default function DocReview({
     return bd <= tol ? best : null;
   };
 
+  // Copy / cut / paste a single selected markup (B417). Markups live on the editable SVG
+  // overlay — the PDF backdrop is never touched. Paste drops the copy CENTERED under the
+  // live cursor (Bluebeam-style); repeated paste restamps at wherever the cursor is now.
+  // Single-element clipboard (sel is one markup id); group/multi clipboard is out of scope.
+  const clip = useRef(null);
+  const copyMarkup = () => {
+    if (!sel) return false;
+    const m = markups.find((x) => x.id === sel);
+    if (!m) return false;
+    clip.current = { ...m, pts: (m.pts || []).map((q) => ({ x: q.x, y: q.y })) }; // deep-clone pts so later edits can't mutate the clipboard
+    return true;
+  };
+  const cutMarkup = () => {
+    if (!copyMarkup()) return false;
+    pushHistory(); setMarkups((a) => a.filter((x) => x.id !== sel)); setSel(null);
+    return true;
+  };
+  const pasteMarkup = () => {
+    const src = clip.current;
+    if (!src) return false;
+    const base = (src.pts || []).map((q) => ({ x: q.x, y: q.y }));
+    // Drop the markup's bbox center under the live cursor (text = its single point); with no
+    // cursor yet, a small fixed page-unit offset so a paste is never a silent no-op.
+    const pts = (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y) && base.length)
+      ? centerOn(base, cursor)
+      : base.map((q) => ({ x: q.x + 12, y: q.y + 12 }));
+    const mk = { ...src, id: uid(), page, pts }; // fresh id, lands on the CURRENT sheet
+    pushHistory(); setMarkups((a) => [...a, mk]); setSel(mk.id);
+    return true;
+  };
+
   // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection.
   // Keep the handler in a ref (refreshed each render with live closures) and bind the
   // window listener ONCE — the old no-deps effect re-subscribed on every render, and
@@ -891,7 +923,10 @@ export default function DocReview({
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo
-    if (mod) return; // leave other modified keys (copy/paste/etc.) to the browser
+    if (mod && (e.key === "c" || e.key === "C")) { if (copyMarkup()) e.preventDefault(); return; }  // ⌘/Ctrl-C copy selected markup (B417)
+    if (mod && (e.key === "x" || e.key === "X")) { if (cutMarkup()) e.preventDefault(); return; }   // ⌘/Ctrl-X cut
+    if (mod && (e.key === "v" || e.key === "V")) { if (pasteMarkup()) e.preventDefault(); return; } // ⌘/Ctrl-V paste at the cursor
+    if (mod) return; // leave any other modified keys to the browser
     if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null); }
@@ -1064,8 +1099,8 @@ export default function DocReview({
           <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
             aria-pressed={browsing}
             style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
-              border: `1px solid ${browsing ? "var(--accent-markup)" : "var(--chrome-divider)"}`,
-              background: browsing ? "var(--accent-markup)" : "var(--chrome-bg-elev)",
+              border: `1px solid ${browsing ? "var(--accent-review)" : "var(--chrome-divider)"}`,
+              background: browsing ? "var(--accent-review)" : "var(--chrome-bg-elev)",
               color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
             🗂 Files
           </button>
@@ -1126,7 +1161,7 @@ export default function DocReview({
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Document Review</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Review</div>
             <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
             <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
             {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}

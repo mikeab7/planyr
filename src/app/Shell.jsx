@@ -18,7 +18,7 @@ import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
   { id: "site-planner", label: "Site Planyr",     Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
-  { id: "doc-review",   label: "Document Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
+  { id: "doc-review",   label: "Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
