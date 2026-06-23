@@ -48,7 +48,7 @@ import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
@@ -798,7 +798,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [parcels, setParcels] = useState(() => restored?.parcels || []);    // {id, points:[{x,y}]}
-  const [els, setEls] = useState(() => restored?.els || []);                // {id,type,cx,cy,w,h,rot}
+  // B416: heal any dock-zone stack stranded on a non-dock side (a court/trailer/buffer left
+  // behind when an older plan was reshaped before the guard existed) the moment the plan opens.
+  const [els, setEls] = useState(() => pruneStrandedZones(restored?.els || [])); // {id,type,cx,cy,w,h,rot}
   const [measures, setMeasures] = useState(() => restored?.measures || []); // {a,b}
   const [callouts, setCallouts] = useState(() => restored?.callouts || []);  // {id, tip:{x,y}, box:{x,y}, text}
   const [markups, setMarkups] = useState(() => restored?.markups || []);   // neutral shapes: line/polyline/rect/ellipse/polygon
@@ -2880,6 +2882,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
       quickAddAt(d.tapIdentify);
     }
+    // B416: committing a building reshape that flipped its long-side axis can leave a
+    // dock-zone stack (court → trailer → buffer) stranded on a side that is no longer a
+    // dock side. Prune it on release (not during the live drag, so a drag past-square-and-
+    // back doesn't destroy the apron mid-gesture); the pre-resize snapshot is on the undo
+    // stack, so one undo restores both the size AND the apron.
+    if (d && (d.mode === "resize" || d.mode === "edgeResize")) {
+      const b = els.find((x) => x.id === d.id);
+      if (b && b.type === "building" && !b.dogEar) {
+        const strandedIds = strandedZoneIds(els, b);
+        if (strandedIds.length) setEls((a) => a.filter((x) => !strandedIds.includes(x.id)));
+      }
+    }
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
@@ -3323,22 +3337,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Add a sidewalk strip flush against whichever side of the building was clicked.
   const SIDEWALK_W = 5;
-  const OPP_TRAILER_D = 50;  // trailer-parking depth on the side opposite the docks
-  const OPP_TRAILER_W = 12;  // trailer stall width for that strip
+  const OPP_TRAILER_W = 12;  // default trailer-stall width for a single striped dock-zone row
   const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
-  // Dock-capable sides run along a building's TWO LONG sides. The dock preset
-  // chooses how many: cross-dock = both, single-load = one, none = neither.
-  // Existing buildings (no `dock` field) keep both long sides for back-compat.
-  const dockSidesOf = (el) => {
-    const longSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
-    const dock = el.dock || "cross";
-    if (dock === "none") return { dside: longSides[1], dockSides: [], trailerSides: [] };
-    if (dock === "single") {
-      const dside = longSides.includes(el.dockSide) ? el.dockSide : longSides[1];
-      return { dside, dockSides: [dside], trailerSides: [] };
-    }
-    return { dside: longSides[1], dockSides: longSides, trailerSides: [] };
-  };
+  // Dock-capable sides run along a building's TWO LONG sides (cross-dock = both, single-load =
+  // one, none = neither; existing buildings with no `dock` field keep both long sides). The
+  // rule is the shared, pure `dockSidesFor` so the canvas, the panel, the depth readout and
+  // the stranded-zone guard can never disagree (B416/B417).
+  const dockSidesOf = dockSidesFor;
   // Build (don't commit) a full-wall strip element flush against one building side.
   const makeStrip = (b, nx, ny, type, depth, extra = {}) => {
     const w = nx !== 0 ? depth : b.w;
@@ -3413,19 +3418,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
     addBuildingEls([el], b.id);
   };
-  // Geometry of a 50′-deep single trailer row flush against host box `b`'s `name`
-  // side, full host length along that side. Rotated +90 on a side wall so the
-  // stalls always stripe ALONG the wall.
-  const oppTrailerGeom = (b, name) => {
-    const [nx, ny] = SIDE_N[name];
-    const horiz = ny !== 0;                 // top/bottom wall → stalls run along X
-    const depth = OPP_TRAILER_D, along = horiz ? b.w : b.h;
-    const off = rot2(nx * (b.w / 2 + depth / 2), ny * (b.h / 2 + depth / 2), b.rot);
-    return { cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: depth, rot: ((b.rot + (horiz ? 0 : 90)) % 360 + 360) % 360 };
-  };
-  // Re-fit a wall-hugging single trailer row to a (resized) host box (the opposite-dock
-  // `oppSide` trailer; the dock-zone stack uses relayoutSide instead).
-  const fitWallTrailer = (hostBox, side) => oppTrailerGeom(hostBox, side);
+  // (Removed B416: the legacy opposite-dock trailer row — `OPP_TRAILER_D` / `oppTrailerGeom`
+  // / `fitWallTrailer` / the `oppSide` refit branch. Since B228 the dock-zone stack
+  // (lib/dockZones `layoutZone`, zone index 1) is the SINGLE source of trailer-parking
+  // geometry, always on a dock side; the old path put a trailer on the side OPPOSITE the
+  // docks — exactly the non-dock-side trailer this bug forbids — and nothing created its
+  // `oppSide` tag anymore, so it was dead weight that could only re-introduce the defect.)
 
   /* ---- Building-anchored dock-zone stack (B228): truck court → trailer parking →
      buffer, stacked OUTWARD from each dock face. The building footprint is the
@@ -3624,7 +3622,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return moved;
       }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
-      if (x.attachedTo === buildingId && x.oppSide) return { ...x, ...fitWallTrailer(nb, x.oppSide) };
       const k = kids?.find((kk) => kk.id === x.id);
       if (k) return { ...x, ...fitKid(nb, k) };
       return x;
@@ -5442,6 +5439,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const selEl = sel?.kind === "el" ? els.find((e) => e.id === sel.id) : null;
   const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
+  // B416: change the selected building's dock preset, then prune any dock-zone stack the new
+  // preset orphans (cross→single drops a side's apron; →none drops both), so a court/trailer/
+  // buffer can never linger on a side that's no longer a dock side.
+  const changeBuildingDock = (newDock) => {
+    if (!selEl) return;
+    pushHistory();
+    setEls((a) => {
+      const b = a.find((x) => x.id === selEl.id);
+      let next = a.map((e) => e.id === selEl.id ? { ...e, dock: newDock } : e);
+      if (b) { const stranded = strandedZoneIds(next, { ...b, dock: newDock }); if (stranded.length) next = next.filter((x) => !stranded.includes(x.id)); }
+      return next;
+    });
+  };
   // Rotate the selected element to an absolute angle, carrying its whole bonded
   // assembly (sidewalks, truck court, trailer parking, dog-ears) around its centre.
   const rotateAssemblyTo = (el, newRot) => {
@@ -7302,7 +7312,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                   {selEl.type === "building" && (
                     <Field label="Docks">
-                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => { pushHistory(); setSelEl({ dock: e.target.value }); }}>
+                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
                         <option value="single">Single-load</option>
                         <option value="cross">Cross-dock</option>
                         <option value="none">No docks</option>
@@ -8545,7 +8555,14 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // hides when zoomed out instead of shrinking onto the centred name labels.
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
-    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB)) : fullMin;
+    // B417: a building's depth is read off its dock axis (dockSidesFor → footprintDepth):
+    // the footprint span perpendicular to the dock face (dock wall → dock wall / → rear wall),
+    // measured on the building ONLY — so a 135′ truck court or any other attached site element
+    // can never be reported as the building's depth. (For a rectangle this equals the shorter
+    // side, since the dock always rides the long walls; deriving it from the dock axis makes
+    // that explicit and robust.) Road = travel width; other strips keep their short-side depth.
+    const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
+      : el.type === "building" ? footprintDepth(el) : fullMin;
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const ox = (el.dimOffset?.x || 0) * ppf, oy = (el.dimOffset?.y || 0) * ppf; // B146: user reposition (local feet → px)
