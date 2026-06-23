@@ -4,7 +4,6 @@
  * Document Review workspace is opened. */
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { backingScale } from "./renderBudget.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -93,46 +92,48 @@ export async function extractPageItems(pdf, pageNum) {
   }
 }
 
-/* Render one page into `canvas` at `scale`. Returns the canvas's ON-SCREEN (CSS) px
- * size and the page's base (scale-1) size — markups are stored in base/page units so
- * they survive zoom (multiply by scale to draw). Returns null if `isStale()` reports the
- * render was superseded while we awaited the page (see below).
+/* Render a page — or just a sub-rectangle of it — into `canvas`, DOUBLE-BUFFERED (B412/B413).
  *
- * The backing store is rendered `dpr×` the CSS size (capped to a pixel budget — see
- * renderBudget.js) and then sampled by the browser, so text stays sharp at the same
- * on-screen size while a huge sheet at high zoom can't blow up canvas memory. The returned
- * w/h (and the canvas's CSS size) stay at the logical scale× size, so the markup SVG
- * overlay — which positions in page-units × scale — lines up exactly as before. (B247)
+ * Reassigning a visible canvas's width/height clears it to transparent, which (with a white
+ * page box behind) flashes white for the async gap until pdf.js refills it. So we rasterise
+ * into an OFF-SCREEN canvas and blit the finished frame onto the visible canvas in one
+ * synchronous step — the compositor never sees the cleared canvas, so a zoom/pan settle
+ * re-raster never flashes. Off-screen rendering also sidesteps the B40 "same canvas during
+ * multiple render operations" throw (each render owns a fresh off-screen canvas), but we
+ * still bail on `isStale()` so a superseded render neither blits a stale frame nor fights
+ * the newest one.
  *
- * `isStale` (optional) closes the B40 same-canvas race: `onTask` only hands the cancellable
- * RenderTask back AFTER `getPage` resolves, so two renders that are both still awaiting
- * getPage each find nothing to cancel and would both call page.render() on the one canvas
- * (PDF.js throws "Cannot use the same canvas during multiple render operations"). Checking
- * `isStale()` right before page.render() makes a superseded render bail before it touches
- * the canvas, so only the newest render draws.
- * `setCssSize=false` lets the caller drive the canvas display size itself (the Markup
- * transform viewport fills a CSS-scaled page box so a zoom can rescale the bitmap). (B329) */
-export async function renderPageToCanvas(pdf, pageNum, canvas, scale, onTask, isStale, setCssSize = true) {
+ * Two layers drive this (see renderBudget.js):
+ *   • backdrop — whole page (region=null), a fixed zoom-independent `density`, once per page.
+ *   • detail   — a `region` (page-unit rect) at full device `density`, re-rastered on settle.
+ * `scale` × `density` = device-px per page-unit. For a region we render the full-page viewport
+ * but translate so the region's top-left lands at the canvas origin; the canvas bounds clip the
+ * rest. The visible canvas's CSS box is driven by the caller (page box × view.scale), so the
+ * markup SVG overlay — page-units × scale — lines up exactly as before. Returns the rastered
+ * region + base size, or null if superseded. */
+export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1, region = null, onTask, isStale } = {}) {
   const page = await pdf.getPage(pageNum);
-  if (isStale && isStale()) return null; // a newer render superseded this during getPage — don't touch the canvas (B40)
+  if (isStale && isStale()) return null; // superseded during getPage — don't touch the canvas (B40)
   const base = page.getViewport({ scale: 1 });
-  const dpr = backingScale(base.width, base.height, scale, deviceDpr());
-  const viewport = page.getViewport({ scale: scale * dpr });
-  const ctx = canvas.getContext("2d");
-  canvas.width = Math.floor(viewport.width);   // dense backing store (scale × dpr, budget-capped)
-  canvas.height = Math.floor(viewport.height);
-  const cssW = Math.floor(base.width * scale), cssH = Math.floor(base.height * scale); // on-screen size (scale only)
-  // When the caller drives display size itself (the Markup transform viewport sizes the
-  // canvas to 100% of a CSS-scaled page box so a zoom gesture can rescale the already-
-  // rendered bitmap without re-rasterising), skip setting the canvas's own CSS box. (B329)
-  if (setCssSize) {
-    canvas.style.width = cssW + "px";          // map the dense bitmap into the logical box → crisp
-    canvas.style.height = cssH + "px";
-  }
-  const task = page.render({ canvasContext: ctx, viewport });
+  const S = scale * density;                                   // device-px per page-unit
+  const rx = region ? region.rx : 0, ry = region ? region.ry : 0;
+  const rw = region ? region.rw : base.width, rh = region ? region.rh : base.height;
+  const ox = Math.round(rx * S), oy = Math.round(ry * S);
+  const bw = Math.max(1, Math.round((rx + rw) * S) - ox);     // exact integer region in device px
+  const bh = Math.max(1, Math.round((ry + rh) * S) - oy);
+  const off = document.createElement("canvas");              // off-screen buffer (never shown blank)
+  off.width = bw; off.height = bh;
+  const viewport = page.getViewport({ scale: S });
+  const params = { canvasContext: off.getContext("2d"), viewport };
+  if (region) params.transform = [1, 0, 0, 1, -ox, -oy];     // bring the region's top-left to (0,0); canvas clips the rest
+  const task = page.render(params);
   if (onTask) onTask(task); // expose the RenderTask so the caller can cancel a superseded render (B40)
   await task.promise;
-  return { w: cssW, h: cssH, baseW: base.width, baseH: base.height };
+  if (isStale && isStale()) return null; // a newer render won while we rasterised — don't blit a stale frame
+  if (canvas.width !== bw) canvas.width = bw;   // guard skips a needless clear when dims are unchanged
+  if (canvas.height !== bh) canvas.height = bh;
+  canvas.getContext("2d").drawImage(off, 0, 0); // same synchronous tick as the resize → no visible blank (B412)
+  return { baseW: base.width, baseH: base.height, w: bw, h: bh, region: { rx, ry, rw, rh }, density: S };
 }
 
 /* Rasterize a page to a PNG data URL (for the stitcher — placed as an <image> and

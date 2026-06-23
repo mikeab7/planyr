@@ -22,6 +22,16 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped chat pair "NEW-1/NEW-2" — the Document Review drawing render vs Bluebeam
+     (white flash on zoom + softer linework on big sheets). Highest B# across both files was B411, so
+     minted **B412** (NEW-1, the flash) + **B413** (NEW-2, the sharpness). Per STANDING RULE #1 BOTH were
+     filed AND fixed + unit-tested + headless-verified the SAME session on branch
+     `claude/confident-edison-lpbco9` — full [x] blocks live in BACKLOG-DONE.md. Deduped: net-new; B413
+     SUPERSEDES the whole-page raster path B247/B265/B327/B329 (extends it, not a fork). Headless harness
+     `ui-audit/verify-b412-b413-render.mjs` 11/11 (detail 2.00× vs would-be whole-page 0.95× = 2.11× sharper;
+     backdrop never re-rasters on zoom; detail never blanks through a settle) + the B329 viewport harness
+     still 13/13. 1266 tests · lint 0 · build green. -->
+
 ### B411 — Auto-filing residual gaps after the multi-discipline split (B410) `[Doc Review / auto-filing]` (bug/task)  *(spun off from B410, 2026-06-23; minted **B411** = B410 + 1)*
 `[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness:
 - **(a) Scanned/image-only sets read as nothing in FILING.** A no-text-layer drawing (e.g. "2023.11.06 Mesa - Electrical B1.pdf") has no embedded text, so the local read returns nothing and the file lands in the holding tray. OCR already exists in the STITCHER (B352, `doc-review/lib/ocr.js`, Tesseract); wire that same OCR into the filing read (`localRead.js`) so scanned sheets classify too. Bigger lift (renders pages to canvas), so it's its own item.

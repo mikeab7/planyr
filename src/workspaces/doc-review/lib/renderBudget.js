@@ -35,3 +35,66 @@ export function backingPixels(baseW, baseH, scale, devicePixelRatio = 1) {
   const dpr = backingScale(baseW, baseH, scale, devicePixelRatio);
   return Math.floor(Math.max(1, baseW * scale) * dpr) * Math.floor(Math.max(1, baseH * scale) * dpr);
 }
+
+/* ---- Two-layer viewport rendering (B413) ----------------------------------------------
+ *
+ * The whole-page-at-one-density model above goes soft when zoomed in on a large sheet: the
+ * 24 MP budget is spread across the ENTIRE sheet, so the visible window can't reach device
+ * density. Bluebeam stays sharp because it only ever rasterises the visible region at full
+ * resolution. We do the same with two layers, both painted INSIDE the unchanged page box:
+ *
+ *   • backdrop — the whole page at a FIXED, zoom-independent density (below). Rendered once
+ *     per page, never on zoom, so it costs nothing during pan/zoom and is always present as a
+ *     no-white floor under everything (removing the whole-page settle re-raster that flashed
+ *     white, B412). A small budget keeps it crisp at fit without holding a second dense page.
+ *   • detail — only the visible page-rect (+ a margin), at full device density, budget-bounded
+ *     on the REGION not the page (so `backingScale` above is reused on the region size and
+ *     returns full dpr when the window is small). Re-rastered on settle, over the backdrop.
+ *
+ * All three helpers are pure (no DOM / no pdf.js) so the host passes the live view + sizes.
+ */
+
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+export const BACKDROP_PX_BUDGET = 8e6; // ≈ 32 MB RGBA — crisp at fit, cheap to keep resident
+
+/* Density (device-px per page-unit) for the whole-page backdrop: the device dpr (capped 2×),
+ * lowered only as far as the backdrop budget needs on a very large sheet. Independent of zoom —
+ * the backdrop is a stable whole-page image the page box CSS-rescales; the detail layer supplies
+ * sharpness where the user is actually looking. */
+export function backdropDensity(pageW, pageH, devicePixelRatio = 1) {
+  const w = Math.max(1, pageW), h = Math.max(1, pageH);
+  const want = Math.min(devicePixelRatio || 1, 2);
+  const budget = Math.sqrt(BACKDROP_PX_BUDGET / (w * h));
+  return Math.max(0.1, Math.min(want, budget));
+}
+
+/* The page-unit rectangle currently visible in the viewport (the part of the page box inside
+ * the wrap), expanded by `marginFrac` on each side and clamped to the page — the region the
+ * detail layer rasterises at full density. `visible` is the un-margined on-screen rect, used by
+ * `tileCovers` to skip a needless re-raster on a tiny pan. Returns null when the page is panned
+ * fully off-screen. view = { scale, tx, ty } with screen = page*scale + t (shared transform). */
+export function visibleRegion(view, pageBase, vw, vh, marginFrac = 0.25) {
+  if (!view || !pageBase || !view.scale || !(vw > 0) || !(vh > 0)) return null;
+  const s = view.scale, pw = Math.max(1, pageBase.w), ph = Math.max(1, pageBase.h);
+  const vx0 = clamp((0 - view.tx) / s, 0, pw), vy0 = clamp((0 - view.ty) / s, 0, ph);
+  const vx1 = clamp((vw - view.tx) / s, 0, pw), vy1 = clamp((vh - view.ty) / s, 0, ph);
+  if (vx1 - vx0 < 1e-3 || vy1 - vy0 < 1e-3) return null; // page off-screen / degenerate
+  const visible = { rx: vx0, ry: vy0, rw: vx1 - vx0, rh: vy1 - vy0 };
+  const mx = visible.rw * marginFrac, my = visible.rh * marginFrac;
+  const rx = clamp(vx0 - mx, 0, pw), ry = clamp(vy0 - my, 0, ph);
+  const rxe = clamp(vx1 + mx, 0, pw), rye = clamp(vy1 + my, 0, ph);
+  return { rect: { rx, ry, rw: rxe - rx, rh: rye - ry }, visible };
+}
+
+/* Does an already-rastered tile (a page-unit rect + the scale it was drawn at) still cover the
+ * visible rect at the current scale? If so a settle needs no re-raster — the existing bitmap,
+ * CSS-rescaled, suffices. Re-raster when the scale changed (density would be wrong) or the view
+ * moved/zoomed past the tile's edges. */
+export function tileCovers(tile, visible, scale) {
+  if (!tile || !visible || tile.scale !== scale) return false;
+  const e = 0.5; // page-unit slack so floating-point edges don't force a re-raster every frame
+  return tile.rx <= visible.rx + e && tile.ry <= visible.ry + e &&
+         tile.rx + tile.rw >= visible.rx + visible.rw - e &&
+         tile.ry + tile.rh >= visible.ry + visible.rh - e;
+}
