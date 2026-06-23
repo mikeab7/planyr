@@ -5,6 +5,19 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V122 — Markup z-order "Arrange" via Bluebeam shortcuts + right-click menu (B421) ✅ (self-verified headless — fully done, nothing pending)
+- **Harness:** `ui-audit/verify-b421-arrange.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Opens a 1-page PDF in the **Review** canvas, draws **three** horizontally-staggered, pairwise-overlapping rectangles (so single-step Forward/Backward is distinguishable from the Front/Back jumps), then drives the SVG overlay with `page.mouse` + keyboard. Reads z-order two independent ways — the **DOM order** of the `<rect>` elements AND the **persisted localStorage draft** (`planyr:docreview:draft:anon:<id>`) — ranking the three by x to recover A/B/C identity through any permutation. No auth needed (pure markup surface), so fully covered logged-out; nothing left for a signed-in pass.
+- **Result:** PASS 2026-06-23 — **17/17**.
+  - **Draw order = z-order:** A,B,C drawn → [A,B,C] (C on top), matching in BOTH the DOM and the persisted draft.
+  - **Keyboard chords (`e.code`, layout-independent):** `Ctrl+]` Bring Forward steps A up ONE (B,A,C); `Ctrl+Shift+]` Bring to Front jumps A to top (B,C,A); `Ctrl+[` Send Backward steps B down one (B,A,C); `Ctrl+Shift+[` Send to Back jumps C to bottom (C,A,B) — each mirrored to the draft.
+  - **Undoable:** `Ctrl+Z` reverts each arrange back to [A,B,C].
+  - **Right-click menu:** opens on a markup; **Send to Back** / **Bring to Front** items reorder + persist; the menu greys **Front/Forward** on the TOP markup and **Back/Backward** on the BOTTOM markup.
+  - **Blank-canvas right-click** opens NO custom menu (the native menu is left to the browser).
+  - **Edit text…** appears only on a text note (not a rect); **Delete** removes the markup.
+  - **Persistence:** the reordered order survives a **full page reload** (read back from the draft).
+  - **0 uncaught page errors.**
+- **Unit + pre-merge gates:** `test/arrange.test.js` **14/14** (pure `reorderWithinPage`/`arrangeFlags` — ops, single-step inverses, no-op reference equality, other-sheet preservation, no mutation). lint 0 · **1335 tests** · build green; the DocReview lazy chunk is intact.
+
 ### V121 — Parcel grabs by its boundary/setback only, never its empty interior (B420) ✅ (self-verified headless — fully done, nothing pending)
 - **Harness:** `ui-audit/verify-b420-parcel-boundary-grab.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Seeds one large LOCKED parcel with a 25 ft setback, frames it, then drives the SVG canvas with `page.mouse` and asserts on the live parcel/setback stroke colours + the parcel menu. No auth needed (pure planner canvas), so fully covered logged-out — nothing left for a signed-in pass.
 - **Result:** PASS 2026-06-23 — **7/7**.
