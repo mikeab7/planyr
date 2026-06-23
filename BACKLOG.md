@@ -22,6 +22,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (with screenshots) — trailer parking generated on a
+     building's NON-dock sides + the building "depth" reading the truck-court depth. First minted B416/B417,
+     but a concurrent `main` (PR #313) took **B416** for the Split-a-parcel control while this was in flight,
+     so **renumbered B417** (trailer on non-dock sides) + **B418** (building depth reference) — the real next
+     free IDs. (The branch `claude/exciting-allen-i2eq2k`, PR #314, the commits, and the code/test tags + the
+     `ui-audit/verify-b416-b417.mjs` harness still read B416/B417, per the collision-renumber convention.)
+     Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified (V120) the SAME session
+     — full [x] blocks live in BACKLOG-DONE.md. Root cause (evidence-first, the filed hypothesis was off):
+     a dock-zone stack stays pinned to the side it was created on, so a reshape / dock-preset change stranded
+     the court→trailer→buffer on a now-non-dock side; the named legacy opp-trailer suspect was already dead
+     code (removed). lint 0 · 1285 tests · build green. Deduped: net-new. -->
+
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
      control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
      free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared
