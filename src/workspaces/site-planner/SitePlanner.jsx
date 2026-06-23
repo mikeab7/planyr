@@ -7738,6 +7738,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   })}
                 </div>
               )}
+              {/* Split a parcel (B416) — the inverse of Merge below. Surfaced HERE in the
+                  panel (not only the right-rail Boundary ▾ menu) so a user reaching for
+                  parcel ops — after B383 moved ＋ Add parcel / parcel actions into this
+                  panel — finds it where they look. Same selectTool("split") as the rail. */}
+              {parcels.length >= 1 && (
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    title="Split a parcel — draw a cut line across one to divide it in two"
+                    style={{ ...chip, width: "100%", ...(tool === "split" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
+                    onClick={() => selectTool("split")}>✂ Split a parcel</button>
+                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Click points to draw a cut across a parcel; double-click or Enter to finish. It divides in two — then delete the piece you don't want.</div>
+                </div>
+              )}
               {parcels.length > 1 && (
                 <div style={{ marginTop: 8 }}>
                   <button style={{ ...chip, width: "100%", ...(combineSel.length >= 2 ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : { opacity: 0.55 }) }}

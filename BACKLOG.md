@@ -22,19 +22,32 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B416 — Trailer parking generated on non-dock sides `[Site Planner]` (bug)  *(owner-dropped 2026-06-23 as "NEW-1", with screenshots; minted **B416** = highest B# across both files (B415) + 1)*
-`[ ]` **Fixed + verified this session on branch `claude/exciting-allen-i2eq2k` — lint 0 · 1285 tests · build green · headless V120 (`ui-audit/verify-b416-b417.mjs`). Remaining: merge to `main` (this run was scoped to the branch — no PR opened, per the task instruction).**
-- **Repro (owner screenshots):** a 580′(w) × 664′(h) building. Because h > w the dock sides resolve to **left/right**, yet a 135′ truck-court stack (court → trailer → buffer) sits **stranded on the TOP** — a non-dock short side. Trailer parking must appear ONLY on dock faces (`dockSidesFor(b).dockSides`): single-load → the one dock side, cross-dock → both long dock sides, never a non-dock side.
-- **Root cause (evidence-first — the filed hypothesis was off):** the named suspect (the legacy opposite-dock trailer row `OPP_TRAILER_D` / `oppTrailerGeom` / `fitWallTrailer`) was **already dead** — gated on an `oppSide` tag nothing creates — so it wasn't firing. The REAL leak: a dock-zone stack is **pinned to the side it was created on** (`truckCourt.side`); when a building's long-side axis flips (a reshape) or its dock preset changes, `relayoutAllSides` faithfully re-lays the stack on the now-**non-dock** side instead of removing it, and nothing ever pruned it. `trailerSides` from the old inline `dockSidesOf` was confirmed unread and dropped.
-- **Fix (trailer parking is dock-side-only; the dock-zone stack stays the single source of trailer geometry):** new pure, unit-tested `lib/dockZones.js` helpers — `dockSidesFor` (extracted so the canvas, the panel, the depth readout and the guard share ONE rule), `strandedZoneIds` (a court→trailer→buffer chain whose side ∉ dockSides), `pruneStrandedZones`. Wired so a stranded stack is pruned **on reshape commit** (pointer-up — not mid-drag, so one undo restores size + apron), **on dock-preset change** (`changeBuildingDock`), and **on plan open** (`useState` init — so the owner's already-stranded plan self-heals the moment it loads). Removed the dead `OPP_TRAILER_D` / `oppTrailerGeom` / `fitWallTrailer` / `oppSide`-refit path. +10 dockZones unit tests incl. the requested "zero trailer elements on a non-dock side" for BOTH presets; headless V120 (stranded-on-top → pruned, identical stack on a real dock side → kept, so the prune is targeted).
-- **Deduped:** net-new — no Open item covered trailer-on-non-dock-side (the label-collision item near the bottom of Open is a different surface). REUSES the B228/B229/B239/B242/B246 dock-zone machinery (consistent, not a fork); shares `dockSidesFor` with B417 but is an independent root cause + test path.
+<!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (with screenshots) — trailer parking generated on a
+     building's NON-dock sides + the building "depth" reading the truck-court depth. First minted B416/B417,
+     but a concurrent `main` (PR #313) took **B416** for the Split-a-parcel control while this was in flight,
+     so **renumbered B417** (trailer on non-dock sides) + **B418** (building depth reference) — the real next
+     free IDs. (The branch `claude/exciting-allen-i2eq2k`, PR #314, the commits, and the code/test tags + the
+     `ui-audit/verify-b416-b417.mjs` harness still read B416/B417, per the collision-renumber convention.)
+     Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified (V120) the SAME session
+     — full [x] blocks live in BACKLOG-DONE.md. Root cause (evidence-first, the filed hypothesis was off):
+     a dock-zone stack stays pinned to the side it was created on, so a reshape / dock-preset change stranded
+     the court→trailer→buffer on a now-non-dock side; the named legacy opp-trailer suspect was already dead
+     code (removed). lint 0 · 1285 tests · build green. Deduped: net-new. -->
 
-### B417 — Building "depth" measured against the wrong reference `[Site Planner]` (bug)  *(owner-dropped 2026-06-23 as "NEW-2", with screenshots; minted **B417**)*
-`[ ]` **Fixed + verified this session on branch `claude/exciting-allen-i2eq2k` — lint 0 · 1285 tests · build green · headless V120. Remaining: merge to `main` (no PR per task).**
-- **Repro:** the same 580×664 building surfaced a 135′ "depth-like" dimension that reads like the truck-court depth, not the building's wall-to-wall depth. Expected: depth = the footprint span **perpendicular to the dock face**, wall to wall (cross: dock wall → dock wall; single: dock wall → rear wall) — never the frontage, never an attached site element's span (apron / truck court / trailer parking / buffer).
-- **Root cause (evidence-first):** the building's OWN depth dimension was already correct — `min(w,h)` IS the dock-normal extent, because docks always ride the long walls (580′ here). The bogus "135′" in the screenshot is the **stranded truck court's own red depth dimension** (B416's fault) floating over the building's depth axis. So the two bugs share the stranded-apron root cause; B416's prune removes the 135′.
-- **Fix:** additionally hardened the building depth so it can NEVER be sourced from anything but the building footprint — new pure `footprintDepth(el)` reads the depth off `dockSidesFor` (the dock-normal span, building-only) and is now the source for the on-canvas building depth dimension (was an implicit `min(w,h)` heuristic). +4 unit tests incl. "depth excludes an attached 135′ court"; headless V120 confirms the building reads its 580′ footprint depth with no stray 135′ left over it.
-- **Deduped:** net-new; shares `dockSidesFor` with B416 but an independent code path (the dimension renderer + `footprintDepth`) and test path.
+<!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
+     control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
+     free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared
+     Enter/double-click finisher), NOT B130 (which created the rail "Boundary" menu). Per STANDING RULE #1
+     filed AND fixed + headless-verified the SAME session on branch `claude/affectionate-wright-gf3kgt` —
+     full [x] block lives in BACKLOG-DONE.md.
+     GROUNDED THE REPORT FIRST: the rail Boundary ▾ → Split a parcel was NEVER deleted (unchanged since
+     2026-06-21 per git blame; scenario A passed on the UNFIXED build), so none of the three suspected
+     failure shapes held. Real cause = a discoverability regression from B383: parcel ops (＋ Add parcel,
+     Merge) were surfaced into the Parcel PANEL, but Split — the inverse of Merge — was left only in the
+     rail. FIX: added "✂ Split a parcel" to the Parcel panel beside Merge (same selectTool("split"), no
+     second pipeline; rail menu kept). Smoke-tested the full activate→capture→finish→commit split live.
+     Regression guard `ui-audit/verify-parcel-split-control.mjs` (rail + panel reachability + e2e cut)
+     11/11. 1273 tests · lint 0 · build green. -->
 
 <!-- 2026-06-23: owner-dropped chat pair "NEW-1/NEW-2" — the Document Review drawing render vs Bluebeam
      (white flash on zoom + softer linework on big sheets). First minted B412/B413, but a concurrent
