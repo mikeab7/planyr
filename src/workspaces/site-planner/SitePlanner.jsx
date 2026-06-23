@@ -5964,7 +5964,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 return <g key={`sb${pc.id}`}>
                   <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />
-                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} pointerEvents="stroke"
+                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
@@ -6028,7 +6028,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
                     strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
-                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} pointerEvents="stroke"
+                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />

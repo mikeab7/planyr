@@ -142,6 +142,26 @@ await deselect(); await closeMenu();
   await closeMenu();
 }
 
+// ── Test E — pressing-and-DRAGGING in the interior PANS, never grabs the parcel for a move ──
+// Distinct from Test A's click: a press in the open interior that then drags must fall through to
+// the background pan, not start a parcel move/select — proves the interior is fully click-through.
+await fit(); await deselect();
+{
+  const pc = await parcelInfo();
+  const i = interiorPt(pc);
+  const cxBefore = pc.cx;
+  await page.mouse.move(i.x, i.y);
+  await page.mouse.down();
+  await page.mouse.move(i.x + 95, i.y, { steps: 12 }); // drag right 95px (>> click slop)
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = await parcelInfo();
+  result.interiorDragPans = {
+    selected: after?.selected,                                  // expect false (never selected)
+    panShiftPx: after ? Math.round(after.cx - cxBefore) : null, // expect ~+95 (the map panned with the parcel)
+  };
+}
+
 // Page JS errors only — GIS-host CORS failures are environmental (sandbox egress policy).
 const realErrors = errors.filter((e) => !/CORS|Access to fetch|Failed to load resource|ERR_FAILED|net::/.test(e));
 
@@ -152,6 +172,7 @@ result.checks = {
   "setback line click DOES select": result.setbackSelects?.selected === true,
   "right-click interior opens NO parcel menu": result.interiorNoMenu === true,
   "right-click boundary opens the parcel menu": result.boundaryOpensMenu === true,
+  "interior DRAG pans, never grabs the parcel": result.interiorDragPans?.selected === false && Math.abs((result.interiorDragPans?.panShiftPx ?? 0) - 95) <= 18,
   "no page JS errors": realErrors.length === 0,
 };
 result.PASS = Object.values(result.checks).every(Boolean);
