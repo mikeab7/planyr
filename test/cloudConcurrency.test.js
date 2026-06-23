@@ -78,7 +78,23 @@ describe("casUpsert — wires expected-version into the right write", () => {
     expect(r).toEqual({ ok: true, version: 6 });
     expect(cap.op).toBe("update");
     expect(cap.values.version).toBe(6); // expected + 1
-    expect(cap.eq).toEqual([["user_id", "u1"], ["id", "s1"], ["version", 5]]); // CAS guard
+    // TEAM: the CAS guard filters on (id, version) only — NOT user_id — so a teammate can update
+    // a shared row without a false conflict; RLS enforces access. (B-TEAM)
+    expect(cap.eq).toEqual([["id", "s1"], ["version", 5]]);
+  });
+
+  it("stamps the creator (user_id) on INSERT from the uid arg, not on UPDATE", async () => {
+    const insCap = {};
+    await casUpsert(mockClient({ data: [{ version: 1 }], error: null }, insCap), "sites",
+      { uid: "creator-1", id: "s1", row: { id: "s1", data: { id: "s1" } }, expected: undefined });
+    expect(insCap.op).toBe("insert");
+    expect(insCap.values.user_id).toBe("creator-1"); // creator stamped here
+
+    const updCap = {};
+    await casUpsert(mockClient({ data: [{ version: 2 }], error: null }, updCap), "sites",
+      { uid: "teammate-2", id: "s1", row: { id: "s1", data: { id: "s1" } }, expected: 1 });
+    expect(updCap.op).toBe("update");
+    expect("user_id" in updCap.values).toBe(false); // a teammate edit never re-stamps the owner
   });
 
   it("a stale write (0 rows match the expected version) is a conflict, not applied", async () => {

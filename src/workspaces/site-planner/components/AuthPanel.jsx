@@ -6,6 +6,7 @@
  * the profile hook's save/reload passed in via `profileApi`. */
 import { useEffect, useRef, useState } from "react";
 import { signIn, signUp, signOut, resetPassword, updatePassword } from "../lib/auth.js";
+import TeamPanel from "./TeamPanel.jsx";
 import ThemePicker from "../../../shared/theme/ThemePicker.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
@@ -14,10 +15,10 @@ const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: 8, 
 const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: 0 };
 const s = (v) => (v == null ? "" : String(v)).trim();
 
-function Wrap({ onClose, children, msg }) {
+function Wrap({ onClose, children, msg, width = 360 }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 360, maxWidth: "92vw" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Account</h2>
           <button onClick={onClose} style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close ✕</button>
@@ -31,7 +32,7 @@ function Wrap({ onClose, children, msg }) {
 
 // ── Logged-in account panel: Profile + Settings tabs ───────────────────────────
 function AccountView({ user, profileApi, initialTab, onClose }) {
-  const [tab, setTab] = useState(initialTab === "settings" ? "settings" : "profile");
+  const [tab, setTab] = useState(["settings", "team"].includes(initialTab) ? initialTab : "profile");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [org, setOrg] = useState("");
@@ -80,13 +81,16 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   );
 
   return (
-    <Wrap onClose={onClose} msg={msg}>
+    <Wrap onClose={onClose} msg={msg} width={tab === "team" ? 440 : 360}>
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
         {tabBtn("profile", "Profile")}
+        {tabBtn("team", "Team")}
         {tabBtn("settings", "Settings")}
       </div>
 
-      {tab === "profile" ? (
+      {tab === "team" ? (
+        <TeamPanel user={user} setMsg={setMsg} />
+      ) : tab === "profile" ? (
         <div>
           <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user.email}</div>

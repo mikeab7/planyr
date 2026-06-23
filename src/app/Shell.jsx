@@ -70,6 +70,7 @@ const RowIcon = ({ d, size = 14 }) => (
 );
 const ICON = {
   profile:  (<><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-6 8-6s8 2 8 6" /></>),
+  team:     (<><circle cx="9" cy="8" r="3.2" /><path d="M3 19c0-3.2 2.7-5 6-5s6 1.8 6 5" /><path d="M16 5.5a3 3 0 0 1 0 5.5M17.5 19c0-2.6-1.3-4.2-3-4.8" /></>),
   settings: (<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>),
   signout:  (<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>),
 };
@@ -181,6 +182,9 @@ export default function Shell() {
           <div style={acctDivider} />
           <button style={acctRow} onClick={() => openAccount("profile")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
             <RowIcon d={ICON.profile} /> Profile
+          </button>
+          <button style={acctRow} onClick={() => openAccount("team")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+            <RowIcon d={ICON.team} /> Team
           </button>
           <button style={acctRow} onClick={() => openAccount("settings")} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
             <RowIcon d={ICON.settings} /> Settings
