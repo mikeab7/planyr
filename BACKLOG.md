@@ -22,6 +22,23 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped logging task "NEW-1" — record the agreed Supabase org/project naming
+     convention in CLAUDE.md so the "Planar vs Planyr" confusion is documented as resolved and future
+     env work references the right project. Highest B# was B405 when filed, but a concurrent `main`
+     (PR #305/#306) took **B406** for Shared team workspaces while this was in flight, so **renumbered
+     to B407** (the real next free ID). Deduped: net-new (no existing Open/Done item covered Supabase
+     naming). The owner had already applied the Supabase-side rename himself (org → Planyr, live
+     project → planyr-production), so the only work left was the doc — per STANDING RULE #1 it was not
+     merely logged but DONE the same session: the convention + the "renaming a display label is
+     cosmetic; the client rides the immutable 20-char project ref in VITE_SUPABASE_URL, so no rebuild"
+     safety fact were written into CLAUDE.md's "## Supabase" section (beside the build-time-env gotcha).
+     A mid-session code check then found the **Scheduler hardcodes a DIFFERENT project ref
+     (`ksetjztkplttbcehyicv`) than the main app (`lyeqzkuiwngunutlkkmi`)**, so the doc was corrected to
+     flag that the us-west-2 "Planar" project is most likely the Scheduler's LIVE backend (match refs
+     before any delete), NOT a deletable spare. README "Deploy secrets" names Supabase only via "the
+     anon key" → nothing to reconcile. Doc-only, no code paths. Full [x] block in BACKLOG-DONE.md
+     (branch `claude/blissful-hopper-zcijkh`). -->
+
 ### B406 — Shared team workspaces: invite by email, share a project with a team `[Site Planner + Doc Review]` (feature)  *(2026-06-22; "B-TEAM" in the cowork handoff. Filed B365 in-session, but a concurrent `main` had taken B365–B405 — renumbered to the real next free B#406. PR #305 title still says B365.)*
 `[ ]` **Shipping — code merged via PR #305; DB phase-2 migrated + verified in PRODUCTION (`lyeqzkuiwngunutlkkmi`); remaining owner step: run `team_storage.sql` (phase 3) for shared-PDF reads.**
 Lets a team share a workspace: invite people by email (activates on signup/sign-in even if they had no account yet), admins vs members, and a project stays **private until deliberately shared** (and can revert to private). Additive + private-by-default preserved — a row with `team_id IS NULL` behaves exactly as before.

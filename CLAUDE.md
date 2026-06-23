@@ -610,6 +610,44 @@ publishable/anon key correctly 401s there). Auth = email+password via `auth.js` 
 logged out → legacy `planarfit:sites:v1`. Save badge reflects the real cloud write.
 No migration of legacy sites (recreate manually).
 
+**Supabase org/project naming convention (resolved — closes the "Planar vs Planyr" confusion; B407).**
+ONE app, so the **org carries the brand** and **projects are named by environment** (deployment-
+lifecycle stage), never by feature — this keeps the set readable as the commercial/VC direction adds
+environments and avoids the redundant "Planyr / Planyr" nesting:
+- **Organization = `Planyr`.**
+- **Live (production) project = `planyr-production`**, AWS `us-east-1` — serves planyr.io; its
+  dashboard label was the old "Site Planar" until the owner renamed it to this convention (2026-06-23).
+- **`planyr-staging` reserved** for a future second-environment project (not yet created).
+
+**Renaming a Supabase org/project display label is COSMETIC — no rebuild, nothing breaks** (the safety
+fact that pairs with the build-time-env gotcha above). The connection is bound to the **immutable
+20-char project ref** baked into `VITE_SUPABASE_URL` (`https://<ref>.supabase.co`) and the **anon
+key** — renaming the org or project changes **neither the ref, the URL, nor the key**, so cloud
+save/load/auth keep working with **no redeploy**. Only creating a *different* project (a new ref) or
+rotating keys would force a rebuild of the build-time env.
+
+**⚠ There are TWO live Supabase projects, not one — match the `ref` before renaming/deleting ANYTHING.**
+The suite currently spans two *separate* Supabase projects (different immutable refs), so "the spare
+Planar project" is almost certainly NOT spare:
+- **Main app (Site Planner + Document Review)** → ref **`lyeqzkuiwngunutlkkmi`**, set via the Cloudflare
+  `VITE_SUPABASE_URL` build env (tables `public.sites`, `public.doc_reviews`, `public.profiles`, …).
+- **Scheduler (the embedded `/sequence/` app)** → a DIFFERENT ref **`ksetjztkplttbcehyicv`**,
+  **hardcoded** in `public/sequence/index.html` (its own anon key; tables `planar_data` /
+  `planar_history` / `planar_suggestions`).
+
+So the second dashboard project ("Planar", AWS `us-west-2`) is most likely the **Scheduler's live
+backend — its data is the schedule history, not a leftover.** **Owner-action checklist (do NOT delete
+on assumption):** in Supabase → each project's **Project Settings → API / project URL**, read its 20-char
+ref and match against BOTH refs above. A project matching **either** ref is LIVE → rename it for what it
+*is* (the Scheduler's is **not** `planyr-staging`; name it e.g. `planyr-scheduler`), **never delete it**.
+Only a project matching **neither** ref is genuinely unused (then repurpose as `planyr-staging` or
+delete). Renaming stays cosmetic/safe (above); **deleting a live project is irreversible data loss.**
+
+**Open architectural question (not yet decided):** the Scheduler riding its OWN Supabase project,
+separate from the main app, predates the one-product direction. Whether to consolidate it onto the main
+project (one backend) or keep it split and just name them per-component is a future decision — recorded
+here so the two-project reality isn't mistaken for a stray duplicate to be cleaned up.
+
 **Table schema** (one row per plan; `data` jsonb = serialized Site Model):
 ```sql
 create table public.sites (
