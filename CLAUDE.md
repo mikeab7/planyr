@@ -605,6 +605,27 @@ publishable/anon key correctly 401s there). Auth = email+password via `auth.js` 
 logged out → legacy `planarfit:sites:v1`. Save badge reflects the real cloud write.
 No migration of legacy sites (recreate manually).
 
+**Supabase org/project naming convention (resolved — closes the "Planar vs Planyr" confusion; B406).**
+ONE app, so the **org carries the brand** and **projects are named by environment** (deployment-
+lifecycle stage), never by feature — this keeps the set readable as the commercial/VC direction adds
+environments and avoids the redundant "Planyr / Planyr" nesting:
+- **Organization = `Planyr`.**
+- **Live (production) project = `planyr-production`**, AWS `us-east-1` — serves planyr.io; its
+  dashboard label was the old "Site Planar" until the owner renamed it to this convention (2026-06-23).
+- **`planyr-staging` reserved** for a future second-environment project (not yet created).
+
+**Renaming a Supabase org/project display label is COSMETIC — no rebuild, nothing breaks** (the safety
+fact that pairs with the build-time-env gotcha above). The connection is bound to the **immutable
+20-char project ref** baked into `VITE_SUPABASE_URL` (`https://<ref>.supabase.co`) and the **anon
+key** — renaming the org or project changes **neither the ref, the URL, nor the key**, so cloud
+save/load/auth keep working with **no redeploy**. Only creating a *different* project (a new ref) or
+rotating keys would force a rebuild of the build-time env.
+
+**Pending owner cleanup (owner action — do NOT attempt):** a second, unused project labeled "Planar"
+sits in AWS `us-west-2`. Before renaming/deleting it the owner will confirm **by project ref** (not by
+display label) which project the live `VITE_SUPABASE_URL` actually targets, then either repurpose
+`us-west-2` as `planyr-staging` or delete it. Treat this as **not yet done**.
+
 **Table schema** (one row per plan; `data` jsonb = serialized Site Model):
 ```sql
 create table public.sites (

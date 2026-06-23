@@ -22,6 +22,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped logging task "NEW-1" — record the agreed Supabase org/project naming
+     convention in CLAUDE.md so the "Planar vs Planyr" confusion is documented as resolved and future
+     env work references the right project. Highest B# across both files was B405, so minted **B406**.
+     Deduped: net-new (no existing Open/Done item covered Supabase naming). The owner had already
+     applied the Supabase-side rename himself (org → Planyr, live project → planyr-production), so the
+     only work left was the doc — and per STANDING RULE #1 it was not merely logged but DONE the same
+     session: the convention + the "renaming a display label is cosmetic; the client rides the
+     immutable 20-char project ref in VITE_SUPABASE_URL, so no rebuild" safety fact + the pending
+     us-west-2 "Planar" owner-cleanup note were written into CLAUDE.md's "## Supabase" section
+     (alongside the existing build-time-env gotcha). README "Deploy secrets" names Supabase only via
+     "the anon key" (no project name) → nothing to reconcile there. Doc-only, no code paths. Full [x]
+     block in BACKLOG-DONE.md (branch `claude/blissful-hopper-zcijkh`). -->
+
 <!-- 2026-06-23: owner-dropped COMBINED chat brief (it explicitly supersedes three earlier separate briefs —
      the Markup→Library rename, "open any file fails", and the standalone oversize-banner-copy item — so filed
      from the combined version to avoid double-filing; deduped: no existing Open item covered these). Highest
