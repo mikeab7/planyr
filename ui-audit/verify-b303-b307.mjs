@@ -30,7 +30,7 @@ page.on("pageerror", (e) => pageErrors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1000);
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await page.waitForTimeout(600);
 
 // open the sample PDF

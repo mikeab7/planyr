@@ -44,7 +44,7 @@ ok("logged-out state is honest on-device (not a fake green 'synced')", /on this 
 // 2) Switch to the Markup module — header survives, and with nothing loaded the badge
 //    correctly hides (idle = nothing to sync), proving it tracks real state per module.
 await page.evaluate(() => {
-  const tab = [...document.querySelectorAll("header button")].find((b) => (b.textContent || "").trim() === "Markup");
+  const tab = [...document.querySelectorAll("header button")].find((b) => (b.textContent || "").trim() === "Library");
   tab && tab.click();
 });
 await page.waitForTimeout(1600);

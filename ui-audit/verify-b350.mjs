@@ -89,7 +89,7 @@ await sleep(1200);
 const bodyTxt = () => page.evaluate(() => document.body.innerText);
 
 // Enter Document Review (Markup) → Stitch
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 await page.locator('button:has-text("Stitch")').first().click({ timeout: 8000 });
 await sleep(700);

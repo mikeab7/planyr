@@ -22,6 +22,32 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped COMBINED chat brief (it explicitly supersedes three earlier separate briefs —
+     the Markup→Library rename, "open any file fails", and the standalone oversize-banner-copy item — so filed
+     from the combined version to avoid double-filing; deduped: no existing Open item covered these). Highest
+     B# across both files was B400, so minted B401–B402; the brief's B207 item was an AMENDMENT (no new B#).
+     Per STANDING RULE #1 both new items were filed AND fixed + verified + merged the SAME session (branch
+     `claude/brave-brown-jb1n2l`) — full [x] blocks live in BACKLOG-DONE.md:
+       • B401 (NEW-1) — module tab "Markup" → "Library" (label ONLY; route id `doc-review`/`/markup`, storage
+         keys, and the amber accent token names unchanged). The only user-facing "Markup" string was the tab;
+         the SitePlanner "Markup line/rect" tool hints are a different feature, left alone. Finish-the-job tail:
+         ~15 ui-audit harnesses selected the tab by visible text → repointed to "Library". New
+         `verify-b401-library-tab.mjs` 4/4 + repointed `verify-new1-header-integration` 5/5.
+       • B402 (NEW-2) — the Files-browser "open any file fails" was ONE conflated banner + a SILENT missing-source
+         path. Grounded against real code FIRST: the brief's "the browser reshape drops storageKey/driveKey"
+         hypothesis was REFUTED at the open hop (`openReview` → `loadReview(row.id)` re-fetches the full Postgres
+         record by id, so the lightweight browser row is never the src) — flagged, not rebuilt. Real fix = a
+         4-state taxonomy (oversize / not-stored / fetch-failed / signed-out) in new pure `lib/sourceState.js`
+         (15 unit tests), wired through `DocReview.fetchSourceBytes` + the FileBrowser/drawer warns. The
+         universal-failure ROOT is a LIVE storage/auth class the logged-out sandbox can't reproduce (most likely
+         the `doc-review-files` bucket/RLS unprovisioned, or legacy keyless rows) → a signed-in deploy pass is
+         pending (cohort/owner), but the code now names every cause precisely + offers a working re-open recovery
+         regardless.
+     B207 AMENDMENT (no new B#): the brief assumed Drive was at "scaffold", but the repo already had it
+     CODE-COMPLETE + TESTED (advanced past the brief by a concurrent session) — confirmed by a full ground-truth
+     read and the B207 entry below was updated to match; the one remaining step is the owner's Google/Cloudflare
+     provisioning. lint 0 · 1228 tests · build green. -->
+
 <!-- 2026-06-22: owner-dropped chat batch (exported Gantt QUALITY) — arrived NEW-1..NEW-4, first minted
      B393–B396, but a CONCURRENT session shipped its OWN B393–B396 (Gantt labels + curved connectors) to
      `main` while this was in flight, so **renumbered B397–B400**. Per STANDING RULE #1 filed AND fixed +
@@ -645,8 +671,10 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
 
 ### B207 — Google Drive storage backend behind the adapter `[Server]` (feature)  *(arrived as "NEW-2"; provisionally B204, renumbered **B207** — `main` took B203–B205)*
 `[~]` Drive as one adapter backend against a **Workspace Drive on planyr.io**: store/fetch/list/move/rename **bytes only**. This is the **substrate beneath auto-filing, NOT a redefinition of it** — auto-filing's own spec (title-block read → match project + aliases → rename/route into the folder structure → "needs filing" holding area for no-match / low-confidence, **never auto-guess** → queryable index of file facts) stays authoritative and **writes through this backend**. The **index records live in Supabase Postgres, not Drive.**
-- **✅ Shipped this session (scaffold):** `server/storage/backends/driveBackend.js` — the full backend contract, with every op returning a clear **"Drive isn't connected yet"** failure (never a throw, never a false success) until credentials arrive. The expected Drive REST `client` interface is documented inline (a fill-in, not a rebuild). Decisions baked in per spec: OAuth app **Internal** (Workspace user type → skips Google verification + the 7-day refresh-token expiry); scope **`drive.file`** (least privilege — app only touches files it creates, which still show in the owner's Drive for manual drag-to-email; broader Drive scope is a flagged decision, not a default); **credentials + refresh token server-side ONLY** (never the frontend build, never a `VITE_` var, never committed, never on the public Cloudflare Pages deploy — same isolation as the APS key). Moving storage to Drive **removes the Supabase 50 MB-per-file ceiling.**
-- **⏳ Blocked on the owner's manual setup (in progress via Cowork):** the Workspace OAuth app + the `GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN / PLANYR_DRIVE_ROOT_FOLDER` env values (see `server/storage/README.md`). Once provided: write the thin Drive REST `client`, swap the in-memory `idMap` store for a Supabase-Postgres one, set `PLANYR_STORAGE_BACKEND=drive`. No app changes.
+- **🔄 2026-06-23 AMENDMENT (ground-truth read, NOT a rebuild):** the owner's brief assumed Drive was still at "scaffold" and listed 5 code tasks to do — but the repo had already advanced **past** the scaffold (a concurrent session). Confirmed by reading every file: items (1) thin Drive REST client, (2) durable Supabase-Postgres idMap, (3) the `/api/files` JWT-validated handler, and (5) the tests are **DONE**; item (4) "Cloud Run + proxy" was met more simply (see note). So this stays `[~]` only because it isn't switched **live** yet — the code is complete + tested. Per the standing "ground in real code; flag contradictions" rule, nothing was re-implemented.
+- **✅ Code-complete + unit-tested:** the thin Drive REST `client` (`server/storage/backends/driveClient.js` — create/get/list/move/rename/delete + share-link on `drive.file`; OAuth refresh→access-token via `server/oauth/googleAuth.js`); the Planyr-key↔Drive-id map moved OFF in-memory onto **Supabase Postgres** (`server/storage/idStoreSupabase.js` + migration `server/storage/db/drive_files.sql`, own-row RLS) so Cloud Run scale-to-zero can't wipe it; the same-origin **`POST/GET/DELETE /api/files`** handler (`functions/api/files.js`) that validates the Supabase Bearer JWT server-side (`server/auth/supabaseAuth.js`) before any Drive op and honors `X-Planyr-Key/-Folder/-Name`; the one-time OAuth consent flow (`functions/api/auth/google/{start,callback}.js`); a guarded Drive round-trip smoke test (`functions/api/drive/selftest.js`). Tests: `test/driveClient.test.js`, `test/idStoreSupabase.test.js` (incl. bind→resolve persistence end-to-end), `test/storageAdapter.test.js` (backend swap + 404/not-connected degrade). **Decisions baked in per spec:** OAuth **Internal** (skips verification + the 7-day refresh-token expiry); scope **`drive.file`** (least privilege); credentials/refresh token **server-side ONLY** (never a `VITE_` var, same isolation as the APS key). Moving storage to Drive **removes the Supabase 50 MB-per-file ceiling.**
+- **🏗 Item (4) — Cloud Run + Pages-proxy — met more simply:** Drive byte-I/O runs IN the Cloudflare Pages Function (`functions/api/files.js`), not a separate Cloud Run hop — same-origin, no CORS, the sanctioned thin-Pages-Function pattern (same as the OAuth callback). Lighter than the brief's proxy-to-Cloud-Run sketch; the frontend keeps its same-origin `/api/files`.
+- **⏳ The ONE remaining step is the owner's provisioning (in progress via Cowork) — NO code left:** create the Workspace OAuth app (**Internal**, scope **`drive.file`**), mint a refresh token at `https://planyr.io/api/auth/google/start`, then set the Cloudflare Pages (Production) **encrypted** env `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` + `PLANYR_STORAGE_BACKEND=drive` (and ensure `SUPABASE_URL` / `SUPABASE_ANON_KEY` are set server-side for the JWT check). Optional: set `PLANYR_SELFTEST_TOKEN` once and hit `/api/drive/selftest?token=…` to confirm the round-trip, then unset it. Flip + redeploy = live. Per B207's own note, route the adoption targets (`overlayStorage.js`, `reviewStore.uploadSource/downloadSource`) through the adapter only AFTER live creds verify end-to-end — a follow-up pass, not this one.
 > **Cross-link:** the auto-filing item (title-block read → match → route → index) writes through this backend; this is its storage substrate, not a competing spec. Also unblocks the >50 MB drawings the Supabase free tier rejects.
 
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*

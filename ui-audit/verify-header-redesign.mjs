@@ -69,7 +69,7 @@ await page.goto(BASE, { waitUntil: "load" });
 await sleep(1400);
 
 // ── Enter Markup (single-sheet), EMPTY state — the screenshot the owner flagged ──
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(900);
 await shot(page, "markup-empty");
 const emptyHdr = await headerText();
@@ -81,7 +81,11 @@ console.log("\nB358 — no cry-wolf save state on an empty Markup:");
 check(!/not saved/i.test(emptyHdr), `header does not say "Not saved" when there's nothing to save`);
 
 console.log("\nB359 — the redundant Library entry point is gone:");
-check(!/library/i.test(emptyHdr), `no "Library" button in the Markup header`);
+// The module tab is now legitimately labelled "Library" (B401), so "Library" should appear
+// exactly ONCE in the header (that tab) — a second occurrence would be the redundant
+// header button B359 removed.
+const libCount = (emptyHdr.match(/library/gi) || []).length;
+check(libCount <= 1, `no redundant "Library" control beyond the module tab (found ${libCount})`);
 
 console.log("\nB357 — Row 2 (tools) reads taller than Row 1 (nav):");
 check(rows && rows.length === 2 && rows[1] > rows[0], `Row2 (${rows?.[1]}px) > Row1 (${rows?.[0]}px)`);

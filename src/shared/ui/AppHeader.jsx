@@ -131,7 +131,7 @@ const MODULES = [
   },
   {
     id: "doc-review",
-    label: "Markup",
+    label: "Library",
     // simplified ti-pencil outline
     icon: (
       <>

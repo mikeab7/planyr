@@ -17,6 +17,7 @@ import FileBrowser from "./components/FileBrowser.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -465,16 +466,21 @@ export default function DocReview({
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
   const fetchSourceBytes = async (src, tok) => {
-    if (!src) return;
-    if (tok != null && tok !== loadTok.current) return; // superseded before fetching
-    if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
+    const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
+    if (superseded()) return; // superseded before fetching
+    // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B402).
+    // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
+    const pre = classifySource(src, { signedIn });
+    if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }
     // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
     // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
     let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
-    if (tok != null && tok !== loadTok.current) return; // superseded while downloading
-    if (!buf) buf = src.storageKey ? await downloadSource(src.storageKey) : null;
-    if (tok != null && tok !== loadTok.current) return; // a newer review opened while downloading
-    if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
+    if (superseded()) return; // superseded while downloading
+    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+    if (superseded()) return; // a newer review opened while downloading
+    // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
+    // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
+    if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);

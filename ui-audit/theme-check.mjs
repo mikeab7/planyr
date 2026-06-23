@@ -54,7 +54,7 @@ async function snap(name, theme, mode, prep) {
 }
 
 const fit = async (p) => { await p.locator('[title="Zoom to fit"]').first().click({ timeout: 4000 }); };
-const toMarkup = async (p) => { await p.locator('button:has-text("Markup")').first().click({ timeout: 4000 }); await p.waitForTimeout(1400); };
+const toMarkup = async (p) => { await p.locator('button:has-text("Library")').first().click({ timeout: 4000 }); await p.waitForTimeout(1400); };
 
 for (const t of ["light", "dark"]) {
   await snap(`theme-planner-${t}.png`, t, "plan", fit);

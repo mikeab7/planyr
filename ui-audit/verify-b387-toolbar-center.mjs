@@ -37,7 +37,7 @@ try {
       const root = document.querySelector(`[data-scope="${name}"]`);
       const header = root && root.querySelector("header");
       const tab = (label) => [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
-      const tabs = ["Site", "Schedule", "Markup"].map(tab);
+      const tabs = ["Site", "Schedule", "Library"].map(tab);
       const center = root.querySelector('[data-testid="center-probe"]');
       const toolbar = root.querySelector('[data-testid="toolbar-probe"]');
       // Row 2 is the SECOND row child of <header> (Row 1 is the first).
