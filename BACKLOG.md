@@ -22,6 +22,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B421 — Shared markup/measure tool engine + Bluebeam-parity refinement loop `[Site Planner + Doc Review / Markup]` (umbrella)  *(owner-dropped 2026-06-23 as the "Shared Markup/Measure Tool Engine" brief; minted **B421** = highest real B# across both files (B420) + 1; plan approved this session — `/root/.claude/plans/planyr-shared-tidy-avalanche.md`)*
+One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (and the Stitcher) consume, bringing every tool to Bluebeam-equivalent behavior, plus a committed machine-checkable tool×property matrix + an automated tester so future tool work converges on its own. The brief's "NEW-#" are scratch labels; real filed IDs are B422+. Owner decisions locked: tools RIGHT / properties LEFT in both; Arrow = an arrowhead toggle on Line; verifier = the full cloud rig (B278/B280/B281) built first. Sub-items, in dependency order:
+- `[x]` **B422 (NEW-1) — the tool×property matrix as data. DONE this session.** (see BACKLOG-DONE.md)
+- `[x]` **B423 (NEW-2) — the shared engine's PURE layer. DONE this session.** (see BACKLOG-DONE.md)
+- `[ ]` **B424 (NEW-2 cont./NEW-3) — shared `MarkupRenderer.jsx` + `PropertyPanel.jsx` + host wiring; unify layout (Site rail → right, Doc gains a left property panel).** Not started.
+- `[ ]` **B425 (NEW-4) — Document Review parity tools: Line, Polyline, Polygon, Ellipse, Callout via the engine.**
+- `[ ]` **B426 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).**
+- `[ ]` **B427 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.**
+- `[ ]` **B428 (NEW-7) — Count as a first-class measure in the Site Planner.**
+- `[ ]` **B429 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).**
+- `[ ]` **B430 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.**
+- **Prereq harness (Phase 0):** B278 (Playwright e2e), B280 (seeded test account — OWNER action), B281 (CI auto-`@claude` loop). B278/B281 I build; B280 I deliver as a ready-to-run file.
+
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — a parcel grabbed by its empty INTERIOR, not just its
      boundary/setback, so a press in the open interior near (but not on) a footprint selected the LOT
      instead of letting you work on a building sitting there. Highest real B# across both files was B419
