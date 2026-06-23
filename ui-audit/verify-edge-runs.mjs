@@ -88,10 +88,33 @@ ok("B213 — exactly ONE setback line (inactive parcel draws none)", c.setbackLi
 ok("B213 — easement on the inactive parcel hidden; the free one shows (1)", c.easements === 1, `easementPolys=${c.easements}`);
 
 // ── B214/B215: select the active parcel → per-SIDE setback pills (runs, not edges) ──
-const parcelPoly = page.locator('polygon[pointer-events="all"]').first();
-const bb = await parcelPoly.boundingBox();
-await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
-await page.waitForTimeout(700);
+// B417: a parcel grabs by its BOUNDARY now (its interior is click-through), so select the active
+// parcel by clicking on its boundary EDGE (on the fat boundary hit-stroke), not the dead centre.
+// Use the active parcel's on-screen box (page coords) and try each edge until the pills appear.
+const parcelBox = () => page.evaluate(() => {
+  const p = document.querySelector('polygon[stroke="#5b6650" i], polygon[stroke="#c2410c" i]'); // the active parcel's visible polygon (first in doc order)
+  if (!p) return null;
+  const r = p.getBoundingClientRect();
+  return { left: r.x, top: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+});
+const pillsNow = () => page.evaluate(() => document.querySelectorAll('rect[stroke="#b45309"]').length);
+{
+  const b = await parcelBox();
+  // Edge points on the boundary hit-stroke (a few px in from each side), header-safe order.
+  const edgePts = [
+    { x: b.left + 3, y: b.cy },          // west edge, mid-height
+    { x: b.left + b.w - 3, y: b.cy },    // east edge, mid-height
+    { x: b.cx, y: b.top + b.h - 3 },     // south/bottom edge
+    { x: b.cx, y: b.top + 3 },           // north/top edge (last — most likely near the header)
+  ];
+  for (const p of edgePts) {
+    if (p.y < 70) continue; // under the header — skip
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(500);
+    if ((await pillsNow()) > 0) break;
+  }
+}
+await page.waitForTimeout(300);
 await shot("edge-runs-2-selected-byside.png");
 c = await counts();
 ok("B214 — ONE setback pill per SIDE: 4 runs (S, E-run, N, W), not 6 edges", c.sbPills === 4, `pills=${c.sbPills}`);

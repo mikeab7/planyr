@@ -22,6 +22,32 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — a parcel grabbed by its empty INTERIOR, not just its
+     boundary/setback, so a press in the open interior near (but not on) a footprint selected the LOT
+     instead of letting you work on a building sitting there. Highest B# across both files was B416, so
+     minted **B417** = the next free ID. Deduped: net-new — the INVERSE of B155/B156 (those make small
+     markup-shape interiors grabbable, correct for annotations; a parcel is a CONTAINER, so boundary-grab
+     is the right inverse, not a contradiction). LAYERS ON B310/B311 (does not replace them): their
+     click-vs-drag intent + "Select parcels" toggle are keyed on startMoveParcel, which now simply fires
+     from the boundary hit-stroke instead of the whole fill. Reuses B146's fat-invisible-hit-stroke; NOT
+     B213 (inactive parcels already draw no setback line, so no setback grab target there).
+     Per STANDING RULE #1 filed AND fixed + headless-verified the SAME session on branch
+     `claude/vigilant-cerf-6rvxga` — full [x] block lives in BACKLOG-DONE.md.
+     FIX (boundary-only hit model, SitePlanner.jsx): the visible parcel <polygon> is now
+     pointerEvents="none" (its fill never grabs, even with a translucent fill toggled on) + a companion
+     transparent fat hit-stroke (rgba(0,0,0,0.001), 12 px, pointerEvents="stroke") on the same ring is the
+     only grab target; the setback outline gets the same fat hit-stroke (owner: "boundary OR setback"); a
+     shared onParcelContext opens the menu from either. Interior = click-through → falls to whatever
+     element is painted on top, else the background pan. ~12 px is zoom-independent because f2p already
+     projects feet→screen pixels (matches the existing easement-edge picker's flat 12). Preserved +
+     re-verified: B310/B311, Shift-merge, align-edge pick, unlocked drag-to-move, B230 vertex editing
+     (hit-tests at the svg root, independent of the fill). B311 tooltip reworded "click a lot" → "click a
+     lot's edge or setback line" (label only). New regression harness
+     `ui-audit/verify-b417-parcel-boundary-grab.mjs` 7/7; repointed verify-b310-b311 / verify-edge-runs /
+     verify-edge-runs-irregular off the now-dead interior / `pointer-events="all"` selectors → all green,
+     plus verify-b221-b222 / verify-parcel-split-control / verify-b383-add-parcel /
+     verify-parcel-resilience still pass. lint 0 · 1273 tests · build green. -->
+
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
      control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
      free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared

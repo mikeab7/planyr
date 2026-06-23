@@ -3836,6 +3836,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     capturePidRef.current = e.pointerId;
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // B417: a parcel is grabbed by its BOUNDARY edge (or setback line), never its empty interior —
+  // so both the boundary hit-stroke and the setback hit-stroke share this right-click handler for
+  // the same pc.id (opens the parcel menu + arms it for merge), matching the old fill behaviour.
+  const onParcelContext = (e, id) => {
+    if (tool !== "select") return;
+    e.preventDefault();
+    setCombineSel((s) => (s.includes(id) ? s : [...s, id]));
+    setSel({ kind: "parcel", id });
+    setParcelMenu({ x: e.clientX, y: e.clientY });
+  };
 
   /* ------------ align rotation to a target (parcel edge / element) ------------ */
   const segDist = (p, a, b) => {
@@ -5659,7 +5669,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             setSettings((s) => ({ ...s, parcelSelect: !s.parcelSelect }));
             if (turningOff && sel?.kind === "parcel") { setSel(null); setMulti([]); setDrillId(null); } // entering pure-browse → drop any parcel selection
           }}
-          title="Select parcels — ON: click a lot to select it (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
+          title="Select parcels — ON: click a lot's edge or setback line to select it; its interior stays free for building work (dragging always pans the map, never selects). OFF: pure browse/measure, so a click never selects a parcel. Saved per project.">
           <span style={{ width: 7, height: 7, borderRadius: 99, background: settings.parcelSelect ? "#22c55e" : "var(--chrome-tab-inactive)", display: "inline-block", boxShadow: settings.parcelSelect ? "0 0 7px rgba(34,197,94,0.7)" : "none" }} />
           {settings.parcelSelect ? "Select parcels" : "Select parcels: off"}
         </button>
@@ -5916,13 +5926,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })}
 
               {/* setback outlines (per-edge) — anchored to the parcel, so an INACTIVE
-                  parcel draws none (B213: inherits active state, like the yield math). */}
+                  parcel draws none (B213: inherits active state, like the yield math).
+                  The visible dashed line stays pointer-inert; a companion fat hit-stroke (B417) makes
+                  the setback line a SECOND grab target for that lot — owner wants "boundary OR setback" —
+                  wired to the same startMoveParcel/right-click for that pc.id. The interior between the
+                  boundary and the setback line stays free for building work. The inboard value pills
+                  render later (on top) and keep their own stopPropagation, so editing them is unchanged. */}
               {settings.showSetback && parcels.filter((pc) => pc.active !== false).map((pc) => {
                 const sb = parcelSetbacks(pc);
                 if (!sb.some((v) => v > 0)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
-                return <polygon key={`sb${pc.id}`} points={o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />;
+                const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                return <g key={`sb${pc.id}`}>
+                  <polygon points={ring} fill="none" stroke={PAL.setback} strokeWidth={1.25} strokeDasharray="7 6" pointerEvents="none" />
+                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} pointerEvents="stroke"
+                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                    onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                    onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                </g>;
               })}
               {/* setback value pills on the selected ACTIVE parcel — ONE per SIDE (run) by
                   default so a multi-segment side edits in one click (B214); per SEGMENT when
@@ -5965,19 +5987,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   });
                 })}</g>;
               })()}
-              {/* parcels */}
+              {/* parcels — the visible polygon is pointer-INERT (its fill never grabs the lot, even
+                  when a translucent fill is toggled on); a companion transparent fat hit-stroke on the
+                  SAME ring is the only grab target, so a lot is selectable by its boundary edge, never
+                  by its empty interior. Interior presses fall through to whatever element is painted on
+                  top, else the background pan — exactly as on empty canvas. Reuses the B146 fat invisible
+                  hit-stroke; ~12 screen px (f2p already projects feet→pixels, so the grab is zoom-independent). B417. */}
               {parcels.map((pc) => {
                 const isSel = sel?.kind === "parcel" && sel.id === pc.id;
                 const picked = combineSel.includes(pc.id);
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
-                return <polygon key={pc.id} points={pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ")}
-                  fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
-                  stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
-                  strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
-                  style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
-                  pointerEvents="all"
-                  onPointerDown={(e) => startMoveParcel(e, pc.id)}
-                  onContextMenu={(e) => { if (tool !== "select") return; e.preventDefault(); setCombineSel((s) => (s.includes(pc.id) ? s : [...s, pc.id])); setSel({ kind: "parcel", id: pc.id }); setParcelMenu({ x: e.clientX, y: e.clientY }); }} />;
+                const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
+                return <g key={pc.id}>
+                  <polygon points={ring}
+                    fill={picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
+                    stroke={picked ? "#2563eb" : isSel ? PAL.accent : (pc.stroke || PAL.parcel)} strokeWidth={picked || isSel ? 3 : 2}
+                    strokeDasharray={inactive ? "8 6" : undefined} opacity={inactive ? 0.4 : 1}
+                    pointerEvents="none" />
+                  <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} pointerEvents="stroke"
+                    style={{ cursor: tool === "select" ? (pc.locked ? "default" : "move") : "crosshair" }}
+                    onPointerDown={(e) => startMoveParcel(e, pc.id)}
+                    onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                </g>;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
                   Painted in ground→structure order so paving never covers a

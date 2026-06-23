@@ -5,6 +5,16 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
+### V120 — Parcel grabs by its boundary/setback only, never its empty interior (B417) ✅ (self-verified headless — fully done, nothing pending)
+- **Harness:** `ui-audit/verify-b417-parcel-boundary-grab.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Seeds one large LOCKED parcel with a 25 ft setback, frames it, then drives the SVG canvas with `page.mouse` and asserts on the live parcel/setback stroke colours + the parcel menu. No auth needed (pure planner canvas), so fully covered logged-out — nothing left for a signed-in pass.
+- **Result:** PASS 2026-06-23 — **7/7**.
+  - **Interior is click-through:** clicking the empty interior (inboard of the setback ring, above the centroid acreage chip) does NOT select the parcel (stroke stays `#5b6650`, width 2).
+  - **Boundary grabs:** clicking the top boundary edge selects it (stroke `#C2410C`, width 3).
+  - **Setback line grabs:** the dashed setback line is rendered and clicking it also selects the parcel (owner's "boundary OR setback").
+  - **Right-click parity:** right-clicking the interior opens NO parcel menu; right-clicking the boundary opens it ("Merge parcels…").
+  - **0 uncaught page errors** (env GIS/CORS tile failures ignored).
+- **Regression (all still green):** `verify-b310-b311` (click-vs-drag + toggle, clicks repointed to the boundary), `verify-edge-runs` + `verify-edge-runs-irregular` (setback pills; selectors repointed off the now-dead `pointer-events="all"`), `verify-b221-b222` (a pond element on a parcel still selects + its vertices insert/delete 4→5→4→3), `verify-parcel-split-control`, `verify-b383-add-parcel`, `verify-parcel-resilience`. lint 0 · 1273 tests · build green.
+
 ### V119 — Doc Review render: no white flash on zoom + Bluebeam-class sharpness (B414/B415) ✅ (self-verified headless — fully done, nothing pending)
 - **Harness:** `ui-audit/verify-b414-b415-render.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Builds a real **E-size** sheet (2448×1584 pt, big filled rect + text), opens it in the **Library** canvas at **deviceScaleFactor 2** (a Retina-class display — the exact case the whole-page budget went soft on), then drives + asserts the live two-canvas DOM. No auth needed (pure rendering), so this is fully covered logged-out — nothing left for a signed-in pass.
 - **Result:** PASS 2026-06-23 — **11/11**.
