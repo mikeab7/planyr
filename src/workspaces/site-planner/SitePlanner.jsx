@@ -36,6 +36,7 @@ import {
   humanizeError,
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
+import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -810,6 +811,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [mkStyle, setMkStyle] = useState(MK_DEFAULT); // current markup style (sticky)
   const [tool, setTool] = useState("select");
   const [toolMenu, setToolMenu] = useState(false); // Parcel ▾ dropdown open
+  const [addParcelMenu, setAddParcelMenu] = useState(false); // B383: ＋ Add parcel flyout in the Parcel panel
   const [parkingMenu, setParkingMenu] = useState(false); // Parking ▾ row-preset dropdown open
   const [buildingMenu, setBuildingMenu] = useState(false); // Building ▾ dock-layout dropdown open
   const [buildingDock, setBuildingDock] = useState("single"); // dock layout for newly drawn buildings
@@ -830,7 +832,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null);
+    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -1905,6 +1907,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ------------ pointer handlers (svg root) ------------ */
+  // B383 identify→add press: a genuine CLICK adds (or toggles) the lot under the cursor;
+  // a DRAG pans the map — both resolved in onUp by travel. Shared by the background press
+  // AND the on-parcel press, so clicking an already-added lot can toggle it back off
+  // (the parcel polygon's own handler stops propagation, so it must call this directly).
+  const beginIdentifyPress = (e) => {
+    setPanning(true);
+    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY };
+    capturePidRef.current = e.pointerId;
+    try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+  };
   const onBgDown = (e) => {
     if (e.button !== 0) return;
     capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
@@ -1925,7 +1937,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
-    if (identifyMode) { identifyAt(fp); return; } // identify: query county GIS at the click
+    if (identifyMode) { beginIdentifyPress(e); return; } // B383 identify→add: click adds the lot, drag pans (resolved in onUp)
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
     if (xsecMode) { // ditch cross-section: two clicks → sample elevations
@@ -2862,6 +2874,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         && Date.now() - d.downT <= PARCEL_CLICK_MS) {
       setSel({ kind: "parcel", id: d.tapParcel });
     }
+    // B383: a press that began in identify→add mode and barely moved was a deliberate
+    // click → add (or toggle) the lot under it; any real drag just panned to find more.
+    if (d && d.mode === "pan" && d.tapIdentify
+        && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
+      quickAddAt(d.tapIdentify);
+    }
     drag.current = null;
     setPanning(false);
     capturePidRef.current = null;
@@ -3787,6 +3805,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const startMoveParcel = (e, id) => {
     if (e.button !== 0) return;
+    if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: in identify→add mode, a press on an existing lot toggles/adds via the same path (click adds, drag pans)
     if (tool !== "select") return;
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
@@ -3925,7 +3944,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-3: start dragging a parcel's acreage chip; offset is kept in parcel-local feet
   // relative to the parcel centroid, so it survives geometry edits and persists with the plan.
   const startAcChip = (e, id) => {
-    if (tool !== "select" || e.button !== 0) return;
+    if (e.button !== 0) return;
+    if (identifyMode) { e.stopPropagation(); beginIdentifyPress(e); return; } // B383: clicking a lot's acreage label in identify mode toggles/adds it too (don't drag the chip)
+    if (tool !== "select") return;
     e.stopPropagation();
     const pc = parcels.find((p) => p.id === id);
     if (!pc) return;
@@ -4120,11 +4141,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `origin` is declared once near the top (geographic basemap state).
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
   const [taxInfo, setTaxInfo] = useState(null);
-  // In-planner parcel identify (click any spot → county record without importing).
+  // In-planner parcel identify → ADD (B383): arm identify mode, the county parcel
+  // outlines light up on the aerial, and each click ADDS that lot to the plan (one or
+  // many) — the same "boundaries light up, click to add" feel as the map's Select-parcels
+  // tool. A re-click on a just-added lot toggles it back off.
   const [identifyMode, setIdentifyMode] = useState(false);
-  const [identifyRes, setIdentifyRes] = useState(null); // { busy } | { attrs, rings, ring, lng, lat, addr } | { error } — rings = all outer parts; ring = largest (for jurisdiction/road tests)
+  const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
+  const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
+  const parcelOutlineRef = useRef(null);       // the lit county parcel-outline layer (esri-leaflet) while identify mode is on
+  const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
+  const ADDR_RE = /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i;
+  // Resolve (once) the site county's parcel layer URL — shared by the lit outlines AND
+  // the click query, so what you SEE is what you can ADD (the B137 rule).
+  const resolveCountyLayer = async () => {
+    if (idLayerRef.current) return idLayerRef.current;
+    const cm = COUNTIES_MAP[siteCounty] || COUNTIES_MAP.harris;
+    idLayerRef.current = cm.layerUrl || await resolveLayerUrl(cm.mapServer || COUNTIES[siteCounty]?.layerUrl || COUNTIES.harris.layerUrl);
+    return idLayerRef.current;
+  };
+  // Stable per-lot key: the CAD OBJECTID when present, else the first vertex — so a
+  // re-click on the same lot toggles it, and we never add the same lot twice.
+  const parcelGisKey = (attrs, rings) => {
+    const oid = attrs?.OBJECTID ?? attrs?.objectid ?? attrs?.OID;
+    if (oid != null) return `oid:${oid}`;
+    const p = rings?.[0]?.[0];
+    return p ? `geo:${p[0].toFixed(6)},${p[1].toFixed(6)}` : `geo:${uid()}`;
+  };
+  // rings (4326) → planner parcels in the site frame, each carrying its gisKey + attrs.
+  // Every outer part of a multipart parcel ("TRS 3 & 5") becomes its own parcel (B36c),
+  // locked by default like every county-pulled lot (B99).
+  const parcelsFromRings = (rings, addr, attrs) => {
+    const key = parcelGisKey(attrs, rings);
+    return rings
+      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: addr || null, attrs: attrs || null, gisKey: key }))
+      .filter((pc) => pc.points.length >= 3);
+  };
   // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
   // EXPLICIT request only (never auto-loaded per parcel). Rides the SWR cache (B96).
   const [jurInfo, setJurInfo] = useState(null); // { busy } | { j, road } | { error }
@@ -4147,37 +4200,71 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </span>
     </div>
   );
-  const identifyAt = async (fp) => {
+  // A click in identify mode ADDS the lot under the cursor straight to the plan (no
+  // preview-then-confirm) — click more lots to add more; re-click a lot you just added
+  // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
+  // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
+  const quickAddAt = async (fp) => {
     if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
-    const tok = ++identifyTok.current; // a later identify click supersedes this one (B53)
+    const tok = ++identifyTok.current; // a later click supersedes this one (B53)
     setJurInfo(null); setIdentifyRes({ busy: true });
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
-      if (!idLayerRef.current) {
-        const cm = COUNTIES_MAP[siteCounty] || COUNTIES_MAP.harris;
-        idLayerRef.current = cm.layerUrl || await resolveLayerUrl(cm.mapServer || COUNTIES[siteCounty]?.layerUrl || COUNTIES.harris.layerUrl);
-      }
-      const feat = await queryAtPoint(idLayerRef.current, lng, lat);
-      if (tok !== identifyTok.current) return; // superseded by a newer click — don't clobber its result
-      if (!feat) { setIdentifyRes({ error: "No parcel at that point." }); return; }
+      const url = await resolveCountyLayer();
+      const feat = await queryAtPoint(url, lng, lat);
+      if (tok !== identifyTok.current) return; // superseded by a newer click
+      if (!feat) { setIdentifyRes({ error: "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." }); return; }
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
-      if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape." }); return; }
-      // `ring` (largest part) still drives the whole-parcel jurisdiction/road tests below; `rings` adds every part for import.
-      setIdentifyRes({ attrs: feat.attributes || {}, rings, ring: largestRingLngLat(feat), lng, lat, addr: findAttr(feat.attributes, /(situs|site_?addr|prop_?addr|loc_?addr|full_?addr|^addr|address)/i) });
+      if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
+      const attrs = feat.attributes || {};
+      const addr = findAttr(attrs, ADDR_RE);
+      const key = parcelGisKey(attrs, rings);
+      // Re-click a lot added THIS session → toggle it back off.
+      if (identifyAddedRef.current.has(key)) {
+        const ids = identifyAddedRef.current.get(key);
+        identifyAddedRef.current.delete(key);
+        pushHistory();
+        setParcels((a) => a.filter((p) => !ids.includes(p.id)));
+        setSel(null); setIdentAdded(identifyAddedRef.current.size);
+        setIdentifyRes({ removed: true, addr });
+        return;
+      }
+      // Already in the plan from before → select + inform, never add a duplicate.
+      const dupe = (stateRef.current.parcels || []).filter((p) => p.gisKey === key);
+      if (dupe.length) {
+        setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
+        setIdentifyRes({ already: true, addr });
+        return;
+      }
+      const pcs = parcelsFromRings(rings, addr, attrs);
+      if (!pcs.length) { setIdentifyRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
+      pushHistory();
+      setParcels((a) => [...a, ...pcs]);
+      identifyAddedRef.current.set(key, pcs.map((p) => p.id));
+      setIdentAdded(identifyAddedRef.current.size);
+      setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
+      // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
+      setIdentifyRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
   };
-  const addIdentifiedParcel = () => {
-    if (!identifyRes?.rings?.length || !origin) return;
-    // Add EVERY part of a multipart parcel (e.g. "TRS 3 & 5"), all in the site frame.
-    const pcs = identifyRes.rings
-      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: identifyRes.addr || null, attrs: identifyRes.attrs || null }))
-      .filter((pc) => pc.points.length >= 3);
-    if (!pcs.length) return;
-    pushHistory();
-    setParcels((a) => [...a, ...pcs]);
-    setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
-    setIdentifyRes(null); setJurInfo(null); setIdentifyMode(false);
-  };
+  // Light up the county parcel outlines on the basemap while identify mode is armed
+  // (B383) — the SAME magenta featureLayer the map's Select-parcels tool uses. Turn the
+  // aerial on so there's context to see them over; pull the layer + reset the session
+  // toggle-set when identify mode ends.
+  useEffect(() => {
+    if (!origin) return;
+    const dropOutline = () => { if (parcelOutlineRef.current) { try { geoMapRef.current?.removeLayer(parcelOutlineRef.current); } catch (_) {} parcelOutlineRef.current = null; } };
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutline(); return; }
+    setBasemapOn(true); // make sure the aerial is on so the lit outlines have context
+    let cancelled = false;
+    resolveCountyLayer().then((url) => {
+      const map = geoMapRef.current;
+      if (cancelled || !url || !map || parcelOutlineRef.current) return;
+      try { const fl = makeParcelLayer(url); fl.addTo(map); parcelOutlineRef.current = fl; } catch (_) {}
+    }).catch(() => {});
+    return () => { cancelled = true; dropOutline(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identifyMode, origin]);
   const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
   // A brand-new blank site is the first plan of its own group → "Concept A"
   // (NEW-1/NEW-2 lettered-concept default; the label stays user-editable).
@@ -5548,30 +5635,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     </span>
   );
 
-  const plannerSaveSlot = (() => {
-    const cloudActive = isCloudActive();
-    const connOk = cloud?.state === "connected";
-    let label, dot, color = PAL.chromeMuted, spin = false, tip;
-    if (saveStatus === "saving") {
-      label = cloudActive ? "Syncing…" : "Saving…"; dot = "#f59e0b"; spin = true; tip = "Saving your changes…";
-    } else if (saveStatus === "unsaved") {
-      color = "var(--warn-text)"; dot = "#f59e0b";
-      label = cloudActive && !connOk ? "Offline" : "Unsaved";
-      tip = cloudActive && !connOk ? "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect." : "You have unsaved changes.";
-    } else if (cloudActive && connOk) {
-      label = "Synced ✓"; dot = "#22c55e"; tip = "Saved and synced to the cloud.";
-    } else if (cloudActive) {
-      label = "Offline"; color = "var(--warn-text)"; dot = "#f59e0b"; tip = "Saved on this device — the cloud is unreachable. Your work will sync when you reconnect.";
-    } else {
-      label = "Saved ✓"; dot = PAL.chromeMuted; tip = "Saved on this device. Sign in to sync across your devices.";
-    }
-    return (
-      <span title={tip} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color, fontWeight: 500, marginRight: 4, minWidth: 70, justifyContent: "flex-end" }}>
-        <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flex: "none", animation: spin ? "pf-pulse 1.1s ease-in-out infinite" : "none" }} />
-        {label}
-      </span>
-    );
-  })();
+  // The Row-1 save indicator is now the shared, app-wide CloudSyncBadge (NEW-1) — a
+  // compact cloud glyph driven by `headerSaveState` below, no text chip. The loud failure
+  // BANNERS (cloudSaveFailed / cloudConflict, rendered further down) stay as the
+  // can't-miss interrupt; the badge is the always-present at-a-glance state.
 
   const plannerToolbar = (
     <>
@@ -5660,8 +5727,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}
         saveState={headerSaveState}
+        // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
+        // failed write; the conflict case gets its own explanation (the loud banner handles reload).
+        onRetrySave={cloudConflict ? undefined : retryCloudSave}
+        saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={plannerCenterContent}
-        saveSlot={plannerSaveSlot}
         authControl={authControl}
         accountActive={accountActive}
         toolbarContent={plannerToolbar}
@@ -5720,7 +5790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </div>
           )}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
-            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : (attachFor || alignFor || identifyMode || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
+            style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
             // Capture phase runs BOTH the vertex-edit handlers (mouse/single-touch) and the two-finger
             // pinch (B331) — merged into one prop each so neither silently overwrites the other. The pinch
@@ -6702,7 +6772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", minWidth: 96 }}>{underlay ? `1 px = ${f2(underlay.ftPerPx)} ft` : `${Math.round(view.ppf * 100) / 100} px/ft`}</span>
             <span style={{ width: 1, height: 14, background: PAL.chromeLine, margin: "0 14px" }} />
             <span style={{ color: (attachFor || alignFor) ? PAL.ember : PAL.chromeMuted, fontWeight: (attachFor || alignFor) ? 600 : 400, flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {attachFor ? "Click a host to bond to · Esc cancels" : alignFor ? "Click an edge to align to · Esc cancels" : identifyMode ? "Click a parcel to identify · Esc cancels" : curHint}
+              {attachFor ? "Click a host to bond to · Esc cancels" : alignFor ? "Click an edge to align to · Esc cancels" : identifyMode ? "Click lit-up lots to add them — one or many · Esc when done" : curHint}
             </span>
             <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: PAL.chromeMuted, marginLeft: 14 }}>{f2(siteSqft / SQFT_PER_ACRE)} ac site</span>
             <button className="dbtn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setShowShortcuts(true)} style={{ marginLeft: 12, width: 20, height: 20, borderRadius: 99, border: `1px solid ${PAL.chromeLine}`, background: "transparent", color: PAL.chromeInk, cursor: "pointer", fontSize: 11, fontWeight: 700, lineHeight: 1 }}>?</button>
@@ -7597,8 +7667,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
           {leftPanel === "parcel" && (
             <Section title={`Parcels · ${parcels.length}`}>
+              {/* ＋ Add parcel (B383) — the one front-door for adding land once you're in the
+                  planner, so you never have to back out to the map. Opens a menu of add methods
+                  (reuses the AnchoredMenu portal flyout the right-rail Boundary menu uses). */}
+              <div ref={addParcelAnchor} style={{ position: "relative", marginBottom: 9 }}>
+                <button
+                  aria-haspopup="menu" aria-expanded={addParcelMenu}
+                  style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
+                  onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — identify from county GIS or draw a boundary">
+                  ＋ Add parcel <span style={{ opacity: 0.8, fontSize: 11 }}>▾</span>
+                </button>
+                <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
+                  {/* Identify from county GIS — the headline path (needs a georeferenced frame). */}
+                  {origin ? (
+                    <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); setBasemapOn(true); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
+                      <div style={{ fontWeight: 650 }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County parcel lines light up on the aerial — click lots to add them (one or many).</div>
+                    </button>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>🔍 Identify from county GIS</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
+                  {/* Draw a new boundary — always available (no GIS frame needed). */}
+                  <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
+                    <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
+                    <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Trace a lot by clicking points on the canvas; close on the first dot.</div>
+                  </button>
+                </AnchoredMenu>
+              </div>
               {parcels.length === 0 ? (
-                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Bring some in from the map, or draw one with the Boundary tool (right rail).</div>
+                <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.6 }}>No parcels in this plan yet. Use <b>＋ Add parcel</b> above, or draw one with the Boundary tool (right rail).</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                   {parcels.map((pc, i) => {
@@ -7635,27 +7735,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 5 }}>Shift-click parcels (here or on the map, or right-click) to multi-select, then Merge. Working merge for test-fit — not a recorded consolidation.</div>
                 </div>
               )}
-              {/* identify any parcel from the county GIS (no import unless you add it) */}
-              <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
-                {origin ? (
-                  <button style={{ ...chip, width: "100%", ...(identifyMode ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }} onClick={() => { setIdentifyMode((m) => !m); setIdentifyRes(null); setJurInfo(null); }}>
-                    {identifyMode ? "Identifying — click a spot (Esc to stop)" : "🔍 Identify parcel"}
-                  </button>
-                ) : (
-                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5 }}>Identify needs a georeferenced plan. Bring the parcel in from the map to enable it.</div>
+              {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
+                  "Identify from county GIS" path. The entry point lives in ＋ Add parcel above;
+                  no duplicate toggle down here. The status row is the off-switch (so is Esc). */}
+              {(identifyMode || identifyRes) && (
+                <div style={{ marginTop: 10, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 10 }}>
+                {identifyMode && (
+                  <>
+                    <button style={{ ...chip, width: "100%", background: PAL.accent, color: "#fff", borderColor: PAL.accent }}
+                      onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
+                      {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
+                    </button>
+                    {origin && ppfToZoom(view.ppf, origin.lat) < PARCEL_MINZOOM && (
+                      <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
+                    )}
+                  </>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: 8, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>Querying county GIS…</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
+                      : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
+                      : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>
                       : <>
-                          <div style={{ fontWeight: 700, color: PAL.ink, marginBottom: 4 }}>{identifyRes.addr || "Parcel"}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                            <span style={{ color: "#15803d", fontWeight: 800, fontSize: 13, lineHeight: 1 }}>✓</span>
+                            <span style={{ fontWeight: 700, color: PAL.ink }}>Added {identifyRes.addr || "parcel"}</span>
+                          </div>
                           {apprRows(identifyRes.attrs).slice(0, 4).map((r) => (
                             <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 0" }}>
                               <span style={{ color: PAL.muted }}>{r.label}</span><span style={{ color: PAL.ink, fontWeight: 600 }}>{apprVal(r.label, r.value)}</span>
                             </div>
                           ))}
-                          {identifyRes.rings?.length > 0 && <button style={{ ...chip, width: "100%", marginTop: 7 }} onClick={addIdentifiedParcel}>＋ Add to plan</button>}
                           <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={checkJurisdiction} disabled={jurInfo?.busy}>
                             {jurInfo?.busy ? "Checking jurisdiction…" : "⚖︎ Jurisdiction & road authority"}
                           </button>
@@ -7675,6 +7786,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </div>
                 )}
               </div>
+              )}
             </Section>
           )}
           {/* parcel-attached drawings (B67): attach a PDF/JPEG to THIS parcel and mark it

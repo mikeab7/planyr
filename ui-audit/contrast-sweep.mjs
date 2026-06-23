@@ -100,7 +100,7 @@ async function driveAndProbe(page, theme) {
 
   // Each remaining state from a fresh load so an open menu can't poison the next click.
   await reload();
-  try { await tab("Markup").click({ timeout: 2000 }); await page.waitForTimeout(700); await grab("markup"); } catch (_) {}
+  try { await tab("Library").click({ timeout: 2000 }); await page.waitForTimeout(700); await grab("markup"); } catch (_) {}
   await reload();
   try { await tab("Schedule").click({ timeout: 2000 }); await page.waitForTimeout(700); await grab("schedule"); } catch (_) {}
   await reload();

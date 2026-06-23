@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
+import { parseNavState, deriveCurrentProject } from "./lib/navState.js";
+import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 
 export default function Scheduler({ shellModule, onShellSwitch, authControl, accountActive = false } = {}) {
   const iframeRef = useRef(null);
@@ -22,6 +24,12 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
   // done, so the FIRST such message is our "ready" signal.
   const [ready, setReady] = useState(false);
   const [showLoader, setShowLoader] = useState(true);
+  // B388 — the embedded app's action toolbar, lifted into this shell header. The embedded app
+  // reports its live toolbar state up over the bridge (planar:toolbar-state); the lifted
+  // controls render it and post commands (planar:*) back down. `ready` stays false until the
+  // first report, so we never render a control backed by a fabricated value (e.g. a hardcoded
+  // unread count) — the iframe is the single source of truth.
+  const [toolbar, setToolbar] = useState({ ready: false });
 
   // Receive the embedded scheduler's nav state (its own projects — not the Site
   // Planner's). It re-emits on load and on every project add/rename/delete/switch.
@@ -30,11 +38,27 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
       // Same-origin embedded iframe only — ignore messages from any other window so a
       // cross-origin page can't spoof the scheduler's project list into the breadcrumb.
       if (e.origin !== window.location.origin) return;
+      // Toolbar state (B388) — a sibling of nav-state from the same embedded app. Coerce to
+      // safe types so a malformed message can't render a NaN %/count; `ready` gates display.
       const m = e.data;
-      if (!m || m.source !== "planar-seq" || m.type !== "planar:nav-state") return;
-      setProjects(Array.isArray(m.projects) ? m.projects : []);
-      setActiveId(m.activeId ?? null);
-      setSection(m.section || "projects");
+      if (m && m.source === "planar-seq" && m.type === "planar:toolbar-state") {
+        setToolbar({
+          ready: true,
+          view: m.view, section: m.section, isMobile: !!m.isMobile,
+          zoomPct: Number(m.zoomPct) || 0, zoomable: !!m.zoomable,
+          reviewCount: Number(m.reviewCount) || 0, reviewOpen: !!m.reviewOpen,
+          saveStatus: m.saveStatus, savePulse: !!m.savePulse, fileLinked: !!m.fileLinked,
+          activePanel: m.activePanel || null,
+        });
+        return;
+      }
+      // parseNavState validates source/type and SANITIZES the project list to plain
+      // {id,name} objects (B380), so the breadcrumb can never deref an undefined entry.
+      const nav = parseNavState(e.data);
+      if (!nav) return;
+      setProjects(nav.projects);
+      setActiveId(nav.activeId);
+      setSection(nav.section);
       setReady(true);   // first nav-state ⇒ the embedded app is interactive
     };
     window.addEventListener("message", onMsg);
@@ -64,10 +88,11 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
   };
 
   // On the Dashboard (reports) view no single project is "current" — the Dashboard
-  // crumb reads as current and the project crumb invites a pick.
-  const currentProject = section === "reports"
-    ? null
-    : (projects.find((p) => p.id === activeId) || null);
+  // crumb reads as current and the project crumb invites a pick. deriveCurrentProject
+  // (B380) never throws and never returns undefined, so the first-render-before-nav-
+  // state window resolves to null (empty/loader state) instead of dereferencing a
+  // not-yet-resolved record.
+  const currentProject = deriveCurrentProject(projects, activeId, section);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
@@ -85,6 +110,10 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
         onSelectProject={(id) => post({ type: "planar:nav-select", id })}
         onDashboard={() => post({ type: "planar:nav-dashboard" })}
         onNewProject={() => post({ type: "planar:nav-new" })}
+        // B388 — the embedded app's toolbar, lifted into the unified header (center = view +
+        // review; right = zoom/export/save/history/contacts/automation/format/settings).
+        toolbarCenter={<ScheduleCenter toolbar={toolbar} post={post} />}
+        toolbarContent={<ScheduleActions toolbar={toolbar} post={post} />}
       />
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <iframe

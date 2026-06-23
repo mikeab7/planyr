@@ -23,6 +23,19 @@ export function setActiveUser(uid) {
 }
 export const isCloudActive = () => !!activeUser;
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
+
+// Session tombstone (per-tab): ids deleted in THIS tab. The bug it kills (B372): when you delete
+// a site from the map, the planner that's still MOUNTED (hidden) for that site unmounts, and its
+// persist-on-leave / beforeunload / debounced-autosave flush fires AFTER the delete — re-writing
+// the row we just removed (it "reappears", and then pullCloud's heal-the-split re-pushes it to the
+// cloud, so it survives a reload too). Every one of those resurrection paths funnels through
+// saveSite, so we block at that single chokepoint: saveSite refuses to RE-CREATE a deleted,
+// now-absent row. A normal edit-save (the record still exists) and a brand-new site (its id was
+// never deleted) are unaffected. Module scope = naturally per-tab; cleared on reload (by then the
+// delete has settled), or explicitly when a same-id record is deliberately re-created (re-import).
+const recentlyDeleted = new Set();
+export const _recentlyDeleted = recentlyDeleted; // test seam
+export function clearRecentlyDeleted(id) { if (id == null) recentlyDeleted.clear(); else recentlyDeleted.delete(id); }
 // Pure merge of the local cache with the cloud's records (exported for tests).
 // CRITICAL (B124/B126 data-loss fix): build from the LOCAL cache first (so a site the
 // cloud didn't return is PRESERVED, never dropped — B124), and reconcile a site present
@@ -178,6 +191,7 @@ export function stageLegacySite(uid, siteId) {
   if (!rec) return null;
   const local = createSiteModel(rec);
   if (!local.id) return null;
+  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
   let cloud = {};
   try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   cloud[local.id] = local;
@@ -224,6 +238,7 @@ export async function importOneSiteToCloud(uid, siteId) {
   if (!rec) return { ok: false, error: "not found" };
   const local = createSiteModel(rec);
   if (!local.id) return { ok: false, error: "invalid record" };
+  recentlyDeleted.delete(local.id); // a deliberate re-create lifts the delete tombstone (B372)
   let cloud = {};
   try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   cloud[local.id] = local; // stage in cache so it shows immediately
@@ -467,6 +482,11 @@ export function saveSite(partial) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
   const existing = sites[partial.id];
+  // Resurrection guard (B372): once a site is deleted in this tab, a late flush from the
+  // unmounting planner (persist-on-leave / beforeunload) or an already-queued debounced autosave
+  // must NOT re-insert it. Block ONLY a re-create of a deleted, currently-absent row — a normal
+  // edit-save (existing present) and a brand-new site (id never deleted) both pass through.
+  if (!existing && recentlyDeleted.has(partial.id)) return false;
   let merged = { ...(existing || {}), ...partial };
   // Cross-tab guard (B127): if the stored record is NEWER than what THIS tab last saw, another
   // tab wrote in between — fold our change ON TOP of the store's content (union) instead of a
@@ -481,18 +501,21 @@ export function saveSite(partial) {
   lastSeenAt[partial.id] = model.updatedAt;
   return writeSites(sites);
 }
+// Remove a site locally (instant/optimistic) AND from the cloud when signed in. Returns the
+// cloud-delete promise ({ ok, error?, removed? }) so the caller can AWAIT it and surface a loud
+// error if the cloud removal actually failed (the row would otherwise silently survive and
+// reappear on reload — B372). Logged out, it resolves ok (nothing to remove server-side).
 export function deleteSite(id) {
   const sites = readSites();
   delete sites[id];
   writeSites(sites);
+  recentlyDeleted.add(id); // tombstone so no in-flight flush can resurrect it (B372)
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
-  // Fire-and-forget cloud removal. TEAM: a regular member can't delete a teammate's SHARED
-  // project (RLS allows only the owner or a team admin) — if the server rejects the delete,
-  // re-pull so the row reappears in the cache instead of vanishing only on this device.
-  if (activeUser) {
-    const me = activeUser;
-    cloudDelete(me, id).then((r) => { if (r && r.ok === false) pullCloud(me).catch(() => {}); }).catch(() => {});
-  }
+  // Return the cloud-removal result so the caller can report an honest failure / no-op (B372).
+  // TEAM: cloudDelete scopes by id and lets RLS decide (owner or team-admin) — a regular member
+  // can't delete a teammate's shared project; that surfaces as removed:0, and the row re-appears
+  // on the next pull rather than being lost.
+  return activeUser ? cloudDelete(activeUser, id) : Promise.resolve({ ok: true, skipped: true });
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }

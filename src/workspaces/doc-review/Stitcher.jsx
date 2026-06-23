@@ -22,7 +22,8 @@ import { createOcrRunner } from "./lib/ocr.js";
 import { ftToAcres } from "../../shared/coordinates/index.js";
 import { worldToScreen, screenToWorld, zoomAround } from "../../shared/viewport/viewportTransform.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import { useReviewPersistence } from "./lib/usePersistence.js";
+import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
+import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, composeTitle } from "./lib/reviewStore.js";
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
@@ -440,7 +441,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const isEmpty = useCallback(() => placed.length === 0 && measures.length === 0, [placed, measures]);
   // Pan/zoom (`view`) is captured in the snapshot but left out of the save triggers so
   // panning doesn't spam writes — the next real edit (or the flush) saves the latest view.
-  const { status, suspendSave } = useReviewPersistence({
+  const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty,
     deps: [reviewId, meta, pdfs, placed, measures, ftPerUnit],
   });
@@ -657,7 +658,15 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         <span style={{ width: 1, height: 20, background: "var(--chrome-divider)" }} />
         <button style={btn(cropBlocks)} onClick={() => setCropBlocks((v) => !v)} title="Hide each grouped sheet's title block so the drawings butt cleanly (B338)">{cropBlocks ? "✓ " : ""}Crop blocks</button>
         <button style={btn(showRefs)} onClick={() => setShowRefs((v) => !v)} title="Show clickable detail-callout hotspots — click one to pull up that detail in a popup (B350)">{showRefs ? "✓ " : ""}Details</button>
-        <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} idle={placed.length === 0} />
+        {/* The Stitcher has its own chrome (no shared AppHeader), so the app-wide save
+            indicator (NEW-1) rides here next to Reviews — same compact cloud glyph, same
+            normalized state, so a failed save is just as loud as everywhere else. */}
+        <CloudSyncBadge
+          state={docSaveState(status, signedIn, placed.length === 0)}
+          onRetry={status === "conflict" ? undefined : saveNow}
+          detail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
+        />
+        <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={onOpenReview || (() => {})} onNew={resetStitch} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -903,6 +912,26 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f1(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
+              {/* Per-measure list with a × delete (B376): the stitched canvas has no select-and-delete,
+                  so this list is the ONLY way to remove a committed measurement here — without it a
+                  stray measure (e.g. an uncalibrated "set scale" area) could never be taken off. */}
+              {measures.length > 0 && (
+                <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 6 }}>
+                  {measures.map((m) => {
+                    const val = m.kind === "area"
+                      ? (ftPerUnit ? `${f2(ftToAcres(polyArea(m.pts) * ftPerUnit * ftPerUnit))} ac` : "set scale")
+                      : (ftPerUnit ? `${f1(dist(m.pts[0], m.pts[1]) * ftPerUnit)} ft` : "set scale");
+                    return (
+                      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0" }}>
+                        <span style={{ flex: "none", color: PAL.muted, textTransform: "capitalize", fontSize: 11.5 }}>{m.kind}</span>
+                        <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{val}</span>
+                        <button onClick={() => { pushHistory(); setMeasures((arr) => arr.filter((x) => x.id !== m.id)); }} title="Delete this measurement" aria-label="Delete this measurement"
+                          style={{ flex: "none", width: 22, height: 22, display: "grid", placeItems: "center", border: "none", background: "transparent", cursor: "pointer", color: "var(--danger-text)", fontSize: 13, fontWeight: 800, lineHeight: 1, borderRadius: 5, fontFamily: "inherit" }}>×</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 8 }}>One calibration applies to the whole stitched plan (shared scale). Measures cross seams in world units.</div>
             </div>
           )}

@@ -313,7 +313,17 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; h
 input[type=range]::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--amber); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.2); cursor:pointer; }
 
 
-/* when embedded in the planyr shell, hide the built-in sequence header */
+/* When embedded in the Planyr shell, the shell's unified header now provides EVERYTHING
+   this app's own header did: the Row-1 breadcrumb shows the logo + Dashboard/Projects
+   toggle + project switcher (bridged over postMessage, B203), and the shell's Row-2 toolbar
+   re-renders the action controls — view switcher, Review, Zoom, Export, Save, Version
+   History, Contacts, Automation, Format, Settings — driving THIS app over the postMessage
+   toolbar bridge (B388). So hide our own header entirely in-embed, or there'd be a double
+   toolbar. (Its self-positioned panels/modals — Settings, Format, etc. — still render; they
+   were never anchored to these buttons, so the buttons can live up in the shell.)
+   History: B381 narrowed an earlier `.app-header{display:none}` to hide only the duplicated
+   nav, because the action toolbar had no shell home yet. Now that the shell hosts the toolbar
+   too (B388), hiding the whole header is correct again — the controls didn't vanish, they moved. */
 html.in-iframe .app-header { display: none !important; }
 </style>
 <script>if(window.self!==window.top)document.documentElement.classList.add("in-iframe");</script>
@@ -447,7 +457,7 @@ const buildHolidaySet = holidays => {
   for (let y = y0-5; y <= y0+15; y++) HOLIDAY_DEFS.forEach(h => { if(holidays[h.k]) s.add(h.fn(y)); });
   return s;
 };
-const DEFAULT_SETTINGS = {defaultSplit:60, snapDefault:true, holidays:{...DEFAULT_HOLIDAYS}, customHealth:[], healthLabelOverrides:{}, barLabels:{left:"start", right:"end", year:true, nameAlign:"left"}, rowHeight:24};
+const DEFAULT_SETTINGS = {defaultSplit:60, snapDefault:true, holidays:{...DEFAULT_HOLIDAYS}, customHealth:[], healthLabelOverrides:{}, barLabels:{left:"start", right:"end", year:true}, rowHeight:24};   // task-name alignment is per-project (proj.labelAlign), not here (B393)
 // Gantt bar-label helpers — one source of truth for the on-screen chart and the PDF exhibit
 const fmtBarDate = (s, withYear) => { if(!s) return ""; const d = new Date(s+"T12:00:00"); return isNaN(d) ? "" : `${d.getMonth()+1}/${d.getDate()}` + (withYear===false ? "" : `/${String(d.getFullYear()).slice(2)}`); };
 const barLabelText = (t, field, withYear) => {
@@ -4342,6 +4352,91 @@ function App() {
     return () => window.removeEventListener("message", onMsg);
   }, [inShell, addProject]);
 
+  // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
+  // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders
+  // those controls up in its own unified header. So when embedded: (1) report the toolbar's
+  // live state up, and (2) accept the shell's toolbar commands and run the SAME actions our
+  // own buttons do. Standalone (not embedded) is untouched — `inShell` gates both halves and
+  // the in-iframe buttons keep their own handlers.
+  const tbSigRef = useRef("");
+  useEffect(() => {
+    if (!inShell || !data) return;
+    const sec = data.section ?? "projects";
+    const section = sec === "suggestions" ? "projects" : sec;
+    const view = data.view ?? "grid";
+    const state = {
+      view, section, isMobile: !!isMobile,
+      zoomPct: Math.round((ganttPPD || 22) / 6 * 100),
+      zoomable: section === "projects" && (view === "split" || view === "gantt"),
+      reviewCount: reviewRows.length,
+      reviewOpen: !!reviewOpen,
+      saveStatus, savePulse: !!savePulse, fileLinked: !!fileLinked,
+      activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
+        : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
+    };
+    const sig = JSON.stringify(state);
+    if (sig === tbSigRef.current) return; // only emit when the toolbar state actually changes
+    tbSigRef.current = sig;
+    try {
+      window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
+    } catch (_) {}
+  }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
+      settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+
+  useEffect(() => {
+    if (!inShell) return;
+    const onCmd = (e) => {
+      // Same-origin shell only — these commands mutate state / trigger downloads. (Same strict
+      // guards as the nav bridge: exact origin + the planar-shell source discriminator.)
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-shell") return;
+      switch (m.type) {
+        case "planar:view-set":
+          if (m.view) setData(d => d ? { ...d, view: m.view } : d);
+          break;
+        case "planar:review-toggle": {
+          const opening = !reviewOpen;
+          if (opening && reviewRows.length && data && data.projects) {
+            const a = reviewRows[Math.min(reviewIdx, reviewRows.length - 1)];
+            if (a && a.project_id != null && data.projects[a.project_id] && data.aPid !== a.project_id) setData(d => ({ ...d, aPid: a.project_id }));
+          }
+          setReviewOpen(opening);
+          break;
+        }
+        case "planar:zoom":
+          if (m.dir === "in") setGanttPPD(z => Math.min(80, Math.ceil(z * 1.35)));
+          else if (m.dir === "out") setGanttPPD(z => Math.max(1, Math.floor(z / 1.35)));
+          break;
+        case "planar:export":
+          if (m.mode === "pdf") setPdfExportOpen(true); else exportHTML();
+          break;
+        case "planar:save":
+          if (saveStatus === "error") { if (latestData.current) attemptCloudSave(latestData.current); }
+          else openFile();
+          break;
+        case "planar:history":
+          setHistoryOpen(true); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:contacts":
+          setContactsOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setFormatOpen(false);
+          break;
+        case "planar:automation":
+          setAutomationOpen(o => !o); setSettingsOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:settings":
+          setSettingsOpen(o => !o); setAutomationOpen(false); setContactsOpen(false); setFormatOpen(false);
+          break;
+        case "planar:format":
+          setFormatOpen(o => !o); setSettingsOpen(false); setAutomationOpen(false); setContactsOpen(false);
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener("message", onCmd);
+    return () => window.removeEventListener("message", onCmd);
+  }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
+
   const proj = data?.projects[data?.aPid];
 
   const flatTasks = useMemo(() => {
@@ -4583,8 +4678,8 @@ function App() {
       )}
       <div className="app-header" style={{minHeight:46,background:"#fff",borderBottom:"1px solid var(--bd2)",display:"flex",alignItems:"center",flexWrap:"wrap",rowGap:6,columnGap:8,padding:"6px 14px",flexShrink:0,zIndex:30}}>
 
-        {/* Logo */}
-        <svg height="26" viewBox="0 0 196 52" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0,marginRight:8,display:"block"}}>
+        {/* Logo — hidden when embedded (the shell chrome already shows the Planyr wordmark) */}
+        <svg className="hdr-logo" height="26" viewBox="0 0 196 52" xmlns="http://www.w3.org/2000/svg" style={{flexShrink:0,marginRight:8,display:"block"}}>
           <g transform="translate(0,6)">
             <rect x="0"  y="0"  width="44" height="7"  rx="2" fill="#4f46e5"/>
             <rect x="10" y="13" width="33" height="7"  rx="2" fill="#4f46e5"/>
@@ -4881,7 +4976,7 @@ function App() {
         <NotesModal task={liveNotesTask} projectId={notesCtx.projectId} initChar={notesCtx?.initChar||null} updateTask={updateTask} onClose={() => setNotesCtx(null)} />
       )}
       {pdfExportOpen && (
-        <PDFExportModal data={data} activePid={data.aPid} onClose={() => setPdfExportOpen(false)} />
+        <PDFExportModal data={data} activePid={data.aPid} setData={setData} onClose={() => setPdfExportOpen(false)} />
       )}
 
       {taskCtx && (
@@ -6823,6 +6918,116 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
   }
 }
 
+// ── B393/B394/B395 — shared Gantt label + dependency-connector geometry ──────────────
+// Pure helpers used by BOTH render paths — the on-screen <GanttView> and the print
+// <buildGanttSVG> — so the two can never drift (the recurring "both paths" rule of
+// B210/B211/B222). No React/DOM here.
+
+// One uniform near-black ink for EVERY in-chart Gantt label (leaf bar, summary bracket,
+// milestone), both paths. B320 eye-comfort: hierarchy comes from WEIGHT, never from
+// fading text toward the background — so the B210 depth-navy is removed from label TEXT
+// (it stays on the bracket GRAPHIC, which is not text). (B393)
+const GANTT_INK = "#1a1a1a";
+
+// Per-project label alignment (view-level, one choice per chart), persisted on the
+// project record and riding the existing cloud-save path — same shape as the B212
+// column config. Default "right" (name trailing just after the bar end). (B393)
+const resolveLabelAlign = proj => {
+  const a = proj && proj.labelAlign;
+  return (a === "left" || a === "center" || a === "right") ? a : "right";
+};
+const writeLabelAlign = (setData, pid, align) => setData(d =>
+  (d.projects && d.projects[pid]) ? {...d, projects: {...d.projects, [pid]: {...d.projects[pid], labelAlign: align}}} : d);
+
+// Weight ramp: top-level summary boldest → child summaries medium → leaf/milestone
+// regular. Color is uniform (GANTT_INK); only the weight steps. An explicit per-task
+// bold lifts to at least 700. (B393)
+const ganttNameWeight = (depth, kind, bold) => {
+  const d = Math.min(depth || 0, 3);
+  let w;
+  if (kind === "summary") w = [800, 700, 600, 600][d];
+  else if (kind === "milestone") w = 600;
+  else w = 500;                       // leaf — regular
+  return bold ? Math.max(w, 700) : w;
+};
+
+// Estimated label width (px) from char count × per-char width (~0.6·fontSize, a slight
+// over-estimate so a flip/lift triggers before a real clip, never after). (B393)
+const estLabelWidth = (s, fs) => Math.max(1, String(s == null ? "" : s).length) * fs * 0.6 + 4;
+
+// THE placement helper. Given a bar/bracket/diamond's geometry, the label width, the
+// chosen alignment and the row-band height, decide where the name goes and how — never
+// on the fill. Mirrors the overflow-outside logic of site-planner/lib/labelLayout.js
+// (can't import it — the /sequence/ iframe is a separate bundle). Pure geometry. (B393)
+//   kind     "leaf" | "summary" | "milestone"
+//   align    "left" | "center" | "right"
+//   bx,bw    bar left x + width (px); milestone passes its diamond center as bx, bw 0
+//   rowTop   y of the row band's top
+//   barMidY  vertical center of the bar/diamond (for inline labels)
+//   barTopY  top y of the bar/span/diamond (so an "above" caption clears it)
+//   labelW   estimated label width
+//   padBefore/padAfter  px already taken by a data label hugging that side of the bar
+//   chartL/chartR  horizontal clip — a label must stay within (no horizontal scroll)
+//   gap, capHalf   spacing + caption half-height
+// Returns { x, y, anchor:"start"|"middle"|"end", mode:"after"|"before"|"plate"|"above" }.
+const placeGanttLabel = ({kind, align, bx, bw, rowTop, barMidY, barTopY, labelW,
+                          padBefore = 0, padAfter = 0, chartL, chartR, gap = 6, capHalf = 6}) => {
+  const barStart = bx, barEnd = bx + bw;
+  // An "above" caption is vertically centered in the upper part of the row band: it sits
+  // just above the bar/span (clear air) but never rides above the row top (which, for the
+  // topmost summary, is the timeline header).
+  const aboveY = Math.max(rowTop + capHalf,
+                          Math.min(rowTop + capHalf + 1, (barTopY != null ? barTopY : rowTop) - 1 - capHalf));
+  const clampX = (x, anchor) => {
+    let x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+    const x1 = x0 + labelW;
+    if (x1 > chartR) x -= (x1 - chartR);          // shift left so the right edge fits
+    x0 = anchor === "start" ? x : anchor === "middle" ? x - labelW / 2 : x - labelW;
+    if (x0 < chartL) x += (chartL - x0);          // then shift right so the left edge fits
+    return x;
+  };
+  const above = (x, anchor) => ({ x: clampX(x, anchor), y: aboveY, anchor, mode: "above" });
+
+  if (kind === "summary")            // caption ALWAYS above the thin span; align anchors it
+    return align === "left"  ? above(barStart, "start")
+         : align === "right" ? above(barEnd,   "end")
+         :                      above(barStart + bw / 2, "middle");
+
+  if (kind === "milestone") {        // Left = before / Center = above / Right = after
+    const lo = barStart - 5, hi = barEnd + 5;     // diamond half-width ≈ 5
+    if (align === "center") return above(bx, "middle");
+    if (align === "left") {
+      const x = lo - gap - padBefore;
+      return (x - labelW < chartL) ? above(bx, "middle") : { x, y: barMidY, anchor: "end", mode: "before" };
+    }
+    const x = hi + gap + padAfter;                // right
+    if (x + labelW <= chartR) return { x, y: barMidY, anchor: "start", mode: "after" };
+    const xl = lo - gap - padBefore;
+    return (xl - labelW >= chartL) ? { x: xl, y: barMidY, anchor: "end", mode: "before" } : above(bx, "middle");
+  }
+
+  // leaf
+  if (align === "center")
+    return (labelW <= bw - 4) ? { x: barStart + bw / 2, y: barMidY, anchor: "middle", mode: "plate" }
+                              : above(barStart + bw / 2, "middle");
+  if (align === "left") {
+    const x = barStart - gap - padBefore;
+    return (x - labelW < chartL) ? above(barStart, "start") : { x, y: barMidY, anchor: "end", mode: "before" };
+  }
+  const x = barEnd + gap + padAfter;              // right (default)
+  if (x + labelW <= chartR) return { x, y: barMidY, anchor: "start", mode: "after" };
+  const xl = barStart - gap - padBefore;          // flip left
+  return (xl - labelW >= chartL) ? { x: xl, y: barMidY, anchor: "end", mode: "before" } : above(barEnd, "end");
+};
+
+// Dependency connectors are CURVED (cubic bézier) — owner preference (B396, reverting the
+// B395 orthogonal experiment). The real bug B395 chased was that the connectors floated at
+// the row's vertical center while the on-screen bars sit at the BOTTOM of the row, so the
+// curves looked unbound. Fix: anchor each endpoint to its bar's true vertical center (per
+// kind — leaf / summary span / milestone; computed inline in each render path since the
+// on-screen bar geometry differs from the print one) so a curve cleanly leaves the
+// predecessor bar and enters the successor bar.
+
 // ── GanttView ─────────────────────────────────────────────
 function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScroll, rolledHealthMap, proj, onMouseEnter, selectedId, setSelectedId, settings}) {
   const [scrollTop, setScrollTop] = useState(0);
@@ -6899,17 +7104,60 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
     return out;
   }, [minD, totD, ppd]);
 
+  // Vertical center of a task's bar within its row — leaf bars sit at the row BOTTOM,
+  // summaries on their span, milestones on the diamond. Dependency curves anchor here so
+  // they bind to the bar instead of floating at the row's mid-line (B396).
+  const depYCenter = (t, idx) => {
+    const topY = idx * ROW_H;
+    if (t.duration === 0) return topY + ROW_H - 7.5;                    // milestone diamond center
+    if (childParentIds.has(t.id)) {                                      // summary span center
+      const dd = Math.min(t.level||0, 3), SPAN = [6,5,4,4][dd], LEG = [0.16,0.12,0.09,0.07][dd]*ROW_H;
+      return topY + (ROW_H - 2 - LEG - SPAN) + SPAN/2;
+    }
+    const LEAF_H = ROW_H*0.25;                                           // leaf bar center
+    return topY + (ROW_H - LEAF_H - 1) + LEAF_H/2;
+  };
+
   const depLines = useMemo(() =>
     tasks.flatMap(task => normPreds(task.predecessors).map(p => {
       const pred = tasks.find(t => t.id===p.id); if(!pred) return null;
+      // A connector needs a real bar/diamond at BOTH ends. An unscheduled task has blank
+      // dates → no x-position (xOf("") is NaN) → the arrow lands in empty space pointing at
+      // nothing. Skip it; the blank row carries an explicit "Unscheduled" tag instead. Mirrors
+      // the bar renderer's isBlankDates guard AND the PDF-export connector guard (both skip
+      // blank-date endpoints) — depLines was the one draw path that lacked it.
+      if (!pred.start || !pred.end || !task.start || !task.end) return null;
       const type = (p.type||"FS").toUpperCase();
+      // x = the bar EDGE the link leaves/enters, per dependency type.
       const x1 = (type==="SS"||type==="SF") ? xOf(pred.start) : xOf(pred.end);
       const x2 = (type==="FF"||type==="SF") ? xOf(task.end) : xOf(task.start);
-      const y1 = tasks.indexOf(pred)*ROW_H+ROW_H/2;
-      const y2 = tasks.indexOf(task)*ROW_H+ROW_H/2;
+      // y = each endpoint's BAR vertical center, so the curve binds to the bar (B396).
+      const y1 = depYCenter(pred, tasks.indexOf(pred));
+      const y2 = depYCenter(task, tasks.indexOf(task));
       return {key:`${p.id}-${task.id}-${type}`, x1, y1, x2, y2, type};
     }).filter(Boolean))
-  , [tasks, minD, ppd]);
+  , [tasks, minD, ppd, childParentIds]);
+
+  // ── In-chart name labels (B393) ──────────────────────────
+  // Per-project alignment; the chart's horizontal clip is [0, totalW] (a label past it
+  // would add horizontal scroll — the gotcha — so the helper flips/lifts instead).
+  const labelAlign = resolveLabelAlign(proj);
+  const chartL = 0, chartR = Math.max(totalW, 400);
+  const NAME_SIZE = lvl => [9.5, 8.5, 8.5, 8][Math.min(lvl || 0, 3)];
+  const padOf = txt => (txt ? estLabelWidth(txt, 8) + 6 : 0);   // room a hugging data label needs
+  // One name renderer for all three kinds: uniform near-black ink, weight-by-level, an
+  // optional contrast plate for the centered-on-bar case. (x,y) is the alignment anchor +
+  // vertical center, in the row's local space; the transform seats the box on it.
+  const GanttName = ({task, kind, place, fs}) => {
+    const ax = place.anchor === "middle" ? "-50%" : place.anchor === "end" ? "-100%" : "0";
+    const plate = place.mode === "plate";
+    return <span data-gantt-name={task.id} data-gantt-mode={place.mode} style={{position:"absolute",
+      left:place.x, top:place.y, transform:`translate(${ax}, -50%)`,
+      fontSize:fs, lineHeight:1.2, fontWeight:ganttNameWeight(task.level, kind, task.bold),
+      fontStyle:task.italic?"italic":"normal", color:GANTT_INK,
+      fontFamily:"'Inter',system-ui,sans-serif", whiteSpace:"nowrap", pointerEvents:"none", zIndex:7,
+      ...(plate ? {background:"rgba(255,255,255,0.85)", padding:"0 3px", borderRadius:2} : {})}}>{task.name}</span>;
+  };
 
   const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
   const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - BUF);
@@ -7041,8 +7289,9 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
           <svg style={{position:"absolute",top:0,left:0,width:totalW,height:tasks.length*ROW_H,pointerEvents:"none",zIndex:3,overflow:"visible"}}>
             {depLines.map(l => {
             const color = l.type==="SS"?"#7c3aed":l.type==="FF"?"#0891b2":l.type==="SF"?"#be185d":"#0969da";
-            const arrowRight = l.x2 >= l.x1;
-            const aDir = arrowRight ? 1 : -1;
+            // Curved (cubic bézier) connector — owner-preferred (B396). Direction-flipped 32px
+            // handles; endpoints already bound to the bar centers by depYCenter.
+            const aDir = l.x2 >= l.x1 ? 1 : -1;
             return (
               <g key={l.key}>
                 <path d={`M${l.x1},${l.y1} C${l.x1+32*aDir},${l.y1} ${l.x2-32*aDir},${l.y2} ${l.x2},${l.y2}`}
@@ -7076,13 +7325,24 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
             // by depth), bottom-aligned with the brackets so baselines line up across the chart.
             const LEAF_H = ROW_H*0.25;
 
-            // Blank-date task: render just the row, no bar/diamond
+            // Blank-date task (an unscheduled stub): no bar/diamond, and — by design — no
+            // dependency arrows are drawn to it (the depLines guard skips it). Show an explicit,
+            // horizontally-sticky "Unscheduled" tag so the empty row reads as intentional rather
+            // than a rendering glitch — never a silent void. Hardcoded light hues to match this
+            // (always-light) chart body, like the bar labels above.
             if (isBlankDates) {
               return <div key={task.id} onClick={()=>setSelectedId?.(task.id)}
                 style={{position:"absolute",top:ri*ROW_H,left:0,right:0,height:ROW_H,
+                  display:"flex",alignItems:"center",
                   borderBottom:"1px solid rgba(0,0,0,0.1)",
                   borderLeft:isGanttSel?"3px solid var(--blue)":"3px solid transparent",
-                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}} />;
+                  background:isGanttSel?(task.rowColor||"#eff6ff"):rowBg,cursor:"default"}}>
+                <span style={{position:"sticky",left:8,display:"inline-flex",alignItems:"center",
+                  height:14,padding:"0 6px",fontSize:8,fontWeight:600,letterSpacing:".05em",
+                  textTransform:"uppercase",color:"#6b7280",background:"#fff",
+                  border:"1px dashed #cbd5e1",borderRadius:7,whiteSpace:"nowrap",
+                  pointerEvents:"none",fontFamily:"'Inter',system-ui,sans-serif"}}>Unscheduled</span>
+              </div>;
             }
 
             return (
@@ -7097,7 +7357,14 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     milestones (z5, the data layer) → bar + name labels (z6–7, top). */}
                 {(() => { return null; })()}
                 {isMilestone ? (<>
-                  {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; return <span style={{position:"absolute",left:bx,transform:"translateX(-50%)",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
+                  {(() => {                                    // milestone name: Left=before / Center=above / Right=after the diamond (B393)
+                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels;
+                    const place = placeGanttLabel({kind:"milestone", align:labelAlign, bx, bw:0, rowTop:0,
+                      barMidY:ROW_H-7.5, barTopY:ROW_H-10.5, labelW:estLabelWidth(task.name, fs),
+                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
+                    return <GanttName task={task} kind="milestone" place={place} fs={fs} />;
+                  })()}
                   {(() => {
                     // Milestone diamond — same monochrome language as task bars (B211): the task
                     // gray, filled when complete, hollow outline otherwise. B222: the hue is the
@@ -7115,27 +7382,29 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     </>); })()}
                 </>) : isSummary ? (
                   (() => {
-                    // Depth-stepped BRACKET (B210): a thin navy span with straight-down legs at
-                    // each end (no triangles). Three cues step together, top-of-tree strongest —
-                    // darkness (navy → lighter navy tint), span thickness, and leg length. Beyond
-                    // ~4 levels the ramp stops deepening (the table's indented name carries depth
-                    // from there). Neutral navy only: status hue is reserved for task bars (B211).
-                    // B222: the bracket keeps its depth-navy independent of the row fill (rowColor
-                    // is the row background only) so a fill can't swallow it; navy reads on any of
-                    // the (all-light) fill swatches.
+                    // Depth-stepped BRACKET (B210): a thin span with straight-down legs at each
+                    // end. The GRAPHIC keeps its top-of-tree-strongest ramp — darkness, span
+                    // thickness and leg length all step together (depth 0 = #2B3340, darkest +
+                    // thickest, stepping lighter/thinner as nesting deepens; B222 keeps it
+                    // independent of the row fill). B393: the navy was REMOVED from the name TEXT
+                    // (see GanttName — uniform near-black, weight carries hierarchy) but stays on
+                    // this graphic, which is not text; magnitudes are compressed a touch vs B210
+                    // so the always-above caption has clear air within the row.
                     const d    = Math.min(task.level||0, 3);
-                    const NAVY = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
-                    const col  = NAVY;
-                    const SPAN = [7,5,4,4][d];                    // horizontal span thickness, px
-                    const LEG  = [0.30,0.22,0.16,0.13][d]*ROW_H;  // downward leg length, steps by depth
+                    const col  = ["#2B3340","#46506A","#6E7790","#8A93A8"][d];
+                    const SPAN = [6,5,4,4][d];                    // horizontal span thickness, px
+                    const LEG  = [0.16,0.12,0.09,0.07][d]*ROW_H;  // downward leg length, steps by depth
                     const legW = 1.5;                             // vertical leg stroke width
                     const botY = ROW_H - 2;                       // baseline shared with leaf bars
                     const spanTop = botY - LEG - SPAN;            // span sits above its legs
-                    const lg  = [{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][d];
-                    const ctr = settings?.barLabels?.nameAlign === "center";
+                    const fs = NAME_SIZE(task.level);
+                    // Summary caption ALWAYS above the thin span (a near-full-width top summary
+                    // has no side room); alignment anchors it L/center/R (B393 — the top-summary fix).
+                    const place = placeGanttLabel({kind:"summary", align:labelAlign, bx, bw, rowTop:0,
+                      barMidY:spanTop+SPAN/2, barTopY:spanTop, labelW:estLabelWidth(task.name, fs),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
                     return (<>
-                      {/* Label centered over the span in the bar's own level-navy (no fill to print white onto) */}
-                      <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:Math.max(0,spanTop-10),fontSize:lg.fontSize,color:col,fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>
+                      <GanttName task={task} kind="summary" place={place} fs={fs} />
                       <div style={{position:"absolute",left:bx,width:bw,top:spanTop,height:SPAN+LEG,zIndex:5,pointerEvents:"none"}}>
                         <div style={{position:"absolute",left:0,right:0,top:0,height:SPAN,background:col,borderRadius:1}} />
                         <div style={{position:"absolute",left:0,top:0,width:legW,height:SPAN+LEG,background:col}} />
@@ -7144,7 +7413,14 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     </>);
                   })()
                 ) : (<>
-                  {(() => { const lg=[{fontSize:10,fontWeight:600},{fontSize:9,fontWeight:500},{fontSize:9,fontWeight:400},{fontSize:8.5,fontWeight:400}][Math.min(task.level||0,3)]; const ctr=settings?.barLabels?.nameAlign==="center"; return <span style={{position:"absolute",left:ctr?bx+bw/2:bx,transform:ctr?"translateX(-50%)":"none",top:1,fontSize:lg.fontSize,color:"#374151",fontFamily:"'Inter',system-ui,sans-serif",whiteSpace:"nowrap",pointerEvents:"none",fontWeight:task.bold?700:lg.fontWeight,fontStyle:task.italic?"italic":"normal",zIndex:7,lineHeight:1.2}}>{task.name}</span>; })()}
+                  {(() => {                                    // leaf name: Right=after / Left=before / Center=on a plate; auto-flip/lift, never on the fill (B393)
+                    const fs = NAME_SIZE(task.level), bl = settings?.barLabels, barTopY = ROW_H-LEAF_H-1;
+                    const place = placeGanttLabel({kind:"leaf", align:labelAlign, bx, bw, rowTop:0,
+                      barMidY:barTopY+LEAF_H/2, barTopY, labelW:estLabelWidth(task.name, fs),
+                      padBefore:padOf(bl?barLabelText(task,bl.left,bl.year):""), padAfter:padOf(bl?barLabelText(task,bl.right,bl.year):""),
+                      chartL, chartR, capHalf:Math.round(fs*0.58)});
+                    return <GanttName task={task} kind="leaf" place={place} fs={fs} />;
+                  })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
                     const L=barLabelText(task,bl.left,bl.year), R=barLabelText(task,bl.right,bl.year);
                     return (<>
@@ -7454,11 +7730,13 @@ function FormatPanel({data, setData, onClose}) {
           <Toggle on={(s.barLabels||{}).year!==false} onChange={v=>upd({barLabels:{...(s.barLabels||{}),year:v}})} />
         </div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 2px 0"}}>
-          <span style={{fontSize:12,color:"var(--txt)"}}>Task name above bar</span>
-          <SegBtn options={[{l:"Left",v:"left"},{l:"Centered",v:"center"}]} value={(s.barLabels||{}).nameAlign||"left"} onChange={v=>upd({barLabels:{...(s.barLabels||{}),nameAlign:v}})} />
+          <span style={{fontSize:12,color:"var(--txt)"}}>Task name alignment</span>
+          <SegBtn options={[{l:"Left",v:"left"},{l:"Center",v:"center"},{l:"Right",v:"right"}]}
+            value={resolveLabelAlign(data.projects?.[data.aPid])}
+            onChange={v=>writeLabelAlign(setData, data.aPid, v)} />
         </div>
         <div style={{fontSize:10,color:"var(--mut)",marginTop:6,lineHeight:1.4}}>
-          Bar labels show beside task bars and milestones — on screen and in the PDF exhibit. Row height applies on screen; the exhibit keeps its own print density.
+          Task names sit beside the bar (Left / Right), on it (Center), or — when there's no room — above it, never on the fill. Saved per project, and used on screen and in the PDF exhibit. The small date/owner labels are set by the table above.
         </div>
       </div>
     </div>
@@ -8368,28 +8646,93 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const dates=allTasks.flatMap(t=>[t.start,t.end]).filter(d=>d&&!isNaN(pd(d))).sort();
   if(!dates.length) return "";
   const minD=dates[0], maxD=dates[dates.length-1];
-  const totalDays=Math.ceil((pd(maxD)-pd(minD))/86400000)+2;
-  const ppd=ganttW/totalDays;
-  const xOf=d=>LABEL_W+Math.round((pd(d)-pd(minD))/86400000*ppd);
+  const DAY=86400000;
+  const addDays=(s,n)=>fd(new Date(pd(s).getTime()+Math.round(n)*DAY));
   const getDepth=(tasks,id)=>{let dep=0,t=tasks.find(x=>x.id===id);while(t&&t.parentId!==null){dep++;t=tasks.find(x=>x.id===t.parentId);}return Math.min(dep,3);};
+  // ── Visible time window: auto-fit by default (B401), optional timescale + pan (B361) ──
+  // Start from the natural [minD,maxD]; EXTEND it just enough that every start/end label
+  // sits on the sheet without clipping (frame it — never move the labels); then apply the
+  // owner's timescale unit / fine-zoom / pan if set. Default (no unit, mul 1, pan 0) = pure
+  // auto-fit. The discrete unit and the continuous multiplier compose into ONE span, so the
+  // sidebar selector and the toolbar control can't fight each other.
+  let winStart, winEnd, totalDays, ppd;
+  {
+    const td0=Math.max(1,Math.ceil((pd(maxD)-pd(minD))/DAY)+2), ppd0=ganttW/td0;
+    const xo0=d=>LABEL_W+Math.round((pd(d)-pd(minD))/DAY*ppd0);
+    let leadPx=0, trailPx=0;
+    try{
+      const padOf=txt=>txt?estLabelWidth(txt,6.5)+5:0;
+      allTasks.forEach(t=>{
+        if(!t||!t.start||!t.end||isNaN(pd(t.start))||isNaN(pd(t.end))) return;
+        const proj=projects.find(p=>p.tasks.some(x=>x.id===t.id));
+        const depth=proj?getDepth(proj.tasks,t.id):0;
+        const isMile=t.duration===0, isParent=proj?proj.tasks.some(x=>x.parentId===t.id):false;
+        if(opts.barNames===false) return;
+        const bx=xo0(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/DAY*ppd0));
+        const kind=isMile?"milestone":isParent?"summary":"leaf";
+        const align=opts.labelAlign||resolveLabelAlign(proj);
+        const fs=[9,8.5,8,7.5][Math.min(depth,3)];
+        const nm=t.name==null?"":String(t.name), lw=estLabelWidth(nm,fs);
+        const bl=(opts.barLabels&&!isParent)?opts.barLabels:null;
+        const place=placeGanttLabel({kind,align,bx,bw:isMile?0:bw,rowTop:0,barMidY:0,barTopY:0,labelW:lw,
+          padBefore:padOf(bl?barLabelText(t,bl.left,bl.year):""),padAfter:padOf(bl?barLabelText(t,bl.right,bl.year):""),
+          chartL:-1e9,chartR:1e9,gap:5,capHalf:Math.round(fs*0.6)});
+        const x0=place.anchor==="start"?place.x:place.anchor==="middle"?place.x-lw/2:place.x-lw, x1=x0+lw;
+        if(LABEL_W-x0>leadPx) leadPx=LABEL_W-x0;
+        if(x1-svgWidth>trailPx) trailPx=x1-svgWidth;
+      });
+    }catch(_){ leadPx=0; trailPx=0; }
+    // Cap the lead/trail so a long label can't crush the schedule into a sliver of the page —
+    // give breathing room, then let an over-long label clamp/flip as before (B401 intent).
+    const cap=Math.max(8,Math.ceil(td0*0.22));
+    const leadD=Math.min(cap,Math.max(0,Math.ceil((leadPx+4)/ppd0))), trailD=Math.min(cap,Math.max(0,Math.ceil((trailPx+4)/ppd0)));
+    const afStart=addDays(minD,-leadD), afEnd=addDays(maxD,trailD+2);
+    const afDays=Math.max(1,Math.ceil((pd(afEnd)-pd(afStart))/DAY));
+    const PPU={days:14,weeks:3.7,months:1.5,quarters:0.57};   // target px/day per discrete unit
+    const mul=(typeof opts.zoomMul==="number"&&opts.zoomMul>0)?opts.zoomMul:1;
+    let vis=(opts.timeUnit&&PPU[opts.timeUnit])?(ganttW/PPU[opts.timeUnit]):afDays;
+    vis=Math.max(3,Math.min(vis/mul,afDays*16));
+    const panFrac=(typeof opts.panFrac==="number"?opts.panFrac:0);
+    const scroll=afDays-vis;
+    // When zoomed in, default the landing to center on TODAY (clamped) so it lands on current
+    // work rather than a far-back empty stretch; the user's pan is an offset from there (B361).
+    const todayDays=(pd(fdLocal(new Date()))-pd(afStart))/DAY;
+    const todayFrac=scroll>0?Math.max(0,Math.min(1,(todayDays-vis/2)/scroll)):0;
+    const eff=Math.max(0,Math.min(1,todayFrac+panFrac));
+    const start=scroll>0?addDays(afStart,Math.round(eff*scroll)):addDays(afStart,Math.round(scroll/2));
+    winStart=start; winEnd=addDays(start,vis); totalDays=Math.max(1,vis); ppd=ganttW/totalDays;
+  }
+  const xOf=d=>LABEL_W+Math.round((pd(d)-pd(winStart))/DAY*ppd);
   const HC={gray:"#94a3b8",yellow:"#d97706",red:"#dc2626",green:"#16a34a",paused:"#9ca3af"};
-  // Build full month list with date metadata for adaptive filtering
-  const months=[], cur2=new Date(pd(minD));cur2.setDate(1);
+  // Build full month list with date metadata for the axis + adaptive label density.
+  const months=[], cur2=new Date(pd(winStart));cur2.setDate(1);
   // Bound the header loop: a valid-but-extreme end date (e.g. a typo'd year 9999, or
   // imported far-future data) would otherwise build ~95k month cells. 12000 months =
   // 1000 years, far beyond any real schedule.
   let _mGuard=12000;
-  while(cur2<=pd(maxD) && _mGuard-->0){
+  while(cur2<=pd(winEnd) && _mGuard-->0){
     months.push({x:xOf(fd(cur2)), mo:cur2.getMonth(), yr:cur2.getFullYear(),
-      label:cur2.toLocaleDateString("en-US",{month:"short",year:"2-digit"})});
+      label:cur2.toLocaleDateString("en-US",{month:"short"})});   // "Jun" — the YEAR is its own tier now (B399)
     cur2.setMonth(cur2.getMonth()+1);
   }
-  // Adaptive label density — skip labels that would overlap (~28px each at 7.5px font)
+  // Each month's right edge = next month's start (last → chart right edge) so tier labels center.
+  months.forEach((m,i)=>{ m.x1 = months[i+1] ? months[i+1].x : svgWidth; m.cx=(m.x+m.x1)/2; });
+  // Year spans for the top tier (group the months by calendar year).
+  const yearSpans=[];
+  months.forEach(m=>{ const last=yearSpans[yearSpans.length-1]; if(last&&last.yr===m.yr) last.x1=m.x1; else yearSpans.push({yr:m.yr,x0:m.x,x1:m.x1}); });
+  yearSpans.forEach(y=>y.cx=(y.x0+y.x1)/2);
+  // Adaptive month-label density — drop labels that would overlap (~26px each); single-letter when tight.
   const monthPx=ppd*30.4;
-  const visibleMonths=monthPx>=26?months:monthPx>=13?months.filter(m=>[0,2,4,6,8,10].includes(m.mo)):monthPx>=7?months.filter(m=>[0,3,6,9].includes(m.mo)):months.filter(m=>m.mo===0);
-  const yearMarkers=months.filter(m=>m.mo===0);
-  const HEADER_H=22, svgH=HEADER_H+ROW_H*allTasks.length;
-  const rows=allTasks.map((t,i)=>{
+  const monLabel = m => monthPx>=30 ? m.label : m.label[0];
+  const visibleMonths=monthPx>=22?months:monthPx>=12?months.filter(m=>m.mo%2===0):monthPx>=6?months.filter(m=>[0,3,6,9].includes(m.mo)):months.filter(m=>m.mo===0);
+  // B399 (owner pick "D") — a two-tier LIGHT header: a YEAR band over a MONTH band, HEADER_H tall.
+  const YEAR_TIER=14, MON_TIER=16, HEADER_H=YEAR_TIER+MON_TIER, svgH=HEADER_H+ROW_H*allTasks.length;
+  // B397 — paint in explicit LAYERS so the data sits ON TOP of the vertical rules (mirrors the
+  // on-screen Gantt's z-order, B222): row bands (bottom) → grid / today / dependency lines →
+  // bars + milestones → text labels (top). The per-row string is split into separate buckets
+  // (the old `${gridLines}${rows}${yearLines}${arrows}${todayLine}` put the rules over the bars).
+  const rowBands=[], barLayer=[], labelLayer=[], nameRecords=[];
+  allTasks.forEach((t,i)=>{
     const y=HEADER_H+i*ROW_H, bg=i%2?"#f6f6f6":"#fff";
     const bx=xOf(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/86400000*ppd));
     const color=HC[t.health]||"#94a3b8";
@@ -8404,8 +8747,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         const nm=t.name==null?"":String(t.name);   // a nameless task must not crash the exhibit (was: t.name.length on undefined)
         const nameStr=nm.length>maxCh?nm.slice(0,maxCh-1)+"…":nm;
         const fw=depth===0?"bold":depth===1?"600":"normal", fs=depth===0?9:depth===1?8.5:8;
-        return `<text x="${nameX}" y="${y+ROW_H*0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>
-<line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y+ROW_H}" stroke="#e0e0e0" stroke-width="0.5"/>`;
+        return `<text x="${nameX}" y="${y+ROW_H*0.68}" font-size="${fs}" font-weight="${fw}" fill="#1a1a1a" font-family="Arial,sans-serif">${escapeHtml(nameStr)}</text>`;
       })();
     const barY=y+ROW_H*0.22, barH=ROW_H*0.55, midY=y+ROW_H*0.5;
     let blText="";
@@ -8424,11 +8766,12 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       const done = pct>=100;
       barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else if(isParent){
-      // Depth-stepped BRACKET (B210): a thin navy span + straight-down legs (no triangles);
-      // darkness, span thickness and leg length step together, top-of-tree strongest, to ~4 levels.
+      // Depth-stepped BRACKET (B210): a thin span + straight-down legs (no triangles). The
+      // GRAPHIC keeps its ramp (depth 0 = #2B3340, darkest/thickest, stepping lighter/thinner);
+      // magnitudes compressed a touch vs B210 so the always-above caption has clear air (B393).
       const dd=Math.min(depth,3);
       const NAVY=["#2B3340","#46506A","#6E7790","#8A93A8"][dd];
-      const SPAN=[4.5,3.5,3,3][dd], LEG=[0.42,0.30,0.22,0.18][dd]*ROW_H, legW=1.1;
+      const SPAN=[4,3.5,3,3][dd], LEG=[0.14,0.10,0.08,0.06][dd]*ROW_H, legW=1.1;
       const sTop=y+ROW_H-2-LEG-SPAN;
       barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/>`
         +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
@@ -8446,10 +8789,39 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           +`<rect x="${bx}" y="${by}" width="${bw2}" height="${LH}" rx="${r}" fill="none" stroke="${GRAY}" stroke-width="0.8"/>`;
       }
     }
-    return `<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>
-${labelHtml}
-${barSvg}${blText}`;
-  }).join("");
+    // In-chart NAME on the bar/bracket/diamond (B394) — the layer GanttView draws but the
+    // exhibit used to omit. Same placement helper, alignment, uniform ink and weight ramp as
+    // on-screen so the two paths can't drift; uniform near-black (no B210 depth-navy here
+    // either); escaped via escapeHtml (B248). Default on (opts.barNames !== false).
+    // Skip a name whose bar is fully OUTSIDE the visible window (B361 zoom/pan) — otherwise its
+    // label would clamp onto the chart edge with no bar (no-op for the auto-fit default, where
+    // every bar is in view).
+    const nameInView = isMilestone ? (bx>=LABEL_W-2 && bx<=svgWidth+2) : (bx+bw>=LABEL_W-2 && bx<=svgWidth+2);
+    if(opts.barNames!==false && nameInView){
+      const kind = isMilestone?"milestone":isParent?"summary":"leaf";
+      const align = opts.labelAlign || resolveLabelAlign(proj);
+      const fs = [9,8.5,8,7.5][Math.min(depth,3)];
+      let barTopY, barMidY, bwN=bw;
+      if(isMilestone){ barTopY=midY-5; barMidY=midY; bwN=0; }
+      else if(isParent){ const dd=Math.min(depth,3); const SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H; barTopY=y+ROW_H-2-LG-SP; barMidY=barTopY+SP/2; }
+      else { const LH=ROW_H*0.30; barTopY=midY-LH/2; barMidY=midY; }
+      const pad = txt => txt ? estLabelWidth(txt,6.5)+5 : 0;
+      const bl = (opts.barLabels && !isParent) ? opts.barLabels : null;
+      const nm = t.name==null?"":String(t.name);
+      const lw = estLabelWidth(nm, fs);
+      const place = placeGanttLabel({kind, align, bx, bw:bwN, rowTop:y, barMidY, barTopY,
+        labelW:lw, padBefore:pad(bl?barLabelText(t,bl.left,bl.year):""),
+        padAfter:pad(bl?barLabelText(t,bl.right,bl.year):""), chartL:LABEL_W, chartR:svgWidth,
+        gap:5, capHalf:Math.round(fs*0.6)});
+      // Collected, not emitted: the in-chart names are de-collided AFTER the row pass so
+      // co-dated labels never overprint each other (B402), then drawn on the top layer.
+      nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
+        weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, str:escapeHtml(nm)});
+    }
+    rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
+    barLayer.push(barSvg);
+    labelLayer.push(`${labelHtml}${blText}`);   // task-column name + bar labels (in-chart names → nameLayer, B402)
+  });
   // Dependency connectors — same curved style as the in-app Gantt (cubic bezier,
   // direction-flipped 32px handles, type colors, dashed). Opacity lifted .55 -> .7 for print.
   let arrows="";
@@ -8459,6 +8831,21 @@ ${barSvg}${blText}`;
     for(const p of projects){
       const ix=new Map();
       p.tasks.forEach((t,i)=>ix.set(t.id, base+i));
+      // The connector LEAVES the source from its BOTTOM edge (≈4–6 o'clock — clears the date at
+      // the source's side) and ARRIVES at the target's TOP edge (≈9–12 o'clock — clears the date
+      // at the target's side), both at the link's own connection x (start for FS/SS, end for
+      // FF/SF). Tangents follow the natural travel direction (NOT forced rigidly vertical), so the
+      // arrow can enter anywhere across the top-left arc and leave anywhere across the lower arc —
+      // whatever reads naturally. Curves kept (owner pick, B396/B402).
+      const edgeYOf=(task,gidx,which)=>{   // which:'top'|'bot' → that edge of the glyph
+        const yTop=HEADER_H+gidx*ROW_H, midY=yTop+ROW_H*0.5;
+        if(task.duration===0) return which==='top'?midY-5:midY+5;                       // diamond vertices
+        if(p.tasks.some(x=>x.parentId===task.id)){                                      // summary bracket
+          const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
+          const top=yTop+(ROW_H-2-LG-SP); return which==='top'?top:top+SP+LG;
+        }
+        const LH=ROW_H*0.30; return which==='top'?midY-LH/2:midY+LH/2;                  // leaf bar edges
+      };
       for(const t of p.tasks){
         const preds=Array.isArray(t.predecessors)?t.predecessors:[];
         for(const pr of preds){
@@ -8468,34 +8855,140 @@ ${barSvg}${blText}`;
           const pi=ix.get(pr.id), si=ix.get(t.id);
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
-          const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);
-          const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);
-          const y1=HEADER_H+pi*ROW_H+ROW_H*0.5, y2=HEADER_H+si*ROW_H+ROW_H*0.5;
-          const aDir=x2>=x1?1:-1;
+          const sx=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);   // source link x
+          const sBot=edgeYOf(pt,pi,'bot');                                 // leave from the source BOTTOM
+          const tx=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);     // target link x
+          const tTop=edgeYOf(t,si,'top');                                  // arrive at the target TOP
+          const dx=tx-sx, dy=tTop-sBot;
+          const vh=dy>=0?Math.max(7,Math.min(26,dy*0.55)):Math.max(6,Math.min(10,-dy*0.3));   // vertical handle
+          const c1x=sx+dx*0.30, c1y=sBot+vh;                              // exit: down + toward target (lower arc)
+          const c2x=tx-dx*0.30, c2y=tTop-vh;                              // entry: from above + source side (top-left arc)
+          // Arrowhead oriented along the ENTRY tangent, so an angled (9–12 o'clock) entry reads right.
+          const ex=tx-c2x, ey=tTop-c2y, el=Math.hypot(ex,ey)||1, ux=ex/el, uy=ey/el;
+          const a1x=tx-ux*6-uy*3, a1y=tTop-uy*6+ux*3, a2x=tx-ux*6+uy*3, a2y=tTop-uy*6-ux*3;
           const color=DEP_C[type]||DEP_C.FS;
-          arrows+=`<path class="dep" d="M${x1},${y1} C${x1+32*aDir},${y1} ${x2-32*aDir},${y2} ${x2},${y2}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${y2} L${x2-5*aDir},${y2-3} L${x2-5*aDir},${y2+3}Z" fill="${color}" opacity="0.7"/>`;
+          arrows+=`<path class="dep" d="M${sx},${sBot.toFixed(1)} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${tx},${tTop.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
+            +`<path d="M${tx},${tTop.toFixed(1)} L${a1x.toFixed(1)},${a1y.toFixed(1)} L${a2x.toFixed(1)},${a2y.toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
         }
       }
       base+=p.tasks.length;
     }
   }
-  // Grid lines every month (subtle), labels only at computed density, year boundaries emphasized
-  const gridLines=months.map(m=>`<line x1="${m.x}" y1="${HEADER_H}" x2="${m.x}" y2="${svgH}" stroke="${m.mo===0?'#bbb':'#eee'}" stroke-width="${m.mo===0?0.8:0.4}"/>`).join("")
-    +visibleMonths.map(m=>`<text x="${m.x+3}" y="15" font-size="7.5" fill="#e8e8e8" font-family="Arial,sans-serif">${m.label}</text>`).join("")
-    +(monthPx<26?yearMarkers.map(m=>`<line x1="${m.x}" y1="0" x2="${m.x}" y2="${HEADER_H}" stroke="#999" stroke-width="1"/>`).join(""):"");
-  // Today marker — red dashed line with a tick in the header band
+  // ── Weighted vertical grid rules (B399, owner spec) — ONE line per month boundary, RANKED
+  //    year > quarter > month, each thicker + a touch darker, so hierarchy reads by line weight
+  //    (no quarter LABEL, just the rule). Year rules drop from the very top; quarter + month from
+  //    below the year tier — down THROUGH the body, kept light and painted BEFORE the bars (B397)
+  //    so nothing ever crosses a bar / bracket / milestone.
+  const gridRules=months.map(m=>{
+    if(m.mo===0)   return `<line x1="${m.x}" y1="0" x2="${m.x}" y2="${svgH}" stroke="#8b95a3" stroke-width="1.3"/>`;            // YEAR — thickest
+    if(m.mo%3===0) return `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#c2c9d2" stroke-width="0.8"/>`; // QUARTER — medium (line only)
+    return                `<line x1="${m.x}" y1="${YEAR_TIER}" x2="${m.x}" y2="${svgH}" stroke="#e7ebf0" stroke-width="0.4"/>`; // MONTH — thinnest
+  }).join("");
+  // B398 — ONE continuous left chart-edge boundary, full height, drawn once (not per-row).
+  const leftEdge=`<line x1="${LABEL_W}" y1="0" x2="${LABEL_W}" y2="${svgH}" stroke="#c4c8ce" stroke-width="0.8"/>`;
+  // Today marker — red dashed line + a small tick at the bottom of the header band.
   const todayStr=fdLocal(new Date());
-  const todayLine=(opts.showToday!==false && todayStr>=minD&&todayStr<=maxD)
+  const todayLine=(opts.showToday!==false && todayStr>=winStart&&todayStr<=winEnd)
     ? `<line x1="${xOf(todayStr)}" y1="${HEADER_H}" x2="${xOf(todayStr)}" y2="${svgH}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2"/>
-<polygon points="${xOf(todayStr)-3.5},${HEADER_H-6} ${xOf(todayStr)+3.5},${HEADER_H-6} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>`
+<polygon points="${xOf(todayStr)-3.5},${HEADER_H-5} ${xOf(todayStr)+3.5},${HEADER_H-5} ${xOf(todayStr)},${HEADER_H}" fill="#dc2626"/>`
     : "";
-  const taskHeaderText = noLabels ? "" : `<text x="4" y="15" font-size="8" font-weight="bold" fill="#fff" font-family="Arial,sans-serif">TASK</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" style="width:100%;display:block">
+  // ── Two-tier LIGHT header (owner pick "D"): a year band over a month band ──
+  const headerBg=`<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${HEADER_H}" fill="#f6f8fa"/>`
+    +`<rect x="${LABEL_W}" y="0" width="${ganttW}" height="${YEAR_TIER}" fill="#e9edf2"/>`;
+  const yearLabels=yearSpans.map(y=>`<text x="${y.cx}" y="${YEAR_TIER-3.5}" font-size="9.5" font-weight="700" fill="#3a4452" font-family="Arial,sans-serif" text-anchor="middle" letter-spacing="0.6">${y.yr}</text>`).join("");
+  const monthLabels=visibleMonths.map(m=>{const strong=m.mo%3===0;return `<text x="${m.cx}" y="${HEADER_H-5}" font-size="7.5" font-weight="${strong?700:500}" fill="${strong?"#3a4452":"#69727f"}" font-family="Arial,sans-serif" text-anchor="middle">${monLabel(m)}</text>`;}).join("");
+  const headerLines=`<line x1="${LABEL_W}" y1="${YEAR_TIER}" x2="${svgWidth}" y2="${YEAR_TIER}" stroke="#d4d8de" stroke-width="0.7"/>`
+    +`<line x1="${LABEL_W}" y1="${HEADER_H}" x2="${svgWidth}" y2="${HEADER_H}" stroke="#b9c0c9" stroke-width="1"/>`;
+  const taskHeaderText = noLabels ? "" : `<text x="4" y="${HEADER_H-6}" font-size="8" font-weight="bold" fill="#3a4452" font-family="Arial,sans-serif">TASK</text>`;
+  // ── B402: de-collide in-chart name labels ──────────────────────────────────────────
+  // Co-dated labels must never overprint each other. Sweep top→down; if a label's box hits
+  // one already placed, nudge it down until clear (capped). A pure no-op when nothing
+  // overlaps (the common per-row case), so existing layouts are untouched. Defensive: any
+  // failure falls back to the un-nudged labels.
+  let nameLayer="";
+  const emitName=r=>{
+    const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;
+    const plate=r.mode==="plate"?`<rect x="${(x0-2).toFixed(1)}" y="${(r.y-r.fs*0.72).toFixed(1)}" width="${(r.lw+4).toFixed(1)}" height="${(r.fs*1.44).toFixed(1)}" rx="2" fill="#fff" opacity="0.85"/>`:"";
+    return plate+`<text x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" font-size="${r.fs}" font-weight="${r.weight}" fill="${GANTT_INK}" text-anchor="${r.anchor}" dominant-baseline="central" font-family="Arial,sans-serif"${r.italic?' font-style="italic"':''}>${r.str}</text>`;
+  };
+  try{
+    const boxOf=r=>{const x0=r.anchor==="middle"?r.x-r.lw/2:r.anchor==="end"?r.x-r.lw:r.x;return {x0,x1:x0+r.lw,y0:r.y-r.fs*0.72,y1:r.y+r.fs*0.72};};
+    const recs=nameRecords.map(r=>({...r,_y0:r.y})).sort((a,b)=>(a.y-b.y)||(a.x-b.x));
+    const placed=[];
+    for(const r of recs){
+      let b=boxOf(r),tries=0;
+      while(tries<8){
+        const hit=placed.find(p=>b.x0<p.x1&&b.x1>p.x0&&b.y0<p.y1&&b.y1>p.y0);
+        if(!hit) break;
+        r.y+=(hit.y1-b.y0)+1.5;
+        if(r.y-r._y0>ROW_H*2.2){ r.y=r._y0; break; }   // give up rather than fling it far
+        b=boxOf(r); tries++;
+      }
+      placed.push(b);
+    }
+    nameLayer=recs.map(emitName).join("");
+  }catch(_){ nameLayer=nameRecords.map(emitName).join(""); }
+  // B400 — a viewBox makes the whole 0..svgWidth content scale to fill the container width EXACTLY
+  // (with style:width:100%), so the full min→max timeline always fits the page Gantt column with no
+  // right-edge clipping. Render is 1:1 at the export widths, so per-page slicing is unchanged (the
+  // paginator's GANTT_HEAD must match HEADER_H).
+  // Paint order (B397): white → header band → row bands → grid rules → left edge → today →
+  // dependency (main's curved, B396) → bars → header labels/lines (axis text on top) → bar labels.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgH}" viewBox="0 0 ${svgWidth} ${svgH}" style="width:100%;display:block">
 <rect width="${svgWidth}" height="${svgH}" fill="#fff"/>
-<rect x="0" y="0" width="${svgWidth}" height="${HEADER_H}" fill="#1a1a1a"/>
-${taskHeaderText}
-${gridLines}${rows}${arrows}${todayLine}</svg>`;
+${headerBg}
+${rowBands.join("")}${gridRules}${leftEdge}${todayLine}${arrows}${barLayer.join("")}${yearLabels}${monthLabels}${headerLines}${taskHeaderText}${labelLayer.join("")}${nameLayer}</svg>`;
+}
+
+// ── Exhibit column sizing (B390 content-fit + B392 drag-resize) ─────────────────────
+// Minimum px the Gantt timeline keeps in the split exhibit, so widening columns can never
+// collapse the chart. Shared by buildPDFHtml and the live drag-resize script it embeds.
+const EXHIBIT_MIN_GANTT = 240;
+// Approximate the rendered width (px) of `str` at font-size `fs` for the exhibit's
+// Inter/Arial face. Per-character advances run slightly generous so a fixed-format value
+// (a date, a duration, a percent) is never clipped by an under-sized column. Pure +
+// DOM-free so the preview, the print window, and the unit tests all agree.
+function approxTextPx(str, fs){
+  let w=0; const s=String(str==null?"":str);
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(c===' '||/[.,:;'!|il]/.test(c)) w+=0.30*fs;
+    else if(/[fjt()/\-]/.test(c)) w+=0.38*fs;
+    else if(/[0-9]/.test(c)) w+=0.58*fs;
+    else if(c==='M'||c==='W') w+=0.92*fs;
+    else if(/[A-Z]/.test(c)) w+=0.70*fs;
+    else if(c==='m'||c==='w') w+=0.86*fs;
+    else w+=0.54*fs;
+  }
+  return w;
+}
+// Lay the exhibit columns out from their content-fit base widths, letting a user's
+// per-column drag override (cfg.colWidths) win, each clamped to its [min,max]. The table
+// block is exactly its columns' total and the Gantt takes the rest, but never less than
+// EXHIBIT_MIN_GANTT — if the columns would crowd the chart, flexible columns shrink toward
+// their min first, then a uniform scale as a last resort. Returns { widths:{k:px}, tableW,
+// ganttW }. Pure + DOM-free, so the preview, the print window, and the tests all agree.
+function layoutExhibitCols(specs, opts){
+  const ov = opts.override || {};
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const widths={};
+  for(const s of specs) widths[s.k]=Math.round(clamp(ov[s.k]!=null?ov[s.k]:s.base, s.min, s.max));
+  const total=()=>specs.reduce((a,s)=>a+widths[s.k],0);
+  const budget=Math.max(160, opts.budget-EXHIBIT_MIN_GANTT); // reserve room for the chart
+  if(total()>budget){
+    const flex=specs.filter(s=>s.flex);
+    const slack=flex.reduce((a,s)=>a+(widths[s.k]-s.min),0);
+    if(slack>0){
+      const need=Math.min(total()-budget, slack);
+      for(const s of flex) widths[s.k]-=Math.round((widths[s.k]-s.min)/slack*need);
+    }
+    if(total()>budget){ // no flex slack left → uniform scale as a last resort
+      const f=budget/total();
+      for(const s of specs) widths[s.k]=Math.max(s.min, Math.round(widths[s.k]*f));
+    }
+  }
+  const tableW=total();
+  return { widths, tableW, ganttW: Math.max(EXHIBIT_MIN_GANTT, opts.budget-tableW) };
 }
 
 function buildPDFHtml(cfg, data, forPreview) {
@@ -8545,34 +9038,114 @@ function buildPDFHtml(cfg, data, forPreview) {
   const mRightPx=Math.round(parseFloat(cfg.margins.right||0.75)*96);
   const pageWpx=Math.round(pgW*96), pageHpx=Math.round(pgR*96);
 
-  let bodyHtml="";
+  let bodyHtml="", resizeScript="";
   if(cfg.includeGantt) {
-    // Side-by-side: grid on left, Gantt timeline on right — like MS Project / Excel split view
-    selProjs.forEach(proj=>{
+    // Side-by-side: a content-fit grid on the left, the Gantt timeline on the right —
+    // like MS Project / Excel split view. The exhibit stacks every selected project under
+    // one shared header, so the columns are sized once against the widest value of each
+    // visible column across them all (B390) — no dead gap before the dates, no clipped
+    // start/end/duration. cfg.colWidths (a user's drag, B392) overrides a column's width.
+    const projTaskLists = selProjs.map(proj=>{
       let tasks=visibleTasks(proj);
       if(cfg.healthFilter==="active") tasks=tasks.filter(t=>t.health==="yellow"||t.health==="red");
       if(cfg.healthFilter==="complete") tasks=tasks.filter(t=>t.health==="green");
-      const thCols=colDefs.map(c=>`<th${c.w?` style="width:${c.w}px"`:""}>${COL_LABELS[c.k]}</th>`).join("");
+      return {proj, tasks};
+    });
+    // Plain-text form of each cell, for width measurement (cellVal returns marked-up HTML).
+    const cellText=(t,k,tasks)=>{ switch(k){
+      case "start": case "end": return fmtD(t[k]);
+      case "duration": return `${t.duration}d`;
+      case "percentComplete": return `${t.percentComplete||0}%`;
+      case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
+      case "health": { const h=HC[t.health]; return h?h.l:(t.health||""); }
+      case "name": return t.name==null?"":String(t.name);
+      case "cost": { const v=costOfIn(tasks,t.id); return v?("$"+Number(v).toLocaleString("en-US",{maximumFractionDigits:2})):""; }
+      default: return t[k]==null?"":String(t[k]);
+    }};
+    // Per-column fit profile: font px, clamp range, whether it may shrink (flex), and any
+    // non-text px (the Status dot+gap). Short fixed-format columns are NOT flex — a date or
+    // a duration must never be the value that gets clipped to make room.
+    const COL_FIT={
+      id:{fs:8,min:22,max:64,flex:false,extra:0}, name:{fs:10.5,min:96,max:280,flex:true,extra:0},
+      start:{fs:9,min:50,max:96,flex:false,extra:0}, end:{fs:9,min:50,max:96,flex:false,extra:0},
+      duration:{fs:9,min:34,max:74,flex:false,extra:0}, health:{fs:9,min:62,max:132,flex:false,extra:13},
+      percentComplete:{fs:9,min:34,max:74,flex:false,extra:0}, responsibleParty:{fs:9,min:52,max:144,flex:true,extra:0},
+      predecessors:{fs:9,min:40,max:120,flex:true,extra:0}, cost:{fs:9,min:50,max:132,flex:true,extra:0},
+    };
+    const PADX=12, SLACK=3; // td horizontal padding (6+6) + a hair of safety
+    const specs=colDefs.map(c=>{
+      const f=COL_FIT[c.k]||{fs:9,min:30,max:130,flex:false,extra:0};
+      const lbl=COL_LABELS[c.k]||c.k;
+      let base=approxTextPx(lbl.toUpperCase(),8)*1.04+lbl.length*0.45; // header is bold + .05em tracked
+      for(const {proj,tasks} of projTaskLists){
+        for(const t of tasks){
+          let w;
+          if(c.k==='name'){
+            const dep=getDepth(proj.tasks,t.id), fs=dep===0?10.5:dep===1?10:9.5;
+            const tri=forPreview&&proj.tasks.some(x=>x.parentId===t.id)?15:0; // collapse triangle (preview only)
+            w=approxTextPx(cellText(t,'name',proj.tasks),fs)+dep*14+tri;
+          } else {
+            w=approxTextPx(cellText(t,c.k,proj.tasks),f.fs)+f.extra;
+          }
+          if(w>base) base=w;
+        }
+      }
+      return {k:c.k, base:base+PADX+SLACK, min:f.min, max:f.max, flex:f.flex};
+    });
+    const fit=layoutExhibitCols(specs,{override:cfg.colWidths||{}, budget:contentPx-2});
+    const colW=fit.widths, canResize=!!forPreview;
+    // One shared header for every project. In the preview each column carries a drag
+    // handle (B392); the print output never does.
+    const thCols=colDefs.map(c=>`<th data-k="${c.k}" style="width:${colW[c.k]}px">${COL_LABELS[c.k]}${canResize?`<span class="col-rs" data-rs="${c.k}" title="Drag to resize"></span>`:""}</th>`).join("");
+    projTaskLists.forEach(({proj,tasks})=>{
       const rows=tasks.map((t,i)=>{
         const cells=colDefs.map(c=>`<td class="c-${c.k}">${cellVal(t,c.k,proj.tasks,proj.id)}</td>`).join("");
         return `<tr class="${i%2?"alt":""}">${cells}</tr>`;
       }).join("");
-      // Filter the project for Gantt to match the table's task list
-      const ganttProj={...proj, tasks};
-      // Allocate ~50% to the table, the rest to Gantt — the 1px frame on each
-      // side of .split-view consumes 2px of the printable width
-      const splitInner=contentPx-2;
-      const tableW=Math.min(Math.round(splitInner*0.5), Math.max(280, splitInner - 320));
-      const ganttW=splitInner - tableW;
-      const ganttSvg=buildGanttSVG([ganttProj], ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels});
+      const ganttProj={...proj, tasks}; // Gantt task list matches the table
+      const ganttSvg=buildGanttSVG([ganttProj], fit.ganttW, cfg.orientation, {noLabels:true, showToday:cfg.showToday!==false, showArrows:cfg.showArrows!==false, barLabels:data.settings?.barLabels, barNames:cfg.barNames!==false, labelAlign:cfg.labelAlign, timeUnit:cfg.timeUnit, zoomMul:cfg.zoomMul, panFrac:cfg.panFrac});
       bodyHtml+=`<div class="proj-block">${selProjs.length>1?`<div class="proj-name">${escapeHtml(proj.name)}</div>`:""}
         <div class="split-view">
-          <div class="split-table" style="width:${tableW}px;flex-shrink:0">
+          <div class="split-table" style="width:${fit.tableW}px;flex-shrink:0">
             <table class="aligned"><thead><tr>${thCols}</tr></thead><tbody>${rows}</tbody></table>
           </div>
-          <div class="split-gantt" style="width:${ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
+          <div class="split-gantt" style="width:${fit.ganttW}px;flex-shrink:0;overflow:hidden">${ganttSvg}</div>
         </div></div>`;
     });
+    // B392 — live drag-to-resize. Handles live in the preview header; this script (preview
+    // only) resizes the dragged column across every page in real time, trading the width
+    // against the Gantt (which keeps EXHIBIT_MIN_GANTT), then posts the final width to the
+    // parent on release so it persists and the Gantt re-fits cleanly.
+    if(forPreview){
+      resizeScript=`<script>(function(){
+  var W=${JSON.stringify(colW)}, MINc=${JSON.stringify(Object.fromEntries(specs.map(s=>[s.k,s.min])))}, MAXc=${JSON.stringify(Object.fromEntries(specs.map(s=>[s.k,s.max])))};
+  var ORDER=${JSON.stringify(colDefs.map(c=>c.k))}, SPLIT=${fit.tableW+fit.ganttW}, MING=${EXHIBIT_MIN_GANTT};
+  function sum(){var t=0;for(var i=0;i<ORDER.length;i++)t+=W[ORDER[i]];return t;}
+  function apply(){
+    var tw=sum(), gw=Math.max(MING,SPLIT-tw);
+    document.querySelectorAll('.split-table').forEach(function(e){e.style.width=tw+'px';});
+    document.querySelectorAll('.split-gantt').forEach(function(e){e.style.width=gw+'px';});
+    ORDER.forEach(function(k){document.querySelectorAll('th[data-k="'+k+'"]').forEach(function(e){e.style.width=W[k]+'px';});});
+  }
+  var drag=null;
+  document.addEventListener('mousedown',function(ev){
+    var h=ev.target&&ev.target.closest?ev.target.closest('[data-rs]'):null; if(!h) return;
+    ev.preventDefault(); ev.stopPropagation();
+    var k=h.getAttribute('data-rs'); drag={k:k,x:ev.clientX,w0:W[k]};
+    document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
+  },true);
+  document.addEventListener('mousemove',function(ev){
+    if(!drag) return;
+    var mn=MINc[drag.k]||30, others=sum()-W[drag.k], cap=Math.min(MAXc[drag.k]||9999,Math.max(mn,(SPLIT-MING)-others));
+    W[drag.k]=Math.round(Math.max(mn,Math.min(drag.w0+(ev.clientX-drag.x),cap))); apply();
+  });
+  document.addEventListener('mouseup',function(){
+    if(!drag) return; var k=drag.k, w=W[k]; drag=null;
+    document.body.style.cursor=''; document.body.style.userSelect='';
+    try{window.parent.postMessage({type:'planarColResize',key:k,w:w},'*');}catch(_){}
+  });
+})();<\/script>`;
+    }
   } else {
     // Tables only (no Gantt) — full width
     selProjs.forEach(proj=>{
@@ -8622,7 +9195,11 @@ body{padding:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in
 .split-view{display:flex;align-items:flex-start;width:100%;border:1px solid #d4d4d4}
 .split-table{border-right:1px solid #d4d4d4}
 .split-table table.aligned{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed}
-.split-table table.aligned thead th{height:22px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+.split-table table.aligned thead th{position:relative;height:30px;padding:0 6px;vertical-align:middle;background:#1a1a1a;color:#fff;font-weight:700;font-size:8px;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;text-align:left}
+/* B392 — drag-to-resize handle on each header cell's right edge (preview only). */
+.col-rs{position:absolute;top:0;right:-4px;width:8px;height:100%;cursor:col-resize;z-index:6}
+.col-rs:hover{background:rgba(99,102,241,.5)}
+@media print{.col-rs{display:none}}
 .split-table table.aligned tbody tr{height:18px}
 .split-table table.aligned tbody tr.alt{background:#f6f6f6}
 .split-table table.aligned tbody td{padding:0 6px;vertical-align:middle;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #ebebeb}
@@ -8657,7 +9234,7 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
   var MT=${mTopPx}, MB=${mBotPx}, ML=${mLeftPx}, MR=${mRightPx};
   var PW=${pageWpx}, PH=${pageHpx};
   var CW=PW-ML-MR, CH=Math.max(160,PH-MT-MB)-2;  /* printable height, 2px sub-pixel slack */
-  var GANTT_HEAD=22, GANTT_ROW=18;               /* must match buildGanttSVG */
+  var GANTT_HEAD=30, GANTT_ROW=18;               /* must match buildGanttSVG HEADER_H (YEAR_TIER+MON_TIER) + ROW_H */
   var FRAME='#d4d4d4';
 
   function outerH(el){
@@ -8794,6 +9371,7 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
           left.appendChild(tbl);
           framed.appendChild(left);
           var right=document.createElement('div');
+          right.className='split-gantt';                                                              /* keep the class so column drag-resize can trade width against it (B392) */
           right.style.cssText='width:'+pr.ganttW+'px;flex-shrink:0';
           right.appendChild(svgWindow(pr.svgEl,0,GANTT_HEAD,pr.ganttW));                                  /* date band: repeats every page */
           if(pg.r1>pg.r0) right.appendChild(svgWindow(pr.svgEl,GANTT_HEAD+pg.r0*GANTT_ROW,(pg.r1-pg.r0)*GANTT_ROW,pr.ganttW));
@@ -8864,6 +9442,7 @@ ${bodyHtml}
   <span>planar</span>
 </div>
 ${forPreview?`<script>(function(){document.addEventListener("click",function(e){var el=e.target.closest&&e.target.closest("[data-collapse]");if(!el)return;e.preventDefault();e.stopPropagation();try{window.parent.postMessage({type:"planarToggleCollapse",key:el.getAttribute("data-collapse")},"*");}catch(_){}}, true);})();<\/script>`:""}
+${resizeScript}
 </body></html>`;
 }
 
@@ -8902,7 +9481,16 @@ const Row = ({label,children}) => (
     {children}
   </div>
 );
-function PDFExportModal({data, activePid, onClose}) {
+// B403 — silently persist & restore the export screen's settings across opens (no badge).
+// Per browser/user via localStorage (the column WIDTH state already rides data.exportColWidths,
+// B392; task-specific selection/collapse is intentionally NOT persisted). docDate is left to
+// default to "today" each open rather than freezing a stale date onto an exhibit.
+const EXPORT_PREFS_KEY = "planar:exportPrefs:v1";
+const EXPORT_PERSIST_KEYS = ["orientation","pageSize","margins","columns","includeGantt","showToday","showArrows","barNames","labelAlign","healthFilter","exhibitLabel","projectTitle","preparedBy","preparedFor","confidential","timeUnit","zoomMul","panFrac"];
+function loadExportPrefs(){ try { return JSON.parse(localStorage.getItem(EXPORT_PREFS_KEY) || "{}") || {}; } catch { return {}; } }
+function saveExportPrefs(obj){ try { localStorage.setItem(EXPORT_PREFS_KEY, JSON.stringify(obj)); } catch (_) {} }
+
+function PDFExportModal({data, activePid, onClose, setData}) {
   const projs = Object.values(data.projects);
   const now = new Date();
   const seedCollapsed = useMemo(() => {
@@ -8912,31 +9500,51 @@ function PDFExportModal({data, activePid, onClose}) {
     }));
     return out;
   }, []);
-  const [cfg, setCfg] = useState({
-    exhibitLabel: "",
-    projectTitle: "",
-    preparedBy: "", preparedFor: "",
-    docDate: now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}),
-    orientation: "landscape",
-    pageSize: "letter",
-    margins: {top:"0.75", right:"0.75", bottom:"0.75", left:"0.75"},
-    selProjects: activePid ? [String(activePid)] : projs.map(p => String(p.id)),
-    columns: (() => { const PRINTABLE=new Set(["id","name","start","end","duration","health","percentComplete","responsibleParty","predecessors"]); const mc=(data.masterCols||[]).filter(k=>PRINTABLE.has(k)); return mc.length>0?mc:["id","name","start","end","duration","health","responsibleParty"]; })(),
-    includeGantt: true,
-    showToday: true,
-    showArrows: true,
-    healthFilter: "all",
-    confidential: "",
-    collapsedIds: seedCollapsed,
-    detailLevel: seedCollapsed.length ? "custom" : "all",
+  const initPrefs = useMemo(() => loadExportPrefs(), []);   // B403
+  const [cfg, setCfg] = useState(() => {
+    const base = {
+      exhibitLabel: "",
+      projectTitle: "",
+      preparedBy: "", preparedFor: "",
+      docDate: now.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}),
+      orientation: "landscape",
+      pageSize: "letter",
+      margins: {top:"0.75", right:"0.75", bottom:"0.75", left:"0.75"},
+      selProjects: activePid ? [String(activePid)] : projs.map(p => String(p.id)),
+      columns: (() => { const PRINTABLE=new Set(["id","name","start","end","duration","health","percentComplete","responsibleParty","predecessors"]); const mc=(data.masterCols||[]).filter(k=>PRINTABLE.has(k)); return mc.length>0?mc:["id","name","start","end","duration","health","responsibleParty"]; })(),
+      includeGantt: true,
+      showToday: true,
+      showArrows: true,
+      barNames: true,                                              // in-chart Gantt names ON by default (B394)
+      labelAlign: resolveLabelAlign(activePid!=null ? data.projects?.[activePid] : null),  // seed from the on-screen choice
+      healthFilter: "all",
+      confidential: "",
+      collapsedIds: seedCollapsed,
+      detailLevel: seedCollapsed.length ? "custom" : "all",
+      // B392 — per-column width overrides from dragging a column edge in the preview.
+      colWidths: data.exportColWidths || {},
+      // B361 time axis: discrete unit (null = auto-fit), continuous fine multiplier, pan 0..1.
+      timeUnit: null, zoomMul: 1, panFrac: 0,
+    };
+    // B403 — overlay the persisted choices (only the safe-to-restore keys).
+    EXPORT_PERSIST_KEYS.forEach(k => { if (initPrefs[k] !== undefined) base[k] = initPrefs[k]; });
+    return base;
   });
   const upd = patch => setCfg(c => ({...c, ...patch}));
   const cfgRef = useRef(cfg);
   useEffect(() => { cfgRef.current = cfg; }, [cfg]);
-  const [headerOpen, setHeaderOpen] = useState(false);
+  const [headerOpen, setHeaderOpen] = useState(() => !!initPrefs.headerOpen);   // B403
   // Collapsible sidebar sections — default open; clicking a section header toggles it
-  const [secOpen, setSecOpen] = useState({});
+  const [secOpen, setSecOpen] = useState(() => initPrefs.secOpen || {});        // B403
   const secIsOpen = k => secOpen[k] !== false;
+
+  // B403 — silently persist the restorable settings on any change (no badge). Written
+  // synchronously (not debounced) so closing the modal right after a change still saves it.
+  useEffect(() => {
+    const out = {}; EXPORT_PERSIST_KEYS.forEach(k => { out[k] = cfg[k]; });
+    out.secOpen = secOpen; out.headerOpen = headerOpen;
+    saveExportPrefs(out);
+  }, [cfg, secOpen, headerOpen]);
 
   // Debounced config for preview (avoids re-render on every keystroke)
   const [previewCfg, setPreviewCfg] = useState(cfg);
@@ -8976,6 +9584,27 @@ function PDFExportModal({data, activePid, onClose}) {
     window.addEventListener("message", onToggle);
     return () => window.removeEventListener("message", onToggle);
   }, []);
+
+  // Column drag-resize (B392) fired from a header handle inside the preview iframe: stash
+  // the new width as an override (flush the preview immediately, like collapse) and persist
+  // it on the schedule so the tuned exhibit comes back next time.
+  useEffect(() => {
+    const onResize = e => {
+      if (!e.data || e.data.type !== "planarColResize") return;
+      const { key, w } = e.data;
+      if (!key || !(w > 0)) return;
+      const c = cfgRef.current, next = {...c, colWidths: {...(c.colWidths || {}), [key]: Math.round(w)}};
+      setCfg(next); setPreviewCfg(next);
+      if (setData) setData(d => ({...d, exportColWidths: {...(d.exportColWidths || {}), [key]: Math.round(w)}}));
+    };
+    window.addEventListener("message", onResize);
+    return () => window.removeEventListener("message", onResize);
+  }, []);
+  const hasColOverrides = Object.keys(cfg.colWidths || {}).length > 0;
+  const resetColWidths = () => {
+    const next = {...cfg, colWidths: {}}; setCfg(next); setPreviewCfg(next);
+    if (setData) setData(d => { const n = {...d}; delete n.exportColWidths; return n; });
+  };
 
   // Blob URL for iframe preview
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -9017,21 +9646,47 @@ function PDFExportModal({data, activePid, onClose}) {
   const fitScale = Math.min(1, (paneW - 48) / pageW);
   const [previewZoom, setPreviewZoom] = useState(1);
   const scale = fitScale * previewZoom;
+  const zoomTo = z => setPreviewZoom(Math.min(4, Math.max(0.25, z)));
+  // "Fit" resets BOTH the page magnification AND the time axis back to the auto-fit whole-
+  // schedule frame (B361/B401) — one button that says "show everything, nicely framed".
+  const fitWidth = () => { setPreviewZoom(1); upd({timeUnit:null, zoomMul:1, panFrac:0}); };
 
-  // Transparent overlay sits on top of the iframe so wheel events aren't swallowed by the iframe boundary
+  // B361 — time-axis controls. The discrete unit and the continuous fine multiplier feed ONE
+  // span inside buildGanttSVG (they compose, never fight); picking a unit snaps the multiplier.
+  const setTimeUnit = u => upd({timeUnit:u, zoomMul:1, panFrac:0});
+  const bumpScale = f => upd({zoomMul: Math.min(12, Math.max(0.25, (cfg.zoomMul||1) * f))});
+
+  // B361 — "Pan" mode (renamed from "Move"): a hand-cursor drag slides the visible TIME window
+  // left/right (horizontal → cfg.panFrac) and scrolls the sheet vertically; the wheel magnifies
+  // the page. A transparent overlay captures these only WHILE pan is on, so the in-preview
+  // collapse triangles / column drag-handles keep working under a real mouse when it's off.
+  const [panMode, setPanMode] = useState(false);
+  const panRef = useRef(null);
   const overlayRef = useRef(null);
+  const flushRef = useRef(0);
   useEffect(() => {
     const el = overlayRef.current;
-    if (!el) return;
-    const handler = e => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setPreviewZoom(z => Math.min(4, Math.max(0.2, z * (e.deltaY < 0 ? 1.1 : 1/1.1))));
+    if (!el || !panMode) return;
+    const pane = previewPaneRef.current;
+    const PAN_SPAN = 520;   // px of horizontal drag = the full time range
+    const onWheel = e => { e.preventDefault(); e.stopPropagation(); setPreviewZoom(z => Math.min(4, Math.max(0.25, z * (e.deltaY < 0 ? 1.1 : 1/1.1)))); };
+    const onDown = e => { if (e.button !== 0) return; e.preventDefault(); panRef.current = { x:e.clientX, y:e.clientY, pf:(cfgRef.current.panFrac||0), st:pane?pane.scrollTop:0 }; el.style.cursor = "grabbing"; };
+    const onMove = e => {
+      const p = panRef.current; if (!p) return;
+      if (pane) pane.scrollTop = p.st - (e.clientY - p.y);                            // vertical → scroll the sheet
+      const pf = Math.max(-1.2, Math.min(1.2, p.pf - (e.clientX - p.x) / PAN_SPAN));  // horizontal → slide the window (offset from today-center)
+      const next = {...cfgRef.current, panFrac: pf};
+      setCfg(next);
+      const now = Date.now();
+      if (now - flushRef.current > 170) { setPreviewCfg(next); flushRef.current = now; }  // throttled live update
     };
-    el.addEventListener('wheel', handler, {passive: false});
-    return () => el.removeEventListener('wheel', handler);
-  }, []);
+    const onUp = () => { if (panRef.current) setPreviewCfg(cfgRef.current); panRef.current = null; if (el) el.style.cursor = "grab"; };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('mousedown', onDown); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [panMode]);
 
   const COL_OPTS = [
     {k:"id",label:"ID"},{k:"name",label:"Task Name"},{k:"start",label:"Start"},
@@ -9060,6 +9715,12 @@ function PDFExportModal({data, activePid, onClose}) {
         transition:"transform .2s",display:"inline-block",lineHeight:1}}>▾</span>}
     </div>
   );
+
+  // Shared styles for the floating preview toolbar (B361).
+  const TB_BTN={width:22,height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.16)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",lineHeight:1,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"};
+  const TB_LBL={height:20,border:"none",borderRadius:4,background:"rgba(255,255,255,0.16)",color:"#fff",fontSize:10,fontWeight:600,padding:"0 8px",cursor:"pointer",fontFamily:"inherit"};
+  const TB_TAG={color:"#aab2bd",fontSize:8,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase"};
+  const TB_DIV={width:1,height:16,background:"rgba(255,255,255,0.22)",margin:"0 2px"};
 
   return (
     <div style={{position:"fixed",inset:0,background:"#000000a0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
@@ -9145,6 +9806,19 @@ function PDFExportModal({data, activePid, onClose}) {
             {cfg.includeGantt && (
               <Row label="Dep. arrows"><Toggle on={cfg.showArrows!==false} onChange={v=>upd({showArrows:v})} /></Row>
             )}
+            {cfg.includeGantt && (
+              <Row label="Time scale">
+                <SegBtn small options={[{l:"Fit",v:"fit"},{l:"Qtr",v:"quarters"},{l:"Mo",v:"months"},{l:"Wk",v:"weeks"},{l:"Day",v:"days"}]} value={cfg.timeUnit||"fit"} onChange={v=>setTimeUnit(v==="fit"?null:v)} />
+              </Row>
+            )}
+            {cfg.includeGantt && (
+              <Row label="Bar names"><Toggle on={cfg.barNames!==false} onChange={v=>upd({barNames:v})} /></Row>
+            )}
+            {cfg.includeGantt && cfg.barNames!==false && (
+              <Row label="Name align">
+                <SegBtn small options={[{l:"Left",v:"left"},{l:"Center",v:"center"},{l:"Right",v:"right"}]} value={cfg.labelAlign||"right"} onChange={v=>upd({labelAlign:v})} />
+              </Row>
+            )}
             </>)}
 
             <SHdr title="Margins" k="margins" />
@@ -9213,53 +9887,76 @@ function PDFExportModal({data, activePid, onClose}) {
                   <span style={{fontSize:11,color:"var(--txt)"}}>{c.label}</span>
                 </label>
               ))}
+              {/* B392 — column widths auto-fit to content; drag a header edge in the preview to tune one. */}
+              {cfg.includeGantt && (
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
+                  <span style={{fontSize:10,color:"var(--mut)",lineHeight:1.3}}>Drag a column's right edge in the preview to resize it.</span>
+                  {hasColOverrides && (
+                    <span onClick={resetColWidths} title="Reset all columns to auto-fit"
+                      style={{fontSize:10,fontWeight:600,color:"#4f46e5",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>Reset</span>
+                  )}
+                </div>
+              )}
             </div>
             )}
 
           </div>
 
-          {/* Preview pane */}
-          <div ref={previewPaneRef}
-            style={{flex:1,background:"#e8eaed",overflow:"auto",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:24,position:"relative"}}>
-            {previewZoom !== 1 && (
-              <div onClick={()=>setPreviewZoom(1)}
-                style={{position:"sticky",top:8,right:8,float:"right",zIndex:10,background:"rgba(0,0,0,0.55)",color:"#fff",
-                  fontSize:10,fontWeight:600,padding:"3px 8px",borderRadius:4,cursor:"pointer",letterSpacing:".03em",
-                  fontFamily:"inherit",userSelect:"none",marginBottom:-24}}
-                title="Click to reset zoom">
-                {Math.round(previewZoom * fitScale * 100)}%
-              </div>
-            )}
+          {/* Preview area = a NON-scrolling relative wrapper holding the scroller + a pinned
+              toolbar. The toolbar lives OUTSIDE the scroller as an absolute overlay so it is
+              always visible AND clickable (the old float/sticky-inside-flex toolbar was dead +
+              intermittently visible — B361 bug fix). */}
+          <div style={{flex:1,position:"relative",display:"flex",minWidth:0,background:"#e8eaed"}}>
+            <div ref={previewPaneRef}
+              style={{flex:1,overflow:"auto",display:"flex",alignItems:"flex-start",
+                justifyContent: (pageW*scale > paneW-48) ? "flex-start" : "center", padding:24}}>
+              {previewUrl && (
+                <div style={{
+                  width: pageW * scale, height: iframeH * scale, flexShrink: 0,
+                  overflow: "hidden", background: "transparent", position: "relative",
+                }}>
+                  <iframe
+                    ref={iframeRef}
+                    key={previewUrl}
+                    src={previewUrl}
+                    style={{ width: pageW, height: iframeH, border: "none",
+                      transformOrigin: "top left", transform: `scale(${scale})`, display: "block" }}
+                    title="PDF Preview"
+                  />
+                  {/* Overlay captures drag-pan + wheel-zoom ONLY in Pan mode; otherwise it is
+                      click-through so the preview's own collapse / column-resize controls work. */}
+                  <div ref={overlayRef}
+                    style={{position:"absolute",inset:0,zIndex:2,background:"transparent",
+                      pointerEvents: panMode ? "auto" : "none", cursor: panMode ? "grab" : "default"}} />
+                </div>
+              )}
+              {!previewUrl && (
+                <div style={{color:"#888",fontSize:12,marginTop:60}}>Generating preview…</div>
+              )}
+            </div>
+
+            {/* Floating controls (B361): page Zoom · time-axis Time stretch · Fit · Pan. */}
             {previewUrl && (
-              <div style={{
-                width: pageW * scale,
-                height: iframeH * scale,
-                flexShrink: 0,
-                overflow: "hidden",
-                background: "transparent",
-                position: "relative",
-              }}>
-                <iframe
-                  ref={iframeRef}
-                  key={previewUrl}
-                  src={previewUrl}
-                  style={{
-                    width: pageW,
-                    height: iframeH,
-                    border: "none",
-                    transformOrigin: "top left",
-                    transform: `scale(${scale})`,
-                    display: "block",
-                  }}
-                  title="PDF Preview"
-                />
-                {/* Transparent overlay intercepts wheel events — iframe boundary swallows them otherwise */}
-                <div ref={overlayRef}
-                  style={{position:"absolute",inset:0,zIndex:2,background:"transparent",cursor:"default"}} />
+              <div style={{position:"absolute",top:12,right:12,zIndex:30,display:"flex",gap:5,alignItems:"center",
+                background:"rgba(20,22,26,0.88)",borderRadius:7,padding:"4px 7px",userSelect:"none",fontFamily:"inherit",
+                boxShadow:"0 2px 10px rgba(0,0,0,0.30)"}}>
+                <span style={TB_TAG}>Zoom</span>
+                <button onClick={()=>zoomTo(previewZoom/1.2)} title="Zoom out — magnify the page less" style={TB_BTN}>−</button>
+                <span onClick={fitWidth} title="Reset to fit" style={{color:"#fff",fontSize:10,fontWeight:600,padding:"0 2px",cursor:"pointer",minWidth:30,textAlign:"center"}}>{Math.round(previewZoom*fitScale*100)}%</span>
+                <button onClick={()=>zoomTo(previewZoom*1.2)} title="Zoom in — magnify the page more" style={TB_BTN}>+</button>
+                {cfg.includeGantt && (<>
+                  <span style={TB_DIV} />
+                  <span style={TB_TAG}>Time</span>
+                  <button onClick={()=>bumpScale(1/1.25)} title="Compress the time axis — fit more months across the chart" style={TB_BTN}>−</button>
+                  <button onClick={()=>bumpScale(1.25)} title="Expand the time axis — fewer months, stretched wider" style={TB_BTN}>+</button>
+                </>)}
+                <span style={TB_DIV} />
+                <button onClick={fitWidth} title="Fit the whole timeline & reset zoom" style={TB_LBL}>Fit</button>
+                {cfg.includeGantt && (
+                  <button onClick={()=>setPanMode(m=>!m)} title={panMode?"Stop panning (re-enable clicking in the preview)":"Pan — drag to slide the visible time window left/right"}
+                    style={{...TB_LBL, background: panMode?"var(--amber)":"rgba(255,255,255,0.16)"}}>✋ Pan</button>
+                )}
               </div>
-            )}
-            {!previewUrl && (
-              <div style={{color:"#888",fontSize:12,marginTop:60}}>Generating preview…</div>
             )}
           </div>
 

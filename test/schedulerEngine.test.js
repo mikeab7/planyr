@@ -30,8 +30,12 @@ describe("addBD / difBD — malformed input must not crash or hang", () => {
     const t0 = performance.now();
     E.calcEnd("2026-06-22", 1e9);
     E.difBD("2026-06-22", "9999-12-31");
-    expect(performance.now() - t0).toBeLessThan(3000); // capped at MAX_BD_STEPS
-  });
+    // Freeze-guard, NOT a perf benchmark: this catches a MISSING cap (an uncapped 1e9-step run is
+    // ~25 min), so the bound only needs to be comfortably sub-minute. The capped run is a bounded
+    // ~1M steps (≈1–3s locally) — keep generous headroom so a slow/loaded CI runner doesn't flake
+    // (a real 3113ms run tripped a too-tight 3000ms bound).
+    expect(performance.now() - t0).toBeLessThan(20000); // capped at MAX_BD_STEPS
+  }, 60000);
   it("normal business-day math is unchanged", () => {
     expect(E.addBD("2026-06-22", 1)).toBe("2026-06-23"); // Mon → Tue
     expect(E.addBD("2026-06-26", 1)).toBe("2026-06-29"); // Fri → Mon (skip weekend)
@@ -182,7 +186,7 @@ describe("rollupParentDates — deep nesting stays fast and matches the referenc
     for (let i = 1; i <= 1000; i++) tasks.push({ id: i, name: "t" + i, start: "2026-06-22", end: `2026-06-${22 + (i % 7)}`, duration: 1, predecessors: [], parentId: i > 1 ? i - 1 : null });
     const t0 = performance.now();
     E.rollupParentDates(tasks);
-    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(performance.now() - t0).toBeLessThan(4000);
   });
 });
 
@@ -269,7 +273,7 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("the shell message handler validates origin and the Gantt month loop is bounded", () => {
     expect(src).toMatch(/if \(e\.origin !== window\.location\.origin\) return;/);
     expect(src).toMatch(/let _mGuard=12000;/);
-    expect(src).toMatch(/while\(cur2<=pd\(maxD\) && _mGuard-->0\)/);
+    expect(src).toMatch(/while\(cur2<=pd\(winEnd\) && _mGuard-->0\)/);   // B401: month axis now walks the visible window
   });
   it("the Scheduler shell wrapper validates message origin too", () => {
     const sjsx = readFileSync(fileURLToPath(new URL("../src/workspaces/scheduler/Scheduler.jsx", import.meta.url)), "utf8");

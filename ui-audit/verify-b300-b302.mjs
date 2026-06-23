@@ -58,7 +58,7 @@ await page.goto(BASE, { waitUntil: "load" });
 await sleep(1200);
 
 // Enter Document Review (Markup)
-await page.locator('button:has-text("Markup")').first().click({ timeout: 8000 });
+await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
 await sleep(700);
 
 // rects of the placed-sheet <image> elements in the stitcher canvas (DOM order = placed order)
@@ -105,7 +105,7 @@ await page.keyboard.press("Enter");
 await sleep(300);
 const polyAfter2 = await polygonCount();
 check(polyAfter2 === 0, `2-point Area is rejected (committed polygons = ${polyAfter2}, want 0)`);
-check(/No measurements yet/.test(await page.evaluate(() => document.body.innerText)), "takeoff still reads 'No measurements yet' after the 2-point attempt");
+check(/Nothing on this sheet yet/.test(await page.evaluate(() => document.body.innerText)), "takeoff still reads 'Nothing on this sheet yet' after the 2-point attempt (empty list, B376)");
 // 3-point area + Enter → commits (one <polygon>)
 await clickAt(ov.x + 120, ov.y + 200);
 await clickAt(ov.x + 260, ov.y + 210);

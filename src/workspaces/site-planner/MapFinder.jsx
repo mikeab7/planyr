@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import * as EL from "esri-leaflet";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, STATEWIDE_KEYS } from "./lib/counties.js";
-import { recordSourceResult, filterHealthyCandidates } from "./lib/sourceHealth.js";
+import { recordSourceResult, filterHealthyCandidates, isSourceOpen } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import {
   resolveLayerUrl,
-  identifyParcelDetailed,
+  identifyParcelEager,
   outerRingsLngLat,
   lngLatRingToFeet,
   feetToLatLng,
@@ -20,6 +19,7 @@ import { elStyle, elRingFeet, byZ } from "./lib/planStyle.js";
 import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
+import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
@@ -58,78 +58,95 @@ const BASEMAPS = {
 // Subtle road/place labels overlay (drawn faint over the imagery).
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
-// Parcel boundaries are drawn as styleable vector lines (same query path that
-// powers click-to-select), not a server image — so they render reliably. They
-// load once zoomed in past this level (too many to draw across a whole county).
-// Clicking to select works at ANY zoom (it's a point query); this only gates the
-// VISIBLE outlines. Kept low enough to outline big rural/industrial tracts from
-// further out, while still avoiding drawing a whole dense-urban county at once.
-const PARCEL_MINZOOM = 14;
-function makeParcelLayer(url) {
-  return EL.featureLayer({
-    url,
-    minZoom: PARCEL_MINZOOM,
-    simplifyFactor: 0.5,
-    precision: 6,
-    fields: ["OBJECTID"],
-    interactive: false, // purely visual; clicks go to the map for add/remove
-    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
-  });
+// Parcel-outline display + the +/− cursors are shared with the in-planner "Add parcel"
+// tool (lib/parcelDisplay.js) so both surfaces light up parcels identically.
+
+/* Project-status visual language — color + glyph + shape per state come from the
+ * ONE shared token set (src/shared/ui/statusTokens.js), consumed identically by the
+ * filter chips, the list-item markers, and the map pins below (B234). Two redundant
+ * cues per state (color AND glyph/shape) so it still reads for colorblind users and
+ * over a busy aerial. The module accent colors (Site/Schedule/Markup) are
+ * deliberately NOT used here — they belong to the tab row. */
+
+// The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
+// never raster). Keyed off the token `shape`, and drawn CENTERED on (cx,cy) — each
+// glyph's bounding box is balanced about that point so it sits dead-center in the
+// marker head regardless of the body shape. B365.
+function statusGlyph(shape, cx, cy) {
+  const n = (v) => +v.toFixed(2);
+  switch (shape) {
+    case "flag": {  // Pursuit — a planted flag (pole left, pennant balanced right).
+      const px = n(cx - 2.5);
+      return `<path d="M${px},${n(cy + 5.5)} L${px},${n(cy - 5.8)}" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>` +
+             `<path d="M${px},${n(cy - 5.3)} L${n(cx + 3.5)},${n(cy - 3.1)} L${px},${n(cy - 0.9)} Z" fill="#fff"/>`;
+    }
+    case "pulse":   // Active build — an activity/heartbeat line.
+      return `<polyline points="${n(cx - 6.5)},${cy} ${n(cx - 3.5)},${cy} ${n(cx - 1.5)},${n(cy - 4.4)} ${n(cx + 1.5)},${n(cy + 4.4)} ${n(cx + 3.5)},${cy} ${n(cx + 6.5)},${cy}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "pause":   // On hold — two bars.
+      return `<rect x="${n(cx - 3.3)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/><rect x="${n(cx + 0.7)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/>`;
+    case "check":   // Complete.
+      return `<polyline points="${n(cx - 5)},${n(cy - 0.3)} ${n(cx - 1.6)},${n(cy + 3.4)} ${n(cx + 5.4)},${n(cy - 4.4)}" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+    case "x":       // Dead (only shown when explicitly surfaced).
+      return `<path d="M${n(cx - 3.4)},${n(cy - 3.4)} L${n(cx + 3.4)},${n(cy + 3.4)} M${n(cx + 3.4)},${n(cy - 3.4)} L${n(cx - 3.4)},${n(cy + 3.4)}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`;
+    default: return "";
+  }
 }
 
-// Custom cursors so it's obvious you're adding (+) or removing (−) a parcel.
-// Just a + / − with a white halo for contrast — no circle around it.
-const ADD_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M14 5 L14 23 M5 14 L23 14' stroke='%23c2410c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
-const REMOVE_CURSOR =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M5 14 L23 14' stroke='%23ffffff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M5 14 L23 14' stroke='%23b91c1c' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E\") 14 14, crosshair";
-
-/* Project-status visual language — color + glyph + shape per state now come from
- * the ONE shared token set (src/shared/ui/statusTokens.js), consumed identically
- * by the filter chips, the list-item markers, and the map pins below (B234). Two
- * redundant cues per state (color AND glyph/shape) so it still reads for
- * colorblind users and over a busy aerial. The module accent colors (Site/
- * Schedule/Markup) are deliberately NOT used here — they belong to the tab row. */
-
-/* Building marker (B161): gabled industrial-building silhouette whose BODY is
- * filled with the project's status color (pursuit = hollow, dashed outline). The
- * glyph (✓ / ‖ / ✕) is the second, color-independent cue. A progress arc
- * (B161/B163) is a SEPARATE encoding and is intentionally not drawn here. */
+/* Status map pin (B365): a FLAT-TOP shield "Planyr site" marker (flat top edge,
+ * tapering to a point at the bottom that lands on the exact spot), kept constant
+ * across states so it always reads as a site — only the FILL color, white halo, size
+ * tier, glyph, and opacity vary, and they vary WITH importance (Pursuit loudest →
+ * Complete recessive; see statusTokens.js).
+ *  • White HALO only (a fattened white copy under the body) — no drop-shadow, which
+ *    flashes on re-render and costs perf; the halo is what guarantees legibility over
+ *    both bright (tan/developed) and dark (water/forest) tiles.
+ *  • A FIXED hit box for every state → the anchor never drifts when a pin's status/
+ *    size changes, and the small Complete pin keeps the big pin's generous click
+ *    target (shrinking the art never shrinks the tap target).
+ * `active` = the currently-open site (a small extra size bump + float-to-top z). */
 function buildingPinIcon(status, active) {
   const t = statusToken(status);
-  const fill = t.hollow ? "none" : t.color;
-  const stroke = t.hollow ? t.color : darken(t.color, 0.3);
-  const scale = active ? 1.15 : 1;
-  const w = Math.round(28 * scale), h = Math.round(36 * scale);
-  const op = t.dim && !active ? 0.78 : 1;
-  let glyph = "";
-  if (t.shape === "check") {
-    glyph = `<polyline points="9,18 13,22 20,13" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-  } else if (t.shape === "pause") {
-    glyph = `<rect x="11" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.85)"/><rect x="14.5" y="15" width="2.5" height="9" rx="1" fill="rgba(255,255,255,.85)"/>`;
-  } else if (t.shape === "x") {
-    glyph = `<path d="M10.5,15 L17.5,22 M17.5,15 L10.5,22" stroke="rgba(255,255,255,.92)" stroke-width="2" stroke-linecap="round"/>`;
+  // Fixed hit box ≥ the old largest marker (~32×41) so the tap target never regresses.
+  const HIT_W = 34, HIT_H = 44;
+  // Size tracks importance, dropped ~25% overall from the old single size; the open
+  // site gets a small bump on top of its tier.
+  const vs = 0.75 * (t.tier || 1) * (active ? 1.12 : 1);
+  const w = +(28 * vs).toFixed(1), h = +(36 * vs).toFixed(1);
+  const op = t.mapOpacity ?? 1;
+  const halo = t.halo || 2;
+  // Flat-top shield: flat top edge (5,10)–(23,10), straight sides to y=22, then a clean
+  // taper to the point at (14,35) that lands on the geographic spot. The glyph centers
+  // on the head zone x[5,23] × y[10,22] → (14,16).
+  const body = "M14,35 L5,22 L5,10 L23,10 L23,22 Z";
+  const GX = 14, GY = 16;
+  let shapeSvg;
+  if (t.mapHollow) {
+    // Lost/passed deal: a faint hollow outline (only ever shown when filtered to Dead).
+    shapeSvg =
+      `<path d="${body}" fill="none" stroke="#fff" stroke-width="${halo * 2}" stroke-linejoin="round" opacity="0.7"/>` +
+      `<path d="${body}" fill="none" stroke="${t.color}" stroke-width="1.4" stroke-linejoin="round"/>`;
+  } else {
+    shapeSvg =
+      // white halo underlay (round joins → uniform outer ring), then the colored body
+      `<path d="${body}" fill="#fff" stroke="#fff" stroke-width="${halo * 2}" stroke-linejoin="round"/>` +
+      `<path d="${body}" fill="${t.color}" stroke="${darken(t.color, 0.28)}" stroke-width="0.75" stroke-linejoin="round"/>` +
+      statusGlyph(t.shape, GX, GY);
   }
-  const bStroke = t.dashed
-    ? `stroke="${stroke}" stroke-width="1.6" stroke-dasharray="4 2.5"`
-    : `stroke="${stroke}" stroke-width="1"`;
-  const hasDoors = fill !== "none";
-  const shadow = active
-    ? "filter:drop-shadow(0 0 6px rgba(232,89,12,.65)) drop-shadow(0 2px 4px rgba(0,0,0,.4));"
-    : "filter:drop-shadow(0 2px 6px rgba(0,0,0,.45));";
+  // SVG bottom-aligned + horizontally centered in the fixed box → the pin tip sits at
+  // the box's bottom-center, which is the icon anchor (the geographic point), for EVERY
+  // size tier. overflow:visible so the halo isn't clipped.
   const html =
-    `<div style="${shadow}opacity:${op}">` +
-    `<svg width="${w}" height="${h}" viewBox="0 0 28 36">` +
-    `<path d="M14,35 L5,29 L5,15 L14,9 L23,15 L23,29 Z" fill="${fill}" ${bStroke}/>` +
-    (hasDoors ? `<rect x="7.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/><rect x="16.5" y="22" width="4" height="7" rx="1" fill="rgba(0,0,0,.22)"/>` : "") +
-    glyph +
+    `<div style="position:relative;width:${HIT_W}px;height:${HIT_H}px;opacity:${op}">` +
+    `<svg width="${w}" height="${h}" viewBox="0 0 28 36" ` +
+    `style="position:absolute;left:${((HIT_W - w) / 2).toFixed(1)}px;bottom:0;overflow:visible">` +
+    shapeSvg +
     `</svg></div>`;
   return L.divIcon({
     className: "",
     html,
-    iconSize: [w, h],
-    iconAnchor: [Math.round(w / 2), h],
-    tooltipAnchor: [0, -(h - 4)],
+    iconSize: [HIT_W, HIT_H],
+    iconAnchor: [HIT_W / 2, HIT_H],
+    tooltipAnchor: [0, -(h - 2)],
   });
 }
 
@@ -472,6 +489,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       if (!site.origin) return; // blank-planner sites have no geo anchor
       const status = statusOf(site);
       if (statusFilter.size && !statusFilter.has(status)) return; // chip filter: show only selected statuses (B235)
+      // Lost/passed deals recede off the map unless the user explicitly filters to
+      // Dead — a settled stage shouldn't clutter the active picture (B365).
+      if (status === "dead" && !statusFilter.has("dead")) return;
       const { lat, lon } = site.origin;
       const active = site.id === activeSiteId;
       const tip = `${site.site || site.name || "Site"} · ${siteAcres(site).toFixed(1)} ac · ${STATUS_META[status]?.label || status} · click to open`;
@@ -511,8 +531,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           poly.addTo(group);
         });
       } else {
-        // zoomed out: a status-aware map pin at the site origin
-        const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false });
+        // zoomed out: a status-aware map pin at the site origin. Z-order by IMPORTANCE
+        // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
+        // pursuit where they overlap; the open site floats above its tier (B365).
+        const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
+        const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
       }
@@ -546,16 +569,61 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lazily add a county's visible parcel-outline layer (zoom-gated, county-bounded
-  // so it only paints where that county has coverage). Idempotent per county.
+  // How long to wait for a county's outline layer to actually draw before treating its
+  // CAD host as hung. A live host (HCAD/TxGIO) answers in ~2s; FBCAD's whole server has
+  // gone dark for 15s+ at a stretch (B244, recurred 2026-06-22) with the outline layer
+  // — which, unlike the click path, had no timeout — spinning "forever". Past this we
+  // drop the dead layer, lean on the always-present statewide TxGIO outlines for that
+  // ground, and remember the host is failing so CLICKS skip it too (keeping what you
+  // SEE and what you can SELECT the same source — the B137 rule).
+  const DISPLAY_LOAD_TIMEOUT_MS = 8000;
+
+  // Lazily add a county's visible parcel-outline layer (zoom-gated). Skips a county
+  // whose CAD breaker is already open (its tiles would only hang); the statewide TxGIO
+  // outline layer still covers that area. Idempotent per county.
   const addDisplay = (key) => {
     const map = mapRef.current;
     const url = layerUrlsRef.current[key];
     if (!map || !url || displaysRef.current[key]) return;
+    const statewide = STATEWIDE_KEYS.includes(key);
+    // A county we already know is down: don't add a layer that will only spin — the
+    // statewide outlines cover it. Never skip the statewide source itself (the
+    // universal fallback).
+    if (!statewide && isSourceOpen(key)) return;
+
     const fl = makeParcelLayer(url);
-    fl.on("requesterror", () => setErr("Parcel outlines are heavy here — clicking a lot still adds it."));
     fl.addTo(map);
     displaysRef.current[key] = fl;
+    // The statewide TxGIO layer is the UNIVERSAL fallback — let it load even when it's
+    // slow, and NEVER pull it on a hiccup. A slow statewide outline still beats no
+    // outline (that "took a while to load but worked" wait IS this layer); removing it
+    // would leave the user with nothing to see OR click. Only a real county layer gets
+    // the hang-guard below.
+    if (statewide) {
+      fl.on("requesterror", () => setErr("Statewide parcel outlines are slow right now — clicking a lot still adds it."));
+      return;
+    }
+
+    let settled = false; // health of this county layer's first real draw, decided once
+    let timer = null;
+    const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const markDown = () => {
+      if (settled) return; settled = true; stopTimer();
+      // A real county's outline request hung/errored → pull the dead layer (so the map
+      // stops spinning), record the host as failing so CLICKS skip it too, and rely on
+      // the TxGIO statewide outlines for this area (keep what you SEE == what you can
+      // SELECT, the B137 rule).
+      try { map.removeLayer(fl); } catch (_) {}
+      delete displaysRef.current[key];
+      recordSourceResult(key, false);
+      setErr("That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.");
+    };
+    // Arm the hang-timer only once a request to the host is actually in flight, so we
+    // never false-flag a county just because we're zoomed out below the outline zoom
+    // (no request made). A live host fires 'load' well within the window.
+    fl.on("requeststart", () => { if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS); });
+    fl.on("load", () => { if (!settled) { settled = true; stopTimer(); } }); // drew fine — healthy
+    fl.on("requesterror", markDown);
   };
   const clearDisplays = () => {
     const map = mapRef.current;
@@ -644,8 +712,13 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
     setBusy(true); setErr(""); setBackupNotice(null);
     try {
-      const res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
-      res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
+      // Eager identify: take the first source that returns a lot (≈2-3s via the
+      // statewide layer) instead of stalling on a hung county server's full 8s timeout.
+      // The breaker is fed for EVERY source via onSettled once they all finish — even
+      // the slow ones we didn't wait for — so the next click skips a dead host (B244).
+      const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
+      });
       if (!res.hits.length) {
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
@@ -686,11 +759,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (!candidates.length) { setParcelInfo({ status: "unavailable", label }); return; }
     let res;
     try {
-      res = await identifyParcelDetailed(candidates, latlng.lng, latlng.lat);
+      res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
+        onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)), // feed the circuit breaker
+      });
     } catch (_) {
       setParcelInfo({ status: "unavailable", label }); return;
     }
-    res.sources.forEach((s) => recordSourceResult(s.county, s.ok)); // feed the circuit breaker
     if (!res.hits.length) {
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).

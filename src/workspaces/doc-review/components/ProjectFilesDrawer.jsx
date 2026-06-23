@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { listProjects, listReviews, fileNewReview, deleteReview, refileReview, upsertFileFacts, listFileFacts, markReviewPlaced, DISCIPLINES } from "../lib/reviewStore.js";
 import { listMyTeams } from "../../site-planner/lib/teams.js";
 import { shareProject, makeProjectPrivate } from "../../site-planner/lib/sharing.js";
+import { fileWarn } from "../lib/sourceState.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
@@ -136,12 +137,10 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
       // Persist the queryable file-facts index row (incl. placement) for this filed drawing.
       if (route && route.facts && r.id) { try { await upsertFileFacts(toFactsRow(route.facts, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ } }
-      // A degraded byte-store is non-fatal — flag it on the row, don't fail it.
-      let warn = null;
-      if (r.oversize) warn = "too large to store (50 MB cap) — re-drop on open to view";
-      else if (r.uploadFailed) warn = "couldn’t be stored — re-drop on open to view";
-      else if (r.driveError) warn = "filed; Drive copy failed";
-      else if (decision && decision.needsFiling && !pid) warn = `couldn’t confidently match a project (${decision.reason})`;
+      // A degraded byte-store is non-fatal — flag it on the row, don't fail it. One taxonomy
+      // (shared fileWarn) so this drawer, the Files browser, and the single-sheet banner agree.
+      let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError });
+      if (!warn && decision && decision.needsFiling && !pid) warn = `couldn’t confidently match a project (${decision.reason})`;
       patchItem(item.uploadId, {
         status: pid ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,
         reviewId: r.id, filedAt: Date.now(), warn, target,

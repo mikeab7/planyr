@@ -16,15 +16,26 @@ migrateScenarios();   // fold legacy named scenarios into Plans
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-// Last cross-workspace nav intent (B191–B193) already acted on. Module-scoped (not a
-// ref) so it survives this workspace unmounting/remounting — otherwise switching back
-// in via the module tab would re-fire the previous Dashboard/open/new intent on mount.
-let lastConsumedNavToken = null;
+// The effective project group of an active plan id (its group, or its own id for a
+// brand-new unsaved blank). null when no plan is open / we're on the map.
+const groupForPlan = (id, mode) => (mode === "plan" && id) ? (loadSite(id)?.groupId || id) : null;
+
+// Last "new project" tick already acted on (Work Item A). Module-scoped (not a ref) so it
+// survives this lazy workspace unmounting/remounting — the Shell mounts us fresh on the
+// "New project" click (after navigating here), so a per-mount ref would miss it.
+let lastConsumedNewProject = 0;
 
 /* Two surfaces: a map to find/select parcels, and the planner to design on a
  * site. Every site autosaves to its own record, so the map can list them and
  * starting/opening another never loses the one you were on. */
-export default function App({ shellModule, onShellSwitch, authControl, accountActive = false, navIntent, onOpenReviewInDocReview } = {}) {
+export default function App({
+  shellModule, onShellSwitch, authControl, accountActive = false, onOpenReviewInDocReview,
+  // Work Item A — the active project lives in the URL. `projectId` is the route's
+  // Site-group id (or null = Dashboard/Map); `onProjectChange` writes our active group
+  // back to the URL; `resumeAllowed` lets a route-less first visit resume the last site;
+  // `newProjectTick` increments when "New project" is clicked from any workspace.
+  projectId = null, onProjectChange, resumeAllowed = true, newProjectTick = 0,
+} = {}) {
   // (County is no longer a top-level pick — the map auto-resolves a clicked
   // parcel's county (B11), and the planner reads its county from the saved site.)
   // Shared map-layer overlay state — ONE source of truth for both pages, so a
@@ -35,12 +46,25 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // either page shows which layers are actually painting vs failed/empty.
   const [layerStatus, setLayerStatus] = useState({});
   const [sites, setSites] = useState(() => loadSitesList());
-  const [activeSiteId, setActiveSiteId] = useState(() => {
-    const cur = getCurrentSiteId();
-    return cur && loadSite(cur) ? cur : null;
-  });
+  // Boot target: the URL's project wins (a deep link, or carried in from another module);
+  // otherwise resume the last-opened site — but ONLY when the page opened with no explicit
+  // route, so a shared "#/" dashboard link or an explicit module URL isn't overridden.
+  const bootActiveId = () => {
+    if (projectId) {
+      const plans = loadPlansOfGroup(projectId); // newest first
+      const cur = getCurrentSiteId();
+      const t = plans.find((p) => p.id === cur) || plans[0];
+      return t ? t.id : null;
+    }
+    if (resumeAllowed) { const cur = getCurrentSiteId(); return cur && loadSite(cur) ? cur : null; }
+    return null;
+  };
+  const [activeSiteId, setActiveSiteId] = useState(bootActiveId);
   // Resume into the planner if there's an active site to pick up.
-  const [mode, setMode] = useState(() => (getCurrentSiteId() && loadSite(getCurrentSiteId()) ? "plan" : "map"));
+  const [mode, setMode] = useState(() => (bootActiveId() ? "plan" : "map"));
+  // Live mirror of the URL project for the once-registered auth callback (which would
+  // otherwise close over the first render's prop).
+  const projectIdRef = useRef(projectId); projectIdRef.current = projectId;
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
   // the fix) so it doesn't linger in storage. The finder fallback already handles
   // the routing; this just tidies the stale pointer.
@@ -63,6 +87,7 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // is global in the shell; here we just react to auth to switch cloud↔local storage.
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState(""); // "couldn't load from cloud" — shown instead of silently wiping to empty (B54)
+  const [deleteError, setDeleteError] = useState(""); // a cloud DELETE that actually failed — loud, never a phantom success (B372)
   const prevUid = useRef(null);
   const applySeq = useRef(0); // monotonic token so overlapping auth events can't interleave (B43)
   // "Bring my on-device sites into my account": signed-in uid drives the prompt; the
@@ -116,9 +141,16 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
       // B54: a failed fetch no longer wipes the cache — say we're showing the last
       // synced copy rather than presenting a silent (and scary) empty library.
       setCloudError(res && res.ok === false ? "Couldn't reach the cloud — showing your last synced copy. Your saved sites are safe; reconnect to refresh." : "");
+      // Resume target after the cloud pull: the URL's project wins (a deep link or a
+      // cross-module carry must survive sign-in), else the last-opened site (B124/B133).
       const cur = getCurrentSiteId();
-      if (cur && loadSite(cur)) {
-        setActiveSiteId(cur); setMode("plan"); // resume if it's one of theirs
+      const urlPid = projectIdRef.current;
+      const urlPlans = urlPid ? loadPlansOfGroup(urlPid) : [];
+      const resume = urlPid
+        ? (urlPlans.find((p) => p.id === cur) || urlPlans[0] || null)
+        : (cur && loadSite(cur) ? { id: cur } : null);
+      if (resume) {
+        setActiveSiteId(resume.id); setCurrentSiteId(resume.id); setMode("plan"); // resume if it's one of theirs
         // Force the keyed planner to re-read from the post-pull merged store even though `cur` is
         // unchanged, so the resumed plan can't linger on the stale pre-auth copy (B133). Safe: the
         // tab-focus SIGNED_IN re-emit is already skipped above (no remount mid-edit), and a boot
@@ -246,17 +278,42 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
     if (target) goPlan(target.id);
   };
 
-  // Consume the Shell's one-shot cross-workspace nav intent (B191–B193) — fired when
-  // Dashboard / a project / New project is chosen from Schedule or Markup, which then
-  // switches into this workspace. Token-stamped so a repeat of the same kind re-fires.
+  // ── URL ↔ active-project sync (Work Item A) ──────────────────────────────────
+  // 1) URL project → state. The route decides WHICH project is open, so a deep link, a
+  //    refresh, or a carry-in from another module all land here. A genuine transition to
+  //    "no project" (the Dashboard) drops to the map; activeSiteId is kept so switching
+  //    back into the project resumes the same plan. The first, route-less render is NOT
+  //    treated as a Dashboard navigation, so a localStorage resume isn't undone.
+  const prevPidRef = useRef(undefined);
   useEffect(() => {
-    if (!navIntent || navIntent.token === lastConsumedNavToken) return;
-    lastConsumedNavToken = navIntent.token;
-    if (navIntent.kind === "dashboard") setMode("map");
-    else if (navIntent.kind === "new-project") newBlankSite();
-    else if (navIntent.kind === "open-project") openProjectGroup(navIntent.projectId);
+    const prev = prevPidRef.current; prevPidRef.current = projectId;
+    if (projectId) {
+      const curGroup = groupForPlan(activeSiteId, mode);
+      if (projectId !== curGroup) openProjectGroup(projectId);
+      else if (mode !== "plan") setMode("plan");
+    } else if (prev !== undefined && prev !== null) {
+      setMode("map");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navIntent]);
+  }, [projectId]);
+
+  // 2) Active project → URL. When the open project changes (open another, back to map,
+  //    sign-in resume, new blank), reflect it in the hash so the URL stays shareable and
+  //    the next module switch carries the project. navigate() de-dupes identical hashes,
+  //    so this never loops with (1).
+  const effGroup = groupForPlan(activeSiteId, mode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onProjectChange?.(effGroup); }, [effGroup]);
+
+  // 3) "New project" from any workspace → start a blank site here (a side effect, not a
+  //    route: the blank has no saved id yet; once edited it writes its id into the URL).
+  useEffect(() => {
+    if (newProjectTick && newProjectTick !== lastConsumedNewProject) {
+      lastConsumedNewProject = newProjectTick;
+      newBlankSite();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newProjectTick]);
 
   // Default name for the next plan in a site: lettered concepts (Concept A, B, …
   // AA, AB; per-site, continues past the highest existing letter — NEW-1/NEW-2).
@@ -292,17 +349,18 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
   // Delete a SINGLE plan from its site (B264) — distinct from deleting the whole site.
   // Never removes the last plan in a group (that's the map's whole-site delete). If the
   // deleted plan was the one open, switch to a sibling so the planner lands somewhere valid.
-  const deletePlan = (id) => {
+  const deletePlan = async (id) => {
     const rec = loadSite(id);
     if (!rec) return;
     const siblings = loadPlansOfGroup(groupOf(rec));
     if (siblings.length <= 1) return; // keep at least one plan per site
     const wasActive = id === activeSiteId;
     const next = siblings.find((s) => s.id !== id);
-    deleteSite(id);
+    const res = await deleteSite(id);
     refreshSites();
     if (wasActive && next) goPlan(next.id);
     else if (wasActive) { setActiveSiteId(null); setMode("map"); }
+    await reportDeleteResult([res], "that plan");
   };
 
   const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
@@ -313,13 +371,26 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
 
   // Delete a whole site (every plan in its group) — used from the map, where each
   // entry represents a location, not an individual plan.
-  const deleteSiteGroup = (id) => {
+  const deleteSiteGroup = async (id) => {
     const rec = loadSite(id); if (!rec) return;
     const plans = loadPlansOfGroup(groupOf(rec));
     const hadActive = plans.some((s) => s.id === activeSiteId);
-    plans.forEach((s) => deleteSite(s.id));
+    const label = rec.site || rec.name || "this site";
+    // Unmount the (now tombstone-protected) planner BEFORE removing rows so its persist-on-leave
+    // can't race the delete; the storage guard (B372) makes it safe even if the order shifts.
     if (hadActive) setActiveSiteId(null);
+    const results = await Promise.all(plans.map((s) => deleteSite(s.id)));
     refreshSites();
+    await reportDeleteResult(results, `"${label}"`);
+  };
+
+  // If a cloud delete actually ERRORED (not just a 0-row no-op), the row may survive server-side
+  // and reappear on reload — say so LOUDLY (never a phantom success, B372) and re-pull so the list
+  // reflects the honest truth instead of showing it gone when it isn't.
+  const reportDeleteResult = async (results, label) => {
+    if (!results.some((r) => r && r.ok === false)) return;
+    setDeleteError(`Couldn't delete ${label} from the cloud — it may reappear when you reload. Check your connection and try again.`);
+    if (signedInUid) { await pullCloud(signedInUid).catch(() => {}); refreshSites(); }
   };
 
   // Set a site's project status (B7/B8). The map shows one marker per SITE group,
@@ -437,6 +508,12 @@ export default function App({ shellModule, onShellSwitch, authControl, accountAc
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
           <span style={{ flex: 1 }}>{cloudError}</span>
           <button onClick={() => setCloudError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {deleteError && (
+        <div role="alert" style={{ position: "fixed", top: cloudError ? 136 : 79, left: "50%", transform: "translateX(-50%)", zIndex: 4600, maxWidth: 560, display: "flex", alignItems: "center", gap: 10, background: "#7c2d12", color: "#fff", border: "1px solid #b91c1c", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>
+          <span style={{ flex: 1 }}>{deleteError}</span>
+          <button onClick={() => setDeleteError("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.15)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 

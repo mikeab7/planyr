@@ -13,6 +13,7 @@ import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { prefetchOnIdle } from "./modulePrefetch.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
+import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
 
 // Workspace registry — each Comp is lazy-loaded (separate bundle chunk).
 const WORKSPACES = [
@@ -75,7 +76,14 @@ const ICON = {
 };
 
 export default function Shell() {
-  const [active,    setActive]    = useState("site-planner");
+  // The active project + workspace now live in the URL hash (Work Item A), so the
+  // project survives a module switch, deep-links, and refreshes — instead of being
+  // module-local state that's lost on the way into Document Review. The breadcrumb and
+  // every workspace read the project from here, not from their own state.
+  const [route, navigate] = useHashRoute();
+  const active    = route.module;     // workspace id
+  const projectId = route.projectId;  // active Site-group id | null
+  const cross     = route.cross;      // cross-project mode
   const [user,      setUser]      = useState(null);
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
@@ -83,23 +91,29 @@ export default function Shell() {
   const [acctOpen,  setAcctOpen]  = useState(false); // account dropdown (signed-in pill, B298)
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
   const acctAnchor = useRef(null);
-  // Cross-workspace navigation (B191–B193). The project breadcrumb lives in every
-  // workspace's header; "Dashboard" and "open/new project" from Schedule or Markup
-  // must route into the Site Planner (where projects open). The Shell switches the
-  // active module and hands the Site Planner a one-shot `navIntent` (token-stamped so
-  // each click re-fires even if the kind repeats); the Site Planner consumes it.
-  const [navIntent, setNavIntent] = useState(null);
-  const goDashboard         = () => { setNavIntent({ kind: "dashboard",    token: Date.now() }); setActive("site-planner"); };
-  const openProjectInPlanner = (id) => { setNavIntent({ kind: "open-project", projectId: id, token: Date.now() }); setActive("site-planner"); };
-  const newProjectInPlanner  = () => { setNavIntent({ kind: "new-project",  token: Date.now() }); setActive("site-planner"); };
+  // Cross-workspace navigation (B191–B193, now URL-driven for project context). The
+  // breadcrumb's "Dashboard" / "select project" simply change the hash; only the two
+  // *side-effecting* actions still need a signal: creating a new project (born in the
+  // Site Planner) and opening a specific review file (Document Review is lazy-mounted).
+  const switchModule = (id) => navigate({ module: id });
+  const goDashboard  = () => navigate({ module: "site-planner", projectId: null, cross: false });
+  // "New project" from anywhere: land in the Site Planner and tell it to start a blank
+  // site. A monotonic tick (not a project id — the blank isn't saved yet) re-fires on
+  // each click; the Site Planner writes the real id into the URL once it exists.
+  const [newProjectTick, setNewProjectTick] = useState(0);
+  const newProject = () => { navigate({ module: "site-planner", projectId: null, cross: false }); setNewProjectTick((n) => n + 1); };
   // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
   // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
-  // from the Site side can't be handed to a component that doesn't exist yet. We stash the
-  // requested review (token-stamped so a repeat click re-fires), switch to Document Review,
-  // and DR consumes the pending intent once it mounts. Without this the open is dropped and
-  // DR boots to its empty placeholder until a second click.
+  // from the Site side can't be handed to a component that doesn't exist yet. We route to
+  // Document Review WITH the file's project (so the breadcrumb + browser land on it), and
+  // stash the requested review (token-stamped so a repeat click re-fires) for DR to open
+  // once it mounts. Without this the open is dropped and DR boots to its placeholder.
   const [docIntent, setDocIntent] = useState(null);
-  const openReviewInDocReview = (row) => { setDocIntent({ kind: "open-review", row, token: Date.now() }); setActive("doc-review"); };
+  const openReviewInDocReview = (row) => {
+    const pid = row && (row.project_id ?? row.projectId ?? null);
+    setDocIntent({ kind: "open-review", row, token: Date.now() });
+    navigate({ module: "doc-review", projectId: pid || null, cross: false });
+  };
 
   useEffect(() => {
     if (!supabaseConfigured()) return;
@@ -254,14 +268,18 @@ export default function Shell() {
           <Suspense fallback={<ModuleLoader module={active} />}>
             <Active
               shellModule={active}
-              onShellSwitch={setActive}
+              onShellSwitch={switchModule}
               authControl={authControl}
               accountActive={!!user}
-              navIntent={navIntent}
+              projectId={projectId}
+              crossProject={cross}
+              onNavigate={navigate}
+              onProjectChange={(gid) => navigate({ projectId: gid || null, cross: false })}
+              resumeAllowed={INITIAL_HASH_EMPTY}
+              newProjectTick={newProjectTick}
               docIntent={docIntent}
               onGoDashboard={goDashboard}
-              onOpenProject={openProjectInPlanner}
-              onNewProject={newProjectInPlanner}
+              onNewProject={newProject}
               onOpenReviewInDocReview={openReviewInDocReview}
             />
           </Suspense>

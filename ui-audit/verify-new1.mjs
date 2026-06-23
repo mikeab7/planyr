@@ -35,7 +35,7 @@ await page.waitForTimeout(1500);
 // 1) First mount of Document Review (docIntent = null path): the bootDocIntentRef capture,
 //    the null-intent markupProject seed, the intent effect's early-return, and the
 //    resume-last boot all run here.
-await page.locator('button:has-text("Markup")').first().click();
+await page.locator('button:has-text("Library")').first().click();
 await page.waitForTimeout(1500);
 r.docReviewMounted = await page.getByText("Document Review", { exact: true }).count();
 r.placeholder = await page.getByText("Open or drop a construction PDF to review.").count();
@@ -55,7 +55,7 @@ await page.keyboard.press("Escape").catch(() => {});
 
 // 3) Switch back into Markup (unmount → remount). The module-scoped lastConsumedDocToken
 //    must not re-fire anything; DR must mount cleanly again.
-await page.locator('button:has-text("Markup")').first().click();
+await page.locator('button:has-text("Library")').first().click();
 await page.waitForTimeout(1200);
 r.docReviewRemounted = await page.getByText("Document Review", { exact: true }).count();
 

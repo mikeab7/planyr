@@ -25,7 +25,7 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console.error
 const r = {};
 await page.goto(BASE, { waitUntil: "load" });
 await page.waitForTimeout(1500);
-await page.locator('button:has-text("Markup")').first().click();
+await page.locator('button:has-text("Library")').first().click();
 await page.waitForTimeout(1500);
 r.filesBtn = await page.locator('[title^="Project Files"]').count();
 await page.locator('[title^="Project Files"]').first().click();

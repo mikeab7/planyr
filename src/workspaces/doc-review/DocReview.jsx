@@ -7,17 +7,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
-import { groupSheets } from "../../shared/files/sheetGroups.js";
+import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
-import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups } from "./lib/takeoff.js";
+import { measureLabel, rollup, dist, midOfPath, centroidOf, canCommitMeasure, sanitizeMarkups, pointInPoly } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
-import ProjectFilesDrawer from "./components/ProjectFilesDrawer.jsx";
+import FileBrowser from "./components/FileBrowser.jsx";
 import { autofilingProvider } from "./lib/autofiling.js";
-import { useReviewPersistence } from "./lib/usePersistence.js";
+import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
+import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
@@ -83,7 +85,14 @@ function cloudPath(x, y, w, h, r = 9) {
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) + edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
 }
 
-export default function DocReview({ shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null } = {}) {
+export default function DocReview({
+  shellModule, onShellSwitch, authControl, accountActive = false, onGoDashboard, onNewProject, docIntent = null,
+  // Work Item A — the active project comes from the URL route (so it survives a module
+  // switch), not module-local state. `projectId` is the route's Site-group id (null =
+  // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
+  // is the all-projects browse mode.
+  projectId = null, onNavigate, crossProject = false,
+} = {}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfRef = useRef(null);
@@ -154,19 +163,24 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
+  // Work Item B: the file browser is the LANDING surface. `browsing` true = show the
+  // tree/facets/list; opening or starting a file flips to the review canvas; the 🗂 Files
+  // button (or selecting a project) brings the browser back.
+  const [browsing, setBrowsing] = useState(true);
   const [takeoffOpen, setTakeoffOpen] = useState(true); // right-side Takeoff panel collapse (B330)
-  // The project the header breadcrumb points at in Markup (B191). Follows the open
-  // review's project; picking another project here browses its files in place (it does
-  // NOT re-file the open review — browsing ≠ filing).
-  // Seed from a fresh cross-workspace open intent so the project context carries through the
-  // switch (no "Select a project" flash); loadSingleReview/openReview confirm it after load.
-  // project_id covers a listReviews row (snake_case), projectId a loaded record (camelCase).
-  const [markupProject, setMarkupProject] = useState(() => {
-    const r = bootDocIntentRef.current && bootDocIntentRef.current.row;
-    const pid = r && (r.project_id ?? r.projectId);
-    return pid ? { id: pid, name: r.project || r.title || "Project" } : null;
-  }); // { id, name } | null
+  // The project the header breadcrumb points at in Markup now comes from the URL route
+  // (Work Item A) — so it survives a module switch instead of resetting to "Select a
+  // project". Picking another project navigates the hash; opening a review navigates to
+  // that review's project (below). Its display name resolves from the local site list
+  // (instant; the per-user cloud cache feeds it), falling back to the open review's own
+  // project label, then the id. { id, name } | null.
+  const markupProject = useMemo(() => {
+    if (!projectId) return null;
+    let name = "";
+    try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) name = p.name; } catch (_) {}
+    if (!name && meta.projectId === projectId && meta.project) name = meta.project;
+    return { id: projectId, name: name || "Project" };
+  }, [projectId, meta.projectId, meta.project]);
   const [pendingStitch, setPendingStitch] = useState(null); // a stitch review handed to <Stitcher> to load
   const sourceRef = useRef(null);                  // { srcId, name } for re-drop matching after load
   const activeSheetRef = useRef(null);             // current sheet button — kept scrolled into view (B306)
@@ -266,17 +280,22 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   // consecutive pages sharing a plan type + a contiguous sheet-number run become one entry
   // ("Grading Plan · C-5–C-9 · 5 sheets"); cover/notes/one-offs stay standalone. Each group's pages
   // carry pageNum so the sidebar maps a logical entry back to real sheets. Recomputes as the read fills in.
-  const groups = useMemo(
-    () => groupSheets(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
+  // The read pages in order, with duplicate adjacent sheet numbers cleared (cross-reference
+  // misreads — B378). This ONE cleaned array feeds both the grouping and every per-page label
+  // lookup, so the sidebar never shows the same wrong number on several rows. `metaOf(n)` reads it.
+  const orderedMeta = useMemo(
+    () => markAdjacentDuplicateNumbers(Array.from({ length: numPages }, (_, i) => ({ pageNum: i + 1, ...(sheetMeta[i + 1] || {}) }))),
     [sheetMeta, numPages]
   );
+  const metaOf = (n) => orderedMeta[n - 1] || sheetMeta[n] || null;
+  const groups = useMemo(() => groupSheets(orderedMeta), [orderedMeta]);
 
   const openFile = async (file) => {
     if (!file) return;
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
     // file would otherwise be read via arrayBuffer() and only then fail).
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
-    setBusy(true); setErr("");
+    setBusy(true); setErr(""); setBrowsing(false); // opening a PDF → show the review canvas
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
@@ -435,7 +454,7 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
-  const { status, suspendSave } = useReviewPersistence({
+  const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
     deps: [reviewId, meta, source, markups, calByPage, calInfo],
   });
@@ -447,16 +466,21 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
   const fetchSourceBytes = async (src, tok) => {
-    if (!src) return;
-    if (tok != null && tok !== loadTok.current) return; // superseded before fetching
-    if (src.oversize) { setRedrop(`“${src.name}” was too large to store in the cloud — re-open it to view (your markups are saved).`); return; }
+    const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
+    if (superseded()) return; // superseded before fetching
+    // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B405).
+    // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
+    const pre = classifySource(src, { signedIn });
+    if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }
     // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
     // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
     let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
-    if (tok != null && tok !== loadTok.current) return; // superseded while downloading
-    if (!buf) buf = src.storageKey ? await downloadSource(src.storageKey) : null;
-    if (tok != null && tok !== loadTok.current) return; // a newer review opened while downloading
-    if (!buf) { setRedrop(`Couldn't fetch “${src.name}” — re-open it to view (your markups are saved).`); return; }
+    if (superseded()) return; // superseded while downloading
+    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+    if (superseded()) return; // a newer review opened while downloading
+    // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
+    // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
+    if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
@@ -466,13 +490,14 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const loadSingleReview = async (rec) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
+    setBrowsing(false); // a review is opening → leave the browser for the review canvas
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
     setPdfDoc(null);
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
     setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
@@ -482,10 +507,12 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     await fetchSourceBytes(src, tok);
   };
   const resetSingle = () => {
+    setBrowsing(false); // "New" → a fresh blank review canvas (still in the current project)
     setPdfDoc(null); sourceRef.current = null;
     setReviewId(newReviewId());
     setMeta(newMeta());
-    setMarkupProject(null);
+    // Keep the current project context: "New" starts a fresh blank review still filed
+    // under the project you're in (it does NOT drop you back to "Select a project").
     setSource(null); setRedrop("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
@@ -505,8 +532,8 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       return;
     }
     // Carry the project context through so the breadcrumb reflects the opened file (single
-    // reviews are also set inside loadSingleReview; this also covers stitch).
-    setMarkupProject(rec.projectId ? { id: rec.projectId, name: rec.project || rec.title || "Project" } : null);
+    // reviews also navigate inside loadSingleReview; this also covers stitch).
+    if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
     if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
@@ -530,6 +557,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
     // than also resuming the last one (the two are async and would race; resume could win
     // and silently replace the file the user just clicked). (NEW-1)
     if (bootDocIntentRef.current) return;
+    // Work Item B: with a project active, Markup lands on the FILE BROWSER (the last file is
+    // one click away in the list) — don't auto-open it into the canvas. Resume-into-canvas
+    // stays only for the project-less single-file workflow (e.g. a logged-out local review).
+    if (projectId) return;
     (async () => {
       let lastMode = "review", lastSingle = null, lastStitch = null;
       try {
@@ -538,13 +569,17 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
         lastStitch = localStorage.getItem("planyr:docreview:lastStitchId");
       } catch (_) {}
       const uid = await currentUid();
+      // Respect an explicit deep link (Work Item A): if the URL named a project, don't
+      // auto-resume a review that belongs to a DIFFERENT project — show the linked
+      // project's browser instead. No URL project → resume freely (it reflects into the URL).
+      const wrongProject = (rec) => projectId && rec && rec.projectId && rec.projectId !== projectId;
       if (lastMode === "stitch" && lastStitch) {
         const rec = reconcile(await loadReview(lastStitch), readDraft(uid, lastStitch));
-        if (rec && rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
+        if (rec && rec.kind === "stitch" && !wrongProject(rec)) { setPendingStitch(rec); setMode("stitch"); return; }
       }
       if (lastSingle) {
         const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
-        if (rec && rec.kind === "single") await loadSingleReview(rec);
+        if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -771,25 +806,43 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; t = Math.max(0, Math.min(1, t));
       return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
     };
-    let best = null, bd = Infinity;
+    const bboxArea = (pts) => { // tie-break for interior hits (the smaller shape wins)
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const q of pts) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+      return (x1 - x0) * (y1 - y0);
+    };
+    // Among interior (d===0) hits, prefer the SMALLEST shape so a small markup sitting on top of a
+    // big filled area stays selectable instead of being swallowed by the area underneath it (B374).
+    let best = null, bd = Infinity, bArea = Infinity;
     for (const m of pageMarks) {
       const pts = m.pts || [];
-      let d = Infinity;
+      let d = Infinity, interior = false;
       if (m.kind === "rect" || m.kind === "cloud") {
         // shape-aware: a box is selectable across its whole body, not just its 2 corners (B33)
         const a = pts[0], b = pts[1]; if (!a || !b) continue;
         const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) d = 0;
+        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
       } else if (m.kind === "text") {
         // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
         const q = pts[0]; if (!q) continue;
         const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
-        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) d = 0;
+        if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
+      } else if (m.kind === "area") {
+        // B33 generalized to the AREA polygon (B374): its FILLED interior is grabbable, so a click
+        // anywhere inside selects it — not just an edge/vertex (the dead-centre bug Michael hit). A
+        // thin / degenerate (<3-pt) area still selects by its edge or vertex via the fallback.
+        if (pts.length >= 3 && pointInPoly(p, pts)) { d = 0; interior = true; }
+        else {
+          for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+          if (pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
+        }
       } else {
-        // measures (distance/perimeter/area/count): nearest vertex OR segment (so the line body selects)
+        // distance / perimeter / count: nearest vertex OR segment (so the line body selects)
         for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
+        if (m.kind === "perimeter" && pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
       }
-      if (d < bd) { bd = d; best = m.id; }
+      const a = interior ? bboxArea(pts) : Infinity;
+      if (d < bd - 1e-6 || (d <= bd + 1e-6 && a < bArea)) { bd = d; best = m.id; bArea = a; }
     }
     return bd <= tol ? best : null;
   };
@@ -830,6 +883,10 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   /* ---------------- render ---------------- */
   const f0 = (n) => Math.round(n).toLocaleString();
   const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Right-hand value for a row in the per-sheet markup list (B376): a measurement shows its
+  // measured value; a text note shows its words; a redline shape has none. Every markup is listed
+  // so it can always be found + deleted from the panel, independent of clicking it on the canvas.
+  const markRowValue = (m) => MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : m.kind === "text" ? ((m.text || "").trim() || "empty note") : "";
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
   // + tightened padding for density on the single header row (B305).
   const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
@@ -839,11 +896,30 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
   const curTool = TOOLS.find((t) => t.id === tool);
   // Logical-sheet sidebar helpers (B266/B348): a calibration dot, a short sheet id, a rich tooltip.
   const calMark = (n) => (calInfo[n]?.src === "auto" ? " ·≈" : calByPage[n] ? " ·✓" : "");
-  const sheetShort = (n) => sheetMeta[n]?.sheetNumber || `Sheet ${n}`;
+  const sheetShort = (n) => metaOf(n)?.sheetNumber || `Sheet ${n}`;
+  // Do we trust the read title enough to surface it as the label (B378)? A title is trustworthy
+  // when it came from a detected title-block band, OR is corroborated by a real sheet number read
+  // from the title-block zone, OR the sheet is a recognized text page (general notes / specs, where
+  // the title IS its identity). A bare band — or nothing — no longer authorizes a body line as the
+  // label (the old `hasReal` gate that let copyright/legend prose through).
+  const trustedTitle = (m) =>
+    m?.sheetTitle && m.sheetTitle !== "Document" && (m.titleBlock || m.sheetNumber || m.textDense) ? m.sheetTitle : "";
+  // The human label for a single sheet: the trusted title ("GENERAL NOTES"), else the deterministic
+  // discipline item ("Grading Plan"), with the sheet number appended; else just the number; else
+  // "Sheet N". Returns { label, real }.
+  const sheetLabel = (n) => {
+    const m = metaOf(n);
+    const title = trustedTitle(m) || (m?.item && m.item.toLowerCase() !== "document" ? m.item : "");
+    const num = m?.sheetNumber ? ` · ${m.sheetNumber}` : "";
+    if (title) return { label: `${title}${num}`, real: true };
+    if (m?.sheetNumber) return { label: m.sheetNumber, real: true };
+    return { label: `Sheet ${n}`, real: false };
+  };
   const sheetTip = (n) => {
-    const m = sheetMeta[n]; const parts = [];
+    const m = metaOf(n); const parts = [];
     if (m?.sheetNumber) parts.push(m.sheetNumber);
-    if (m?.titleBlock && m.sheetTitle && m.sheetTitle !== "Document") parts.push(m.sheetTitle); // title only from a real title block
+    const t = trustedTitle(m);
+    if (t) parts.push(t);
     if (calInfo[n]?.label) parts.push(`scale ${calInfo[n].label}${calInfo[n].src !== "manual" ? " — verify" : ""}`);
     return parts.join(" · ") || `Sheet ${n}`;
   };
@@ -931,26 +1007,32 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
-      <ProjectFilesDrawer open={filesOpen} onClose={() => setFilesOpen(false)} onOpenReview={openReview} signedIn={signedIn}
-        projectId={markupProject?.id || meta.projectId || null} indexProvider={autofilingProvider} onPlaceOnMap={() => onShellSwitch?.("site-planner")} />
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
         // Breadcrumb (B191–B193): Dashboard leaves Markup for the all-projects map;
-        // picking a project browses its files in place (opens the Files drawer scoped
-        // to it); New project is born in the Site Planner. Save state from persistence.
+        // picking a project browses its files in place (the file browser, scoped to it);
+        // New project is born in the Site Planner. Save state from persistence.
         onDashboard={onGoDashboard}
         currentProject={markupProject}
-        onSelectProject={(id, name) => { setMarkupProject({ id, name }); setFilesOpen(true); }}
+        cross={crossProject}
+        onSelectProject={(id) => { onNavigate?.({ projectId: id }); setBrowsing(true); }}
         onNewProject={onNewProject}
-        saveState={status === "saving" ? "saving" : (status === "unsaved" || status === "conflict") ? "error" : (signedIn ? "synced" : "local")}
+        // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState
+        // keeps the "a failed write is LOUD, never silent" contract (unit-locked).
+        saveState={docSaveState(status, signedIn, isEmpty())}
+        onRetrySave={status === "conflict" ? undefined : saveNow}
+        saveDetail={status === "conflict" ? "This review was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
         centerContent={
-          // Files is opened from Row 1 (the project-name area), not a module tab (B180):
-          // a shelf every workspace reaches into, so it lives next to the project name.
-          // The project name itself is NOT repeated here — the Row-1 breadcrumb is its one
-          // canonical home (B357); a second copy in the centre was the "crowded centre".
-          <button onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
+          // The 🗂 Files button returns to the file browser landing from the review canvas
+          // (B6). It reads as active while browsing. The project name itself isn't repeated
+          // here — the Row-1 breadcrumb is its one canonical home (B357).
+          <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
+            aria-pressed={browsing}
+            style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
+              border: `1px solid ${browsing ? "var(--accent-markup)" : "var(--chrome-divider)"}`,
+              background: browsing ? "var(--accent-markup)" : "var(--chrome-bg-elev)",
+              color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
             🗂 Files
           </button>
         }
@@ -961,10 +1043,11 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
             <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
             <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
-            {/* Reviews (file/save this review) now lives in the Row-2 tools row, not Row 1 (B360);
-                its truthful save chip rides with it (B358). The old 📁 Library door was removed —
-                the 🗂 Files drawer already browses by project + discipline (B359). */}
-            <ReviewsBar status={status} signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} idle={isEmpty()} />
+            {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
+                save chip was retired — the app-wide Row-1 CloudSyncBadge (NEW-1) is the single
+                save indicator now, so there's no longer a second chip competing here. The old
+                📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
+            <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
             {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
@@ -987,12 +1070,25 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
       {openErr && (
         <div role="alert" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "6px 12px", background: "#fee2e2", color: "#991b1b", fontSize: 12, fontFamily: "system-ui, sans-serif" }}>
           <span>⚠ {openErr}</span>
-          <button onClick={() => { setOpenErr(""); setFilesOpen(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
+          <button onClick={() => { setOpenErr(""); setBrowsing(true); }} style={{ marginLeft: "auto", padding: "4px 9px", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #dca0a0", background: "#fff", color: "#991b1b" }}>Browse Files…</button>
           <button onClick={() => setOpenErr("")} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(0,0,0,0.06)", color: "#991b1b", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
-      {!pdfRef.current ? (
+      {browsing ? (
+        // Work Item B — the file browser IS the landing surface (a project's tree, facets,
+        // and badged list), not an empty "drop a PDF" screen. Opening a file flips to the
+        // review canvas; the 🗂 Files button brings the browser back.
+        <FileBrowser
+          projectId={projectId}
+          projectName={markupProject?.name || ""}
+          signedIn={signedIn}
+          cross={crossProject}
+          indexProvider={autofilingProvider}
+          onOpenReview={openReview}
+          onNavigate={onNavigate}
+        />
+      ) : !pdfRef.current ? (
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>
@@ -1025,12 +1121,9 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
                 const gid = `${gi}:${g.pages[0]?.pageNum}`;
                 if (g.kind === "single") {
                   const n = g.pages[0].pageNum, active = n === page;
-                  // Use a real label only when this sheet has a confident title-block read (a detected
-                  // band or a real sheet number) — never surface a random body-text line as the label
-                  // (a textless/title-block-less page stays "Sheet N"). (B266)
-                  const m = sheetMeta[n];
-                  const hasReal = !!(m && (m.sheetNumber || m.titleBlock));
-                  const lbl = hasReal && g.label && g.label !== "Sheet" ? g.label : `Sheet ${n}`;
+                  // The label: the real title-block title + number, else "Sheet N" — never a random
+                  // body-text line (B266) and never a cross-referenced/duplicate number (B378).
+                  const lbl = sheetLabel(n).label;
                   return (
                     <button key={gid} ref={active ? activeSheetRef : null} onClick={() => goToPage(n)} title={sheetTip(n)} data-testid="sheet-entry"
                       style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 9px", marginBottom: 3, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
@@ -1084,6 +1177,25 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
                 {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
                 {drawDraft()}
               </svg>
+              {/* On-canvas delete affordance (B375): a clear × on the selected markup so removing it
+                  doesn't depend on knowing the Delete key. Lives OUTSIDE the pointerEvents:none overlay
+                  (like the inline editors) so it takes its own click; stopPropagation keeps that click
+                  from starting a pan/draw on the canvas underneath. Anchored at the markup's top-right. */}
+              {sel && !editing && !calInput && (() => {
+                const m = pageMarks.find((mm) => mm.id === sel);
+                const src = (dragPreview && dragPreview.id === sel ? dragPreview.pts : m && m.pts) || [];
+                if (!m || !src.length) return null;
+                const sp = src.map((q) => ({ x: q.x * view.scale, y: q.y * view.scale }));
+                let rx = -Infinity, ty = Infinity;
+                for (const q of sp) { rx = Math.max(rx, q.x); ty = Math.min(ty, q.y); }
+                if (m.kind === "text") { rx = sp[0].x + ((m.text || "").length * 6.5 + 6); ty = sp[0].y - 12; }
+                return (
+                  <button title="Delete this markup (Del)" aria-label="Delete this markup"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); pushHistory(); setMarkups((a) => a.filter((mm) => mm.id !== sel)); setSel(null); }}
+                    style={{ position: "absolute", left: rx + 6, top: ty - 2, width: 22, height: 22, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: "var(--danger-text)", color: "var(--on-accent)", cursor: "pointer", fontSize: 15, fontWeight: 800, lineHeight: 1, boxShadow: "0 2px 8px rgba(0,0,0,0.35)", zIndex: 7, padding: 0, fontFamily: "inherit" }}>×</button>
+                );
+              })()}
               {editing && (
                 <input autoFocus value={editing.text}
                   onChange={(ev) => setEditing((ed) => (ed ? { ...ed, text: ev.target.value } : ed))}
@@ -1135,12 +1247,21 @@ export default function DocReview({ shellModule, onShellSwitch, authControl, acc
               })()}
             </div>
             <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>This sheet</div>
-            {pageMarks.filter((m) => MEASURE.has(m.kind)).length === 0
-              ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>No measurements yet.</div>
-              : <div style={{ marginBottom: 10 }}>{pageMarks.filter((m) => MEASURE.has(m.kind)).map((m) => (
-                  <div key={m.id} onClick={() => { setTool("select"); setSel(m.id); }} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 6px", borderRadius: 6, cursor: "pointer", background: m.id === sel ? "#fbf3ee" : "transparent", fontSize: 11.5 }}>
-                    <span style={{ color: PAL.muted, textTransform: "capitalize" }}>{m.kind}</span>
-                    <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{measureLabel(m, ftPerUnit)}</span>
+            {/* Every markup on the sheet (measures + redlines + notes), each click-to-select with its
+                own × delete — so anything can be removed from the list even if it's hard to click on a
+                dense sheet or you're not in Select mode (B376). */}
+            {pageMarks.length === 0
+              ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
+              : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
+                    <button onClick={() => { setTool("select"); setSel(m.id); }} title="Select this markup on the sheet"
+                      style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
+                      <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>
+                      <span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{markRowValue(m)}</span>
+                    </button>
+                    <button onClick={() => { pushHistory(); setMarkups((a) => a.filter((x) => x.id !== m.id)); if (sel === m.id) setSel(null); }}
+                      title="Delete this markup" aria-label="Delete this markup"
+                      style={{ flex: "none", width: 22, height: 22, display: "grid", placeItems: "center", border: "none", background: "transparent", cursor: "pointer", color: "var(--danger-text)", fontSize: 13, fontWeight: 800, lineHeight: 1, borderRadius: 5, fontFamily: "inherit" }}>×</button>
                   </div>
                 ))}</div>}
 

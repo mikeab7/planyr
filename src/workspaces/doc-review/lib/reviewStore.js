@@ -275,31 +275,30 @@ export async function upsertFileFacts(row) {
   if (!supabase || !row || !row.id) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to file documents." };
-  // No user_id in the payload: the column default (auth.uid()) stamps the creator on insert and
-  // a teammate edit of a shared row won't re-stamp the owner. team_id carries the share (null =
-  // private). onConflict is the PK = "id" post-migration; degrade to the prior (user_id,id) /
-  // no-team_id shapes so indexing never regresses against a partially-migrated DB.
+  // No user_id in the payload: the column default (auth.uid()) stamps the creator on INSERT, so a
+  // teammate edit of a shared row won't re-stamp the owner. team_id carries the share (null =
+  // private); category/state are the Work Item B index columns. onConflict = the PK "id" (post the
+  // phase-2 migration). Degrade gracefully if any optional column (team_id / category / state) or
+  // the old composite PK isn't where we expect, so indexing never regresses on a partial migration.
   const { teamId, team_id: t0, ...rest } = row;
   const payload = { ...rest, team_id: teamId || t0 || null };
+  const core = () => { const { team_id, category, state, ...c } = payload; return c; };
   let { error } = await supabase.from("file_facts").upsert(payload, { onConflict: "id" });
-  if (error && isMissingColumn(error, "team_id")) {
-    const { team_id, ...noTeam } = payload;
-    ({ error } = await supabase.from("file_facts").upsert(noTeam, { onConflict: "id" }));
-  }
-  if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) {
-    // pre primary-key change: the unique target is still (user_id, id)
-    const { team_id, ...noTeam } = payload;
-    ({ error } = await supabase.from("file_facts").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
-  }
+  if (error && /team_id|category|state|column|schema cache/i.test(error.message || ""))
+    ({ error } = await supabase.from("file_facts").upsert(core(), { onConflict: "id" }));
+  if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change: target is (user_id,id)
+    ({ error } = await supabase.from("file_facts").upsert({ ...core(), user_id: uid }, { onConflict: "user_id,id" }));
   return { ok: !error, error: error ? error.message : null };
 }
 
+const FILE_FACTS_CORE = "id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at";
 export async function listFileFacts() {
   if (!supabase || !(await currentUid())) return [];
-  const cols = "id,review_id,project_id,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,placement,updated_at";
-  let { data, error } = await supabase.from("file_facts").select(cols + ",team_id").order("updated_at", { ascending: false });
-  if (error && isMissingColumn(error, "team_id")) // team-sharing migration not run → drop team_id
-    ({ data, error } = await supabase.from("file_facts").select(cols).order("updated_at", { ascending: false }));
+  let { data, error } = await supabase.from("file_facts")
+    .select(FILE_FACTS_CORE + ",team_id,category,state")
+    .order("updated_at", { ascending: false });
+  if (error) // an optional column (team_id / category / state) isn't migrated in → read the core set
+    ({ data, error } = await supabase.from("file_facts").select(FILE_FACTS_CORE).order("updated_at", { ascending: false }));
   return error || !data ? [] : data;
 }
 

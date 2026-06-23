@@ -2,9 +2,10 @@
  *
  * Row 1 (35px): logo + wordmark | divider | nav links
  *               || project name (center) ||
- *               save slot | auth control
+ *               cloud-sync badge | settings | auth control
  *
  * Row 2 (44px): module tabs (Site · Schedule · Markup)
+ *               | optional center slot (toolbarCenter, B387) |
  *               || toolbar slot (workspace-specific tools) ||
  * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
  * happens, so it carries the visual weight; the nav row stays thin. Don't equalise them
@@ -15,21 +16,30 @@
  *   onSwitch      — (id) => void  — switch to another module
  *   onDashboard   — () => void    — "Dashboard" / "Projects" nav links
  *   centerContent — ReactNode     — project name + chevron dropdown (workspace provides)
- *   saveSlot      — ReactNode     — save/sync badge (workspace provides)
+ *   saveState     — normalized save/sync state — drives the shared CloudSyncBadge (NEW-1)
+ *   onRetrySave   — () => void     — optional; the badge's error popover offers "Retry now"
+ *   saveDetail    — string         — optional; overrides the badge popover's default explanation
+ *   saveSlot      — ReactNode      — optional extra Row-1 content (legacy slot; the save badge
+ *                                    is now the shared CloudSyncBadge driven by saveState)
  *   authControl   — ReactNode     — user avatar or sign-in button (Shell provides)
  *   toolbarContent — ReactNode    — module-specific toolbar buttons (workspace provides)
+ *   toolbarCenter  — ReactNode    — optional Row-2 center group (B387); present ⇒ Row 2 is a
+ *                                    3-zone tabs|center|toolbar layout (center optically centered
+ *                                    like Row 1). Absent (Site/Markup) ⇒ unchanged 2-zone layout.
  *
  * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
  */
 import { useEffect, useRef, useState } from "react";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
+import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
 import { MODULE_ACCENT } from "./moduleAccent.js";
 import { useTheme } from "../theme/ThemeProvider.jsx";
+import ThemePicker from "../theme/ThemePicker.jsx";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -43,25 +53,20 @@ const TAB_IDLE = "var(--chrome-tab-inactive)";
 const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-markup)" };
 const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
 
-// Light / Dark / System theme options. The picker now lives inside the row-1 Settings
-// gear popover (B342) rather than sitting open in the header — decluttered, but still one
-// click and reachable signed-out. Pure local theme switch (reads/sets the ThemeProvider,
-// whose matchMedia "System" listener is independent of where this control mounts). (B317)
-const THEME_OPTS = [
-  { id: "light",  label: "Light",  hint: "Always light",            icon: <><circle cx="8" cy="8" r="3.1" /><path d="M8 1.6v1.5M8 12.9v1.5M1.6 8h1.5M12.9 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M12.5 3.5l-1 1M4.5 11.5l-1 1" /></> },
-  { id: "dark",   label: "Dark",   hint: "Always dark",             icon: <path d="M13 9.4A5.2 5.2 0 0 1 6.6 3 5.2 5.2 0 1 0 13 9.4Z" /> },
-  { id: "system", label: "System", hint: "Match your computer",     icon: <><rect x="2" y="3" width="12" height="8" rx="1" /><path d="M6 13.4h4M8 11.4v2" /></> },
-];
-
+// The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
+// for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
+// visitor can still switch (preserves B342's "reachable signed-out" without duplicating the
+// control when signed in). The picker UI itself is the shared <ThemePicker/>. (B317/B342/B389)
 const settingsPanel = {
   padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)",
   border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)",
   fontFamily: "system-ui, sans-serif",
 };
 
-// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Always
-// present, signed in or out, so the theme switch never depends on the account menu. (B342)
-function SettingsMenu({ mode, setMode }) {
+// Settings gear (row-1 right zone) → popover hosting the display-theme picker. Rendered
+// only when signed OUT (B389): signed-in users get the theme control in account → Settings,
+// so the gear isn't duplicated; signed out, this keeps the switch one click away. (B342/B389)
+function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
   return (
@@ -87,36 +92,7 @@ function SettingsMenu({ mode, setMode }) {
       </button>
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchor}
         placement="below-right" width={206} gap={8} panelStyle={settingsPanel}>
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-tertiary)", padding: "4px 8px 6px" }}>
-          Display theme
-        </div>
-        {THEME_OPTS.map((o) => {
-          const on = mode === o.id;
-          return (
-            <button
-              key={o.id}
-              onClick={() => setMode(o.id)}
-              aria-pressed={on}
-              style={{
-                display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-                padding: "8px 9px", borderRadius: 7, border: "none", cursor: "pointer",
-                fontFamily: "inherit", background: on ? "var(--hover-ghost)" : "transparent", color: "var(--text-primary)",
-              }}
-              onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "var(--hover-ghost)"; }}
-              onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}
-            >
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none" }}>
-                {o.icon}
-              </svg>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>{o.label}</span>
-                <span style={{ display: "block", fontSize: 11, color: "var(--text-secondary)" }}>{o.hint}</span>
-              </span>
-              {on && <span aria-hidden style={{ color: "var(--accent-site-text)", fontWeight: 800, fontSize: 13 }}>✓</span>}
-            </button>
-          );
-        })}
+        <ThemePicker />
       </AnchoredMenu>
     </>
   );
@@ -155,7 +131,7 @@ const MODULES = [
   },
   {
     id: "doc-review",
-    label: "Markup",
+    label: "Library",
     // simplified ti-pencil outline
     icon: (
       <>
@@ -236,6 +212,11 @@ export default function AppHeader({
   saveSlot,
   authControl,
   toolbarContent,
+  // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
+  // (tabs | center | toolbar) with the center group optically centered like Row 1.
+  // Generic + additive: callers that omit it (Site, Markup) keep the 2-zone layout
+  // unchanged. Its first consumer is the Schedule toolbar lift (B388).
+  toolbarCenter,
   // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
   // breadcrumb renders right of the logo; workspaces that don't wire it (none, now)
   // simply omit it and the left zone stays logo-only.
@@ -243,10 +224,17 @@ export default function AppHeader({
   onSelectProject,
   onNewProject,
   saveState,
+  // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
+  // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
+  // badge falls back to a sensible per-state explanation when they're omitted.
+  onRetrySave,
+  saveDetail,
   // Optional: a workspace-supplied project list (B203 — Schedule feeds in its embedded
   // scheduler's own projects) and a home-crumb label override (B204 — Site → "Map").
   projects,
   homeLabel,
+  // Cross-project mode (Work Item A) — the breadcrumb reads "All projects" when on.
+  cross = false,
   // Whether a real account is signed in. The same-project-in-another-tab warning
   // (B313) only applies to signed-in accounts: a logged-out, device-only session
   // starts fresh and should never see the cross-tab conflict banner — it protects
@@ -255,7 +243,7 @@ export default function AppHeader({
   accountActive = false,
 }) {
   const [fullscreen, setFullscreen] = useState(false);
-  const { mode, resolved, setMode } = useTheme();
+  const { resolved } = useTheme();
   const multiTab = useMultiTab(accountActive && currentProject ? currentProject.id : null); // B313 — same-project-in-another-tab warning (signed-in only)
 
   useEffect(() => {
@@ -293,6 +281,12 @@ export default function AppHeader({
       </button>
     );
   }
+
+  // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
+  // so the per-tab wiring is defined once.
+  const moduleTabButtons = MODULES.map((m) => (
+    <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
+  ));
 
   return (
     <>
@@ -338,6 +332,7 @@ export default function AppHeader({
                 saveState={saveState}
                 projects={projects}
                 homeLabel={homeLabel}
+                cross={cross}
               />
             </>
           )}
@@ -353,46 +348,68 @@ export default function AppHeader({
           {centerContent}
         </div>
 
-        {/* Right zone — save · auth */}
+        {/* Right zone — cloud-sync badge · settings · auth */}
         <div
           style={{
             flex: 1, display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 12,
           }}
         >
+          {/* The compact, app-wide save indicator (NEW-1): one shared component, driven by
+              the real saveState every workspace already computes — never an optimistic
+              "always green", and it renders a LOUD error state instead of silently vanishing. */}
+          <CloudSyncBadge state={saveState} onRetry={onRetrySave} detail={saveDetail} />
           {saveSlot}
-          <SettingsMenu mode={mode} setMode={setMode} />
+          {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
+          {!accountActive && <SettingsMenu />}
           {authControl}
         </div>
       </div>
 
-      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ── */}
-      <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
-
-        {/* Module tabs */}
-        <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-          {MODULES.map((m) => (
-            <ModuleTab
-              key={m.id}
-              m={m}
-              isActive={m.id === module}
-              onClick={() => onSwitch && onSwitch(m.id)}
-            />
-          ))}
+      {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
+           With a center slot (B387) Row 2 is a 3-zone layout: tabs (flex:1) | center group
+           (shrink-to-content) | toolbar (flex:1, end), so the center group is optically
+           centered the same way Row 1 centers the project name. The row may wrap on a
+           too-narrow viewport (the center/toolbar flow to a second line) instead of
+           overlapping — never absolute positioning. With NO center slot (Site/Markup) the
+           original 2-zone tabs|toolbar layout renders unchanged. */}
+      {toolbarCenter ? (
+        <div style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 2, borderTop: `1px solid ${LINE}` }}>
+          {/* Left zone — module tabs (flex:1, basis 0 — mirrors Row 1 so the center is
+              TRULY centered regardless of how wide the tabs vs the toolbar are) */}
+          <div style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: 1, minWidth: 0 }}>
+            {moduleTabButtons}
+          </div>
+          {/* Center zone — workspace-supplied center group (shrink-to-content) */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "0 1 auto", minWidth: 0, gap: 4, padding: "0 8px" }}>
+            {toolbarCenter}
+          </div>
+          {/* Right zone — toolbar slot (flex:1 end, mirrors Row 1's right zone) */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: 0, gap: 4, overflow: "hidden" }}>
+            {toolbarContent}
+          </div>
         </div>
+      ) : (
+        <div style={{ height: 44, display: "flex", alignItems: "center", borderTop: `1px solid ${LINE}` }}>
 
-        {/* Toolbar slot */}
-        <div
-          style={{
-            flex: 1, display: "flex", alignItems: "center",
-            justifyContent: "flex-end", paddingRight: 6,
-            minWidth: 0, gap: 4,
-            overflow: "hidden",
-          }}
-        >
-          {toolbarContent}
+          {/* Module tabs */}
+          <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
+            {moduleTabButtons}
+          </div>
+
+          {/* Toolbar slot */}
+          <div
+            style={{
+              flex: 1, display: "flex", alignItems: "center",
+              justifyContent: "flex-end", paddingRight: 6,
+              minWidth: 0, gap: 4,
+              overflow: "hidden",
+            }}
+          >
+            {toolbarContent}
+          </div>
         </div>
-      </div>
+      )}
     </header>
     {/* B313 — non-blocking warning when the SAME project is open in another same-browser tab.
         Clears automatically when that tab closes/navigates (its 'bye' / TTL prunes it). */}

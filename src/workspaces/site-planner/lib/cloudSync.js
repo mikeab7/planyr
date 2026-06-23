@@ -74,13 +74,36 @@ export async function cloudUpsert(uid, model) {
   return { ok: false, error: r.error || "cloud write failed" };
 }
 
+// Pure: turn a DELETE … .select() result into a typed outcome (exported for unit tests).
+//   { ok:false, error }    → the delete errored (network / permission) — the caller surfaces it
+//                            LOUDLY because the row may survive server-side and reappear on reload.
+//   { ok:true, removed:0 } → no row matched: it was already gone, OR an ownership/RLS mismatch
+//                            blocked it. The goal (the row's absence) still holds, so this is NOT
+//                            an error — but we report removed:0 so a caller can tell "actually
+//                            removed a row" from "there was nothing to remove" (a plain `.delete()`
+//                            reports success either way, which is the silent no-op this fixes).
+//   { ok:true, removed:N } → N rows removed.
+export function interpretDelete(rows, error) {
+  if (error) return { ok: false, error: error.message || "delete failed" };
+  return { ok: true, removed: Array.isArray(rows) ? rows.length : 0 };
+}
+
 export async function cloudDelete(uid, id) {
-  if (!supabase || !uid || !id) return { ok: false };
+  // Nothing to remove server-side (logged out / unconfigured) is success, not a failure to alarm on.
+  if (!supabase || !uid || !id) return { ok: true, removed: 0, skipped: true };
   delete siteVersions[id]; // stop tracking a removed row's version
-  // Scope by id only and let RLS decide (own row OR team-admin on a shared row). A user_id filter
-  // would block an admin from deleting a teammate's shared project, which the policy permits.
-  const { error } = await supabase.from("sites").delete().eq("id", id);
-  return { ok: !error, error: error ? error.message : null };
+  // Scope by id only and let RLS decide who may delete (own row, OR team-admin on a shared row).
+  // A user_id filter would block an admin from deleting a teammate's shared project, which the
+  // policy permits — RLS is the security boundary here, not the client filter (team feature).
+  // `.select()` returns the rows actually removed, so a 0-row no-op (RLS mismatch, or an
+  // already-deleted row) is DISTINGUISHABLE from a real removal — a bare `.delete()` reports
+  // success on both (B372).
+  try {
+    const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
+    return interpretDelete(data, error);
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "delete threw" };
+  }
 }
 
 // Every site row the signed-in user can see — their own PLUS any shared with a team they're

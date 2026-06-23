@@ -30,7 +30,12 @@ const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 
 export const DUP_MS = 10_000;          // drop an identical signature seen again within 10s
 export const RATE_WINDOW_MS = 60_000;  // per-minute window…
-export const RATE_MAX = 20;            // …at most this many sends within it (storm guard)
+export const RATE_MAX = 20;            // …at most this many sends within it (burst/storm guard)
+export const SESSION_MAX = 100;        // hard ceiling on TOTAL sends for the page's lifetime.
+                                       // The per-minute window re-arms forever, so it only tames
+                                       // bursts; this caps a slow sustained drip (a persistent
+                                       // error loop, or a logged-out abuser trickling rows) at a
+                                       // fixed total per page load. Standard error-tracker practice.
 const MSG_MAX = 2000;
 const STACK_MAX = 8000;
 const RECENT_MAX = 20;                 // diagnostic ring-buffer size
@@ -77,28 +82,33 @@ export function buildErrorRow(error, context = {}, meta = {}) {
 }
 
 /* Pure decision: should this error be sent, given recent history? Suppresses an exact
- * duplicate signature within dupMs and caps total sends to maxPerWindow per windowMs,
- * so a tight error loop becomes a few rows, not a flood. Returns { report, state } with
+ * duplicate signature within dupMs, caps bursts to maxPerWindow per windowMs, AND enforces
+ * a hard maxPerSession ceiling on the running total (which never resets) — so a tight loop
+ * becomes a few rows and a slow drip can't trickle forever. Returns { report, state } with
  * the next state (no I/O). Unit-tested. */
 export function decideReport(sig, now, state = {}, opts = {}) {
   const dupMs = opts.dupMs ?? DUP_MS;
   const windowMs = opts.windowMs ?? RATE_WINDOW_MS;
   const maxPerWindow = opts.maxPerWindow ?? RATE_MAX;
+  const maxPerSession = opts.maxPerSession ?? SESSION_MAX;
   const seen = state.seen instanceof Map ? state.seen : new Map();
   let windowStart = state.windowStart || now;
   let sent = state.sent || 0;
+  const total = state.total || 0;
+  // Session ceiling first: once hit, nothing more goes out for this page's lifetime.
+  if (total >= maxPerSession) return { report: false, state: { seen, windowStart, sent, total } };
   if (now - windowStart >= windowMs) { windowStart = now; sent = 0; }   // window rolled over
   const last = seen.get(sig);
-  if (last != null && now - last < dupMs) return { report: false, state: { seen, windowStart, sent } };
-  if (sent >= maxPerWindow) return { report: false, state: { seen, windowStart, sent } };
+  if (last != null && now - last < dupMs) return { report: false, state: { seen, windowStart, sent, total } };
+  if (sent >= maxPerWindow) return { report: false, state: { seen, windowStart, sent, total } };
   seen.set(sig, now);
   if (seen.size > 200) for (const [k, t] of seen) if (now - t > dupMs) seen.delete(k); // bound memory
-  return { report: true, state: { seen, windowStart, sent: sent + 1 } };
+  return { report: true, state: { seen, windowStart, sent: sent + 1, total: total + 1 } };
 }
 
 // ——— impure layer (browser only) ————————————————————————————————————————————————
 
-let _state = { seen: new Map(), windowStart: 0, sent: 0 };
+let _state = { seen: new Map(), windowStart: 0, sent: 0, total: 0 };
 let _module = null;
 let _installed = false;
 const _recent = []; // diagnostic ring buffer (last N rows) for live/headless debugging
@@ -142,5 +152,5 @@ export function installClientErrorTelemetry(win = typeof window !== "undefined" 
   win.addEventListener("vite:preloadError", (e) => reportClientError((e && e.payload) || e, { source: "vite:preloadError" }));
   // Diagnostic handle (mirrors window.pfSupabase): inspect recent captures live without
   // a DB round-trip. Safe to ship.
-  try { win.pfTelemetry = { reportClientError, recent: () => _recent.slice(), state: () => ({ sent: _state.sent }) }; } catch { /* ignore */ }
+  try { win.pfTelemetry = { reportClientError, recent: () => _recent.slice(), state: () => ({ sent: _state.sent, total: _state.total }) }; } catch { /* ignore */ }
 }

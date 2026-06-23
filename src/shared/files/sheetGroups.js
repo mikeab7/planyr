@@ -78,6 +78,25 @@ function toLogical(run) {
   };
 }
 
+/* A sheet number that repeats on an ADJACENT page is almost always a cross-reference misread —
+ * a real plan set never prints the same sheet # on two pages in a row (B378). When the band-scoped
+ * read can't isolate the number (a no-title-block notes sheet), the whole-page read can still grab
+ * the same body cross-reference ("SEE DWG S202") on several sheets at once, producing identical
+ * duplicate rows. Clear such numbers (and lower confidence) so each page falls back to a clean
+ * "Sheet N" instead of showing the same wrong number repeatedly. Pure: returns a new array, with
+ * fresh objects only for the pages it changed. */
+export function markAdjacentDuplicateNumbers(pages = []) {
+  const dup = new Array(pages.length).fill(false);
+  const codeOf = (p) => (p && p.sheetNumber ? p.sheetNumber.toString().trim().toUpperCase() : "");
+  for (let i = 1; i < pages.length; i++) {
+    const a = codeOf(pages[i - 1]), b = codeOf(pages[i]);
+    if (a && b && a === b) { dup[i - 1] = true; dup[i] = true; }
+  }
+  return pages.map((p, i) =>
+    dup[i] ? { ...p, sheetNumber: "", confidence: Math.min(p.confidence ?? 0, 0.3), dupNumber: true } : p
+  );
+}
+
 /* Collapse per-page metadata into the logical sheet list. `pages` = [{ sheetNumber, sheetTitle,
  * discipline, item, ... }] in page order (each typically carries a `pageNum`/`srcId` the caller
  * added so it can map a logical entry back to real pages). Returns

@@ -22,13 +22,322 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-### B365 — Shared team workspaces: invite by email, share a project with a team `[Site Planner + Doc Review]` (feature)  *(2026-06-22; "B-TEAM" in the cowork handoff — filed as the real next B#)*
-`[ ]` **In progress — code complete on branch `claude/shared-workspace-planning-iwvujx`, DB phase-2 migrated + verified in PRODUCTION (`lyeqzkuiwngunutlkkmi`); remaining: merge to `main` (go live) + run `team_storage.sql` (phase 3).**
-Lets a team share a workspace: invite people by email (activates on signup/sign-in even if they had no account yet), admins vs members, and a project stays **private until deliberately shared** (and can revert to private). Additive + private-by-default preserved — a row with `team_id IS NULL` behaves exactly as before.
-- **DB (done + verified in prod):** `db/profiles.sql` (email mirror), `db/teams.sql` (teams/team_members/team_invites + `is_team_member`/`is_team_admin` SECURITY-DEFINER helpers + `claim_team_invites`/`list_team_members` RPCs + signup auto-claim), `db/team_sharing.sql` (`team_id` on sites/doc_reviews/file_facts; PK `(user_id,id)`→`(id)`; RLS rewritten to "own OR shared-with-my-team", delete = owner-or-team-admin). Verified end-state: 3 `team_id` cols, `sites` PK = `id`, 12 RLS policies, both helpers present. Pre-flight done (snapshot tables `backup_*_20260622`; 0 dup ids) — **drop the backup tables once confirmed good.**
-- **DB (still to run):** `doc-review/db/team_storage.sql` (phase 3) — extra Storage SELECT policy so teammates can open each other's **shared review PDFs**. Until run, that one sub-path is inert (graceful); everything else works.
-- **Client (done on branch):** `optimisticUpsert.casUpsert` updates by `(id,version)` only + stamps `user_id` on INSERT only (creator never re-stamped on a teammate edit); `cloudSync`/`reviewStore` carry `team_id`, delete by id (RLS scopes), team_id-missing graceful degrade; `siteModel` `teamId`/`ownerId` + `teamShareOf` (SITE_MODEL_VERSION→8); `storage.mergePulledSites` doesn't re-push teammates' rows; `lib/teams.js` + `lib/sharing.js`; `SitePlannerApp` claims invites on sign-in; **UI** = Team tab (`TeamPanel`) + account-menu entry, and a Share-with-team control in the Project Files drawer. 1102 tests green, build green.
-- **Left:** open PR → merge to `main`; run `team_storage.sql`; signed-in live check (create team / invite / accept / share / concurrent-edit conflict / member-can't-delete) — auth-only, so not headless-testable in the sandbox.
+<!-- 2026-06-23: owner-dropped COMBINED chat brief (it explicitly supersedes three earlier separate briefs —
+     the Markup→Library rename, "open any file fails", and the standalone oversize-banner-copy item — so filed
+     from the combined version to avoid double-filing; deduped: no existing Open item covered these). Highest
+     B# across both files was B400 when filed, but a concurrent `main` (#297) took B401–B403 for a Scheduler/
+     Export batch while this was in flight, so **renumbered B404–B405** (the real next free IDs); the brief's
+     B207 item was an AMENDMENT (no new B#). Per STANDING RULE #1 both new items were filed AND fixed + verified
+     + merged the SAME session (branch `claude/brave-brown-jb1n2l`) — full [x] blocks live in BACKLOG-DONE.md:
+       • B404 (NEW-1) — module tab "Markup" → "Library" (label ONLY; route id `doc-review`/`/markup`, storage
+         keys, and the amber accent token names unchanged). The only user-facing "Markup" string was the tab;
+         the SitePlanner "Markup line/rect" tool hints are a different feature, left alone. Finish-the-job tail:
+         ~15 ui-audit harnesses selected the tab by visible text → repointed to "Library". New
+         `verify-b404-library-tab.mjs` 4/4 + repointed `verify-new1-header-integration` 5/5.
+       • B405 (NEW-2) — the Files-browser "open any file fails" was ONE conflated banner + a SILENT missing-source
+         path. Grounded against real code FIRST: the brief's "the browser reshape drops storageKey/driveKey"
+         hypothesis was REFUTED at the open hop (`openReview` → `loadReview(row.id)` re-fetches the full Postgres
+         record by id, so the lightweight browser row is never the src) — flagged, not rebuilt. Real fix = a
+         4-state taxonomy (oversize / not-stored / fetch-failed / signed-out) in new pure `lib/sourceState.js`
+         (15 unit tests), wired through `DocReview.fetchSourceBytes` + the FileBrowser/drawer warns. The
+         universal-failure ROOT is a LIVE storage/auth class the logged-out sandbox can't reproduce (most likely
+         the `doc-review-files` bucket/RLS unprovisioned, or legacy keyless rows) → a signed-in deploy pass is
+         pending (cohort/owner), but the code now names every cause precisely + offers a working re-open recovery
+         regardless.
+     B207 AMENDMENT (no new B#): the brief assumed Drive was at "scaffold", but the repo already had it
+     CODE-COMPLETE + TESTED (advanced past the brief by a concurrent session) — confirmed by a full ground-truth
+     read and the B207 entry below was updated to match; the one remaining step is the owner's Google/Cloudflare
+     provisioning. lint 0 · 1228 tests · build green. -->
+
+<!-- 2026-06-22: owner-dropped chat batch (exported Gantt QUALITY) — arrived NEW-1..NEW-4, first minted
+     B393–B396, but a CONCURRENT session shipped its OWN B393–B396 (Gantt labels + curved connectors) to
+     `main` while this was in flight, so **renumbered B397–B400**. Per STANDING RULE #1 filed AND fixed +
+     headless-verified (V115, 12/12) + merged the SAME session on branch `claude/gifted-hypatia-na62be`:
+     B397 (vertical rules behind bars), B398 (one continuous left edge), B399 (light two-tier Year▸Month
+     header + weighted year>quarter>month grid rules, owner-art-directed), B400 (viewBox fit-to-width +
+     Move/zoom drag-pan in the preview). The owner approved ELBOW connectors here, but the concurrent
+     session had already settled connectors with later, more-informed owner feedback ("the serpentine ones
+     were fine, I preferred those, revert — they just weren't bound to the bars"), so on owner confirmation
+     this session the elbow work was DROPPED and main's curved-bound connectors (their B396) kept. Full [x]
+     blocks in BACKLOG-DONE.md. -->
+
+<!-- 2026-06-22: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" — Gantt label alignment + uniform ink,
+     printed-Gantt missing names, and serpentine dependency arrows. First minted B390/B391/B392, but a
+     concurrent `main` (PR #293, the PDF/Print Exhibit table-layout batch below) took B390/B391/B392
+     while this was in flight, so **renumbered B393 / B394 / B395** (the real next free IDs). Deduped:
+     all NET-NEW — no existing item covered Gantt label alignment / in-chart PDF names / orthogonal
+     connectors; the prior "NEW-1"s (B383/B385–B388) were Site-Planner or Schedule-toolbar items, and
+     the B390–B392 collision is the exhibit batch (a different surface). Per STANDING RULE #1 all three
+     were filed AND fixed + headless-verified + shipped the SAME session (branch
+     `claude/zen-ramanujan-14sak9`) — they share ONE label/render pass in GanttView + buildGanttSVG, so
+     landed together. Full [x] blocks live in BACKLOG-DONE.md; headless harness V114
+     (`ui-audit/verify-gantt-labels-deps.mjs`, all checks across right/center/left). -->
+
+<!-- 2026-06-22: owner feedback right after B393/B394/B395 shipped — "the serpentine things were fine,
+     i preferred those, revert, the issue was just that they weren't bound to anything". Minted **B396**:
+     reverted B395's orthogonal elbow back to the curved bézier in both render paths AND fixed the real
+     defect (the curves floated at the row mid-line; now bound to each bar's vertical center). Full [x]
+     block in BACKLOG-DONE.md; verified via the updated V114 harness. -->
+
+<!-- 2026-06-22: owner-dropped chat batch (PDF/Print Exhibit table layout) — three items from one
+     screenshot+voice note. Filed B385/B386/B387, **renumbered B390/B391/B392** — concurrent `main`
+     (PRs #290/#291/#292) took B385–B389 while this was in flight, so B390–B392 are the real next free
+     IDs (branch commit/PR titles still read B385/B386/B387). Per STANDING RULE #1 all three were filed
+     AND fixed + headless-verified (V113, 10/10) + merged via PR #293 the SAME session on branch
+     `claude/practical-edison-ggcm1k` — full [x] blocks live in BACKLOG-DONE.md:
+       • B390 (bug)  — exhibit columns mis-sized: oversized Task-Name gap + truncated Start/End/Dur.
+                       Split table used table-layout:fixed at hardcoded ~50% width with fixed per-column
+                       px and Name at w:null (absorbed the slack → the gap; dates clipped in the
+                       too-narrow fixed cols). Replaced with a content-fit model (pure approxTextPx +
+                       layoutExhibitCols); dates/dur never flex.
+       • B391 (feat) — year-boundary divider lines on the exhibit Gantt (month lines were hidden behind
+                       the opaque row bands). Heavier slate line at each Jan 1, drawn over the bands;
+                       January labels emphasized.
+       • B392 (feat) — drag-to-resize columns in the preview (mirrors the live grid's col-resize),
+                       reflowing live + persisted (data.exportColWidths) + a Reset.
+     Deduped: net-new. B392 RECONCILED with B160 (see its note) — complementary, not a dup. -->
+
+
+<!-- 2026-06-22: owner-dropped chat item — "put the light v dark option under profile settings".
+     Minted **B389**. Per STANDING RULE #1 fixed + headless-verified (V112, 7/7) the SAME session on
+     branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the Light/Dark/System picker moved from the row-1 ⚙ gear into account → Settings
+     (AuthPanel), next to Change password. Extracted a shared `src/shared/theme/ThemePicker.jsx`
+     (one picker, used by both the Settings panel and the gear). The row-1 gear is KEPT only when
+     signed out (`{!accountActive && <SettingsMenu/>}`) so a logged-out visitor can still switch
+     (B342 preserved) without duplicating it for signed-in users. Pure relocation — ThemeProvider /
+     data-theme / System listener unchanged. lint 0 · 1201 tests · build green; B387/B388 harnesses
+     still green (the logged-out gear they rely on is preserved). -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-2" — lift Schedule's toolbar up into the unified
+     AppHeader so Schedule has ONE header like Site/Markup (built on the B387 center slot). Filed
+     B386, **renumbered B388** — a concurrent `main` (PRs #289/#290) took B385/B386 while this was in
+     flight, so B387/B388 are the real next free IDs (branch commit titles still say B385/B386).
+     Owner GREENLIT building it the same session, so per STANDING RULE #1 it was fixed + headless-
+     verified (V111, 17/17) on branch `claude/inspiring-bohr-46gql9` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the embedded Gantt app's action toolbar now renders up in the shell's Row-2 header —
+     Grid/Split/Gantt + review inbox in B387's `toolbarCenter`; zoom/export/save/history/contacts/
+     automation/format/settings in `toolbarContent`. The feared popover-anchoring blocker was
+     UNFOUNDED: the embedded app already renders its panels as self-positioned fixed modals/drawers
+     (never anchored to buttons), so lifting the trigger buttons is clean — buttons post `planar:*`
+     commands, panels still open in the iframe. The B203 bridge was extended (planar:toolbar-state +
+     command messages), strict same-origin guards kept, iframe stays source-of-truth (badge = reported
+     count, never fabricated). `.in-iframe .app-header{display:none}` hides the whole in-embed header
+     (re-widening what B381 narrowed); standalone /sequence/ untouched (inShell-gated). Two settings
+     gears kept separate (B342 vs Schedule view); "share" = the existing Contacts control. SUPERSEDES
+     B381's harness `verify-schedule-toolbar.mjs` (retired). New `ScheduleToolbar.jsx`; edits to
+     Scheduler.jsx + index.html. lint 0 · 1201 tests · build green · JSX OK · lazy chunks intact. -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an optional CENTER toolbar zone to AppHeader
+     Row 2 (a third slot between the module tabs and the right toolbar, mirroring how Row 1 centers
+     the project name). Filed B385, **renumbered B387** — concurrent `main` (PR #289) took B385 while
+     this was in flight; canonical IDs for this pair are B387 + B388. Per STANDING RULE #1 it was fixed +
+     headless-verified (V110, 9/9) the SAME session on branch `claude/inspiring-bohr-46gql9` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a new optional `toolbarCenter` ReactNode prop on AppHeader. When provided, Row 2
+     becomes 3 zones — tabs (flex:1) | center group (shrink) | toolbar (flex:1 end) — center TRULY
+     centered like Row 1 (mid-x 719 vs 720); it wraps on narrow widths and never overlaps. Absent
+     (Site/Markup) → the original 2-zone layout renders byte-for-byte unchanged. Generic + additive;
+     B388 (the Schedule toolbar lift) is its first consumer. Deduped: net-new — NOT the CloudSyncBadge
+     "NEW-1" (a Row-1 saveState concern), NOT the Markup toolbarContent move. lint 0 · 1201 tests ·
+     build green · AppHeader/Scheduler/SitePlannerApp lazy chunks intact. -->
+
+<!-- 2026-06-22: cross-chat "NEW-1" — Schedule Gantt drew phantom dependency arrows into empty
+     space, pointing at unscheduled (blank-date) tasks. First filed B385, **renumbered B386** — a
+     concurrent `main` (PR #289) took B385 for the Site Planner parcel-identify feature while this
+     was in flight, so B386 is the real next free ID. Filed AND fixed + headless-verified (V109) +
+     SHIPPED the same session per STANDING RULE #1 — merged to `main` via PR #290 (branch
+     `claude/gifted-rubin-0adp7h`). Full [x] block lives in BACKLOG-DONE.md. -->
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — add an "Add parcel" front-door to the Parcel
+     left-hand panel so you never have to back out to the map to assemble more land. Highest B#
+     across both files was B382, so minted **B383** (+ filed the deferred "Add by address" stretch
+     as **B384**, still Open). Per STANDING RULE #1 B383 was filed AND fixed + headless-verified
+     (V108, 14/14) + merged the SAME session on branch `claude/determined-volta-hzjxmc` — full [x]
+     block lives in BACKLOG-DONE.md.
+     WHAT SHIPPED: a primary **＋ Add parcel** control (accent chip) at the top of the Parcel
+     `Section` opens an `AnchoredMenu` with (1) "Identify from county GIS" (arms the existing
+     `identifyMode`; disabled-copy gate when `origin` is null) and (2) "Draw a new boundary"
+     (`selectTool("parcel")`, always enabled — the no-GIS-frame fallback). The standalone
+     "🔍 Identify parcel" toggle was CONSOLIDATED into that menu (no duplicate entry point); the
+     armed-status row (the off-switch) + the identify result card / ＋ Add to plan / ⚖︎ Jurisdiction
+     stay intact as the body of that path. Pure surfacing — reuses `addIdentifiedParcel` /
+     `setParcels` / `identifyMode` / the parcel draw tool (no new add pipeline; same single-pipeline
+     rule as B232/B233); added parcels keep `locked:true` (B99).
+     Deduped: net-new. NOT B233 (that's the *map's* address→select+info card), NOT B231/B36c (the
+     multipart-import pipeline it reuses), NOT B99/B100 (the lock/active model it inherits). lint 0
+     · 1201 tests · build green · `SitePlannerApp` lazy chunk intact. B384 (Add by address) left Open
+     by design — the geocode logic lives in MapFinder and needs a clean extraction, not a rush. -->
+
+<!-- 2026-06-22: owner follow-up on B383 — "it should work like the map select parcel tool where the
+     parcel boundaries light up and you can easily click to add one or multiple." Minted **B385**.
+     Per STANDING RULE #1 filed AND fixed + headless-verified (V108 extended, 22/22) the SAME session
+     on branch `claude/determined-volta-hzjxmc` — full [x] block in BACKLOG-DONE.md.
+     WHAT SHIPPED: the "Identify from county GIS" path now behaves like the map's Select-parcels tool —
+     while it's armed, the county parcel OUTLINES light up on the aerial (the SAME magenta esri-leaflet
+     `makeParcelLayer`, extracted to shared `lib/parcelDisplay.js` so map + planner share one source),
+     and each CLICK adds that lot straight to the plan (one or many); a re-click toggles a just-added
+     lot off; a drag pans (click-vs-drag resolved in onUp, mirroring B310). The old preview-card-then-
+     "＋ Add to plan" button is gone — the card now shows the just-added lot's appraisal + the kept
+     jurisdiction lookup. Reuses the single add path (`parcelsFromRings`) + the existing query; outlines
+     load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
+     (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
+
+### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
+`[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
+
+<!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
+     floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
+     Grid/Split/Gantt view switcher, Automation, Settings, Review all gone). First filed B380,
+     renumbered **B381** — concurrent main (PR #284) took B380 for the Schedule render-crash fix while
+     this was in flight, so B381 is the real next free ID. Per STANDING RULE #1 filed AND fixed +
+     headless-verified (V106, 15/15) + merged the SAME session on branch `claude/vigilant-newton-rovl4l`
+     — full [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE (hidden, NOT deleted): the Schedule module embeds /sequence/ in an iframe; the shell's
+     Row-1 breadcrumb takes over project nav, so the sequence app hides its own duplicated nav when
+     `.in-iframe`. But the rule was `.in-iframe .app-header{display:none}` — it hid the ENTIRE header,
+     and the whole action toolbar lives in that header. Only the in-grid Columns button (in GridView,
+     not the header) survived — exactly the reported symptom. Handlers were intact throughout; a pure
+     CSS over-reach.
+     FIX (public/sequence/index.html): narrowed the rule to hide ONLY the duplicated branding/nav —
+     the logo (new .hdr-logo class), .hdr-mode (Dashboard/Projects toggle) and .hdr-project (project
+     picker), all provided by the shell breadcrumb via the B203 postMessage bridge. The action toolbar
+     is visible again, original position + original handlers. Restored exactly the shipped set — the
+     brief's speculative fit-to-view / today-jump / status-filter controls do NOT exist in this app, so
+     none were invented (no rebuild-from-guess).
+     Verified: V106 `ui-audit/verify-schedule-toolbar.mjs` 15/15 (zoom % changes 17→33, Contacts opens
+     — proven not no-ops); Site + Markup checked, NOT affected (not iframes; they use the shell's
+     toolbarContent slot, which `.in-iframe` can't reach). lint 0 · tests green · build green ·
+     `Scheduler` lazy chunk intact.
+     Deduped: NET-NEW, the completion of B203 (DONE) — B203 bridged the NAV half of the same hidden
+     header; B381 restores the ACTION-TOOLBAR half it left dark. NOT a dup of main's B380 (a separate
+     Schedule render-crash race in Scheduler.jsx — different file, different cause), nor B341 (chrome
+     token regressions), nor the Markup toolbarContent move. -->
+
+<!-- 2026-06-22: cross-chat diagnosis brief "NEW-1" — intermittent render crash on Schedule load
+     ("Cannot read properties of undefined"), caught by the workspace ErrorBoundary (the non-chunk
+     "Try again" variant), recovers on re-render. Highest B# across both files was B379, so minted
+     **B380**. Per STANDING RULE #1 filed AND fixed + headless-verified (V105, regression net proven
+     to FAIL with the guard off) the SAME session on branch `claude/relaxed-dijkstra-sokq4a` — full
+     [x] block lives in BACKLOG-DONE.md.
+     ROOT CAUSE confirmed by reproduction, not guessed: the Schedule shell derives its breadcrumb's
+     current project with `projects.find(p => p.id === activeId)` over the project list bridged from
+     the embedded /sequence/ iframe (the brief's #1 candidate, Scheduler.jsx). The embedded app can
+     transiently post a sparse/not-yet-resolved list (an `undefined`/null entry) during its own data
+     load; one such entry makes `p.id` throw inside the Scheduler's render → the workspace boundary.
+     A pure re-render recovers because the steady-state list is well-formed. (The brief's other
+     candidates — AppHeader/ProjectBreadcrumb p.id/p.name, useProfile/displayName — were verified
+     already null-safe; the deref that actually throws is the Scheduler's `.find`.)
+     FIX (guard at the source, not optional-chaining everywhere): new pure `scheduler/lib/navState.js`
+     — `parseNavState` validates + `sanitizeProjects` coerces the inbound list to plain `{id,name}`
+     objects (drops the throwing entries) and `deriveCurrentProject` never throws / never returns
+     undefined; Scheduler.jsx routes the message + current-project derivation through them; one
+     data-entry guard in the shared `ProjectBreadcrumb` (`.filter(Boolean)`) hardens its own `p.id`/
+     `p.name` map for any controlled caller. NOT a chunk fix (not B221/B239) and NOT an ErrorBoundary
+     auto-retry — the race is removed so a genuine future crash still stays visible.
+     Deduped: net-new. NOT B221/B239 (stale-chunk family — the brief's two tells rule that out), NOT
+     B315 (undo-after-move stale-ref race, a different surface). 12 new unit tests
+     (`test/schedulerNavState.test.js`), 1198 green, lint 0, build green, `Scheduler` lazy chunk
+     intact; existing `verify-schedule-picker.mjs` still 8/8 (no regression). -->
+
+<!-- 2026-06-22: owner report "the sheet labeling is atrocious" (a structural general-notes set)
+     arrived with a two-item investigation brief (NEW-1 garbage labels, NEW-2 false auto-calibration).
+     Highest B# across both files was B373, so minted **B378–B379**. Per STANDING RULE #1 BOTH were
+     filed AND fixed + headless-verified (V104) the SAME session on branch `claude/ecstatic-maxwell-6y8aq1`
+     — full [x] blocks live in BACKLOG-DONE.md:
+       • B378 (NEW-1) — text-dense sheets labelled garbage: body boilerplate as the title, a body
+         cross-reference ("S202") read as the sheet number on several rows, weak sidebar gate. Fixed
+         the shared `sheetMeta` reader — title scorer now prefers short+large type (+ boilerplate
+         filter), the sheet number is read from the title-block ZONE only (band, else edge strip),
+         `reconstructLines` splits on a large horizontal gap so a title can't merge into a body line,
+         a `trustedTitle` sidebar gate, and a `markAdjacentDuplicateNumbers` dedup. SHIPPED.
+       • B379 (NEW-2) — a pure-text notes/specs sheet auto-calibrated off a stray body scale string.
+         Added a `textDense` classification; `statedCalibration` returns 0 for it (leaves it
+         uncalibrated, never silently mis-scaled). SHIPPED.
+     +10 unit tests, 1153 green · lint 0 errors · build green · `DocReview` lazy chunk intact ·
+     headless `ui-audit/verify-notes-sheet-labels.mjs` 9/9 + the B266/B348, B335–B339, B350 markup
+     harnesses still green. -->
+
+<!-- 2026-06-22: owner-dropped chat item — "the fact that I don't have an easy way to delete this little
+     triangle that I put there is insane … go through all the tools and figure out what we need to debug."
+     The "triangle" was an UNCALIBRATED Area measurement (its label falls back to "set scale"). Highest B#
+     across both files was B373, so minted **B374–B377**. Per STANDING RULE #1 all filed AND fixed +
+     headless-verified + shipped the SAME session (branch `claude/youthful-mccarthy-xjcotz`) — full [x]
+     blocks live in BACKLOG-DONE.md:
+       • B374 (bug) — the Area's FILLED interior was a DEAD click target (DocReview hitTest tested area by
+         vertex/segment only, while rect/cloud already had an interior test, B33), so the triangle couldn't
+         be selected to delete it. Added area point-in-poly to hitTest (reusing the now-exported
+         takeoff.pointInPoly) + a smaller-shape tie-break + the perimeter/area closing edge. SHIPPED.
+       • B375 (feature) — added an on-canvas × delete on the selected markup (deletion had been keyboard-only
+         + a button buried in the collapsible Takeoff panel). SHIPPED.
+       • B376 (feature) — the Takeoff list now lists + deletes EVERY markup (not just measures); the Stitcher
+         — which had NO committed-measure delete at all — gets a deletable measure list. SHIPPED.
+       • B377 (bug, found while verifying) — the B352 Tesseract OCR worker threw "logger is not a function" on
+         every no-text page (defaultMakeWorker passed logger:undefined, clobbering Tesseract's default no-op);
+         defaulted it to a no-op. Stitcher harness uncaught JS errors 13 → 0. SHIPPED.
+     Verified: `verify-delete-markup.mjs` 10/10 + `verify-stitch-delete-measure.mjs` ALL PASS (chromium-1228,
+     0 page errors); no regression (V72 13/13, B300–B302 green, V88 green). lint 0 · 1144 tests · build green. -->
+
+<!-- 2026-06-22: coworker live-investigation brief (Site Analysis GIS failures on Grand Port /
+     Mont Belvieu) arrived as NEW-1..NEW-4. Highest B# across both files was B365, so minted
+     **B366–B369**. Per STANDING RULE #1 all four were filed AND fixed + verified + (about to be)
+     merged the SAME session on branch `claude/nice-cori-ghm37q` — full [x] blocks live in
+     BACKLOG-DONE.md:
+       • B366 (NEW-1) — screening resilience + honest error taxonomy: a shared resilient ArcGIS
+         fetch (timeout + jittered-backoff retry + GET→POST), a concurrency pool (3) that ends the
+         burst, and a new UNAVAILABLE state (retryable, Retry control) — never the misleading
+         "network or CORS". SHIPPED.
+       • B367 (NEW-2) — GIS screening cache: keep last-good on a failed refresh + "couldn't refresh"
+         age badge (stale-while-revalidate), never blank a layer. The existing roadmap "GIS layer
+         caching" item, Phase 1. SHIPPED. (Phase 2 = regional snapshot → B371, Later.)
+       • B368 (NEW-3) — repointed Wells/Pipelines from the Harris-County republication (Chambers
+         14-vs-8,014 false-clean) to the authoritative statewide **RRC** service (wells L1, pipes L13);
+         Wetlands pinned as a registered monitored-exception. SHIPPED.
+       • B369 (NEW-4) — GIS Source Registry (`src/shared/gis/sources.js`) + a CI tier/inline-URL guard
+         + live coverage/schema fixtures (the 14-vs-8,014 catch) + a weekly @claude drift workflow.
+         SHIPPED for the analysis+jurisdiction surface. (Map-display-layer migration tail → B370, Open.)
+     Deduped: NEW-2 folded into the existing "GIS layer caching" roadmap item (not a duplicate). lint 0
+     · 1129 tests · build green · `SitePlannerApp` lazy chunk intact · headless V101 11/11. RRC's own
+     live coverage fixtures run in CI / on planyr.io (host not on the sandbox egress allow-list). -->
+
+### B370 — Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry `[Site Planner / Platform]` (task) — the tail of B369  *(filed 2026-06-22; minted **B370**)*
+`[ ]` **Open.** B369 made `src/shared/gis/sources.js` the single source of truth for the **Site Analysis screen + jurisdiction identify** endpoints (zero inline URLs there, CI-guarded). The **map-display** layers — the Leaflet/esri-leaflet tile + vector overlays in `lib/layers.js`, `lib/counties.js` (`JURISDICTION_LAYERS`, incl. the COH `geogimstest` host), `lib/evidenceLayers.js`, `lib/vectorLayers.js` — still hold their service URLs inline. Migrate them into the registry too, so the tier-guard (no `/Test/`/`geogimstest` without an acknowledged exception) and the drift/coverage checks cover the **whole** GIS surface, not just the screen.
+- **Why not done in the B366–B369 session:** the map-tile path is a **separate, large surface** (many layers across 4 files) and is explicitly **out of the reported bug's blast radius** — the brief notes map tiles load as `<img>` (no CORS, no screening logic) and says to leave them alone. Rushing a live-map-wide URL refactor into the same session risked breaking a working map with no fast headless way to re-verify every layer. Filing it as its own focused pass (own branch, per-layer verify) is the safe call, not a silent omission.
+- **Plan:** add map-layer rows to the registry (reuse the same `tier`/`provider`/`coverage` shape); repoint `layers.js`/`counties.js`/`evidenceLayers.js`/`vectorLayers.js` to read `serviceUrl` from the registry; extend `ui-audit/gis-source-audit.mjs`'s inline-URL scan to those files; re-verify the map renders every layer (the existing `gis-verify/coverage-picker-verify.mjs` + a tile-load check). The known COH `geogimstest` **TEST** host (a long-standing KNOWN ISSUE) becomes a registered `monitored-exception` — finally machine-tracked.
+
+<!-- 2026-06-22: owner-dropped chat item "NEW-1" — a deleted site (HOLLISTER) reappears (delete not
+     persisting), both on reload (path A) AND mid-session without a reload (path B). First filed B366,
+     renumbered **B372** — a concurrent `main` (PR #277) took B366–B371 (GIS Site Analysis resilience +
+     source registry) while this was in flight, so B372 is the real next free ID. **Filed AND fixed +
+     headless-verified + pushed THIS session per STANDING RULE #1** (branch `claude/cool-ride-pm0m2l`) —
+     full [x] block in BACKLOG-DONE.md.
+     KEPT AS ONE ITEM (owner said split only if path B has an independent cause): both paths share ONE
+     root cause — the site you delete from the map is the one whose planner is still MOUNTED (you opened
+     it, then went Back to map; it renders hidden, not unmounted). Deleting it unmounts that planner,
+     whose persist-on-leave / beforeunload flush fired AFTER the delete and RE-WROTE the row → it returns
+     mid-session on the next list refresh (B), and pullCloud's heal-the-split then re-pushes that
+     local-only row to the cloud so it survives a reload too (A). Explains "only that project" — it's the
+     one he had open. Deduped — NOT a dup of B276 (per-ITEM overlay tombstones inside one site) nor B127
+     (cross-tab stale-write fold); this is whole-SITE delete durability + a loud cloud-delete failure.
+     Fix: a per-tab delete tombstone in storage.js (saveSite refuses to re-create a deleted, absent row —
+     the single chokepoint every resurrection path funnels through), deleteSite returns the cloud result,
+     the App AWAITS it and shows a LOUD banner + re-pulls on a genuine cloud-delete error, and cloudDelete
+     uses `.select()` so a 0-row no-op is distinguishable from a real removal. 9 new unit tests +
+     headless V102 (`ui-audit/verify-b372-delete-durable.mjs`, 6/6, proven to FAIL with the guard off). -->
+
+<!-- 2026-06-21: cross-chat "NEW-1" — redesign the project-status MAP markers for correct visual
+     hierarchy (Pursuit was a thin dashed cool-blue hollow outline that vanished into the aerial while
+     Complete shouted). Minted **B365** (a concurrent `main` took B362–B364 — bump-out resize, bonded-child
+     rotation, scanned/DWG — while this was in flight, so B365 is the real next free ID; renumbered from a
+     first-filed B362). Filed AND shipped + headless-verified (19/19, V98) THIS session per STANDING RULE #1
+     — full [x] block in BACKLOG-DONE.md
+     (branch `claude/trusting-cori-rkn2x3`). Deduped — NET-NEW, a redesign of (not a dup of): B161 (the
+     building-marker shape kept; its inverted hollow-dashed Pursuit treatment replaced), B234 (the shared
+     status token set — extended IN PLACE, the single source of truth the item asked for), B163/B236 (the
+     progress-arc encoding — a separate concern, untouched). Re-hued statusTokens.js (Pursuit→coral,
+     Active→blue-not-green) + index.css --status-* mirrors (contrast-audit green both themes); rebuilt
+     MapFinder.jsx buildingPinIcon (solid fill, white halo, size tiers, SVG flag/pulse/pause/check glyphs,
+     z-order by importance, fixed hit box); Dead hidden by default. -->
 
 ### B364 — Enable the scanned / image-only + DWG reading path for the no-text-layer minority `[Doc Review]` (feature)  *(2026-06-21, follow-up to B360's corpus tuning — owner asked to note it)*
 `[ ]` **Open.** B360's Tier-1 reader (free, in-browser text) files the owner's vector PDFs well (project **8/8** on the real corpus), but a minority of his sets have **no usable text layer**, so Tier-1 can't read them: image-only/scanned PDFs (e.g. Mesa Plumbing / Electrical extract ~nothing — "ARCO / REGENCY / JOHNSON DEVELOPMENT" + OCR noise, no project/discipline) and the **.dwg** files (Bergstrom / Mesa CAD). Today they correctly fall to the **holding tray** (never misfiled — the "never auto-guess" gate), but they can't auto-file. Making them auto-fileable means standing up the **already-built-but-dormant** backends:
@@ -361,11 +670,15 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
      (B207) scaffolded behind them. Code in server/storage/ (walled off from the public Pages build); see
      server/storage/README.md for the exact env/credentials the Drive backend needs from Cowork. -->
 
-### B207 — Google Drive storage backend behind the adapter `[Server]` (feature)  *(arrived as "NEW-2"; provisionally B204, renumbered **B207** — `main` took B203–B205)*
-`[~]` Drive as one adapter backend against a **Workspace Drive on planyr.io**: store/fetch/list/move/rename **bytes only**. This is the **substrate beneath auto-filing, NOT a redefinition of it** — auto-filing's own spec (title-block read → match project + aliases → rename/route into the folder structure → "needs filing" holding area for no-match / low-confidence, **never auto-guess** → queryable index of file facts) stays authoritative and **writes through this backend**. The **index records live in Supabase Postgres, not Drive.**
-- **✅ Shipped this session (scaffold):** `server/storage/backends/driveBackend.js` — the full backend contract, with every op returning a clear **"Drive isn't connected yet"** failure (never a throw, never a false success) until credentials arrive. The expected Drive REST `client` interface is documented inline (a fill-in, not a rebuild). Decisions baked in per spec: OAuth app **Internal** (Workspace user type → skips Google verification + the 7-day refresh-token expiry); scope **`drive.file`** (least privilege — app only touches files it creates, which still show in the owner's Drive for manual drag-to-email; broader Drive scope is a flagged decision, not a default); **credentials + refresh token server-side ONLY** (never the frontend build, never a `VITE_` var, never committed, never on the public Cloudflare Pages deploy — same isolation as the APS key). Moving storage to Drive **removes the Supabase 50 MB-per-file ceiling.**
-- **⏳ Blocked on the owner's manual setup (in progress via Cowork):** the Workspace OAuth app + the `GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN / PLANYR_DRIVE_ROOT_FOLDER` env values (see `server/storage/README.md`). Once provided: write the thin Drive REST `client`, swap the in-memory `idMap` store for a Supabase-Postgres one, set `PLANYR_STORAGE_BACKEND=drive`. No app changes.
-> **Cross-link:** the auto-filing item (title-block read → match → route → index) writes through this backend; this is its storage substrate, not a competing spec. Also unblocks the >50 MB drawings the Supabase free tier rejects.
+<!-- 2026-06-23: B207 (Google Drive storage backend) — ✅ DONE, moved to BACKLOG-DONE.md. The code was
+     already complete + unit-tested (a prior session advanced it past the brief's "scaffold"), and the owner
+     CONFIRMED all Drive env vars present + deployed live in Cloudflare Pages Production — GOOGLE_CLIENT_ID /
+     GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN / PLANYR_STORAGE_BACKEND=drive / SUPABASE_URL /
+     SUPABASE_ANON_KEY — verified 2026-06-22 against deploy 912de2b (green), with the temporary
+     PLANYR_SELFTEST_TOKEN correctly removed. ⛔ DO NOT re-run the OAuth setup / re-mint GOOGLE_REFRESH_TOKEN:
+     a fresh consent would mint a new token that no longer matches the deployed one and could take Drive
+     filing offline. Only optional follow-up = a signed-in end-to-end re-confirmation (already passed
+     2026-06-20). Full [x] block in BACKLOG-DONE.md. -->
 
 ### B180 — Project Files repository as a tagged-index with saved views `[Document Review / Files]` (feature)  *(arrived as "NEW-1"; provisionally B176, renumbered **B180** — #159 took B176–B179)*
 `[~]` A project-level **file repository** opened from **Row 1 (the project-name area), NOT a fourth module tab.** Rationale (owner): tabs are *workspaces* (modes of working — Site / Schedule / Markup); **Files is a shelf every workspace reaches into**, so it must be openable from inside any of them. "Folders" are **saved views over a tagged index, never a hand-maintained tree** — "All surveys", "All title commitments", "this project's civil set" are all *queries* against file facts. Two document classes: **spatial** (can live on the map — drawings, surveys, legal descriptions) vs **reference** (geotech, environmental, contracts — pulled and read, never a map object); a **title commitment is BOTH** (a reference document, but Schedule A's legal description feeds the boundary polygon and Schedule B's exceptions feed easement objects). Drawer: files grouped by discipline; per-file state **Filed** (automatic) vs **On map** (calibrated once); a **drop zone** (auto-file by title block) and a **"needs filing"** holding area with one-click confirm for low-confidence / no-match.
@@ -710,14 +1023,26 @@ product switcher) already shipped for the *planner* context bar and explicitly l
 physical row is a later polish," so **B104** is that remaining polish for the *map* view
 (net-new, not a re-file); the rest have no existing Open counterpart. All eight are `[ ]` Open.
 
-### B361 — Gantt time scale selector on PDF/Print Exhibit export `[Scheduler]` (feature)  *(renumbered from a colliding B159 → B361, 2026-06-21; the surviving B159 is the Task-names visibility toggle; B355 was taken by the concept-names feature)*
-
-- [ ] Add a **time scale selector** to the PDF/Print Exhibit export sidebar, controlling the density of the Gantt chart's time axis in the exported output.
-- Options: **Days · Weeks · Months · Quarters** — matching common schedule exhibit conventions.
-- Changing the selection re-renders the Gantt preview in real time before the user prints/saves.
-- Export-only control; does not affect the live schedule view.
-
-<!-- Filed 2026-06-18 from owner-submitted NEW-2. No prior Scheduler/Gantt items to dedup against. -->
+<!-- 2026-06-22: owner-dropped corrected chat batch (Scheduler PDF/Print Exhibit export quality) —
+     amended NEW-1/NEW-2/NEW-4/NEW-5 (NEW-3 unchanged). Minted **B401/B402/B403**; the amended NEW-1
+     folded into **B361** (its explicit home — "the continuous companion to B159's discrete selector").
+     Per STANDING RULE #1 all four were filed AND fixed + headless-verified (V116, 16/16) + committed
+     this session on branch `claude/vigilant-brown-5dqcog`. All touch ONE surface:
+     public/sequence/index.html (buildGanttSVG + PDFExportModal + buildPDFHtml). Full [x] blocks live
+     in BACKLOG-DONE.md:
+       • B361 — export time-axis controls: a discrete Days/Wk/Mo/Qtr selector (sidebar) + a continuous
+                Time −/+ (toolbar) wired to the SAME span state + Pan (renamed from Move, drags the
+                time window, today-centered default) + FIXED the dead/intermittent floating toolbar
+                (rebuilt as a pinned absolute overlay). Page Zoom + Fit kept.
+       • B401 — the default time window auto-fits so every start/end label sits on the sheet (extend the
+                frame, never move a label; capped at ~22% of span/side so a long label can't crush it).
+       • B402 — dependency connectors stay CURVED but now terminate at 12 o'clock (descend into the bar/
+                diamond TOP, clearing the endpoint date) + a vertical de-collision pass for co-dated names.
+       • B403 — silently persist & restore ALL export-screen state (orientation/size/margins/columns/
+                name-align/header/section-collapse/timescale/pan) via localStorage `planar:exportPrefs:v1`,
+                synchronously, NO badge. Column width keeps riding data.exportColWidths (B392).
+     B160 (the whole-split table-vs-chart divider ratio) left Open by design — distinct from B361's
+     in-chart time axis; B392's per-column drag-resize already covers most of the need. -->
 
 ---
 
@@ -728,14 +1053,25 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 - Preview updates in real time as the user drags/adjusts.
 - **Interacts with B361 (time scale):** wider Gantt + finer time scale = more bars visible; narrower + coarser = summary view. Both controls must co-exist without conflict.
 - Export-only; live schedule layout unaffected.
+- **Amended-NEW-1 boundary (2026-06-22):** the owner's corrected NEW-1 explicitly keeps this item DISTINCT from the in-chart time-axis controls (timescale zoom + pan) — those live in **B361**. B160 is purely the **panel divider** (one ratio handle for the whole table-vs-chart split). The per-column drag-resize (**B392**, shipped) already lets a user trade table width against chart width column-by-column; B160 remains the single whole-split ratio handle if still wanted.
 
-<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). -->
+<!-- Filed 2026-06-18 from owner-submitted NEW-3. Deduped against B361 (related but distinct control). Annotated 2026-06-22 with the amended-NEW-1 boundary (time-axis controls → B361; divider → here). -->
+<!-- RECONCILE w/ B392 (DONE 2026-06-22, PR #293): B392 shipped per-column drag-resize in the exhibit.
+     Because the table block is now exactly the sum of its (content-fit or dragged) column widths and
+     the Gantt auto-takes the remainder (never < EXHIBIT_MIN_GANTT=240px), dragging columns already
+     shifts the column-block-vs-Gantt ratio — so B392 PARTIALLY covers this item's user need without a
+     slider. B160 remains a distinct control (one ratio handle for the whole split). If built, implement
+     it as the OVERALL budget that B392's per-column widths fit within (don't fight: B392 already clamps
+     the table total so the Gantt keeps its floor). Not a duplicate; reconciled, left Open. -->
 
 ---
 
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*
+
+### B371 — GIS screening cache Phase 2: regional Houston-metro snapshot / offline pre-cache `[Site Planner / Analysis]` (feature) — Phase 2 of B367  *(filed 2026-06-22; minted **B371**)*
+`[ ]` **Later (gated behind B367 Phase 1, which shipped).** Phase 1 (B367) keeps the last-good answer per parcel+layer and never blanks a layer on a transient outage. Phase 2 is the owner's "cache most of Houston" idea: a **regional pre-cache/snapshot** of the Houston-metro source layers (+ a coverage mask), refreshed on a schedule, so a **never-seen** parcel with no features resolves **offline** to "No <layer> mapped (source vintage <date>)" instead of waiting on (or failing) a live query. Heavier — needs storage (a Supabase table or a static snapshot) + a refresh job + a coverage mask so "no features in the snapshot" is trustworthy only inside the cached extent. Deferred deliberately behind Phase 1 per the brief; pick up once Phase 1 proves out in the field.
 
 ### B340 — Auto-assembly CV tails behind the B335–B339 seams `[Doc Review / Stitch]` (feature) — the hard minority  *(filed 2026-06-21 as the deferred remainder of the B335–B339 batch; minted **B340** — a hot `main` took B325–B334)*
 `[ ]` The B335–B339 headline flow (drop a set → auto-group → auto-stitch → crop → auto-calibrate) is **shipped + verified** for the common case — CAD vector PDFs with a real text layer. (Scanned-sheet **OCR** was the 4th tail and is now **DONE → B352**, shipped + verified this session.) Three computer-vision tails remain, deferred behind clean injectable seams because each needs vector-graphics analysis we can't yet headless-verify — and the manual-Align safety net already covers them:

@@ -156,6 +156,18 @@ server/                   # placeholder README only — NOT built or deployed; b
   part of what "commit" already authorized. The only acceptable stop short of live is a
   hard blocker (merge conflict, red required check, protection that rejects the merge) —
   report _that_, not a request for permission.
+- **The required `build` check often does NOT auto-start on a PR you open via the GitHub
+  MCP / automation — un-stick it yourself with a nudge commit; NEVER hand this to Michael.**
+  GitHub suppresses `pull_request`/`push` workflow triggers for PRs opened or pushed by the
+  automation's app token, so the required `build` check sits **"Expected — Waiting for status
+  to be reported"** and **auto-merge waits forever** (it will NOT merge on its own). A
+  `workflow_dispatch` build _runs_ but its check does **not** satisfy the required context, and
+  a direct merge is rejected with `Required status check "build" is expected`. **Fix:** after
+  opening the PR + enabling auto-merge, push a tiny **empty nudge commit** to the PR branch
+  (`git commit --allow-empty -m "Nudge CI" && git push`) — that fires the real `pull_request`
+  build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
+  involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
+  of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
@@ -204,6 +216,8 @@ server/                   # placeholder README only — NOT built or deployed; b
   (markups, measurements, calibration, stitch transforms, takeoff, source-file refs) as `data`
   jsonb, RLS private like `public.sites`; **source PDFs** in a private Storage bucket
   `doc-review-files` at `<uid>/<reviewId>/<srcId>.pdf`. Migration `src/workspaces/doc-review/db/doc_reviews.sql`.
+  *(Update: since **B207 is live**, `storeSource` now files PDFs to **Google Drive first** and uses this
+  Supabase bucket only as the fallback — see "Two backends" below. The work layer + RLS are unchanged.)*
 - Copies the Site Planner data-loss pattern (persist on first edit, honest badge, sync localStorage
   mirror + beforeunload/visibility/unmount flush, resume-last-review). **Oversize (≥50 MB free-tier)
   PDFs:** work layer still saves, file flagged "re-drop on load" (banner single / dashed placeholder
@@ -244,7 +258,8 @@ server/                   # placeholder README only — NOT built or deployed; b
   "project → discipline → latest set" without re-reading the PDF. Client: index provider
   `doc-review/lib/autofiling.js` fills the `capturePlacementFacts` seam (B181) + `autofile`;
   `lib/fileIndex.js` + `reviewStore.upsertFileFacts/listFileFacts` persist it.
-- **Gated dormant (like APS/Drive):** `backendReady` reflects `VITE_AUTOFILE_ENABLED`; proxy
+- **Gated dormant (like the APS DWG fallback; NOTE Drive storage itself is now LIVE — B207):**
+  `backendReady` reflects `VITE_AUTOFILE_ENABLED`; proxy
   `functions/api/file.js` 503s until `DOC_FILING_URL` is set → drawer files manually as before
   (404/503 = graceful skip). **Owner deploy:** `gcloud run deploy server/filing/` + `ANTHROPIC_API_KEY`
   + `DOC_FILING_URL` + `VITE_AUTOFILE_ENABLED=1` + run `db/file_facts.sql` once. (V74.)
@@ -290,6 +305,27 @@ server/                   # placeholder README only — NOT built or deployed; b
   when the target isn't in the set. Toolbar **Details** toggle; hotspots grab clicks only in Pan mode.
 - Both REUSE the B336 reader (`readSheetMeta` → each page carries `notes`/`detailRefs`/`detailAnchors`;
   placed sheets persist them). 14 unit tests; V92 headless (`ui-audit/verify-b350.mjs`).
+
+### Document Review — robust labels on text-dense (general-notes / specs) sheets (B378/B379) — LIVE
+- A structural general-notes set labelled atrociously (body boilerplate as the title, a body
+  cross-reference read as the sheet number on several rows, false "·≈" auto-cal). All from one
+  mismatch: the reader was tuned for a drawing (sparse plan + one dense title-block strip); a notes
+  sheet (wall-to-wall text, no drawing area) breaks every assumption. Fixed at the **shared** reader
+  so the Markup sidebar AND the Stitcher both benefit:
+  - **Title scorer** (`sheetMeta.readSheetTitle`) now prefers **short + large type** (height-dominant
+    score, ≤7-word/≤48-letter cap) + a **boilerplate filter** — so "GENERAL NOTES" wins over the
+    copyright/legend prose it used to lose to.
+  - **Sheet number** is read from the **title-block zone only** (`readSheetMeta` → band, else the
+    right/bottom edge strip when a dense sheet defeats the density-based band detector), never the
+    whole-page body — so a cross-ref ("SEE DWG S202") can't masquerade as the sheet's own number.
+    `reconstructLines` now **splits a row on a large horizontal gap** so a title-block title can't
+    merge into a far-left body line. `markAdjacentDuplicateNumbers` (sheetGroups) clears a number
+    that repeats on an adjacent page. Sidebar uses a `trustedTitle` gate (band OR zone-number OR
+    text-page corroboration) → real title, else item, else number, else "Sheet N".
+  - **B379:** `readSheetMeta` flags a **`textDense`** sheet (notes/specs/legend title, or a prose-
+    saturated drawing area); `statedCalibration` returns 0 for it — a pure-text sheet is left
+    uncalibrated, never silently mis-scaled off a stray body scale string. Real plan sheets unchanged.
+  - +10 unit tests (1153 green); headless **V104** (`ui-audit/verify-notes-sheet-labels.mjs`, 9/9).
 
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
@@ -430,36 +466,50 @@ conflate them.
    which is safe to ship in the browser **because RLS protects it** (a request can only
    ever see/write the signed-in user's own rows). This is the **permanent home for user
    data**; little custom server code.
-2. **`/server` on Google Cloud Run — the compute layer (built in-repo, NOT yet deployed).**
-   Scale-to-zero containers (idle = free; a request spins one up) for the heavy work that
-   can't live in the browser or a Supabase row:
-   - **DWG→DXF conversion** — **LibreDWG** primary (free, native binary compiled into the
-     container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG
-     failures (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned;
-     a LibreDWG failure with APS off returns an explicit error, never a silent success).
-     Code: `server/convert/` (B238). LibreDWG needs a real container (native binary +
-     filesystem), which is exactly why this is Cloud Run and not a Cloudflare Function.
-   - **Auto-filing title-block read + project match** — `server/filing/` (B299): reads a
-     dropped drawing's title block with the Claude API (key **server-side only**), matches it
-     to a named project (**never auto-guesses**), and returns a filing decision + placement
-     facts. Dormant behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED`
-     until provisioned (a not-yet-deployed proxy 503s → the drawer files manually, no
-     regression). The same-origin proxy is `functions/api/file.js`.
-   - **Google Drive auto-filing + bytes I/O** — the storage adapter (`server/storage/`,
-     B206–B209) that auto-filing writes through; the queryable **file-facts index lives in
-     Supabase Postgres** (`doc-review/db/file_facts.sql`), not on `/server`. (The one-time
-     Google OAuth *consent* callback is a thin same-origin Cloudflare Pages Function,
-     `functions/api/auth/google/*`; the heavy compute is Cloud Run.)
+2. **The server-side compute/integration tier — two delivery shapes, DIFFERENT deploy status.**
+   Don't lump them: the **Drive storage backend is LIVE on the edge**; the **heavy CAD/AI compute
+   is built in-repo but not yet deployed** to Cloud Run.
+   - **✅ LIVE & DEPLOYED — Google Drive storage (bytes I/O).** The storage backend
+     (`server/storage/`, B206–B209 / B207) runs **IN the same-origin Cloudflare Pages Function**
+     `functions/api/files.js` — Drive byte-I/O is light (multipart upload/download over `fetch`),
+     so it needs no container, and same-origin means no CORS. It is the live home for Document
+     Review source PDFs: `reviewStore.storeSource` files **Drive-first**, with Supabase Storage as
+     the fallback. The Planyr-key↔Drive-file-id map persists in **Supabase Postgres**
+     (`server/storage/db/drive_files.sql`, own-row RLS) so the stateless Function can't lose it;
+     the queryable **file-facts index** also lives in Supabase (`doc-review/db/file_facts.sql`),
+     not Drive. The one-time OAuth *consent* callback is a sibling Pages Function
+     (`functions/api/auth/google/*`); `functions/api/drive/selftest.js` is a guarded round-trip
+     smoke test. **Provisioned + owner-verified 2026-06-22 in Cloudflare Pages Production:**
+     `GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` + `PLANYR_STORAGE_BACKEND=drive` + `SUPABASE_URL/ANON_KEY`.
+     Drive **removes the Supabase 50 MB-per-file ceiling** on the happy path. **⛔ Do NOT re-mint
+     `GOOGLE_REFRESH_TOKEN`** — a fresh consent no longer matches the deployed secret and would take
+     Drive filing offline.
+   - **⏳ Built in-repo, NOT yet deployed — Cloud Run.** Scale-to-zero containers (idle = free; a
+     request spins one up) for work that genuinely needs a container or a server-only key:
+     - **DWG→DXF conversion** — **LibreDWG** primary (free, native binary compiled into the
+       container image), **Autodesk APS Model Derivative** fallback for hard LibreDWG failures
+       (dormant behind `APS_ENABLED`, **off** until the APS account is provisioned; a LibreDWG
+       failure with APS off returns an explicit error, never a silent success). Code:
+       `server/convert/` (B238). LibreDWG needs a real container (native binary + filesystem) —
+       exactly why this is Cloud Run and not a Pages Function.
+     - **Tier-2 AI auto-filing title-block read** — `server/filing/` (B299): reads a dropped
+       drawing's title block with the Claude API (key **server-side only**), matches it to a named
+       project (**never auto-guesses**), returns a filing decision + placement facts. Dormant
+       behind `ANTHROPIC_API_KEY` / `DOC_FILING_URL` / `VITE_AUTOFILE_ENABLED` (the not-yet-deployed
+       proxy `functions/api/file.js` 503s → the drawer files manually, no regression). NOTE:
+       **Tier-1 auto-filing (B312, plain code in the browser) is LIVE default-on** — this AI tier is
+       only the scanned/image-only fallback.
 
    **All third-party secrets stay server-side only** — the APS key, the **Anthropic read key**
-   (auto-filing), the Google credentials, and the Supabase **service-role** key — **walled off
-   from the public Cloudflare Pages deploy**. The only Supabase key that reaches the frontend is the RLS-protected **anon**
-   key. `/server` is **additive compute layered onto** the permanent Supabase data home,
-   reached over the network in the backend tranche — never bundled into the browser build.
+   (auto-filing), the **Google credentials** (Drive), and the Supabase **service-role** key. They live
+   in the Cloudflare Pages env as **encrypted secrets read only by the server-side `functions/api/*`
+   handlers** (or on Cloud Run) — **never inlined into the public browser bundle** (never a `VITE_`
+   var). The only Supabase key that reaches the frontend is the RLS-protected **anon** key.
 
-So "the backend" is BUILT for user data (Supabase) while the CAD-conversion + filing compute
-(`/server` on Cloud Run) is built in-repo but not yet deployed. Keep the **data** layer and
-the **compute** layer separate when reasoning about what exists.
+So the **data** backend (Supabase) and the **Drive storage** backend (the `functions/api/files.js`
+Pages Function) are **LIVE**; the **Cloud Run** compute — DWG→DXF conversion + the Tier-2 AI filing
+read — is built in-repo but **not yet deployed**. Keep the **data**, **storage**, and **heavy-compute**
+layers distinct when reasoning about what exists.
 
 ---
 

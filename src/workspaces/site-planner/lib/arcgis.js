@@ -223,6 +223,60 @@ export async function identifyParcelDetailed(candidates, lng, lat) {
   return { hits, responded, errors, sources };
 }
 
+/* Like identifyParcelDetailed, but resolves AS SOON AS the first parcel hit lands
+ * instead of waiting for every candidate to settle — so a click selects the moment
+ * the fastest source answers (≈2-3s via the statewide layer) rather than stalling on
+ * a hung county server's full 8s timeout. B244 made that timeout BOUNDED; this stops
+ * the GOOD answer from waiting on the BAD one (the "can't click" recurrence when FBCAD
+ * went dark again, 2026-06-22). Candidates are queried in parallel; the first to come
+ * back with a lot wins — and because real CADs are listed before the statewide
+ * fallback, a healthy county still answers first in the common case.
+ *
+ * When NO candidate hits, it waits for all to settle and reports the same honest
+ * `responded`/`errors` as identifyParcelDetailed, so "reached a server, no parcel here"
+ * (responded > 0) still reads differently from "couldn't reach any server" (responded
+ * === 0) (B245).
+ *
+ * `onSettled(sources)` (optional) fires ONCE after every candidate finishes — even if
+ * we already returned early on a hit — so the caller can feed the circuit breaker
+ * (sourceHealth) the health of the slow/failed sources too, and the NEXT click skips a
+ * dead host. Returns { hits:[{county,feature}], responded, errors,
+ * sources:[{county,ok,hit,error}], complete }. */
+export function identifyParcelEager(candidates, lng, lat, { onSettled } = {}) {
+  const list = candidates || [];
+  const st = list.map((c) => ({ county: c.county, ok: false, hit: false, error: null, feature: null, settled: false }));
+  const view = () => st.map((s) => ({ county: s.county, ok: s.ok, hit: s.hit, error: s.error }));
+  const result = (complete) => ({
+    hits: st.filter((s) => s.hit).map((s) => ({ county: s.county, feature: s.feature })),
+    responded: st.filter((s) => s.ok).length,
+    errors: st.filter((s) => s.settled && !s.ok).length,
+    sources: view(),
+    complete,
+  });
+
+  let resolveOuter;
+  const out = new Promise((r) => { resolveOuter = r; });
+  let done = false;
+  let settledCount = 0;
+  const settle = (i) => {
+    st[i].settled = true; settledCount += 1;
+    const all = settledCount === list.length;
+    // Early win: a hit lets the caller proceed without waiting on a still-pending
+    // (possibly hung) sibling. With no hit, only resolve once EVERYONE has settled, so
+    // responded/errors can honestly tell "no parcel here" from "nothing responded".
+    if (!done && (st[i].hit || all)) { done = true; resolveOuter(result(all)); }
+    if (all && onSettled) onSettled(view());
+  };
+  if (!list.length) { resolveOuter(result(true)); if (onSettled) onSettled([]); return out; }
+  list.forEach(({ url }, i) => {
+    queryAtPoint(url, lng, lat).then(
+      (feature) => { st[i].ok = true; st[i].hit = !!feature; st[i].feature = feature || null; },
+      (err) => { st[i].error = err; }
+    ).finally(() => settle(i));
+  });
+  return out;
+}
+
 /* Convert a lon/lat polygon feature into local feet for the planner, plus the
  * [lat,lng] ring for drawing a highlight on the Leaflet map. Uses a local
  * equirectangular projection about the parcel centroid — exact enough for a

@@ -97,7 +97,7 @@ await ok("Dashboard crumb returns to all-projects map (B192)", backToMap);
 await shot("new1to3-back-to-dashboard.png");
 
 // ── 6. Breadcrumb present in Markup + Schedule (shared header) ──
-await page.locator('button:has-text("Markup"):visible').first().click();
+await page.locator('button:has-text("Library"):visible').first().click();
 await page.waitForTimeout(1200);
 await ok("Breadcrumb present in Markup", await page.locator('button[title="All projects — Dashboard"]:visible').isVisible());
 await shot("new1to3-markup.png");
