@@ -46,6 +46,25 @@ export async function firstPagesText(fileOrPdf, maxPages = 2) {
   }
 }
 
+/* Pull EVERY page's embedded text as an array of per-page strings — the multi-discipline filing
+ * read (2026-06-23) classifies each page on its own so a combined PDF (a make-ready package, a full
+ * IFC binding C-/A-/S-/M-/E-/P- sheets together) files into the right discipline(s) instead of being
+ * stamped with whatever its first page showed. Text-only (no rendering), so even a long set is cheap.
+ * Accepts a File/Blob/ArrayBuffer (loads + destroys its own pdf) OR an already-loaded pdf. A page
+ * with no embedded text contributes "" (its `hasText:false` flows through to the splitter). */
+export async function extractAllPagesText(fileOrPdf, maxPages = Infinity) {
+  const owned = !(fileOrPdf && typeof fileOrPdf.getPage === "function");
+  const pdf = owned ? await loadPdf(fileOrPdf) : fileOrPdf;
+  try {
+    const n = Math.min(maxPages, pdf.numPages || 1);
+    const out = [];
+    for (let p = 1; p <= n; p++) out.push(await extractPageText(pdf, p));
+    return out;
+  } finally {
+    if (owned) { try { pdf.destroy(); } catch (_) { /* best-effort */ } }
+  }
+}
+
 /* Pull a page's embedded text WITH per-item positions (B336) — the sheet-metadata reader
  * needs to know WHERE each string sits to find the title-block band, the sheet title, and
  * the match-line labels (a plain joined string can't). pdf.js gives each text run a

@@ -138,7 +138,13 @@ export default function FileBrowser({
       const factsIn = (route && route.facts) ? { ...route.facts } : { discipline, item: item_, docDate };
       factsIn.projectId = pid; factsIn.needsFiling = needsFiling;
       try { await upsertFileFacts(toFactsRow(factsIn, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ }
-      const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
+      let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
+      // Multi-discipline heads-up: the set was filed under its dominant discipline, but it also
+      // contains other disciplines' sheets (page ranges detected) — surface them so they aren't lost.
+      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
+        const others = decision.sets.filter((s) => s.discipline !== discipline).map((s) => `${s.discipline} (${s.pages}p)`);
+        if (others.length) warn = [`Also contains ${others.join(", ")}`, warn].filter(Boolean).join(" · ");
+      }
       patchItem(item.uploadId, { status: needsFiling ? QUEUE_STATUS.NEEDS_FILING : QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: pid ? projName(pid) : "Holding area" });
     } catch (e) {
       patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (e && e.message) || "Couldn't file." });

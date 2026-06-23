@@ -141,6 +141,11 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       // (shared fileWarn) so this drawer, the Files browser, and the single-sheet banner agree.
       let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       if (!warn && decision && decision.needsFiling && !pid) warn = `couldn’t confidently match a project (${decision.reason})`;
+      // Multi-discipline heads-up: filed under the dominant discipline; flag the others detected.
+      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
+        const others = decision.sets.filter((s) => s.discipline !== ((decision.discipline) || "Other")).map((s) => `${s.discipline} (${s.pages}p)`);
+        if (others.length) warn = [`Also contains ${others.join(", ")}`, warn].filter(Boolean).join(" · ");
+      }
       patchItem(item.uploadId, {
         status: pid ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,
         reviewId: r.id, filedAt: Date.now(), warn, target,
