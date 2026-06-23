@@ -22,6 +22,21 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
+     control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
+     free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared
+     Enter/double-click finisher), NOT B130 (which created the rail "Boundary" menu). Per STANDING RULE #1
+     filed AND fixed + headless-verified the SAME session on branch `claude/affectionate-wright-gf3kgt` —
+     full [x] block lives in BACKLOG-DONE.md.
+     GROUNDED THE REPORT FIRST: the rail Boundary ▾ → Split a parcel was NEVER deleted (unchanged since
+     2026-06-21 per git blame; scenario A passed on the UNFIXED build), so none of the three suspected
+     failure shapes held. Real cause = a discoverability regression from B383: parcel ops (＋ Add parcel,
+     Merge) were surfaced into the Parcel PANEL, but Split — the inverse of Merge — was left only in the
+     rail. FIX: added "✂ Split a parcel" to the Parcel panel beside Merge (same selectTool("split"), no
+     second pipeline; rail menu kept). Smoke-tested the full activate→capture→finish→commit split live.
+     Regression guard `ui-audit/verify-parcel-split-control.mjs` (rail + panel reachability + e2e cut)
+     11/11. 1273 tests · lint 0 · build green. -->
+
 <!-- 2026-06-23: owner-dropped chat pair "NEW-1/NEW-2" — the Document Review drawing render vs Bluebeam
      (white flash on zoom + softer linework on big sheets). First minted B412/B413, but a concurrent
      `main` (PR #311) took **B412** (title-block reader) + **B413** (auto-stitch surveys) while this was
