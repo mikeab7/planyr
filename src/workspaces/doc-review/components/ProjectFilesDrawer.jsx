@@ -139,7 +139,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       if (route && route.facts && r.id) { try { await upsertFileFacts(toFactsRow(route.facts, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ } }
       // A degraded byte-store is non-fatal — flag it on the row, don't fail it. One taxonomy
       // (shared fileWarn) so this drawer, the Files browser, and the single-sheet banner agree.
-      let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError });
+      let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       if (!warn && decision && decision.needsFiling && !pid) warn = `couldn’t confidently match a project (${decision.reason})`;
       patchItem(item.uploadId, {
         status: pid ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,

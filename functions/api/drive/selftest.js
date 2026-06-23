@@ -10,7 +10,7 @@
  * Recommended use: set PLANYR_SELFTEST_TOKEN to a random value, run once, then delete the
  * var to turn the endpoint back off.
  */
-import { buildStorageAdapter, storageConfig } from "../../../server/storage/index.js";
+import { buildStorageAdapter, storageConfig, defaultDriveClientFactory } from "../../../server/storage/index.js";
 
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -43,6 +43,35 @@ export async function onRequestGet(context) {
       try { steps[steps.length - 1].roundTrip = new TextDecoder().decode(got.bytes) === "planyr drive self-test — safe to delete"; } catch (_) { steps[steps.length - 1].roundTrip = false; }
     }
     await run("delete (cleanup)", () => adapter.remove(key));
+  }
+
+  // Resumable round-trip (B409) — proves the LARGE-file transport (session init → PUT →
+  // read-back) works against real Drive, so the path the 100 MB+ browser-direct upload relies on
+  // can't silently regress. Size is overridable via ?mb=N (default 6 MB, already past Google's
+  // 5 MB multipart limit). This step runs server-side, so it's bounded by the Worker's memory and
+  // capped at 64 MB; the true >100 MB validation is dropping a big PDF on the deployed app, where
+  // the browser PUTs straight to Google and nothing is buffered server-side.
+  const client = defaultDriveClientFactory(cfg.drive);
+  if (client) {
+    const mb = Math.min(Math.max(Number(new URL(request.url).searchParams.get("mb")) || 6, 1), 64);
+    const big = new Uint8Array(mb * 1024 * 1024); // zero-filled; only the transport is under test
+    let rid = null;
+    await run(`resumable upload (${mb} MB)`, async () => {
+      try {
+        const parentFolderId = await client.folderId("__selftest__");
+        const res = await client.createViaResumable({ bytes: big, contentType: "application/octet-stream", name: `planyr-resumable-${Date.now()}.bin`, parentFolderId });
+        rid = res && res.id; return { ok: !!rid };
+      } catch (e) { return { ok: false, error: (e && e.message) || "resumable upload failed" }; }
+    });
+    if (rid) {
+      await run("resumable read-back", async () => {
+        try { const m = await client.media(rid); return { ok: !!(m && m.bytes && m.bytes.byteLength === big.byteLength) }; }
+        catch (e) { return { ok: false, error: (e && e.message) || "read-back failed" }; }
+      });
+      await run("resumable delete (cleanup)", async () => {
+        try { await client.del(rid); return { ok: true }; } catch (e) { return { ok: false, error: (e && e.message) || "delete failed" }; }
+      });
+    }
   }
 
   const ok = steps.every((s) => s.ok);

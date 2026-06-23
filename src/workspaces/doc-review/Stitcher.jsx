@@ -184,6 +184,19 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       setPlaced((arr) => arr.map((x) => (x.id === s.id ? { ...x, href: img.href, baseW: img.baseW, baseH: img.baseH, missing: false } : x)));
     }
     if (!pdfsRef.current.some((p) => p.missing && p.srcId !== srcId)) setErr("");
+    // A re-dropped sheet that was previously UNSTORED (oversize, or never uploaded) now gets
+    // persisted so it survives the next reload instead of going missing again — the recovery
+    // path for B409. Large files take the browser-direct Drive route. Same srcId, so the
+    // sheet's placement + markups stay bound. Skip sheets that already have a key (a transient
+    // fetch miss) so we don't create a duplicate Drive copy.
+    const src = pdfsRef.current.find((p) => p.srcId === srcId);
+    const needsStore = !src || src.oversize || (!src.driveKey && !src.storageKey);
+    if (blob && needsStore) {
+      const name = (blob && blob.name) || (src && src.name) || "document.pdf";
+      storeSource(srcId, blob, { projectId: meta.projectId, discipline: meta.discipline, fileName: name }).then((r) =>
+        setPdfs((p) => p.map((x) => (x.srcId === srcId ? { ...x, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : x)))
+      ).catch(() => {}); // best-effort persist; don't leak an unhandled rejection
+    }
   };
 
   // Remove a placed sheet. If this drops the world-frame (the index-0 sheet that defines the

@@ -8,6 +8,9 @@
  * was never stored, too big to store, or stored-but-unreachable — and a missing source even
  * returned SILENTLY (no banner at all). Each state below maps to a different user action:
  *
+ *   too-large    — a big file (over the 50 MB Supabase cap) whose bytes aren't stored. Distinct
+ *                  from the legacy "oversize" wording because the fix is now actionable: large
+ *                  files go straight to Drive (B409), so re-opening it actually uploads it.
  *   oversize     — over the 50 MB per-file cloud limit, so the bytes were never stored
  *                  online → re-open the file to view it (B207's Drive cutover lifts the cap).
  *   not-stored   — a source record exists but was never durably uploaded (a reload mid-
@@ -23,12 +26,17 @@
 
 export const CLOUD_FILE_LIMIT_MB = 50;
 
+// A source whose own recorded size is over the cap — a big file (so an "oversize" flag means
+// the resumable Drive path didn't land it yet, re-droppable), vs a stray/legacy oversize with
+// no known size (left on the plain "oversize" message).
+const isLargeFile = (src) => !!(src && src.size && src.size > CLOUD_FILE_LIMIT_MB * 1024 * 1024);
+
 /* Classify a persisted source BEFORE attempting a download. Returns one of the unavailable
  * states, or null when the source carries a storage/Drive key and should be fetchable (the
  * caller then attempts the fetch and, on failure, uses "fetch-failed" / "signed-out"). */
 export function classifySource(src, { signedIn = true } = {}) {
   if (!src) return signedIn ? "not-stored" : "signed-out";
-  if (src.oversize) return "oversize";
+  if (src.oversize) return isLargeFile(src) ? "too-large" : "oversize";
   if (!src.driveKey && !src.storageKey) return signedIn ? "not-stored" : "signed-out";
   return null; // has a key → looks fetchable
 }
@@ -39,6 +47,8 @@ export function classifySource(src, { signedIn = true } = {}) {
 export function sourceUnavailableMessage(state, { name = "this file" } = {}) {
   const q = `“${name}”`; // “name”
   switch (state) {
+    case "too-large":
+      return `${q} is a large file and its cloud upload didn’t finish — re-open the file to upload it (large files now go straight to Drive; your markups are saved).`;
     case "oversize":
       return `${q} is over the ${CLOUD_FILE_LIMIT_MB} MB per-file cloud limit, so its pages couldn’t be stored online — re-open the file to view it (your markups are saved).`;
     case "not-stored":
@@ -53,7 +63,8 @@ export function sourceUnavailableMessage(state, { name = "this file" } = {}) {
 
 /* The short Files-browser / drawer queue warn for a just-filed file. Mirrors the banner
  * taxonomy so the two surfaces use one vocabulary. Returns null when the file stored fine. */
-export function fileWarn({ oversize = false, uploadFailed = false, driveError = false } = {}) {
+export function fileWarn({ oversize = false, uploadFailed = false, driveError = false, large = false } = {}) {
+  if (oversize && large) return `large file — cloud upload didn’t finish, re-open to retry`;
   if (oversize) return `over the ${CLOUD_FILE_LIMIT_MB} MB cloud limit — re-open to view`;
   if (uploadFailed) return `couldn’t be stored — re-open to upload`;
   if (driveError) return `filed; Drive copy failed`;

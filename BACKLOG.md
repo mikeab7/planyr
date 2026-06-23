@@ -22,6 +22,18 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B409 — Large files (>~100 MB) now upload to Drive via a browser-direct resumable path — no more silent "oversize" `[Doc Review / storage]` (bug)  *(owner-dropped 2026-06-23 as "NEW-1"; minted **B409** = highest B# across both files (B408) + 1)*
+`[ ]` **Code shipped on branch `claude/quirky-galileo-dm786x` — lint 0 · 1238 tests · build green. ONE step left: a signed-in, deployed ≥100 MB Drive round-trip to confirm the live browser→Google CORS PUT (the sandbox can't sign in or reach Drive — same live-verify gate as B405/B406).** Deduped: net-new — NOT B405 (that's the file-OPEN/read-back taxonomy; this is the WRITE/upload path) and NOT B207 (the Drive cutover, which this completes for big files).
+- **Repro (owner, signed in):** a ~125 MB civil PDF ("GPL - Civil IFP 2026.06.19.pdf", 125,176,019 B) flagged "over the 50 MB … couldn't be stored online" and wrote **no** drive_files row; the bytes fell back to Supabase and were rejected as oversize, so the owner's only copy is a manual My Drive upload, not the app's `project-<id>/<discipline>` tree.
+- **Root cause (code-confirmed):** `functions/api/files.js` buffered the whole upload in the Cloudflare Worker (`request.arrayBuffer()` → capped by the ~100 MB request-body limit + 128 MB memory) **and** `driveClient.create()` used `uploadType=multipart` (Google's ≤5 MB path) — so a 100 MB+ file could reach neither backend.
+- **Fix (additive + regression-safe — only files >50 MB take the new path; ≤50 MB untouched on the proven multipart path, Supabase fallback preserved so behaviour is never worse than today):**
+  - `driveClient.createResumableSession()` mints a Drive **resumable** session bound to the browser's `Origin` (for the cross-origin PUT); `createViaResumable()` is the server-side variant (selftest + future server use).
+  - New Pages Function `functions/api/files/resumable.js`: `POST` = init (returns the pre-authorized session URL), `PUT` = commit (records the Planyr-key↔Drive-id map). Same Supabase-auth + drive-backend gating as `/api/files`.
+  - Client `reviewStore.uploadLargeToDrive()`: init → **PUT bytes straight to Google (never through the Worker)** → commit; `storeSource()` routes >50 MB blobs to it, so neither the body limit nor the memory cap applies (multi-GB works).
+  - **Distinct message (part b):** `sourceState` adds a `too-large` state ("re-open to upload — large files now go to Drive"), separate from the legacy 50 MB "oversize" wording; `fileWarn` gets a matching large-file warn.
+  - **Recovery (part c):** re-dropping a previously-oversize file re-stores it to Drive **in place** (same `srcId`/`reviewId` → markups stay attached). DocReview already re-stored on open; the Stitcher's `bindSource` now does too. (No bulk byte-migration is possible — oversize bytes were never stored anywhere — so the re-drop, which now works, IS the migration.)
+  - **Guard (part a):** `selftest.js` gains a resumable round-trip step (`?mb=N`) so the large-file transport can't regress on the deploy. +9 unit tests (resumable request shapes incl. the `Origin` binding; `too-large` state/copy/warn).
+
 <!-- 2026-06-23: owner-dropped logging task "NEW-1" — record the agreed Supabase org/project naming
      convention in CLAUDE.md so the "Planar vs Planyr" confusion is documented as resolved and future
      env work references the right project. Highest B# was B405 when filed, but a concurrent `main`
