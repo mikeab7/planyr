@@ -21,7 +21,7 @@
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
-import { casUpsert, isMissingVersionColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { casUpsert, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -92,29 +92,42 @@ export async function upsertReview(record) {
   // always carries every field (incl. the library ones). The library index columns are
   // added on top; if that migration hasn't run yet we fall back to the core row so
   // saving never regresses — the new fields still round-trip through `data`.
+  // No user_id here: casUpsert stamps the creator only on INSERT, so a teammate editing a
+  // SHARED review never re-stamps the owner. team_id rides along (null = private; when set,
+  // RLS lets the project's team read/edit it).
   const base = {
-    id: record.id, user_id: uid,
+    id: record.id,
     title: record.title || null,
     kind: record.kind || null,
     project: record.project || null,
     discipline: record.discipline || null,
+    team_id: record.teamId || null,
     updated_at: new Date(record.updatedAt || Date.now()).toISOString(),
     data,
   };
   const full = { ...base, project_id: record.projectId || null, item: record.item || null, revision: record.revision || null, doc_date: record.docDate || null };
-  // Optimistic concurrency (B314), guarded by the version we last synced. TWO independent
-  // graceful degrades layer here: (a) the library index columns may be un-migrated → retry
-  // with the core `base` row; (b) the `version` column may be un-migrated → fall back to a
-  // plain upsert (today's full→base behaviour). Either way saving never regresses.
-  const libColMiss = (e) => !!e && /column|project_id|doc_date|revision|item|schema cache/i.test(e) && !/version/i.test(e);
+  // Optimistic concurrency (B314), guarded by the version we last synced. THREE independent
+  // graceful degrades layer here so saving never regresses against a partially-migrated DB:
+  // (a) the team_id column may be un-migrated → retry without it; (b) the library index columns
+  // may be un-migrated → retry the core `base` row; (c) the `version` column may be un-migrated →
+  // fall back to a plain upsert.
+  const stripTeam = (row) => { const { team_id, ...rest } = row; return rest; };
+  const libColMiss = (e) => !!e && /column|project_id|doc_date|revision|item|schema cache/i.test(e) && !/version/i.test(e) && !/team_id/i.test(e);
   const expected = reviewVersions[record.id];
-  let r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: full, expected });
-  if (r.ok === false && r.error && libColMiss(r.error)) // library columns absent → core row
-    r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: base, expected });
-  if (r.degrade) { // version column absent → plain upsert (today's full→base fallback)
-    let { error } = await supabase.from("doc_reviews").upsert(full, { onConflict: "user_id,id" });
+  // full → (lib cols missing) → base, for a given row-shaper (identity or team-stripped).
+  const attempt = async (shape) => {
+    let r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: shape(full), expected });
+    if (r.ok === false && r.error && libColMiss(r.error))
+      r = await casUpsert(supabase, "doc_reviews", { uid, id: record.id, row: shape(base), expected });
+    return r;
+  };
+  let r = await attempt((x) => x);
+  if (r.ok === false && r.error && isMissingColumn(r.error, "team_id")) // team_id column absent → drop it
+    r = await attempt(stripTeam);
+  if (r.degrade) { // version column absent → plain upsert (pre-version DB: no team_id, old composite PK)
+    let { error } = await supabase.from("doc_reviews").upsert({ ...stripTeam(full), user_id: uid }, { onConflict: "user_id,id" });
     if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
-      ({ error } = await supabase.from("doc_reviews").upsert(base, { onConflict: "user_id,id" }));
+      ({ error } = await supabase.from("doc_reviews").upsert({ ...stripTeam(base), user_id: uid }, { onConflict: "user_id,id" }));
     if (!error) writeDraft(uid, data);
     return { ok: !error, error: error ? error.message : null };
   }
@@ -126,12 +139,18 @@ export async function upsertReview(record) {
 // The full serialized review (the `data` jsonb), or null. RLS scopes to the user.
 export async function loadReview(id) {
   if (!supabase || !id) return null;
-  let { data, error } = await supabase.from("doc_reviews").select("data, version").eq("id", id).maybeSingle();
+  let { data, error } = await supabase.from("doc_reviews").select("data, version, team_id").eq("id", id).maybeSingle();
+  if (error && isMissingColumn(error, "team_id")) // team-sharing migration not run → drop team_id
+    ({ data, error } = await supabase.from("doc_reviews").select("data, version").eq("id", id).maybeSingle());
   if (error && isMissingVersionColumn(error)) // pre-migration → re-select without version
     ({ data, error } = await supabase.from("doc_reviews").select("data").eq("id", id).maybeSingle());
   if (error || !data) return null;
   if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B314)
-  return data.data || null;
+  const rec = data.data || null;
+  // Overlay the authoritative team_id column so a subsequent save preserves the share (the
+  // record's own field can lag); null = private.
+  if (rec && "team_id" in data) rec.teamId = data.team_id || null;
+  return rec;
 }
 
 // Lightweight list for the picker / library (no heavy `data` payload). Falls back to
@@ -142,6 +161,10 @@ export async function listReviews() {
   // heavy payload) so the drawer's Filed/On-map badge can reflect it (NEW-3). On any error
   // we fall back to the core columns — the badge degrades to "filed", never regresses.
   let res = await supabase.from("doc_reviews")
+    .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed")
+    .order("updated_at", { ascending: false });
+  // team_id/user_id may be un-migrated → drop to the prior column set; then the older core set.
+  if (res.error) res = await supabase.from("doc_reviews")
     .select("id,title,kind,project,project_id,discipline,item,revision,doc_date,updated_at,placed:data->placed")
     .order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
@@ -183,7 +206,9 @@ export async function deleteReview(id) {
     }
   } catch (_) {}
   if (uid) clearDraft(uid, id);
-  const { error } = await supabase.from("doc_reviews").delete().eq("user_id", uid).eq("id", id); // scope by owner (defense-in-depth, matches cloudDelete)
+  // Scope by id only; RLS decides (own review OR team-admin on a shared one). A user_id filter
+  // would block an admin from deleting a teammate's shared review, which the policy permits.
+  const { error } = await supabase.from("doc_reviews").delete().eq("id", id);
   return { ok: !error, error: error ? error.message : null };
 }
 
@@ -208,15 +233,19 @@ export async function refileReview(id, { projectId = null, project = "", discipl
 // name + lifecycle status (read straight from the Site Model jsonb).
 export async function listProjects() {
   if (!supabase || !(await currentUid())) return [];
-  let res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status").order("updated_at", { ascending: false });
+  // Prefer the richest select (status + team_id); degrade if either column isn't migrated in.
+  let res = await supabase.from("sites").select("group_id,site,updated_at,team_id,status:data->>status").order("updated_at", { ascending: false });
+  if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at,status:data->>status").order("updated_at", { ascending: false });
   if (res.error) res = await supabase.from("sites").select("group_id,site,updated_at").order("updated_at", { ascending: false }); // tolerate older PostgREST
   const { data } = res;
   if (!data) return [];
   const byId = new Map();
   for (const r of data) {
     const id = r.group_id;
-    if (!id || byId.has(id)) continue; // newest row wins for the name/status
-    byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown" }); // don't claim "active" when status is missing or the read fell back to the no-status query (B35)
+    if (!id) continue;
+    if (!byId.has(id)) // newest row wins for the name/status
+      byId.set(id, { id, name: r.site || "Untitled site", status: STATUSES.includes(r.status) ? r.status : "unknown", teamId: r.team_id || null });
+    else if (r.team_id && !byId.get(id).teamId) byId.get(id).teamId = r.team_id; // any shared plan ⇒ project is shared
   }
   return [...byId.values()];
 }
@@ -246,14 +275,19 @@ export async function upsertFileFacts(row) {
   if (!supabase || !row || !row.id) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to file documents." };
-  const full = { ...row, user_id: uid };
-  let { error } = await supabase.from("file_facts").upsert(full, { onConflict: "user_id,id" });
-  // Degrade gracefully if the Work Item B columns (category/state) aren't migrated yet —
-  // re-upsert without them. The tree still works (category/state are derived client-side).
-  if (error && /category|state|column/i.test(error.message || "")) {
-    const { category, state, ...core } = full;
-    ({ error } = await supabase.from("file_facts").upsert(core, { onConflict: "user_id,id" }));
-  }
+  // No user_id in the payload: the column default (auth.uid()) stamps the creator on INSERT, so a
+  // teammate edit of a shared row won't re-stamp the owner. team_id carries the share (null =
+  // private); category/state are the Work Item B index columns. onConflict = the PK "id" (post the
+  // phase-2 migration). Degrade gracefully if any optional column (team_id / category / state) or
+  // the old composite PK isn't where we expect, so indexing never regresses on a partial migration.
+  const { teamId, team_id: t0, ...rest } = row;
+  const payload = { ...rest, team_id: teamId || t0 || null };
+  const core = () => { const { team_id, category, state, ...c } = payload; return c; };
+  let { error } = await supabase.from("file_facts").upsert(payload, { onConflict: "id" });
+  if (error && /team_id|category|state|column|schema cache/i.test(error.message || ""))
+    ({ error } = await supabase.from("file_facts").upsert(core(), { onConflict: "id" }));
+  if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change: target is (user_id,id)
+    ({ error } = await supabase.from("file_facts").upsert({ ...core(), user_id: uid }, { onConflict: "user_id,id" }));
   return { ok: !error, error: error ? error.message : null };
 }
 
@@ -261,11 +295,10 @@ const FILE_FACTS_CORE = "id,review_id,project_id,discipline,item,sheet_number,sh
 export async function listFileFacts() {
   if (!supabase || !(await currentUid())) return [];
   let { data, error } = await supabase.from("file_facts")
-    .select(FILE_FACTS_CORE + ",category,state")
+    .select(FILE_FACTS_CORE + ",team_id,category,state")
     .order("updated_at", { ascending: false });
-  if (error) { // pre-migration: the category/state columns don't exist yet — read the core set
+  if (error) // an optional column (team_id / category / state) isn't migrated in → read the core set
     ({ data, error } = await supabase.from("file_facts").select(FILE_FACTS_CORE).order("updated_at", { ascending: false }));
-  }
   return error || !data ? [] : data;
 }
 

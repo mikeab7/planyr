@@ -69,6 +69,11 @@ doesn't write code. This is a standing rule, not a one-off.
   whether there's anything left for _me_ to do** — e.g. "nothing on your end, it's done"
   or "the one thing I need from you is X." Don't leave me to ask. (Browser click-throughs
   in `VERIFICATION.md` are the Claude cohort's job, never mine — those never count as my to-do.)
+- **If a step is on MY side, HAND ME THE FILE — never just name a repo path (owner rule,
+  2026-06-22).** When I need to run a SQL file, upload something, or paste something into a
+  console, deliver the actual file(s) to me directly (the harness `SendUserFile` tool), in the
+  order I should use them, with the one-line "do this first" note. I don't know where things are
+  saved in the repo and shouldn't have to hunt. Make my part copy-paste / one-click easy.
 
 This plain-language rule is about how you talk **to me** in chat. Keep commit messages,
 PR descriptions, code comments, and the backlog technical and precise as usual.
@@ -605,7 +610,7 @@ publishable/anon key correctly 401s there). Auth = email+password via `auth.js` 
 logged out → legacy `planarfit:sites:v1`. Save badge reflects the real cloud write.
 No migration of legacy sites (recreate manually).
 
-**Supabase org/project naming convention (resolved — closes the "Planar vs Planyr" confusion; B406).**
+**Supabase org/project naming convention (resolved — closes the "Planar vs Planyr" confusion; B407).**
 ONE app, so the **org carries the brand** and **projects are named by environment** (deployment-
 lifecycle stage), never by feature — this keeps the set readable as the commercial/VC direction adds
 environments and avoids the redundant "Planyr / Planyr" nesting:
