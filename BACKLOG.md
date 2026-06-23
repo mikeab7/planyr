@@ -22,6 +22,30 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
+     across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
+     (NOT B397 Scheduler-Gantt z-order, NOT the CSS stacking-context fixes, NOT B33/B374 markup
+     hit-testing — B421 REUSES that). Per the brief's per-item disposition:
+       • B421 (NEW-1) was BUILD-AND-MERGE — filed AND built + verified + shipped to main the SAME
+         session per STANDING RULE #1 (branch `claude/gallant-turing-mcempv`); full [x] block lives in
+         BACKLOG-DONE.md. New pure `doc-review/lib/arrange.js` + 14 unit tests; keyboard chords (e.code,
+         before the `if (mod) return` early-out) + a portalled right-click menu in DocReview.jsx;
+         Stitcher skipped (measures-only). Headless V122 (`ui-audit/verify-b421-arrange.mjs`) 17/17 ·
+         lint 0 · 1335 tests · build green.
+       • B422 (NEW-2) is LOG-ONLY — a ROADMAP STUB (named markup Layers) that needs a design pass
+         BEFORE any build; it stays Open below, unbuilt. -->
+
+### B422 — Named markup Layers (show / hide / lock / rename / reorder) `[Doc Review / Markup]` (feature) — ROADMAP STUB, design pass required before build  *(owner-dropped 2026-06-23 as "NEW-2"; minted **B422**)*
+`[ ]` **PARKED — file only, do NOT build yet (a design pass must land first).** CAD-/Bluebeam-style named layers for the markup surface: group markups into named layers ("Existing", "Demo", "My redlines", "GC's markups"), each with show/hide, lock, rename, delete, and reorder. Distinct from & complementary to the Arrange z-order ops (**B421**, shipped): Arrange controls draw order **within** a layer; Layers organize the whole sheet. Strategic value is organizational — isolate one reviewer's markups, lock an as-built, separate civil from architectural — which maps onto the multi-reviewer / multi-customer direction.
+- **Why it can't be a quick handoff (the open design questions):**
+  - **Data-model change + migration.** Each markup gains a `layerId`; the review gains a `layers` collection (`id, name, visible, locked, order`). Old saved reviews migrate on load — markups with no `layerId` fold into a default "Markup" layer. Use the existing version-bump + `migrate` discipline (same pattern as the Site Model `SITE_MODEL_VERSION` migrations), not an ad-hoc reshape.
+  - **Active-layer concept.** New markups land on the active layer → needs a clear, always-visible indicator of which that is.
+  - **Render + hit-testing.** The render path filters out hidden layers; `hitTest` (B33) must skip markups on hidden OR locked layers so you can't grab what you can't edit.
+  - **Arrange interplay.** B421's four reorder ops become "arrange **within** the active layer" — reuse them, don't fork.
+  - **New UI surface.** A Layers panel in the right rail (alongside Takeoff); reuse the portal-menu pattern (`AnchoredMenu`/B127) for per-layer menus.
+  - **Delete-layer is a "silence is a crash" hazard.** Deleting a layer must force an explicit choice for its markups (reassign to another layer vs. delete with the layer) via a loud confirmation — never silently drop markups.
+- **Next step before any code:** a design pass — a Layers-panel mockup **plus** a written data-model + migration proposal — reviewed and approved first. Do NOT assign to a build session until that lands.
+
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — a parcel grabbed by its empty INTERIOR, not just its
      boundary/setback, so a press in the open interior near (but not on) a footprint selected the LOT
      instead of letting you work on a building sitting there. Highest real B# across both files was B419
