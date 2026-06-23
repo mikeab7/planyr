@@ -22,6 +22,46 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped cross-chat item "NEW-1" — "Gantt dependency connector lines anchor to
+     empty space until a zoom forces a recompute" `[Scheduler / Gantt]` (bug). DEDUPED → ALREADY FIXED &
+     VERIFIED; NOT filed to Open, no new B# minted (would duplicate done work + burn a permanent ID). The
+     report arrived "blind" from another chat and describes the PRE-fix state. Verified against the REAL
+     code this session and — as the report itself invited ("if the real code contradicts either hypothesis,
+     stop and flag the correction") — BOTH root-cause hypotheses are CONTRADICTED by the shipped code:
+       • (b) "endpoints read from live DOM measurement (getBoundingClientRect) before layout commits" —
+         FALSE. Neither connector path measures the DOM. The on-screen GanttView `depLines` useMemo and the
+         `buildGanttSVG` export both derive endpoints PURELY from the coordinate model: x = xOf(date) =
+         dif(minD,date)*ppd (day-offset × pixels-per-day), y = index*ROW_H + bar-center offset (depYCenter /
+         edgeYOf). The bars use the SAME xOf/ROW_H math, so connectors and bars cannot diverge by scale or
+         paint timing — exactly the model-derived fix the report prescribes, already in place.
+       • (a) "the zoom/scale factor isn't applied on first paint" — moot: the memo's dep array already
+         includes ppd ([tasks, minD, ppd, childParentIds]); a stale ppd would misplace the BARS too (the
+         report says bars are fine), so it's structurally impossible in the current code.
+     ACTUAL defect that produced the screenshot (connectors trailing into empty space at low zoom toward the
+     UNSCHEDULED Wastewater/Begin Design/Civil Design tasks): the on-screen depLines LACKED the blank-date
+     guard the export already had → xOf("")=NaN drew into the void. Fixed by two DONE items (BACKLOG-DONE.md):
+       • B386 (commit e4fdb2f) — suppress connectors to unscheduled (blank-date) endpoints; the blank row
+         shows an explicit "Unscheduled" tag instead of a silent void.
+       • B396 (commit 841ee0a) — bind both endpoints to each bar's vertical center (depYCenter), so curves
+         no longer float at the row mid-line.
+     All three NEW-1 edge cases are handled: off-window virtualized rows (depLines iterates ALL tasks by model
+     index, not the rendered slice → off-screen endpoints still resolve to the right model coord, never a
+     missing-node (0,0)); unscheduled / 0-duration targets (B386 guard + tag); milestone diamonds
+     (depYCenter/edgeYOf return the diamond CENTER for duration===0, not a zero-width edge). The report's
+     requested "headless verification at low zoom, first paint, no zoom interaction" ALREADY EXISTS and was
+     re-run GREEN this session:
+       • ui-audit/verify-unscheduled-deps.mjs (V109) — seeds the same Pappadoupolos scenario; asserts exactly
+         1 connector, ZERO NaN paths (= none into empty space), visible "Unscheduled" tags. PASS.
+       • ui-audit/verify-gantt-labels-deps.mjs (V114) — asserts every connector endpoint binds to the bar
+         band (not floating), no NaN, on BOTH the on-screen and print paths, across L/C/R alignment. PASS.
+     Both render at the DEFAULT first-paint zoom ppd=1 (~17%, even lower than the reported 33%) with NO zoom
+     interaction — a direct live repro of the reported condition, passing. No X-on-bar regression assertion
+     added: connector-x and bar-x are the SAME xOf(date) expression (equal by construction), and the rendered
+     bar carries a 6px min-width clamp the model anchor intentionally ignores, so pinning endpoint-x to the
+     rendered edge would couple to a render clamp and flake without adding real coverage (same-xOf + no-NaN
+     already preclude "empty space" horizontally). Deduped: NOT net-new — fully covered by B386 + B396.
+     Doc-only provenance; nothing to ship. -->
+
 ### B411 — Auto-filing residual gaps after the multi-discipline split (B410) `[Doc Review / auto-filing]` (bug/task)  *(spun off from B410, 2026-06-23; minted **B411** = B410 + 1)*
 `[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness:
 - **(a) Scanned/image-only sets read as nothing in FILING.** A no-text-layer drawing (e.g. "2023.11.06 Mesa - Electrical B1.pdf") has no embedded text, so the local read returns nothing and the file lands in the holding tray. OCR already exists in the STITCHER (B352, `doc-review/lib/ocr.js`, Tesseract); wire that same OCR into the filing read (`localRead.js`) so scanned sheets classify too. Bigger lift (renders pages to canvas), so it's its own item.
