@@ -22,6 +22,14 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B406 — Shared team workspaces: invite by email, share a project with a team `[Site Planner + Doc Review]` (feature)  *(2026-06-22; "B-TEAM" in the cowork handoff. Filed B365 in-session, but a concurrent `main` had taken B365–B405 — renumbered to the real next free B#406. PR #305 title still says B365.)*
+`[ ]` **Shipping — code merged via PR #305; DB phase-2 migrated + verified in PRODUCTION (`lyeqzkuiwngunutlkkmi`); remaining owner step: run `team_storage.sql` (phase 3) for shared-PDF reads.**
+Lets a team share a workspace: invite people by email (activates on signup/sign-in even if they had no account yet), admins vs members, and a project stays **private until deliberately shared** (and can revert to private). Additive + private-by-default preserved — a row with `team_id IS NULL` behaves exactly as before.
+- **DB (done + verified in prod):** `db/profiles.sql` (email mirror), `db/teams.sql` (teams/team_members/team_invites + `is_team_member`/`is_team_admin` SECURITY-DEFINER helpers + `claim_team_invites`/`list_team_members` RPCs + signup auto-claim), `db/team_sharing.sql` (`team_id` on sites/doc_reviews/file_facts; PK `(user_id,id)`→`(id)`; RLS rewritten to "own OR shared-with-my-team", delete = owner-or-team-admin). Verified end-state: 3 `team_id` cols, `sites` PK = `id`, 12 RLS policies, both helpers present. Pre-flight done (snapshot tables `backup_*_20260622`; 0 dup ids) — **drop the backup tables once confirmed good.**
+- **DB (still to run):** `doc-review/db/team_storage.sql` (phase 3) — extra Storage SELECT policy so teammates can open each other's **shared review PDFs**. Until run, that one sub-path is inert (graceful); everything else works.
+- **Client:** `optimisticUpsert.casUpsert` updates by `(id,version)` only + stamps `user_id` on INSERT only (creator never re-stamped on a teammate edit); `cloudSync`/`reviewStore` carry `team_id`, delete by id (RLS scopes), team_id-missing graceful degrade; `siteModel` `teamId`/`ownerId` + `teamShareOf` (SITE_MODEL_VERSION→8); `storage.mergePulledSites` doesn't re-push teammates' rows; `lib/teams.js` + `lib/sharing.js`; `SitePlannerApp` claims invites on sign-in; **UI** = Team tab (`TeamPanel`) + account-menu entry, Share-with-team control in the Project Files drawer.
+- **Left:** run `team_storage.sql`; signed-in live check (create team / invite / accept / share / concurrent-edit conflict / member-can't-delete) — auth-only, so not headless-testable in the sandbox. See VERIFICATION V118.
+
 <!-- 2026-06-23: owner-dropped COMBINED chat brief (it explicitly supersedes three earlier separate briefs —
      the Markup→Library rename, "open any file fails", and the standalone oversize-banner-copy item — so filed
      from the combined version to avoid double-filing; deduped: no existing Open item covered these). Highest
