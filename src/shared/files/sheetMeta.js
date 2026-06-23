@@ -16,7 +16,7 @@
  *
  * Unit-tested with hand-built item lists (no pdf.js), mirroring the project's DI test style.
  */
-import { readTitleBlockText, classifyDiscipline, parseSheetNumber } from "./titleBlockParse.js";
+import { readTitleBlockText, classifyDiscipline, parseSheetNumber, disciplineFromSheetNumber } from "./titleBlockParse.js";
 import { parseDetailRefs, parseDetailAnchors } from "./detailRefs.js";
 import { parseNotes } from "./sheetNotes.js";
 
@@ -191,6 +191,13 @@ const looksLikeData = (t) =>
 // rows ("CJ DENOTES CONTROL JOINT", "…CONTINUED"). These are never a sheet title.
 const looksLikeBoilerplate = (t) =>
   /\b(property of|all rights reserved|copyright|reproduced|reproduction|written (consent|permission|authoriz)|may not be (copied|used|reproduced|altered)|shall not be (used|copied|reproduced)|without (the )?(prior )?written|denotes|continued|hereon|instrument of service)\b/i.test(t);
+// A title-block FIELD-LABEL row — the printed label of a title-block field, sometimes merged with its
+// value when both sit on one baseline ("C-14 SHEET NUMBER", "SCALE 1\"=40'", "DRAWN BY JS"). TITLE_SKIP
+// only catches a label at the START of the line (^), so a line that LEADS with the value slips past it
+// and used to be taken as the title (B412 — the GPL "C-14 SHEET NUMBER" mislabels). Match the label
+// ANYWHERE in the line. (B412)
+const looksLikeFieldRow = (t) =>
+  /\bsheet\s*(no\.?|number|#)\b|\bscale\b|\b(drawn|checked|designed|approved|reviewed)\s*by\b|\b(project|job)\s*(no\.?|number|#)\b|\brev(ision)?\s*(no\.?|#)?\b|\bdrawing\s*(no\.?|number|#)\b/i.test(t);
 
 /* The sheet title — the human "what is this sheet" line (e.g. "GRADING & DRAINAGE PLAN" or
  * "GENERAL NOTES"). A real title is SHORT and LARGE-TYPE, not a long sentence — so we keep only
@@ -199,16 +206,27 @@ const looksLikeBoilerplate = (t) =>
  * the actual title (B378). Skips label/data/boilerplate rows; falls back to the deterministic
  * discipline `item` (titleBlockParse) when nothing readable stands out, so grouping always has a
  * key. Returns "". */
-export function readSheetTitle(lines, band, fallback = "") {
-  const inBand = (ln) => (band ? itemInBand(ln, band) : true);
+export function readSheetTitle(lines, band, fallback = "", dims = {}) {
+  // Scope the title to the TITLE-BLOCK ZONE — the same discipline readSheetNumberInZone uses for the
+  // number (B378/B412). With a detected band, that band; WITHOUT one, the right/bottom edge strip —
+  // NOT the whole page. A whole-page scan let a large drawing-area annotation ("MATCH LINE …") or a
+  // big project-name banner outscore the real title (the GPL-civil mislabels). Falls fully open only
+  // when we have neither a band nor page dims (older callers): then every line is eligible, as before.
+  const W = dims.width || 0, H = dims.height || 0;
+  const inZone = band
+    ? (ln) => lineInRect(ln, band)
+    : (W && H)
+      ? (ln) => (ln.x + ln.w / 2 >= W * 0.78) || (ln.y + ln.h / 2 >= H * 0.82)
+      : () => true;
   const isTitleish = (ln) => {
     const t = ln.text;
-    if (!t || TITLE_SKIP.test(t) || looksLikeData(t) || looksLikeBoilerplate(t)) return false;
+    if (!t || TITLE_SKIP.test(t) || looksLikeData(t) || looksLikeBoilerplate(t) || looksLikeFieldRow(t)) return false;
+    if (/match\s*-?\s*line|for\s+continuation/i.test(t)) return false; // a seam annotation, not a title
     if (wordCount(t) > 7) return false;                       // a title is a few words, not a sentence
     return t.replace(/[^a-z]/gi, "").length <= 48;            // nor a long run-on line
   };
   const cand = lines
-    .filter(inBand)
+    .filter(inZone)
     .filter(isTitleish)
     // Height dominates (×100 so a taller line always wins); letters only break ties between equal-
     // height lines (prefer a real title over a stray 3-letter token), capped so they can't override
@@ -224,11 +242,40 @@ export function readSheetTitle(lines, band, fallback = "") {
  * otherwise fall back to the right edge strip, then the bottom edge strip — where title blocks live
  * — because a dense notes sheet often defeats the density-based band detector yet still keeps its
  * number in that strip. Returns the code or "". */
+// A token shaped exactly like a sheet code and nothing else ("C-2", "A101", "C-2.01"). Used for the
+// BARE-code read below — anchored ^…$ so it matches a standalone token, not a code buried in prose.
+const SHEET_CODE = /^[A-Z]{1,3}-?\d{1,3}(?:\.\d{1,2})?[A-Z]?$/i;
+/* The most PROMINENT bare sheet code in a zone (no "SHEET NO." label) — for a scanned/reference
+ * sheet whose title block prints the number as a big standalone "C-2" with the label drawn as
+ * graphics, not text. Stays conservative ("never auto-guess"): the token must be a lone sheet-code
+ * shape AND carry a real discipline letter-prefix (so a page count like "46" — no letter — can't
+ * win), and we take the TALLEST such token (the sheet number is the title block's largest text).
+ * Returns the code or "". */
+function prominentSheetCode(items, pred) {
+  const cands = items.filter(pred).filter((it) => {
+    const s = (it.str || "").trim();
+    return SHEET_CODE.test(s) && disciplineFromSheetNumber(s);
+  });
+  if (!cands.length) return "";
+  cands.sort((a, b) => (b.h || 0) - (a.h || 0));
+  return cands[0].str.trim().toUpperCase();
+}
+
 function readSheetNumberInZone(items, dims, band) {
-  const join = (pred) => parseSheetNumber(items.filter(pred).map((i) => i.str).join(" "));
-  if (band) return join((it) => itemInBand(it, band));
   const W = dims.width || 0, H = dims.height || 0;
-  return join((it) => it.x + (it.w || 0) / 2 >= W * 0.78) || join((it) => it.y + (it.h || 0) / 2 >= H * 0.82);
+  const rightP = (it) => it.x + (it.w || 0) / 2 >= W * 0.78;
+  const bottomP = (it) => it.y + (it.h || 0) / 2 >= H * 0.82;
+  const join = (pred) => parseSheetNumber(items.filter(pred).map((i) => i.str).join(" "));
+  // 1) The labeled read ("SHEET NO. C-2") — the most reliable, scoped to the title-block zone.
+  if (band) {
+    const labeled = join((it) => itemInBand(it, band));
+    if (labeled) return labeled;
+    // 2) No label, but the number is printed as a prominent bare code in the title-block band.
+    return prominentSheetCode(items, (it) => itemInBand(it, band));
+  }
+  const labeled = join(rightP) || join(bottomP);
+  if (labeled) return labeled;
+  return prominentSheetCode(items, (it) => rightP(it) || bottomP(it));
 }
 
 /* ----------------------------- the reader -------------------------------------- */
@@ -255,7 +302,7 @@ export function readSheetMeta(page = {}) {
   const scale = fields.scale; // one parse pass — readTitleBlockText already read the stated scale (B360)
   const matchLines = parseMatchLines(lines, dims);
   const { discipline, item } = classifyDiscipline(joined, fields.sheetNumber);
-  const sheetTitle = readSheetTitle(lines, band, item);
+  const sheetTitle = readSheetTitle(lines, band, item, dims);
   // Is this a pure-text sheet (general notes / specifications / legend), not a drawing? Such a
   // sheet has no plan scale — auto-calibration must NOT fire on it (B379). Signals: a notes/specs
   // title, or a drawing area saturated with sentence-like prose (plans carry only short labels).
