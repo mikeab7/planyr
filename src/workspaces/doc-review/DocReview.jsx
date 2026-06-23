@@ -5,7 +5,8 @@
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadPdf, renderPageToCanvas, extractPageItems } from "./lib/pdf.js";
+import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
+import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
 import { statedCalibration } from "./lib/sheetRead.js";
@@ -24,12 +25,17 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { centerOn } from "../../shared/geometry/pasteGeom.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
 // in via the module tab would re-fire the previous open on mount. Mirrors SitePlannerApp's
 // lastConsumedNavToken. (NEW-1)
 let lastConsumedDocToken = null;
+
+// Device pixel ratio (capped use is in renderBudget) — the detail layer renders at this density
+// so linework is native-sharp on the visible window regardless of sheet size (B415).
+const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
@@ -94,11 +100,15 @@ export default function DocReview({
   projectId = null, onNavigate, crossProject = false,
 } = {}) {
   const wrapRef = useRef(null);
-  const canvasRef = useRef(null);
+  const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B415)
+  const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
   const pdfRef = useRef(null);
   const fileRef = useRef(null);
   const renderTok = useRef(0);
-  const renderTaskRef = useRef(null); // current pdf.js RenderTask, so a superseded render can be cancelled (B40)
+  const renderTaskRef = useRef(null);   // current DETAIL pdf.js RenderTask, cancellable (B40)
+  const backdropTok = useRef(0);
+  const backdropTaskRef = useRef(null); // current BACKDROP RenderTask, cancellable (B40)
+  const detailTileRef = useRef(null);   // {rx,ry,rw,rh,scale} of the rastered detail tile (coverage check, B415)
   // Destroy the previous PDF document before swapping in a new one — frees the worker
   // + retained ArrayBuffer; without this every re-open leaks the prior doc (B39).
   const setPdfDoc = (next) => {
@@ -122,13 +132,15 @@ export default function DocReview({
   const [page, setPage] = useState(1);
   // Viewport transform (B329): ONE shared pan/zoom model with the Site map. `view` is
   // { scale, tx, ty } — pixels per page-unit + the page origin's position in the viewport —
-  // so the sheet pans freely in any direction (not trapped inside a scroll box). `renderScale`
-  // is the resolution the canvas bitmap was last rasterised at; it's decoupled from view.scale
-  // so a zoom gesture rescales the already-drawn bitmap and only re-rasterises (crisp) once the
-  // gesture settles. View transform ONLY — it never touches stored markups or calibration.
+  // so the sheet pans freely in any direction (not trapped inside a scroll box). The bitmaps
+  // are decoupled from view.scale (B415): during a gesture the page box CSS-rescales the
+  // already-drawn backdrop + detail (cheap, no flash); on settle the detail re-rasterises the
+  // visible window crisp. View transform ONLY — it never touches stored markups or calibration.
   const [view, setView] = useState(null);          // { scale, tx, ty } | null until first fit
   const [pageBase, setPageBase] = useState(null);  // { w, h } current page at scale 1
-  const [renderScale, setRenderScale] = useState(0); // scale the bitmap is currently drawn at
+  const [detailTile, setDetailTile] = useState(null); // {rx,ry,rw,rh,scale} placing the sharp detail canvas (B415)
+  const [backdropReq, setBackdropReq] = useState(0);  // bump → re-raster the whole-page backdrop (page/load only)
+  const [detailReq, setDetailReq] = useState(0);      // bump → re-raster the viewport detail (page/load + settle)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -149,6 +161,8 @@ export default function DocReview({
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
+  const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B415)
+  const pageBaseRef = useRef(pageBase); pageBaseRef.current = pageBase;
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
   const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
   const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
@@ -302,7 +316,7 @@ export default function DocReview({
       setFileName(file.name || "document.pdf");
       setNumPages(pdf.numPages);
       setPage(1);
-      setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // fit the new backdrop (B329)
+      setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // fit the new backdrop (B329)
       setRedrop(""); setCalInput(null); clearHistory(); // a new backdrop starts a fresh undo timeline (B303)
       // A genuinely DIFFERENT document replaces the backdrop — drop the previous sheet's
       // calibrations so they can't bleed onto the new (differently-paginated) file. A re-drop
@@ -343,50 +357,70 @@ export default function DocReview({
       const base = p.getViewport({ scale: 1 });
       if (!live) return;
       setPageBase({ w: base.width, h: base.height });
+      pageBaseRef.current = { w: base.width, h: base.height }; // sync now so the req effects below read the new size
+      detailTileRef.current = null; setDetailTile(null);       // a new page/size invalidates the old detail tile
       if (!viewRef.current) {
         const wrap = wrapRef.current;
         const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
-        const nv = fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode });
-        setView(nv); setRenderScale(nv.scale);
+        setView(fitView(base.width, base.height, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode: fitMode }));
       }
+      setBackdropReq((n) => n + 1); setDetailReq((n) => n + 1); // raster both layers for the new page/size
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, numPages, loadNonce]);
 
-  // Re-rasterise crisply once a zoom gesture settles: debounce view.scale → renderScale, so a
-  // smooth zoom rescales the already-drawn bitmap during the gesture (cheap) and only redraws
-  // the PDF at full resolution when it stops. Panning (tx/ty only) never re-rasters. (B329)
+  // Re-raster the sharp DETAIL layer once a pan/zoom gesture settles (debounced). The backdrop
+  // never re-rasters on zoom, so during the gesture the page box just CSS-rescales the existing
+  // bitmaps (cheap, no flash); on settle we redraw only the visible window at full density. The
+  // tileCovers check inside renderDetail makes a settle that didn't move the window a no-op. (B415)
   useEffect(() => {
-    if (!view || view.scale === renderScale) return;
-    const id = setTimeout(() => setRenderScale(view.scale), 140);
+    if (!view) return;
+    const id = setTimeout(() => setDetailReq((n) => n + 1), 140);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view && view.scale]);
+  }, [view && view.scale, view && view.tx, view && view.ty]);
 
-  const render = useCallback(async () => {
-    const pdf = pdfRef.current, canvas = canvasRef.current;
-    if (!pdf || !canvas || !renderScale) return; // a concrete renderScale is set first; render only draws
+  // BACKDROP — the whole page at a fixed, zoom-independent density, rendered once per page (never
+  // on zoom), double-buffered so a page change swaps with no white flash. Always present under the
+  // detail layer as a no-white floor. Reads live refs so its identity stays stable. (B414/B415)
+  const renderBackdrop = useCallback(async () => {
+    const pdf = pdfRef.current, canvas = backdropRef.current, base = pageBaseRef.current;
+    if (!pdf || !canvas || !base) return;
+    const tok = ++backdropTok.current;
+    if (backdropTaskRef.current) { try { backdropTaskRef.current.cancel(); } catch (_) {} backdropTaskRef.current = null; }
+    try {
+      await renderInto(pdf, pageRef.current, canvas, {
+        scale: 1, density: backdropDensity(base.w, base.h, deviceDpr()),
+        onTask: (t) => { backdropTaskRef.current = t; }, isStale: () => tok !== backdropTok.current });
+    } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
+  }, []);
+
+  // DETAIL — only the visible window (+ margin) at full device density, re-rastered on settle and
+  // double-buffered. tileCovers skips the work when the existing tile still covers the view; the
+  // budget is spent on the REGION (not the whole sheet), so density stays native when zoomed in. (B415)
+  const renderDetail = useCallback(async () => {
+    const pdf = pdfRef.current, canvas = detailRef.current, wrap = wrapRef.current;
+    const v = viewRef.current, base = pageBaseRef.current;
+    if (!pdf || !canvas || !wrap || !v || !base) return;
+    const reg = visibleRegion(v, base, wrap.clientWidth, wrap.clientHeight);
+    if (!reg) return;
+    if (tileCovers(detailTileRef.current, reg.visible, v.scale)) return; // already sharp here
     const tok = ++renderTok.current;
-    // Cancel any in-flight render before starting a new one, so overlapping page/zoom
-    // changes can't fight over the same canvas (PDF.js throws on that) (B40).
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} renderTaskRef.current = null; }
     try {
-      // setCssSize=false: the canvas fills its CSS-scaled page box (width/height 100%), so a zoom
-      // rescales the bitmap without a re-raster; the page box carries the size. isStale bails BEFORE
-      // page.render() if a newer render started while awaiting getPage (the B40 same-canvas race,
-      // from main). The transform model has no dims to set — pageBase + view size the box. (B329/B40)
-      const d = await renderPageToCanvas(pdf, page, canvas, renderScale,
-        (task) => { renderTaskRef.current = task; }, () => tok !== renderTok.current, false);
-      if (!d || tok !== renderTok.current) return; // null = superseded mid-getPage (B40), or a newer render won
+      const density = backingScale(reg.rect.rw, reg.rect.rh, v.scale, deviceDpr());
+      const d = await renderInto(pdf, pageRef.current, canvas, {
+        scale: v.scale, density, region: reg.rect,
+        onTask: (t) => { renderTaskRef.current = t; }, isStale: () => tok !== renderTok.current });
+      if (!d || tok !== renderTok.current) return; // superseded mid-render (B40), or a newer render won
+      const tile = { ...reg.rect, scale: v.scale };
+      detailTileRef.current = tile; setDetailTile(tile);
+    } catch (e) { if (!(e && e.name === "RenderingCancelledException")) { /* keep the prior frame */ } }
+  }, []);
 
-    } catch (e) {
-      if (e && e.name === "RenderingCancelledException") return; // expected when superseded/unmounted
-      // other render errors: keep the prior frame rather than crashing
-    }
-  }, [page, renderScale]);
-
-  useEffect(() => { render(); }, [render, numPages]);
+  useEffect(() => { renderBackdrop(); }, [renderBackdrop, backdropReq]);
+  useEffect(() => { renderDetail(); }, [renderDetail, detailReq]);
 
   // Keep the current sheet scrolled into view in the (long) sheet list as you page (B306).
   useEffect(() => { activeSheetRef.current?.scrollIntoView({ block: "nearest" }); }, [page]);
@@ -394,6 +428,7 @@ export default function DocReview({
   // Free PDF.js resources on unmount: cancel any in-flight render + destroy the doc (B39/B40).
   useEffect(() => () => {
     if (renderTaskRef.current) { try { renderTaskRef.current.cancel(); } catch (_) {} }
+    if (backdropTaskRef.current) { try { backdropTaskRef.current.cancel(); } catch (_) {} }
     try { pdfRef.current && pdfRef.current.destroy(); } catch (_) {}
   }, []);
 
@@ -416,7 +451,7 @@ export default function DocReview({
     if (!base || !wrap) { setView(null); setLoadNonce((n) => n + 1); return; } // no page yet → prepare effect fits
     const vw = wrap.clientWidth || 900, vh = wrap.clientHeight || 600;
     const nv = fitView(base.w, base.h, vw, vh, { pad: 12, min: VIEW_MIN, max: VIEW_MAX, mode });
-    setView(nv); setRenderScale(nv.scale);
+    setView(nv); setDetailReq((n) => n + 1); // re-raster the detail at the new fit (backdrop is zoom-independent)
   };
   // Bind a NON-passive wheel listener via a callback ref so preventDefault works (a React
   // onWheel is registered passive at the root and can't stop the page from scrolling/zooming)
@@ -484,7 +519,7 @@ export default function DocReview({
     const pdf = await loadPdf(buf);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
-    setNumPages(pdf.numPages); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1); // refit on load (B329)
+    setNumPages(pdf.numPages); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // refit on load (B329)
     scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
   };
   const loadSingleReview = async (rec) => {
@@ -514,7 +549,7 @@ export default function DocReview({
     // Keep the current project context: "New" starts a fresh blank review still filed
     // under the project you're in (it does NOT drop you back to "Select a project").
     setSource(null); setRedrop("");
-    setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); setRenderScale(0); setLoadNonce((n) => n + 1);
+    setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); setSel(null); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
@@ -847,6 +882,37 @@ export default function DocReview({
     return bd <= tol ? best : null;
   };
 
+  // Copy / cut / paste a single selected markup (B417). Markups live on the editable SVG
+  // overlay — the PDF backdrop is never touched. Paste drops the copy CENTERED under the
+  // live cursor (Bluebeam-style); repeated paste restamps at wherever the cursor is now.
+  // Single-element clipboard (sel is one markup id); group/multi clipboard is out of scope.
+  const clip = useRef(null);
+  const copyMarkup = () => {
+    if (!sel) return false;
+    const m = markups.find((x) => x.id === sel);
+    if (!m) return false;
+    clip.current = { ...m, pts: (m.pts || []).map((q) => ({ x: q.x, y: q.y })) }; // deep-clone pts so later edits can't mutate the clipboard
+    return true;
+  };
+  const cutMarkup = () => {
+    if (!copyMarkup()) return false;
+    pushHistory(); setMarkups((a) => a.filter((x) => x.id !== sel)); setSel(null);
+    return true;
+  };
+  const pasteMarkup = () => {
+    const src = clip.current;
+    if (!src) return false;
+    const base = (src.pts || []).map((q) => ({ x: q.x, y: q.y }));
+    // Drop the markup's bbox center under the live cursor (text = its single point); with no
+    // cursor yet, a small fixed page-unit offset so a paste is never a silent no-op.
+    const pts = (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y) && base.length)
+      ? centerOn(base, cursor)
+      : base.map((q) => ({ x: q.x + 12, y: q.y + 12 }));
+    const mk = { ...src, id: uid(), page, pts }; // fresh id, lands on the CURRENT sheet
+    pushHistory(); setMarkups((a) => [...a, mk]); setSel(mk.id);
+    return true;
+  };
+
   // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection.
   // Keep the handler in a ref (refreshed each render with live closures) and bind the
   // window listener ONCE — the old no-deps effect re-subscribed on every render, and
@@ -857,7 +923,10 @@ export default function DocReview({
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else if (!removeLastVertex()) undo(); return; } // ⌘/Ctrl-Z (B303)
     if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }                                                        // Ctrl-Y redo
-    if (mod) return; // leave other modified keys (copy/paste/etc.) to the browser
+    if (mod && (e.key === "c" || e.key === "C")) { if (copyMarkup()) e.preventDefault(); return; }  // ⌘/Ctrl-C copy selected markup (B417)
+    if (mod && (e.key === "x" || e.key === "X")) { if (cutMarkup()) e.preventDefault(); return; }   // ⌘/Ctrl-X cut
+    if (mod && (e.key === "v" || e.key === "V")) { if (pasteMarkup()) e.preventDefault(); return; } // ⌘/Ctrl-V paste at the cursor
+    if (mod) return; // leave any other modified keys to the browser
     if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null); }
@@ -1030,8 +1099,8 @@ export default function DocReview({
           <button onClick={() => setBrowsing(true)} title="Back to the project file browser"
             aria-pressed={browsing}
             style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px",
-              border: `1px solid ${browsing ? "var(--accent-markup)" : "var(--chrome-divider)"}`,
-              background: browsing ? "var(--accent-markup)" : "var(--chrome-bg-elev)",
+              border: `1px solid ${browsing ? "var(--accent-review)" : "var(--chrome-divider)"}`,
+              background: browsing ? "var(--accent-review)" : "var(--chrome-bg-elev)",
               color: browsing ? "var(--on-accent)" : "var(--chrome-text)" }}>
             🗂 Files
           </button>
@@ -1092,7 +1161,7 @@ export default function DocReview({
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Document Review</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Review</div>
             <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
             <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
             {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
@@ -1170,9 +1239,18 @@ export default function DocReview({
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
             {pageBase && view && (
               <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
-              {/* canvas fills the CSS-scaled box; its bitmap is rastered at renderScale and rescaled
-                  by the browser between re-rasters. pointerEvents:none so the viewport gets the gesture. */}
-              <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} />
+              {/* Two layers (B415). BACKDROP: the whole page at a fixed density, filling the page
+                  box — never re-rastered on zoom, so it's always present as a no-white floor. DETAIL:
+                  just the visible window at full device density, positioned over the backdrop, sized
+                  in page-units × view.scale (so it CSS-rescales with a zoom gesture, then re-rasters
+                  crisp on settle). Both pointerEvents:none so the viewport gets the gesture; the
+                  detail canvas stays mounted (display:none until its first tile) so renderDetail
+                  always has a canvas to draw into. The markup SVG overlay sits above both, unchanged. */}
+              <canvas ref={backdropRef} style={{ display: "block", position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
+              <canvas ref={detailRef} style={{ position: "absolute",
+                left: detailTile ? detailTile.rx * view.scale : 0, top: detailTile ? detailTile.ry * view.scale : 0,
+                width: detailTile ? detailTile.rw * view.scale : 0, height: detailTile ? detailTile.rh * view.scale : 0,
+                display: detailTile ? "block" : "none", pointerEvents: "none" }} />
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                 {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
                 {drawDraft()}

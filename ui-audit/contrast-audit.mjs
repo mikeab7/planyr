@@ -117,13 +117,13 @@ const PAIRS = [
   ["--accent-site-text", "--chrome-bg-elev", "Site tab text · chrome-elev", T],
   ["--accent-schedule-text", "--chrome-bg", "Schedule tab text · chrome", T],
   ["--accent-schedule-text", "--chrome-bg-elev", "Schedule tab text · chrome-elev", T],
-  ["--accent-markup-text", "--chrome-bg", "Markup tab text · chrome", T],
-  ["--accent-markup-text", "--chrome-bg-elev", "Markup tab text · chrome-elev", T],
+  ["--accent-review-text", "--chrome-bg", "Review tab text · chrome", T],
+  ["--accent-review-text", "--chrome-bg-elev", "Review tab text · chrome-elev", T],
   // Module accent TEXT on a light card (breadcrumb "current"/"New project" labels use
   // the -text token after the B341 fix — verifies accent-as-foreground is legible).
   ["--accent-site-text", "--surface-raised", "Site accent text · card", T],
   ["--accent-schedule-text", "--surface-raised", "Schedule accent text · card", T],
-  ["--accent-markup-text", "--surface-raised", "Markup accent text · card", T],
+  ["--accent-review-text", "--surface-raised", "Review accent text · card", T],
   // Semantic text colors (success/danger/info/warn) — used for colored labels on the
   // themed panels (B354). A hardcoded #15803d/#b3361b/#1d4ed8/#b45309 reads on a light
   // card but fails on a dark card, so these MUST stay tokens. Checked on both surfaces.
@@ -138,11 +138,11 @@ const PAIRS = [
   // On-accent text (text/icon ON a module fill — chips, active fills)
   ["--on-accent-site", "--accent-site", "on-fill · Site", T, "fill locked + white specced (B318); fill used only as ≥3:1 underline, on-accent token currently unused for text — safe for large/bold only"],
   ["--on-accent-schedule", "--accent-schedule", "on-fill · Schedule", T, "fill locked + white specced (B318); used only as ≥3:1 underline — safe for large/bold only"],
-  ["--on-accent-markup", "--accent-markup", "on-fill · Markup (amber→dark)", T],
+  ["--on-accent-review", "--accent-review", "on-fill · Review (amber→dark)", T],
   // The 2px active-tab underline (a UI graphic) — fill on chrome
   ["--accent-site", "--chrome-bg-elev", "Site underline · chrome", U],
   ["--accent-schedule", "--chrome-bg-elev", "Schedule underline · chrome", U],
-  ["--accent-markup", "--chrome-bg-elev", "Markup underline · chrome", U, "decorative 2px indicator on white chrome; active state is also carried by the (passing) markup-text label + bold weight"],
+  ["--accent-review", "--chrome-bg-elev", "Review underline · chrome", U, "decorative 2px indicator on white chrome; active state is also carried by the (passing) review-text label + bold weight"],
   // Status as a glyph/dot/border (graphic) on the app surface
   ["--status-pursuit", "--surface-raised", "status Pursuit glyph · card", U],
   ["--status-active", "--surface-raised", "status Active glyph · card", U],

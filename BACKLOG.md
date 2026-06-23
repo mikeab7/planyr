@@ -31,6 +31,44 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
   2. **Sequence-target resolution.** Labels reference by SEQUENCE ("SHEET 2" = the 2nd sheet = C-3), not the "C-3" code — `autoStitch.buildAdjacency` keys on `sheetNumber`, so a numeric target must resolve to the Nth group member (prototyped, not yet in code).
 - **Honest note for the owner:** the seamless-join ENGINE is done and proven on your sheets. For it to run hands-free on these "FOR REFERENCE ONLY / NOT TO SCALE" compressed scans, the app must also reliably recognize which scanned sheet neighbors which (blockers #1–#2 above). A vector CAD set (or sheets whose match-line text + numbers read cleanly) auto-stitches AND now gets the pixel-perfect seam today.
 
+<!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (with screenshots) — trailer parking generated on a
+     building's NON-dock sides + the building "depth" reading the truck-court depth. First minted B416/B417,
+     but a concurrent `main` (PR #313) took **B416** for the Split-a-parcel control while this was in flight,
+     so **renumbered B417** (trailer on non-dock sides) + **B418** (building depth reference) — the real next
+     free IDs. (The branch `claude/exciting-allen-i2eq2k`, PR #314, the commits, and the code/test tags + the
+     `ui-audit/verify-b416-b417.mjs` harness still read B416/B417, per the collision-renumber convention.)
+     Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified (V120) the SAME session
+     — full [x] blocks live in BACKLOG-DONE.md. Root cause (evidence-first, the filed hypothesis was off):
+     a dock-zone stack stays pinned to the side it was created on, so a reshape / dock-preset change stranded
+     the court→trailer→buffer on a now-non-dock side; the named legacy opp-trailer suspect was already dead
+     code (removed). lint 0 · 1285 tests · build green. Deduped: net-new. -->
+
+<!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
+     control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
+     free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared
+     Enter/double-click finisher), NOT B130 (which created the rail "Boundary" menu). Per STANDING RULE #1
+     filed AND fixed + headless-verified the SAME session on branch `claude/affectionate-wright-gf3kgt` —
+     full [x] block lives in BACKLOG-DONE.md.
+     GROUNDED THE REPORT FIRST: the rail Boundary ▾ → Split a parcel was NEVER deleted (unchanged since
+     2026-06-21 per git blame; scenario A passed on the UNFIXED build), so none of the three suspected
+     failure shapes held. Real cause = a discoverability regression from B383: parcel ops (＋ Add parcel,
+     Merge) were surfaced into the Parcel PANEL, but Split — the inverse of Merge — was left only in the
+     rail. FIX: added "✂ Split a parcel" to the Parcel panel beside Merge (same selectTool("split"), no
+     second pipeline; rail menu kept). Smoke-tested the full activate→capture→finish→commit split live.
+     Regression guard `ui-audit/verify-parcel-split-control.mjs` (rail + panel reachability + e2e cut)
+     11/11. 1273 tests · lint 0 · build green. -->
+
+<!-- 2026-06-23: owner-dropped chat pair "NEW-1/NEW-2" — the Document Review drawing render vs Bluebeam
+     (white flash on zoom + softer linework on big sheets). First minted B412/B413, but a concurrent
+     `main` (PR #311) took **B412** (title-block reader) + **B413** (auto-stitch surveys) while this was
+     in flight, so **renumbered B414** (NEW-1, the flash) + **B415** (NEW-2, the sharpness) — the real
+     next free IDs. Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified the
+     SAME session on branch `claude/confident-edison-lpbco9` — full [x] blocks live in BACKLOG-DONE.md.
+     Deduped: net-new; B415 SUPERSEDES the whole-page raster path B247/B265/B327/B329 (extends it, not a
+     fork). Headless harness `ui-audit/verify-b414-b415-render.mjs` 11/11 (detail 2.00× vs would-be
+     whole-page 0.95× = 2.11× sharper; backdrop never re-rasters on zoom; detail never blanks through a
+     settle) + the B329 viewport harness still 13/13. 1273 tests · lint 0 · build green. -->
+
 ### B411 — Auto-filing residual gaps after the multi-discipline split (B410) `[Doc Review / auto-filing]` (bug/task)  *(spun off from B410, 2026-06-23; minted **B411** = B410 + 1)*
 `[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness:
 - **(a) Scanned/image-only sets read as nothing in FILING.** A no-text-layer drawing (e.g. "2023.11.06 Mesa - Electrical B1.pdf") has no embedded text, so the local read returns nothing and the file lands in the holding tray. OCR already exists in the STITCHER (B352, `doc-review/lib/ocr.js`, Tesseract); wire that same OCR into the filing read (`localRead.js`) so scanned sheets classify too. Bigger lift (renders pages to canvas), so it's its own item.
