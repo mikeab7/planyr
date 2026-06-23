@@ -47,7 +47,7 @@ import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./lib/siteModel.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
-import { layoutLabels, buildingLabelLines, dimCalloutVisible } from "./lib/labelLayout.js";
+import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, layoutZone, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { addedAreaLabelPoint } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -4679,6 +4679,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (el.type === "sidewalk" || el.type === "landscape") {
       // e.g. "5′ Sidewalk" / "15′ Buffer" / "5′ Landscape" — width only, no sf / length
       const name = el.buffer ? "Buffer" : el.type === "landscape" ? "Landscape" : "Sidewalk";
+      // B149 — this strip's width label is DETAIL tier. At site-overview zoom a 5′ strip is
+      // ~1px, so "5′ Sidewalk" is illegible clutter that piles onto the real labels — drop the
+      // LABEL here (the thin strip GEOMETRY stays; a sub-pixel strip popping in/out on zoom
+      // would flicker — owner-locked decision). It reveals on zoom-in once the strip's width
+      // projects past DETAIL_LABEL_MIN_PX (~30px) on screen (detailLabelVisible — the SAME gate
+      // family as the dimension callouts, not a parallel one). Building name/SF + the chip are OVERVIEW tier, so
+      // they're never added to this gate and stay visible when zoomed out.
+      const stripW = poly
+        ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
+        : Math.min(el.w, el.h);
+      if (!detailLabelVisible(stripW, view.ppf)) continue; // hidden at overview, returns on zoom-in
       lines = [poly ? name : `${f0(Math.min(el.w, el.h))}′ ${name}`];
     } else if (el.type === "pond") {
       // B140/B157: label shows acres + sf (was sf only). In expansion mode (B139) the
@@ -8561,11 +8572,14 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
       parts.push(<line key="cu1" x1={tl.x + w - cp} y1={tl.y} x2={tl.x + w - cp} y2={tl.y + h} stroke={st.stroke} strokeWidth={1} />);
     }
   }
-  if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel && dimCalloutVisible(ppf)) {
+  if ((el.type === "building" || el.type === "paving" || el.type === "road") && !el.points && !el.noLabel) {
     // Dimension line along the short side (depth of a building/truck court, width
     // of a drive/road). A road's callout excludes its 6" curbs (true width − 1′).
-    // B121 (round 2): this red dimension layer is gated by zoom (dimCalloutVisible) so it
-    // hides when zoomed out instead of shrinking onto the centred name labels.
+    // B121 (round 2): this red dimension layer hides when zoomed out instead of shrinking
+    // onto the centred name labels. B149 tiers it: a BUILDING footprint depth is SITE tier
+    // (stays on the global dimCalloutVisible zoom gate); a PAVING/ROAD width is DETAIL tier,
+    // so it only draws once the measured span projects past DETAIL_LABEL_MIN_PX (~30px) on screen
+    // (detailLabelVisible) — a drive-aisle / road width drops at site-overview zoom, reveals on zoom-in.
     const k = Math.max(0.34, Math.min(1, ppf / 0.45));
     const fullMin = Math.min(el.w, el.h);
     // B417: a building's depth is read off its dock axis (dockSidesFor → footprintDepth):
@@ -8576,6 +8590,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     // that explicit and robust.) Road = travel width; other strips keep their short-side depth.
     const dimW = el.type === "road" ? roadTravelWidth(el.w, el.h, el.curb ?? (+settings.roadCurb || CURB))
       : el.type === "building" ? footprintDepth(el) : fullMin;
+    // B149 tier gate (see comment above): building dims are site-tier; paving/road widths
+    // are detail-tier and ride the self-tuning min-on-screen-length rule keyed on the span
+    // they actually measure (dimW). Reuses dimCalloutVisible as the shared floor — no new gate.
+    const dimVisible = el.type === "building" ? dimCalloutVisible(ppf) : detailLabelVisible(dimW, ppf);
     const RED = "#dc2626", tick = 4 * k, fz = 11 * k, txt = `${f0(dimW)}′`;
     const horizLong = el.w >= el.h;
     const ox = (el.dimOffset?.x || 0) * ppf, oy = (el.dimOffset?.y || 0) * ppf; // B146: user reposition (local feet → px)
@@ -8612,7 +8630,10 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     }
     // When the element is selected the dimension is grab-to-move (the red line/ticks are the handle);
     // otherwise it ignores pointers so a click falls through to select/move the element itself.
-    parts.push(
+    // dimVisible (B149) drops a detail-tier paving/road width at site-overview zoom. A SELECTED
+    // paving/road keeps its dimension so the click-to-edit / drag-to-reposition handle never
+    // vanishes mid-edit; buildings keep their exact prior behaviour (site tier, no select exception).
+    if (dimVisible || (dimSel && el.type !== "building")) parts.push(
       <g key="dim" style={dimSel ? { cursor: "move" } : { pointerEvents: "none" }}
         onPointerDown={dimSel ? ((e) => { if (e.button === 0) { e.stopPropagation(); startDimMove(e, el.id); } }) : undefined}>
         {dim}

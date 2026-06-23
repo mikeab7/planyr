@@ -109,3 +109,27 @@ export const buildingLabelLines = ({ name, sqft, bumpCount = 0, dims }) => {
 // the name pile. Pure + tested; the threshold is a screening default, tune in-browser.
 export const DIM_CALLOUT_MIN_PPF = 0.18; // px per foot (default working zoom is ~0.35)
 export const dimCalloutVisible = (ppf) => ppf >= DIM_CALLOUT_MIN_PPF;
+
+// B149 — level-of-detail TIER gate for fine-infrastructure width callouts: a sidewalk /
+// landscape / buffer WIDTH label ("5′ Sidewalk"), and a drive-aisle or road WIDTH dimension.
+// At site-overview zoom the feature these measure is only a pixel or two across, so the number
+// is illegible clutter that piles onto the real labels. This is the "detail" tier — it sits
+// BELOW the "site" tier (building-footprint dims, which stay on dimCalloutVisible) and the
+// "overview" tier (building name/SF + the site-summary chip, never zoom-gated).
+//
+// Self-tuning, resolution-independent rule (B149): the measured feature must project to at
+// least ~DETAIL_LABEL_MIN_PX on screen before its width label draws — so a 5′ strip stays
+// unlabelled until you zoom in enough to actually see it as a band, and a wider buffer / aisle
+// reveals sooner, with no hand-tuned per-zoom breakpoints. We REUSE dimCalloutVisible as the
+// shared zoom FLOOR (so a very wide feature still can't show below the global declutter point)
+// rather than standing up a parallel gate — one source of truth with the dimension layer.
+//
+// Threshold calibrated in-browser (B149 says tune it live): the planner hard-caps zoom at
+// ppf 8 (zoomAround/pinchZoom clamp). At 40px the narrowest real strip — a 5′ sidewalk —
+// would only reveal at 40/5 = 8.0 ppf, i.e. the EXACT max zoom (no headroom, and it flickers
+// at the float boundary). 30px puts the 5′ reveal at ppf 6, so it appears with room to spare
+// when you zoom in to inspect, while a 5′ strip at site-overview (~0.2–0.5 ppf ⇒ 1–3px) and
+// at working zoom (0.35 ⇒ 1.75px) stays well hidden. Wider strips reveal proportionally sooner.
+export const DETAIL_LABEL_MIN_PX = 30; // min on-screen length (px) of the measured feature
+export const detailLabelVisible = (featureFt, ppf) =>
+  dimCalloutVisible(ppf) && featureFt * ppf >= DETAIL_LABEL_MIN_PX;

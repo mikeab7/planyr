@@ -196,6 +196,16 @@ server/                   # placeholder README only — NOT built or deployed; b
   `lib/layerRequest.js` take no coverage input). Fails open. Mapillary renamed "Poles & hydrants
   from street imagery" + gated "needs setup" (B285/B286); jurisdiction vectors retry transient
   5xx with backoff (B287). `lib/coverage.js`.
+- **Level-of-detail tiering for fine-infra labels (B149, incl. the 2026-06-23 sidewalk amendment).**
+  At site-overview zoom the sidewalk/landscape/buffer **width labels** and the paving/road red **width
+  dimensions** are illegible clutter, so they're **detail tier**: gated by `detailLabelVisible(featureFt,
+  ppf)` in `lib/labelLayout.js` — the existing `dimCalloutVisible`/`DIM_CALLOUT_MIN_PPF` gate as the
+  floor, refined by B149's self-tuning min-on-screen-length rule (`featureFt*ppf ≥ DETAIL_LABEL_MIN_PX`,
+  **30 px**, calibrated to the planner's ppf-8 zoom cap so a 5′ strip reveals at ppf ~6 with headroom).
+  The thin strip **geometry stays** (only the label/dimension drops — a ~1 px strip popping in/out would
+  flicker). Building footprint dims stay **site tier** (`dimCalloutVisible`); building name/SF + the
+  site-summary chip are **overview tier** (never zoom-gated). Headless-verified V119
+  (`ui-audit/verify-b149-sidewalk-lod.mjs`).
 
 ### Supabase backend (built, Phases 1–4)
 - Phase 1 cloud Postgres; Phase 2 email/password auth; Phase 3 RLS (sites private by default);
