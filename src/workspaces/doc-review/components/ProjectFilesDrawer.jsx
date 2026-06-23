@@ -31,6 +31,8 @@ import { listMyTeams } from "../../site-planner/lib/teams.js";
 import { shareProject, makeProjectPrivate } from "../../site-planner/lib/sharing.js";
 import { fileWarn } from "../lib/sourceState.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
+import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
+import { splitPdfByPlan } from "../lib/pdfSplit.js";
 import {
   buildFileFacts, runView, groupByDiscipline, needsFiling, SAVED_VIEWS,
   DOC_CLASS, isSpatial, fileState, FILE_STATE, stubIndexProvider,
@@ -131,9 +133,34 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       const decision = route ? route.decision : null;
       const pid = decision && decision.matched ? decision.projectId : proj;
       target = pid ? projName(pid) : "Holding area";
+      const docDate = decision ? decision.docDate : null;
+      const fileFacts = async (id, extra) => { try { await upsertFileFacts(toFactsRow({ ...(route && route.facts), ...extra }, { id, reviewId: id, sourceFile: extra.fileName })); } catch (_) { /* best-effort */ } };
+
+      // Multi-discipline set → SPLIT the bytes into one PDF per discipline, each filed in its own
+      // folder (owner decision 2026-06-23). Falls back to single-file filing if the split can't run.
+      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
+        const split = { multiDiscipline: true, standaloneSets: decision.sets, sets: decision.sets, dominant: { discipline: decision.discipline, item: decision.item } };
+        const plan = buildFilingPlan(split, decision.numPages);
+        let parts = [];
+        try { parts = await splitPdfByPlan(item.file, plan, item.name); } catch (_) { parts = []; }
+        if (parts.length > 1) {
+          const filed = [];
+          let firstId = null;
+          for (const part of parts) {
+            const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline: part.discipline, item: part.item, docDate, blob: part.blob, fileName: part.fileName });
+            if (r && r.ok) { filed.push(`${part.discipline} (${part.pageNums.length}p)`); firstId = firstId || r.id; if (route && route.facts) await fileFacts(r.id, { discipline: part.discipline, item: part.item, fileName: part.fileName }); }
+          }
+          if (filed.length) {
+            patchItem(item.uploadId, { status: pid ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING, reviewId: firstId, filedAt: Date.now(), warn: `Split into ${filed.join(", ")}`, target });
+            return;
+          }
+        }
+        // else: split unavailable → fall through to single-file filing below.
+      }
+
       const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "",
         discipline: (decision && decision.discipline) || "Other", item: (decision && decision.item) || "",
-        docDate: decision ? decision.docDate : null, blob: item.file, fileName: item.name });
+        docDate, blob: item.file, fileName: item.name });
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
       // Persist the queryable file-facts index row (incl. placement) for this filed drawing.
       if (route && route.facts && r.id) { try { await upsertFileFacts(toFactsRow(route.facts, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ } }
@@ -141,11 +168,6 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
       // (shared fileWarn) so this drawer, the Files browser, and the single-sheet banner agree.
       let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       if (!warn && decision && decision.needsFiling && !pid) warn = `couldn’t confidently match a project (${decision.reason})`;
-      // Multi-discipline heads-up: filed under the dominant discipline; flag the others detected.
-      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
-        const others = decision.sets.filter((s) => s.discipline !== ((decision.discipline) || "Other")).map((s) => `${s.discipline} (${s.pages}p)`);
-        if (others.length) warn = [`Also contains ${others.join(", ")}`, warn].filter(Boolean).join(" · ");
-      }
       patchItem(item.uploadId, {
         status: pid ? QUEUE_STATUS.DONE : QUEUE_STATUS.NEEDS_FILING,
         reviewId: r.id, filedAt: Date.now(), warn, target,

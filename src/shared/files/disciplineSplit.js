@@ -162,3 +162,34 @@ function mostCommon(arr) {
   for (const [v, n] of t) if (n > bestN) { best = v; bestN = n; }
   return best;
 }
+
+/* Turn a split into a COMPLETE filing plan — a partition of ALL pages into the PDFs to create, so
+ * the byte-splitter (pdfSplit.js) can carve one clean per-discipline PDF and never drop a page.
+ *   • Single-discipline file → one plan entry covering every page.
+ *   • Multi-discipline file → one entry per STANDALONE discipline set; every leftover page (a cover,
+ *     a lone notes/cross-ref sheet that wasn't its own set) rides with the DOMINANT entry, so the
+ *     dominant PDF is "its sheets + everything not claimed by another trade" and nothing is lost.
+ * `totalPages` defaults to the highest page seen. Entries are page-ordered; the dominant is first. */
+export function buildFilingPlan(split, totalPages) {
+  const sets = (split && split.standaloneSets) || [];
+  const dominantDisc = split && split.dominant && split.dominant.discipline;
+  const allSeen = ((split && split.sets) || []).reduce((m, s) => Math.max(m, ...s.pageNums), 0);
+  const total = totalPages || allSeen || 0;
+
+  if (!split || !split.multiDiscipline || sets.length < 2) {
+    const pages = [];
+    for (let p = 1; p <= total; p++) pages.push(p);
+    const d = (split && split.dominant) || { discipline: "Other", item: "Document" };
+    return [{ discipline: d.discipline || "Other", item: d.item || d.discipline || "Document", pageNums: pages, primary: true }];
+  }
+
+  const claimed = new Set();
+  for (const s of sets) for (const n of s.pageNums) claimed.add(n);
+  const entries = sets.map((s) => ({ discipline: s.discipline, item: s.item || s.discipline, pageNums: [...s.pageNums], primary: s.discipline === dominantDisc }));
+  // Leftover pages → the dominant (or the first) entry.
+  const home = entries.find((e) => e.primary) || entries[0];
+  for (let p = 1; p <= total; p++) if (!claimed.has(p)) home.pageNums.push(p);
+  for (const e of entries) e.pageNums.sort((a, b) => a - b);
+  // Dominant first, then by size.
+  return entries.sort((a, b) => (b.primary - a.primary) || (b.pageNums.length - a.pageNums.length));
+}

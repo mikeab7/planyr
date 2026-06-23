@@ -23,6 +23,8 @@ import {
 } from "../lib/reviewStore.js";
 import { toFactsRow, mergeFactsIntoReviews } from "../lib/fileIndex.js";
 import { fileWarn } from "../lib/sourceState.js";
+import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
+import { splitPdfByPlan } from "../lib/pdfSplit.js";
 import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
   categoryOf, subcategoryOf, stateOf, FILE_STATES, FACETS, onMap, isReference, isSpatial,
@@ -116,6 +118,16 @@ export default function FileBrowser({
   const patchItem = (uploadId, patch) => setQueue((q) => q.map((it) => (it.uploadId === uploadId ? { ...it, ...patch } : it)));
   const removeItem = (uploadId) => setQueue((q) => q.filter((it) => it.uploadId !== uploadId));
 
+  // File one blob as a review + its facts row. Returns the fileNewReview result (or null on fail).
+  const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling }) => {
+    const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName });
+    if (!r || !r.ok) return r || null;
+    const factsIn = facts ? { ...facts } : { discipline, item: item_, docDate };
+    factsIn.projectId = pid; factsIn.discipline = discipline; factsIn.item = item_; factsIn.needsFiling = needsFiling;
+    try { await upsertFileFacts(toFactsRow(factsIn, { id: r.id, reviewId: r.id, sourceFile: fileName })); } catch (_) { /* index is best-effort */ }
+    return r;
+  };
+
   const processItem = async (item) => {
     patchItem(item.uploadId, { status: QUEUE_STATUS.PROCESSING, error: null, warn: null });
     try {
@@ -127,24 +139,45 @@ export default function FileBrowser({
       // We're inside a project → file into it (an explicit act, never a guess). In cross
       // mode, only a confident title-block match routes; else it goes to the holding area.
       const pid = cross ? (decision && decision.matched ? decision.projectId : null) : projectId;
+      const docDate = decision ? decision.docDate : null;
+
+      // Multi-discipline set → SPLIT the bytes into one clean PDF per discipline and file each in
+      // its own folder (owner decision 2026-06-23). Falls back to single-file filing if the byte
+      // split can't run, so behaviour is never worse than before.
+      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
+        const split = { multiDiscipline: true, standaloneSets: decision.sets, sets: decision.sets, dominant: { discipline: decision.discipline, item: decision.item } };
+        const plan = buildFilingPlan(split, decision.numPages);
+        let parts = [];
+        try { parts = await splitPdfByPlan(item.file, plan, item.name); } catch (_) { parts = []; }
+        if (parts.length > 1) {
+          const filed = [];
+          let firstId = null;
+          let lastErr = null;
+          for (const part of parts) {
+            const need = !pid || !part.discipline || part.discipline === "Other";
+            const r = await fileOne({ pid, discipline: part.discipline, item_: part.item, docDate, blob: part.blob, fileName: part.fileName, facts: route && route.facts, needsFiling: need });
+            if (r && r.ok) { filed.push({ d: part.discipline, n: part.pageNums.length }); firstId = firstId || r.id; }
+            else lastErr = (r && r.error) || "Couldn't file a split.";
+          }
+          if (filed.length) {
+            const note = `Split into ${filed.map((f) => `${f.d} (${f.n}p)`).join(", ")}`;
+            patchItem(item.uploadId, { status: QUEUE_STATUS.DONE, reviewId: firstId, filedAt: Date.now(), warn: note, target: pid ? projName(pid) : "Holding area" });
+            return;
+          }
+          patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: lastErr || "Couldn't file the split." });
+          return;
+        }
+        // else: split unavailable → fall through to single-file filing below.
+      }
+
       const discipline = (decision && decision.discipline) || "Other";
       const item_ = (decision && decision.item) || "";
-      const docDate = decision ? decision.docDate : null;
       // Low-confidence classify (no project, or no readable discipline) → Needs filing for a
       // one-click confirm — never a guessed category (misfiled is worse than unfiled).
       const needsFiling = !pid || !discipline || discipline === "Other";
-      const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob: item.file, fileName: item.name });
+      const r = await fileOne({ pid, discipline, item_, docDate, blob: item.file, fileName: item.name, facts: route && route.facts, needsFiling });
       if (!r || !r.ok) { patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (r && r.error) || "Couldn't file." }); return; }
-      const factsIn = (route && route.facts) ? { ...route.facts } : { discipline, item: item_, docDate };
-      factsIn.projectId = pid; factsIn.needsFiling = needsFiling;
-      try { await upsertFileFacts(toFactsRow(factsIn, { id: r.id, reviewId: r.id, sourceFile: item.name })); } catch (_) { /* index is best-effort */ }
-      let warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
-      // Multi-discipline heads-up: the set was filed under its dominant discipline, but it also
-      // contains other disciplines' sheets (page ranges detected) — surface them so they aren't lost.
-      if (decision && decision.multiDiscipline && (decision.sets || []).length > 1) {
-        const others = decision.sets.filter((s) => s.discipline !== discipline).map((s) => `${s.discipline} (${s.pages}p)`);
-        if (others.length) warn = [`Also contains ${others.join(", ")}`, warn].filter(Boolean).join(" · ");
-      }
+      const warn = fileWarn({ oversize: r.oversize, uploadFailed: r.uploadFailed, driveError: r.driveError, large: r.large });
       patchItem(item.uploadId, { status: needsFiling ? QUEUE_STATUS.NEEDS_FILING : QUEUE_STATUS.DONE, reviewId: r.id, filedAt: Date.now(), warn, target: pid ? projName(pid) : "Holding area" });
     } catch (e) {
       patchItem(item.uploadId, { status: QUEUE_STATUS.FAILED, error: (e && e.message) || "Couldn't file." });

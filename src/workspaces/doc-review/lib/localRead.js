@@ -71,7 +71,7 @@ export async function localTitleBlockRead(file, projects = [], { extractPages = 
     matched: !!m.matched, projectId: m.projectId, project,
     discipline, item, revision: whole.revision || "", docDate,
     confidence: m.confidence, needsFiling: m.needsFiling, reason: m.reason,
-    multiDiscipline: split.multiDiscipline, sets, scannedPages: split.scannedPages,
+    multiDiscipline: split.multiDiscipline, sets, scannedPages: split.scannedPages, numPages: metas.length,
     candidates: (m.candidates || []).map((c) => ({ id: c.id, name: c.name, score: +(c.score || 0).toFixed(3) })),
     source: "local",
   };
