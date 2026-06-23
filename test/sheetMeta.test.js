@@ -3,6 +3,7 @@ import {
   reconstructLines, edgeOf, parseMatchLines, detectTitleBlock,
   drawingAreaOf, readSheetTitle, readSheetMeta,
 } from "../src/shared/files/sheetMeta.js";
+import { groupSheets } from "../src/shared/files/sheetGroups.js";
 
 // A 34"×22" (ANSI D) landscape sheet in points (72/in).
 const W = 2448, H = 1584;
@@ -169,5 +170,70 @@ describe("readSheetMeta — text-dense general-notes sheet (B378/B379)", () => {
   });
   it("does NOT flag a normal plan sheet as textDense", () => {
     expect(readSheetMeta(gradingSheet()).textDense).toBe(false);
+  });
+});
+
+// A real GPL topo-survey sheet (the owner's "stitch these" upload): a scanned/reference sheet with a
+// tiny text layer — a bottom-left title block printing the sheet code as a big BARE "C-2" (no "SHEET
+// NO." label text), the title, an "NTS" scale, and the set page-count "46". The number went unread
+// (label-anchored only), so the set couldn't group OR stitch. (B412)
+function topoSheet(code, roman) {
+  return { width: W, height: H, items: [
+    { str: `TOPO SURVEY ${roman}`, x: 120, y: 1362, w: 157, h: 20 },
+    { str: code, x: 53, y: 1343, w: 73, h: 45 },      // the bare sheet code, large, in the title block
+    { str: "46", x: 53, y: 1481, w: 50, h: 45 },       // the SET page-count (no letter prefix → must NOT win)
+    { str: "FOR REFERENCE ONLY", x: 122, y: 746, w: 187, h: 16 },
+    { str: "NTS", x: 83, y: 824, w: 32, h: 16 },
+  ] };
+}
+
+describe("readSheetMeta — bare title-block sheet code on a scanned/reference sheet (B412)", () => {
+  it("reads the prominent bare code 'C-2', NOT the page-count '46'", () => {
+    const meta = readSheetMeta(topoSheet("C-2", "I"));
+    expect(meta.sheetNumber).toBe("C-2");
+  });
+  it("reads NTS as the (non-)scale so auto-calibration won't fire", () => {
+    expect(readSheetMeta(topoSheet("C-2", "I")).scale).toMatchObject({ explicit: "nts" });
+  });
+  it("a bare number with NO letter prefix is still ignored (stays conservative)", () => {
+    const items = [{ str: "46", x: 53, y: 1481, w: 50, h: 45 }, { str: "TOPO SURVEY I", x: 120, y: 1362, w: 157, h: 20 }];
+    expect(readSheetMeta({ width: W, height: H, items }).sheetNumber).toBe("");
+  });
+  it("the three topo sheets now form ONE consecutive set", () => {
+    const metas = [["C-2", "I"], ["C-3", "II"], ["C-4", "III"]].map(([c, r], i) => {
+      const m = readSheetMeta(topoSheet(c, r));
+      return { id: "p" + (i + 1), sheetNumber: m.sheetNumber, sheetTitle: m.sheetTitle, discipline: m.discipline, item: m.item };
+    });
+    const groups = groupSheets(metas);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: "group", sheetRange: "C-2–C-4" });
+  });
+});
+
+describe("readSheetTitle — rejects drawing annotations & field-label rows (B412)", () => {
+  it("does NOT pick a large MATCH LINE annotation in the drawing area over the title block", () => {
+    const lines = reconstructLines([
+      { str: "GRADING PLAN", x: 1980, y: 200, w: 220, h: 18 },              // real title (smaller) in the band
+      { str: "MATCH LINE - SEE SHEET C-15", x: 700, y: 760, w: 360, h: 30 }, // big annotation in the drawing area
+    ], {});
+    const band = detectTitleBlock([
+      { str: "GRADING PLAN", x: 1980, y: 200, w: 220, h: 18 },
+    ].concat(Array.from({ length: 16 }, (_, i) => ({ str: "X", x: 1980, y: 260 + i * 30, w: 200, h: 12 }))), { width: W, height: H });
+    expect(readSheetTitle(lines, band, "Civil", { width: W, height: H })).toBe("GRADING PLAN");
+  });
+  it("does NOT pick a large project-name banner (whole-page scan) — restricts to the title-block zone", () => {
+    const lines = reconstructLines([
+      { str: "GRAND PORT LOGISTICS", x: 700, y: 90, w: 700, h: 40 },   // banner, top-center drawing area
+      { str: "DEMOLITION PLAN", x: 2000, y: 1400, w: 240, h: 20 },     // title in the bottom-right zone
+    ], {});
+    expect(readSheetTitle(lines, null, "Civil", { width: W, height: H })).toBe("DEMOLITION PLAN");
+  });
+  it("rejects a merged field-label+value row 'C-14 SHEET NUMBER'", () => {
+    const lines = reconstructLines([
+      { str: "C-14 SHEET NUMBER", x: 2000, y: 320, w: 260, h: 14 },
+      { str: "PAVING PLAN", x: 2000, y: 200, w: 220, h: 20 },
+    ], {});
+    const band = { side: "right", x: W * 0.78, y: 0, w: W * 0.22, h: H };
+    expect(readSheetTitle(lines, band, "Civil", { width: W, height: H })).toBe("PAVING PLAN");
   });
 });
