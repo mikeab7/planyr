@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF } from "../src/workspaces/site-planner/lib/labelLayout.js";
+import { boxOf, boxesOverlap, fitLines, layoutLabels, buildingLabelLines, dimCalloutVisible, DIM_CALLOUT_MIN_PPF, detailLabelVisible, DETAIL_LABEL_MIN_PX } from "../src/workspaces/site-planner/lib/labelLayout.js";
 
 describe("labelLayout — shared label level-of-detail + collision engine (B121)", () => {
   it("boxOf centres a box on its point; boxesOverlap respects pad", () => {
@@ -78,6 +78,27 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(dimCalloutVisible(0.35)).toBe(true);                 // default working zoom → show
     expect(dimCalloutVisible(DIM_CALLOUT_MIN_PPF)).toBe(true);  // exactly at the threshold → show
     expect(dimCalloutVisible(0.1)).toBe(false);                 // zoomed out → hide (declutter)
+  });
+
+  it("detailLabelVisible (B149): a fine width label needs the zoom floor AND DETAIL_LABEL_MIN_PX of measured feature", () => {
+    const P = DETAIL_LABEL_MIN_PX; // calibrated to 30px (see lib/labelLayout.js — the ppf-8 zoom cap)
+    // A 5′ sidewalk strip is the headline case: at site-overview zoom (~0.2 ppf) it's ~1px, so
+    // its "5′ Sidewalk" width label is illegible clutter and must NOT draw (the reported bug). It
+    // reveals only once you zoom in far enough that the 5′ projects to ≥ the threshold — resolution-
+    // independently, and threshold-agnostically (we derive the boundary ppf from the constant).
+    expect(detailLabelVisible(5, 0.2)).toBe(false);          // overview: 5×0.2=1px → hidden (the bug)
+    expect(detailLabelVisible(5, 0.35)).toBe(false);         // working zoom: still a sliver → hidden
+    expect(detailLabelVisible(5, P / 5 + 0.01)).toBe(true);  // just past the 5′ reveal point → shown
+    expect(detailLabelVisible(5, P / 5 - 0.01)).toBe(false); // just shy of it → still hidden
+    // A wider 25′ buffer / 37′ aisle reveals at a LOWER zoom (self-tuning) but is still gone at overview.
+    expect(detailLabelVisible(25, 0.2)).toBe(false);         // 25×0.2=5px → hidden at overview
+    expect(detailLabelVisible(25, P / 25 + 0.01)).toBe(true); // reveals sooner than the 5′ strip
+    expect(P / 25).toBeLessThan(P / 5);                       // wider feature ⇒ lower reveal ppf
+    // The shared zoom floor (dimCalloutVisible) still bites: even a long feature can't show below it.
+    expect(detailLabelVisible(500, 0.1)).toBe(false);               // 500×0.1=50px but ppf<floor → hidden
+    expect(detailLabelVisible(500, DIM_CALLOUT_MIN_PPF)).toBe(true); // at the floor with ≥threshold → shown
+    // Calibrated so the narrowest real strip (5′) reveals BELOW the planner's ppf-8 zoom cap (headroom).
+    expect(P / 5).toBeLessThan(8);
   });
 
   it("leader line (B121 r2b): a label wider than its shape is pulled outside with a leader to the centroid", () => {
