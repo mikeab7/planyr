@@ -24,13 +24,16 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — a parcel grabbed by its empty INTERIOR, not just its
      boundary/setback, so a press in the open interior near (but not on) a footprint selected the LOT
-     instead of letting you work on a building sitting there. Highest B# across both files was B416, so
-     minted **B417** = the next free ID. Deduped: net-new — the INVERSE of B155/B156 (those make small
-     markup-shape interiors grabbable, correct for annotations; a parcel is a CONTAINER, so boundary-grab
-     is the right inverse, not a contradiction). LAYERS ON B310/B311 (does not replace them): their
-     click-vs-drag intent + "Select parcels" toggle are keyed on startMoveParcel, which now simply fires
-     from the boundary hit-stroke instead of the whole fill. Reuses B146's fat-invisible-hit-stroke; NOT
-     B213 (inactive parcels already draw no setback line, so no setback grab target there).
+     instead of letting you work on a building sitting there. Highest real B# across both files was B419
+     (B416 Split-a-parcel, B417 paste-at-cursor/trailer-parking, B418 building-depth/"Review" label, B419
+     token rename — all taken by concurrent PRs #313/#314/#316 while this was in flight), so minted
+     **B420** = the next free ID. (The branch/commits/harness/code tags first read B417 per the
+     collision-renumber convention, renamed to B420 on the merge-in of main.) Deduped: net-new — the
+     INVERSE of B155/B156 (those make small markup-shape interiors grabbable, correct for annotations; a
+     parcel is a CONTAINER, so boundary-grab is the right inverse, not a contradiction). LAYERS ON
+     B310/B311 (does not replace them): their click-vs-drag intent + "Select parcels" toggle are keyed on
+     startMoveParcel, which now simply fires from the boundary hit-stroke instead of the whole fill.
+     Reuses B146's fat-invisible-hit-stroke; NOT B213 (inactive parcels already draw no setback line).
      Per STANDING RULE #1 filed AND fixed + headless-verified the SAME session on branch
      `claude/vigilant-cerf-6rvxga` — full [x] block lives in BACKLOG-DONE.md.
      FIX (boundary-only hit model, SitePlanner.jsx): the visible parcel <polygon> is now
@@ -43,10 +46,31 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      re-verified: B310/B311, Shift-merge, align-edge pick, unlocked drag-to-move, B230 vertex editing
      (hit-tests at the svg root, independent of the fill). B311 tooltip reworded "click a lot" → "click a
      lot's edge or setback line" (label only). New regression harness
-     `ui-audit/verify-b417-parcel-boundary-grab.mjs` 7/7; repointed verify-b310-b311 / verify-edge-runs /
+     `ui-audit/verify-b420-parcel-boundary-grab.mjs` 7/7; repointed verify-b310-b311 / verify-edge-runs /
      verify-edge-runs-irregular off the now-dead interior / `pointer-events="all"` selectors → all green,
      plus verify-b221-b222 / verify-parcel-split-control / verify-b383-add-parcel /
-     verify-parcel-resilience still pass. lint 0 · 1273 tests · build green. -->
+     verify-parcel-resilience still pass. lint 0 · 1320 tests · build green. -->
+
+### B413 — Auto-stitch scanned, scale-less survey sheets that carry NO match-line text `[Doc Review / stitching]` (feature)  *(owner-dropped 2026-06-23 with a real upload "get it to stitch these together correctly"; owner picked approach (A) "build the real OCR auto-stitch"; minted **B413** = highest B# (B412) + 1; IN PROGRESS)*
+`[ ]` **Phase 1 (foundation) BUILT + unit-tested (`src/shared/files/ocrMatchLines.js`, 8 tests); NOT yet wired into the live stitch — see remaining blockers below. Do NOT present a topology-only placement as "aligned" (a wrong stitch is worse than an unstitched one).** The owner's GPL topo slice (C-2/C-3/C-4, "TOPO SURVEY I/II/III", NOT TO SCALE, FOR REFERENCE ONLY, 9-item text layer) carries its "MATCH LINE … SHEET N" labels only in the RASTER — so `autoPlaceGroup` (B337) gets nothing.
+- **DONE — OCR match-line recovery design, proven on the real pages.** `recoverMatchLines(passes, dims)` runs `parseMatchLines` in EACH orientation pass's own upright frame, then maps the label centre back to page space to pick the edge (`framePointToPage`). Verified against real Tesseract reads: C-2's bottom "MATCH LINE ~ SHEET 2" → side bottom; C-4's left (rotated 90°) "MATCH LINE ~ SHEET 2" → side left. Adjacency for the L-layout (C-2 over C-3, C-4 right of C-3) is fully recoverable.
+- **✅ DONE (2026-06-23) — blocker #3, the hard CV tail: pixel-precise seam alignment. BUILT, tested, wired, proven seamless on the owner's real C-2/C-3 scans.** New pure module `src/shared/files/matchLineFit.js` (1-D horizontal CLOSE bridges the dashes → OPEN drops text/crossing strokes → RANSAC fits the line over the full width, with a span guard so a short horizontal note can't masquerade as the seam) + browser glue `doc-review/lib/matchLineRefine.js` (`refineGroupPlacements`: BFS the seam graph, re-derive each neighbor's matrix from the REAL match line via `solveM`, then `slideRefine` connects the crossing linework). Handles the ~1° inter-sheet skew (recovered −0.938° on the real pair, matching a Python reference exactly) and the inset/dashed line. Wired into `Stitcher.jsx` (`renderPageToImageData` → binarize → refine) as a **best-effort, fail-safe** pass: any sheet it can't fit confidently — or whose correction isn't a plausible nudge (`plausibleRefine`) — keeps its label-based placement, so it only ever improves a seam, never breaks one. 24 unit tests; verified end-to-end through the real exported functions on the actual sheets (seamless composite). Removes the old "topology-only ⇒ keep aligned:false" limitation for any set that reaches the refiner.
+- **REMAINING blockers (only the RECOGNITION layer that feeds the now-working aligner; needed for fully-automatic on these specific compressed scans):**
+  1. **OCR reliability/perf.** Tesseract on these COMPRESSED scans is inconsistent across scale/orientation/PSM (a label read at one render setting is missed at another) and OCR-ing every sparse page at 3 orientations is slow. Needs tuning (edge-band crops at a fixed legible scale, per-orientation PSM) + a conservative trigger (only a sparse-text drawing with no text match-lines) and likely a worker budget. Until labels are read, `autoPlaceGroup` builds no adjacency → the aligner isn't invoked → sheet stays manual-Align.
+  2. **Sequence-target resolution.** Labels reference by SEQUENCE ("SHEET 2" = the 2nd sheet = C-3), not the "C-3" code — `autoStitch.buildAdjacency` keys on `sheetNumber`, so a numeric target must resolve to the Nth group member (prototyped, not yet in code).
+- **Honest note for the owner:** the seamless-join ENGINE is done and proven on your sheets. For it to run hands-free on these "FOR REFERENCE ONLY / NOT TO SCALE" compressed scans, the app must also reliably recognize which scanned sheet neighbors which (blockers #1–#2 above). A vector CAD set (or sheets whose match-line text + numbers read cleanly) auto-stitches AND now gets the pixel-perfect seam today.
+
+<!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (with screenshots) — trailer parking generated on a
+     building's NON-dock sides + the building "depth" reading the truck-court depth. First minted B416/B417,
+     but a concurrent `main` (PR #313) took **B416** for the Split-a-parcel control while this was in flight,
+     so **renumbered B417** (trailer on non-dock sides) + **B418** (building depth reference) — the real next
+     free IDs. (The branch `claude/exciting-allen-i2eq2k`, PR #314, the commits, and the code/test tags + the
+     `ui-audit/verify-b416-b417.mjs` harness still read B416/B417, per the collision-renumber convention.)
+     Per STANDING RULE #1 BOTH were filed AND fixed + unit-tested + headless-verified (V120) the SAME session
+     — full [x] blocks live in BACKLOG-DONE.md. Root cause (evidence-first, the filed hypothesis was off):
+     a dock-zone stack stays pinned to the side it was created on, so a reshape / dock-preset change stranded
+     the court→trailer→buffer on a now-non-dock side; the named legacy opp-trailer suspect was already dead
+     code (removed). lint 0 · 1285 tests · build green. Deduped: net-new. -->
 
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
      control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
@@ -73,12 +97,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      fork). Headless harness `ui-audit/verify-b414-b415-render.mjs` 11/11 (detail 2.00× vs would-be
      whole-page 0.95× = 2.11× sharper; backdrop never re-rasters on zoom; detail never blanks through a
      settle) + the B329 viewport harness still 13/13. 1273 tests · lint 0 · build green. -->
-
-### B413 — Auto-stitch scanned, scale-less survey sheets that carry NO match-line text `[Doc Review / stitching]` (feature)  *(owner-dropped 2026-06-23 with a real upload "get it to stitch these together correctly"; minted **B413** = highest B# (B412) + 1; PENDING owner decision on approach)*
-`[?]` The owner dropped a real 3-page GPL topo slice ("Pages_from_GPL_Civil_Compressed_topo.pdf"). **B412 (shipped) now reads their bare title-block codes (C-2/C-3/C-4) so the three group as one "Topographic Survey · C-2–C-4 · 3 sheets" set** — but they still won't AUTO-stitch, and that's data-limited, not a bug: each sheet says **"NOT TO SCALE" + "FOR REFERENCE ONLY"**, has a **tiny text layer (9 items)**, and its **"MATCH LINE … SHEET N" labels live in the RASTER image, not the text** — the signal `autoPlaceGroup` (B337) needs. EVIDENCE (this session, rendered + OCR'd the real pages): adjacency IS recoverable but only via OCR — C-2 bottom→"SHEET 2", C-4 left (rotated 90°)→"SHEET 2", so the tiling is an L: C-2 over C-3, C-4 right of C-3. Tesseract read the horizontal label cleanly, the vertical one only after rotation, and the *exact seam line* sits inside each page (above the title block), not at the drawing-area edge autoStitch assumes. So a CORRECT auto-stitch needs: (1) OCR edge bands at 0/90/270°, (2) locate the actual match-line, (3) position-aware seam placement, (4) non-linear tiling. Real CV feature; do NOT ship a guessed stitch ("a wrong stitch is worse than an unstitched one"). Options for the owner:
-- **(A) OCR-assisted match-line auto-stitch (the real fix).** Multi-orientation OCR of edge bands → recover each "MATCH LINE … SHEET N" + its edge/position → feed the existing seam-graph autoStitch (handles the L-tiling). Verify by rendering the composite headlessly. The genuinely-correct automatic answer; biggest build.
-- **(B) Sequence/adjacency pre-seed.** Auto-arrange the grouped set in the detected layout as the manual-Align STARTING layout (honestly tagged "not aligned"), so the owner drags-to-finish from a sensible arrangement instead of scattered sheets. Ships quickly; not precise.
-- **(C) Leave manual** for these NTS reference-only scans (they're reference, not measured drawings).
 
 ### B411 — Auto-filing residual gaps after the multi-discipline split (B410) `[Doc Review / auto-filing]` (bug/task)  *(spun off from B410, 2026-06-23; minted **B411** = B410 + 1)*
 `[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness:

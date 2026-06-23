@@ -72,3 +72,67 @@ export function layoutZone(b, side, i, depths) {
 export function layoutStack(b, side, depths) {
   return depths.map((_, i) => ({ i, geom: layoutZone(b, side, i, depths) }));
 }
+
+// Dock-capable sides run along a building's TWO LONG sides; the dock preset chooses how
+// many — cross = both, single = one, none = neither. A square (w === h) tie-breaks to the
+// horizontal pair (top/bottom), matching `el.w >= el.h`. PURE (depends only on the element's
+// own footprint + dock fields), so the canvas, the panel and the stranded-zone guard below
+// all share one source of truth. (Extracted from SitePlanner's old inline `dockSidesOf`.)
+export function dockSidesFor(el) {
+  const longSides = el.w >= el.h ? ["top", "bottom"] : ["left", "right"];
+  const dock = (el && el.dock) || "cross";
+  if (dock === "none") return { dside: longSides[1], dockSides: [] };
+  if (dock === "single") {
+    const dside = longSides.includes(el.dockSide) ? el.dockSide : longSides[1];
+    return { dside, dockSides: [dside] };
+  }
+  return { dside: longSides[1], dockSides: longSides };
+}
+
+// The building's DEPTH (feet): its footprint extent perpendicular to the dock face — dock
+// wall → dock wall (cross) / dock wall → rear wall (single), which both reduce to the span
+// across the dock-normal axis. Read off `dockSidesFor`, NEVER off an attached site element,
+// so a 135′ truck court can't masquerade as the building's depth (NEW-2/B417). For a
+// rectangle this equals the shorter side (the dock always rides the long walls), but we
+// derive it from the dock axis so intent is explicit and robust to the dock metadata.
+export function footprintDepth(el) {
+  const { dockSides, dside } = dockSidesFor(el);
+  const side = dockSides[0] || dside;                 // a dock side (or the implied one when dock=none)
+  const horizWall = side === "top" || side === "bottom"; // docks on a horizontal wall → depth is the vertical (h) span
+  return horizWall ? el.h : el.w;
+}
+
+// IDs of dock-zone stack members (truck court → trailer parking → buffer) sitting on a side
+// that is NO LONGER a dock side — e.g. after a reshape flips the long-side axis, or a dock
+// preset drops a side. A stranded court drags its bonded trailer + buffer, so the whole chain
+// is returned. PURE; the caller removes them so trailer parking stays dock-side-only
+// (NEW-1/B416). Courts are only ever CREATED on dock sides, so a court off the dock sides is
+// always a stranding artefact — never intentional.
+export function strandedZoneIds(els, building) {
+  const ok = new Set(dockSidesFor(building).dockSides);
+  const kill = new Set(
+    (els || [])
+      .filter((x) => x.attachedTo === building.id && x.truckCourt && !x.points && !ok.has(x.truckCourt.side))
+      .map((x) => x.id),
+  );
+  let grew = true;
+  while (grew) {                                       // cascade onto bonded trailers, then their buffers
+    grew = false;
+    (els || []).forEach((x) => {
+      if (kill.has(x.id)) return;
+      if ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer))) { kill.add(x.id); grew = true; }
+    });
+  }
+  return [...kill];
+}
+
+// Heal a loaded element list: drop every stranded dock-zone stack from every building, so an
+// older plan reshaped before this guard existed cleans itself up the moment it's opened.
+export function pruneStrandedZones(els) {
+  let next = els || [];
+  next.filter((x) => x.type === "building" && !x.dogEar).forEach((b) => {
+    const ids = strandedZoneIds(next, b);
+    if (ids.length) next = next.filter((x) => !ids.includes(x.id));
+  });
+  return next;
+}

@@ -1,4 +1,4 @@
-/* Verification for B417 — a parcel grabs ONLY by its boundary edge or its setback line, never by
+/* Verification for B420 — a parcel grabs ONLY by its boundary edge or its setback line, never by
  * its empty interior (free the interior for building work).
  *
  * Owner repro: in Select mode, clicking anywhere inside a lot's interior used to select the parcel
@@ -10,7 +10,7 @@
  * default every county-pulled / drawn lot carries) WITH a 25 ft setback so the setback line renders.
  * Selected parcel = stroke #C2410C; unselected = stroke #5b6650 (light theme). Setback line = #b45309.
  *
- * Run: BASE_URL=http://localhost:4173/ node ui-audit/verify-b417-parcel-boundary-grab.mjs
+ * Run: BASE_URL=http://localhost:4173/ node ui-audit/verify-b420-parcel-boundary-grab.mjs
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -22,7 +22,7 @@ mkdirSync(OUT, { recursive: true });
 // Big rectangle so the interior, the setback ring, and the boundary are well separated on screen.
 const parcel = { id: "pc1", locked: true, points: [{ x: -440, y: -200 }, { x: 440, y: -200 }, { x: 440, y: 320 }, { x: -440, y: 320 }] };
 const demoSite = {
-  id: "uiaudit-b417", groupId: "uiaudit-b417", site: "Parcel Hit-Area Demo", name: "Plan 1",
+  id: "uiaudit-b420", groupId: "uiaudit-b420", site: "Parcel Hit-Area Demo", name: "Plan 1",
   origin: { lat: 29.786, lon: -95.83 }, county: "harris",
   parcels: [parcel], els: [], measures: [], callouts: [], markups: [],
   settings: { showSetback: true, setback: 25 }, underlay: null,
@@ -95,7 +95,7 @@ const setbackPt = (sb) => ({ x: sb.cx, y: sb.top + 2 });            // on the se
   await page.waitForTimeout(300);
   const after = await parcelInfo();
   result.interiorDoesNotSelect = { selected: after?.selected, strokeWidth: after?.strokeWidth }; // expect false / "2"
-  await page.screenshot({ path: OUT + "b417-interior-click.png", clip: { x: Math.max(0, (pc?.left ?? 400) - 20), y: Math.max(0, (pc?.top ?? 200) - 20), width: Math.min(900, (pc?.w ?? 600) + 40), height: Math.min(700, (pc?.h ?? 500) + 40) } });
+  await page.screenshot({ path: OUT + "b420-interior-click.png", clip: { x: Math.max(0, (pc?.left ?? 400) - 20), y: Math.max(0, (pc?.top ?? 200) - 20), width: Math.min(900, (pc?.w ?? 600) + 40), height: Math.min(700, (pc?.h ?? 500) + 40) } });
 }
 
 // ── Test B — clicking the BOUNDARY edge DOES select ────────────────────────
@@ -107,7 +107,7 @@ await deselect();
   await page.waitForTimeout(300);
   const after = await parcelInfo();
   result.boundarySelects = { selected: after?.selected, strokeWidth: after?.strokeWidth }; // expect true / "3"
-  await page.screenshot({ path: OUT + "b417-boundary-click.png", clip: { x: Math.max(0, (pc?.left ?? 400) - 20), y: Math.max(0, (pc?.top ?? 200) - 40), width: Math.min(900, (pc?.w ?? 600) + 40), height: Math.min(700, (pc?.h ?? 500) + 60) } });
+  await page.screenshot({ path: OUT + "b420-boundary-click.png", clip: { x: Math.max(0, (pc?.left ?? 400) - 20), y: Math.max(0, (pc?.top ?? 200) - 40), width: Math.min(900, (pc?.w ?? 600) + 40), height: Math.min(700, (pc?.h ?? 500) + 60) } });
 }
 
 // ── Test C — clicking the SETBACK line DOES select (owner: "boundary OR setback") ──

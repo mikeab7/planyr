@@ -4,7 +4,7 @@
  *               || project name (center) ||
  *               cloud-sync badge | settings | auth control
  *
- * Row 2 (44px): module tabs (Site · Schedule · Markup)
+ * Row 2 (44px): module tabs (Site · Schedule · Review)
  *               | optional center slot (toolbarCenter, B387) |
  *               || toolbar slot (workspace-specific tools) ||
  * Row 2 is intentionally TALLER than Row 1 (B357): the tools row is where the work
@@ -25,7 +25,7 @@
  *   toolbarContent — ReactNode    — module-specific toolbar buttons (workspace provides)
  *   toolbarCenter  — ReactNode    — optional Row-2 center group (B387); present ⇒ Row 2 is a
  *                                    3-zone tabs|center|toolbar layout (center optically centered
- *                                    like Row 1). Absent (Site/Markup) ⇒ unchanged 2-zone layout.
+ *                                    like Row 1). Absent (Site/Review) ⇒ unchanged 2-zone layout.
  *
  * Fullscreen: F key hides the header; Esc (or an exit button) restores it.
  * When hidden the workspace's flex: 1 content fills 100 % of viewport height.
@@ -50,8 +50,8 @@ const LINE   = "var(--chrome-divider)";
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-markup)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-markup-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -131,7 +131,7 @@ const MODULES = [
   },
   {
     id: "doc-review",
-    label: "Library",
+    label: "Review",
     // simplified ti-pencil outline
     icon: (
       <>
@@ -214,7 +214,7 @@ export default function AppHeader({
   toolbarContent,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
   // (tabs | center | toolbar) with the center group optically centered like Row 1.
-  // Generic + additive: callers that omit it (Site, Markup) keep the 2-zone layout
+  // Generic + additive: callers that omit it (Site, Review) keep the 2-zone layout
   // unchanged. Its first consumer is the Schedule toolbar lift (B388).
   toolbarCenter,
   // Project breadcrumb / switcher (B191–B193). When onSelectProject is provided the
@@ -371,7 +371,7 @@ export default function AppHeader({
            (shrink-to-content) | toolbar (flex:1, end), so the center group is optically
            centered the same way Row 1 centers the project name. The row may wrap on a
            too-narrow viewport (the center/toolbar flow to a second line) instead of
-           overlapping — never absolute positioning. With NO center slot (Site/Markup) the
+           overlapping — never absolute positioning. With NO center slot (Site/Review) the
            original 2-zone tabs|toolbar layout renders unchanged. */}
       {toolbarCenter ? (
         <div style={{ minHeight: 44, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 2, borderTop: `1px solid ${LINE}` }}>
