@@ -155,6 +155,22 @@ export async function renderPageToImage(pdf, pageNum, scale = 2) {
   return { href, baseW: base.width, baseH: base.height };
 }
 
+/* Render a page to raw ImageData at `scale` for the match-line refiner (B413). Returns
+ * { data:ImageData, baseW, baseH, scale }. The canvas is discarded; the caller binarizes the
+ * ImageData and drops it. Scale ~2 keeps the dashed match line legible to the pixel fitter. */
+export async function renderPageToImageData(pdf, pageNum, scale = 2) {
+  const page = await pdf.getPage(pageNum);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { data, baseW: base.width, baseH: base.height, scale };
+}
+
 /* Render a page to an offscreen <canvas> at EXACTLY `scale` (no devicePixelRatio fiddling) for
  * OCR (B340). The returned canvas's pixel coords are page-points × scale, so a word's pixel
  * bbox ÷ scale maps straight back to scale-1 page units — the same frame `extractPageItems`

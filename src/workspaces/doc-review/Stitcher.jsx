@@ -10,11 +10,12 @@
  * World↔screen is a single pan/zoom group.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadPdf, renderPageToImage } from "./lib/pdf.js";
+import { loadPdf, renderPageToImage, renderPageToImageData } from "./lib/pdf.js";
 import { dist, polyArea, pathLength, centroidOf } from "./lib/takeoff.js";
 import { parseFeet } from "./lib/parseLength.js";
 import { fwd, inv, solveM, sheetBBox, alignBaselinesDegenerate, measureOverUnaligned, panTo } from "./lib/stitchGeom.js";
 import { autoPlaceGroup, detectedEndpointsFor } from "./lib/autoStitch.js";
+import { binarizeImageData, refineGroupPlacements } from "./lib/matchLineRefine.js";
 import { readAndGroup, groupCalibration } from "./lib/sheetRead.js";
 import { normSheet } from "../../shared/files/detailRefs.js";
 import { aggregateNotes } from "../../shared/files/sheetNotes.js";
@@ -255,7 +256,25 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           detailRefs: pg.detailRefs || [], detailAnchors: pg.detailAnchors || [], notes: pg.notes || [],
         });
       }
-      const { placements, unplaced } = autoPlaceGroup(built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines })));
+      const placeInput = built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines, baseW: s.baseW, baseH: s.baseH }));
+      const auto = autoPlaceGroup(placeInput);
+      let placements = auto.placements; const unplaced = auto.unplaced;
+      // B413 — refine each auto-placed seam from the rendered pixels: find the REAL (inset/skewed)
+      // match line on both sheets and land the neighbor's exactly on the anchor's, so a scanned
+      // set joins seamlessly instead of butting paper edges. Best-effort: any sheet we can't fit
+      // confidently keeps its label-based placement, so this only improves seams, never breaks one.
+      if (built.length > 1 && built.length <= 12) {
+        try {
+          const rasters = new Map();
+          for (const s of built) {
+            if (!placements.has(s.id)) continue;
+            const im = await renderPageToImageData(pdf.doc, s.pageNum, 2);
+            const { bin, W, H } = binarizeImageData(im.data);
+            rasters.set(s.id, { bin, W, H, pagePerRaster: im.baseW / W });
+          }
+          placements = refineGroupPlacements({ sheets: placeInput, placements, anchorId: auto.anchorId, rasterOf: (id) => rasters.get(id) || null });
+        } catch (_) { /* refine is best-effort; keep label placements on any failure */ }
+      }
       const existing = placedRef.current;
       const GAP = 40;
       const right = existing.length ? Math.max(...existing.map((s) => sheetBBox(s).maxX)) : 0;
