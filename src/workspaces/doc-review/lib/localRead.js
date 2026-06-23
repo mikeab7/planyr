@@ -7,51 +7,79 @@
  * sheet (no text layer) it returns `hasText:false`, the caller's cue to fall back to the AI
  * reader (server/filing/) for that minority of files.
  *
- * Thin glue only: the real logic is the unit-tested pure modules (titleBlockParse, matchProject);
- * here we just pull the text and assemble the result. Browser-only (rides the lazy doc-review
- * chunk alongside the viewer's own pdf.js).
+ * MULTI-DISCIPLINE (owner request, 2026-06-23): a real drop is often a whole BOUND set, not one
+ * sheet — and it may carry several disciplines (a make-ready package; a full IFC with C-/A-/S-/
+ * M-/E-/P- sheets together). So this now reads EVERY page's text, classifies each page on its own
+ * (prefix-first, disciplineSplit.js), and:
+ *   • picks the file's discipline by MAJORITY (fixes the old "read the first 2 pages → label the
+ *     whole file" misfile — a Mechanical set whose cover named the architect filed as Architectural),
+ *   • when the set spans ≥2 substantive disciplines, returns the per-discipline `sets` (page ranges)
+ *     so the library can file each block in its right folder instead of one wrong place.
+ *
+ * Thin glue only: the real logic is the unit-tested pure modules (titleBlockParse, matchProject,
+ * disciplineSplit). Browser-only (rides the lazy doc-review chunk alongside the viewer's pdf.js).
  */
 import { readTitleBlockText } from "../../../shared/files/titleBlockParse.js";
 import { matchProjectInText } from "../../../shared/files/matchProject.js";
+import { splitByDiscipline } from "../../../shared/files/disciplineSplit.js";
 
-// Read the first couple of pages' text — the title block / cover identifies the project & set.
-// The extractor itself is pdf.js `firstPagesText` (the ONE embedded-text reader, B360); pdf.js is
-// imported lazily (it pulls a Vite-only worker URL) so this module loads anywhere and pdf.js only
-// spins up when a file is actually read.
-async function firstPagesText(file, maxPages = 2) {
-  const { firstPagesText: read } = await import("./pdf.js");
-  return read(file, maxPages);
+// Read every page's embedded text (the title blocks identify each sheet's project & discipline).
+// pdf.js is imported lazily (it pulls a Vite-only worker URL) so this module loads anywhere and
+// pdf.js only spins up when a file is actually read.
+async function allPagesText(file) {
+  const { extractAllPagesText: read } = await import("./pdf.js");
+  return read(file);
 }
 
 /* Read + match a dropped PDF locally. Returns:
- *   { ok:true, hasText:true,  decision, fields, facts, source:"local" }   — a real free read
+ *   { ok:true, hasText:true,  decision, fields, facts, split, source:"local" }   — a real free read
  *   { ok:true, hasText:false } — no embedded text (scanned) → caller falls back to the AI
  *   { ok:false, error }        — couldn't open the PDF
- * `extractText` is injectable for tests (so the decision assembly is testable without pdf.js). */
-export async function localTitleBlockRead(file, projects = [], { extractText = firstPagesText, match = {} } = {}) {
-  let text = "";
-  try { text = await extractText(file); }
+ * `decision` carries the file's MAJORITY discipline plus `multiDiscipline` + `sets` (per-discipline
+ * page ranges) when the set spans several disciplines. `extractPages` is injectable for tests (so
+ * the decision assembly is testable without pdf.js); it returns an array of per-page text strings. */
+export async function localTitleBlockRead(file, projects = [], { extractPages = allPagesText, match = {} } = {}) {
+  let pages = [];
+  try { pages = await extractPages(file); }
   catch (e) { return { ok: false, error: (e && e.message) || "Couldn't open the PDF." }; }
+  if (typeof pages === "string") pages = [pages]; // tolerate a single joined string (old seam)
 
-  const fields = readTitleBlockText(text);
-  if (!fields.hasText) return { ok: true, hasText: false }; // scanned/image-only → AI fallback
+  // Per-page deterministic read → the records the splitter classifies.
+  const metas = pages.map((text, i) => {
+    const f = readTitleBlockText(text);
+    return { pageNum: i + 1, hasText: f.hasText, discipline: f.discipline, item: f.item, sheetNumber: f.sheetNumber, date: f.date, revision: f.revision };
+  });
+  if (!metas.some((m) => m.hasText)) return { ok: true, hasText: false }; // wholly scanned → AI fallback
 
-  const m = matchProjectInText(text, projects, match);
+  const joined = pages.join(" ");
+  const whole = readTitleBlockText(joined); // file-level date / revision / scale
+  const split = splitByDiscipline(metas);
+
+  const m = matchProjectInText(joined, projects, match);
   const project = m.matched ? (projects.find((p) => p.id === m.projectId) || {}).name || m.matched.name || "" : "";
-  const docDate = fields.date || new Date().toISOString().slice(0, 10);
-  const item = (fields.item || "Document").trim();
+  const docDate = whole.date || new Date().toISOString().slice(0, 10);
+  const discipline = split.dominant.discipline || "Other";
+  const item = (split.dominant.item || "Document").trim();
+
+  // The per-discipline filing plan (only the substantive, standalone blocks) — each ready to file
+  // in its own folder, named the usual "<Project> - <Item> - date" way.
+  const sets = (split.standaloneSets || []).map((s) => ({
+    discipline: s.discipline, item: s.item, pageNums: s.pageNums, sheetRanges: s.sheetRanges, pages: s.pages,
+  }));
 
   const decision = {
     matched: !!m.matched, projectId: m.projectId, project,
-    discipline: fields.discipline || "Other", item, revision: fields.revision || "", docDate,
+    discipline, item, revision: whole.revision || "", docDate,
     confidence: m.confidence, needsFiling: m.needsFiling, reason: m.reason,
+    multiDiscipline: split.multiDiscipline, sets, scannedPages: split.scannedPages, numPages: metas.length,
     candidates: (m.candidates || []).map((c) => ({ id: c.id, name: c.name, score: +(c.score || 0).toFixed(3) })),
     source: "local",
   };
   const facts = {
-    projectId: m.projectId, discipline: decision.discipline, item,
-    sheetNumber: fields.sheetNumber || "", sheetTitle: "", revision: decision.revision, docDate,
-    matchConfidence: m.confidence, needsFiling: m.needsFiling, placement: null, // placement is the AI/CV step, not Tier-1
+    projectId: m.projectId, discipline, item,
+    sheetNumber: (sets[0] && sets[0].sheetRanges[0]) || whole.sheetNumber || "", sheetTitle: "",
+    revision: decision.revision, docDate,
+    matchConfidence: m.confidence, needsFiling: m.needsFiling, multiDiscipline: split.multiDiscipline, placement: null,
   };
-  return { ok: true, hasText: true, decision, fields, facts, source: "local" };
+  return { ok: true, hasText: true, decision, fields: whole, facts, split, source: "local" };
 }

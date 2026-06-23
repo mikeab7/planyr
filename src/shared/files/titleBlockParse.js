@@ -90,6 +90,19 @@ const SHEET_PREFIX_DISC = [
   [/^m/i, "Mechanical"], [/^e/i, "Electrical"], [/^p/i, "Plumbing"], [/^g/i, "Geotech"],
 ];
 
+/* The discipline implied by a sheet CODE's letter prefix (A-201 → Architectural, M-1 → Mechanical).
+ * On a real set this is the engineer's OWN filing code — the single most reliable per-sheet
+ * discipline signal — so the multi-discipline splitter (disciplineSplit.js) trusts it over a
+ * keyword tally that a stray cross-reference can skew. Returns "" when the code has no recognized
+ * alpha prefix (a bare number, or a prefix we don't map) — the caller then falls back to keywords.
+ * Tested as the shared source feeding both the sheet-prefix tie-break here and the splitter. */
+export function disciplineFromSheetNumber(sheetNumber) {
+  const pre = (sheetNumber || "").toString().trim();
+  if (!/^[A-Za-z]/.test(pre)) return ""; // must START with a letter (a bare "25" is not a code prefix)
+  for (const [re, discipline] of SHEET_PREFIX_DISC) if (re.test(pre)) return discipline;
+  return "";
+}
+
 const lc = (s) => (s || "").toString().toLowerCase();
 
 // How many times a rule's keywords occur in the text (capped — we only need dominance, not exact).
@@ -132,8 +145,8 @@ export function classifyDiscipline(text, sheetNumber = "") {
   }
   if (best) return { discipline: best.discipline, item: best.item };
   // No keyword hit: lean on the sheet-number prefix if we have one, else Other.
-  const pre = (sheetNumber || "").trim();
-  for (const [re, discipline] of SHEET_PREFIX_DISC) if (re.test(pre)) return { discipline, item: "Document" };
+  const pre = disciplineFromSheetNumber(sheetNumber);
+  if (pre) return { discipline: pre, item: "Document" };
   return { discipline: "Other", item: "Document" };
 }
 
