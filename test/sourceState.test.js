@@ -75,3 +75,35 @@ describe("fileWarn — the Files-browser / drawer queue warn mirrors the taxonom
     expect(fileWarn({ oversize: true, driveError: true })).toMatch(/cloud limit/);
   });
 });
+
+// B409: a big file (over the Supabase cap) whose bytes aren't stored gets a DISTINCT message
+// from the legacy 50 MB "oversize" wording, because the fix is now actionable — large files go
+// straight to Drive, so re-opening it actually uploads it.
+describe("classifySource — big-file 'too-large' state (B409)", () => {
+  const BIG = 51 * 1024 * 1024; // over the 50 MB cap
+  it("an oversize source with a known large size → too-large", () => {
+    expect(classifySource({ name: "Civil IFP", oversize: true, size: BIG })).toBe("too-large");
+  });
+  it("an oversize source with no/small recorded size stays on the legacy 'oversize' state", () => {
+    expect(classifySource({ name: "x", oversize: true })).toBe("oversize");
+    expect(classifySource({ name: "x", oversize: true, size: 1024 })).toBe("oversize");
+  });
+});
+
+describe("too-large copy + warn are distinct from oversize (B409)", () => {
+  it("the too-large banner is actionable (re-open to upload, mentions Drive) and not the 50 MB cap line", () => {
+    const m = sourceUnavailableMessage("too-large", { name: "Civil IFP" });
+    expect(m).toContain("Civil IFP");
+    expect(m).toMatch(/upload/);
+    expect(m).toMatch(/Drive/);
+    expect(m).toMatch(/markups are saved/);
+    expect(m).not.toMatch(/per-file cloud limit/); // distinct from the legacy oversize wording
+    expect(m).not.toBe(sourceUnavailableMessage("oversize", { name: "Civil IFP" }));
+  });
+  it("fileWarn distinguishes a large-file upload failure from the plain cap warn", () => {
+    const big = fileWarn({ oversize: true, large: true });
+    expect(big).toMatch(/large file/);
+    expect(big).toMatch(/retry/);
+    expect(big).not.toBe(fileWarn({ oversize: true })); // plain cap warn stays for the no-size case
+  });
+});

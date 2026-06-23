@@ -46,6 +46,27 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
   };
   const ensureFolder = async (name, parentId) => (await findFolder(name, parentId)) || createFolder(name, parentId);
 
+  const byteLen = (bytes) =>
+    bytes == null ? undefined : (bytes.byteLength != null ? bytes.byteLength : (bytes.size != null ? bytes.size : undefined));
+
+  /* Initiate a RESUMABLE upload session (B409). The multipart create() above buffers the
+   * whole file and is Google's ≤5 MB path; a large drawing (E-size civil sets run 100 MB+)
+   * needs resumable, AND its bytes must skip the Cloudflare Worker entirely (the Worker has a
+   * ~100 MB request-body limit + 128 MB memory cap). So the server only MINTS the session here
+   * and hands the pre-authorized `uploadUri` back to the browser, which PUTs the bytes straight
+   * to Google. When the PUT is cross-origin (from the browser), pass that browser's `origin` so
+   * Google binds the session for CORS. Returns { uploadUri }; throws on a non-2xx init. */
+  const resumableSession = async ({ name, parentFolderId, contentType = "application/octet-stream", size, origin } = {}) => {
+    const headers = { "X-Upload-Content-Type": contentType };
+    if (size != null) headers["X-Upload-Content-Length"] = String(size);
+    if (origin) headers["Origin"] = origin; // bind the session to the browser origin (CORS)
+    const meta = { name: name || "document", ...(parentFolderId ? { parents: [parentFolderId] } : {}) };
+    const res = await api("POST", `${UPLOAD}/files?uploadType=resumable&fields=id`, { json: meta, headers, raw: true });
+    const uploadUri = res.headers.get("location") || res.headers.get("Location");
+    if (!uploadUri) throw new Error("Drive resumable init returned no upload URI.");
+    return { uploadUri };
+  };
+
   return {
     // Ensure Planyr/<path…> exists (app-created), returns the deepest folder id.
     async folderId(folderPath) {
@@ -67,6 +88,25 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
         body: blob, headers: { "content-type": `multipart/related; boundary=${boundary}` },
       });
       return { id: r.id };
+    },
+
+    // Mint a resumable upload session for the browser to PUT large bytes to directly (B409).
+    createResumableSession: resumableSession,
+
+    // Server-side resumable create: initiate a session then PUT the bytes from the server (no
+    // browser, no CORS — the session's own URL is the credential). Used by the Drive self-test
+    // and available as a server-side large-upload path. `bytes` = Uint8Array/ArrayBuffer/Blob.
+    async createViaResumable({ bytes, contentType = "application/octet-stream", name, parentFolderId } = {}) {
+      const { uploadUri } = await resumableSession({ name, parentFolderId, contentType, size: byteLen(bytes) });
+      const res = await fetchImpl(uploadUri, { method: "PUT", headers: { "content-type": contentType }, body: bytes });
+      if (!res.ok) {
+        let msg = `Drive resumable PUT ${res.status}`;
+        try { const e = await res.json(); msg = (e.error && (e.error.message || e.error)) || msg; } catch (_) { /* keep */ }
+        throw new Error(msg);
+      }
+      const j = await res.json();
+      if (!j || !j.id) throw new Error("Drive resumable upload returned no file id.");
+      return { id: j.id };
     },
 
     async media(fileId) {

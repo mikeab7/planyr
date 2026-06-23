@@ -327,6 +327,50 @@ export async function pushFileToDrive(file, { projectId = null, discipline = "Ot
   } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
 }
 
+/* Upload a LARGE file (> the Supabase per-file cap) straight to Google Drive, bypassing the
+ * Cloudflare Worker entirely (B409). pushFileToDrive() above POSTs the whole file through the
+ * Pages Function, which buffers it (request.arrayBuffer) and Drive-creates it with
+ * uploadType=multipart — Google's ≤5 MB path — so it's capped by the Worker's ~100 MB body
+ * limit + 128 MB memory and a real E-size civil set (100 MB+) silently fails. Here the server
+ * only MINTS a resumable session; the browser PUTs the bytes DIRECTLY to Google (cross-origin),
+ * so neither limit applies (multi-GB works). Mirrors pushFileToDrive's return:
+ * { ok, driveKey } | { ok:false, skipped:true, error } | { ok:false, error }. Never throws. */
+export async function uploadLargeToDrive(file, { projectId = null, discipline = "Other", fileName } = {}) {
+  if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data && data.session && data.session.access_token; } catch (_) { /* none */ }
+  if (!token) return { ok: false, skipped: true, error: "Not signed in." };
+  const folder = `project-${projectId ? slug(projectId) : "unfiled"}/${slug(discipline)}`;
+  const name = fileName || "document.pdf";
+  const driveKey = `${folder}/${name}`; // the key the read-back GET uses (server prefixes the uid)
+  const contentType = file.type || "application/pdf";
+  try {
+    // 1) INIT — server mints a resumable session bound to this origin (for the cross-origin PUT).
+    const initResp = await fetch("/api/files/resumable", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "x-planyr-key": driveKey, "x-planyr-folder": folder,
+        "x-planyr-name": name, "x-planyr-content-type": contentType, "x-planyr-size": String(file.size || 0) },
+    });
+    if (initResp.status === 404 || initResp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
+    let init = {}; try { init = await initResp.json(); } catch (_) { /* ignore */ }
+    if (!initResp.ok || !init.ok || !init.uploadUri) return { ok: false, error: init.error || `HTTP ${initResp.status}` };
+    // 2) PUT the bytes STRAIGHT to Google — never through the Worker, so no body/memory limit.
+    const putResp = await fetch(init.uploadUri, { method: "PUT", headers: { "content-type": contentType }, body: file });
+    if (!putResp.ok) return { ok: false, error: `Drive upload didn’t finish (HTTP ${putResp.status}).` };
+    let meta = {}; try { meta = await putResp.json(); } catch (_) { /* ignore */ }
+    if (!meta.id) return { ok: false, error: "Drive upload returned no file id." };
+    // 3) COMMIT — server records the key ↔ Drive-id mapping so the file reads back later.
+    const commitResp = await fetch("/api/files/resumable", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ planyrKey: driveKey, fileId: meta.id, name }),
+    });
+    let commit = {}; try { commit = await commitResp.json(); } catch (_) { /* ignore */ }
+    if (!commitResp.ok || !commit.ok) return { ok: false, error: commit.error || "Couldn’t record the Drive file." };
+    return { ok: true, driveKey };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
 /* Delete a file's bytes FROM Google Drive (DELETE /api/files?key=…). Best-effort —
  * returns true on a clean delete, false otherwise; never throws. Called when a review is
  * deleted so a Drive-only file doesn't orphan a copy in Drive. */
@@ -380,7 +424,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
-  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, name: fileName || "document.pdf",
+  return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, large: stored.large, name: fileName || "document.pdf",
     driveError: stored.driveError };
 }
 
@@ -397,14 +441,23 @@ export const isStoredSource = (s) => !!(s && (s.storageKey || s.driveKey || s.ov
 /* Store ONE interactively-opened source PDF (the "Open PDF…" single sheet and every Stitcher
  * sheet) the same way filing does: Google Drive is the primary home, Supabase Storage the
  * fallback — so these files (a) live in Drive like filed ones and (b) bypass Supabase's 50 MB
- * per-file cap on the happy path (the cap otherwise silently flagged big E-size drawings
- * "oversize"). Returns { ok, storageKey, driveKey, oversize, driveError, driveSkipped }.
- * Never throws. (B322/NEW-2.) */
+ * per-file cap (the cap otherwise silently flagged big E-size drawings "oversize"). Files OVER
+ * that cap take the browser-direct resumable path (uploadLargeToDrive, B409) so their bytes
+ * skip the Cloudflare Worker's body/memory limits; smaller files keep the proven multipart
+ * path. Returns { ok, storageKey, driveKey, oversize, large, driveError, driveSkipped }.
+ * Never throws. (B322/NEW-2; B409 large-file path.) */
 export async function storeSource(srcId, blob, { projectId = null, discipline = "Other", fileName } = {}) {
-  const drive = blob ? await pushFileToDrive(blob, { projectId, discipline, fileName }) : { ok: false, skipped: true };
-  if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, driveError: null, driveSkipped: false };
+  // A file over the Supabase cap can't go through the Worker AND Supabase rejects it as
+  // "oversize" — so route it straight to Drive (B409). If that path is unavailable it falls back
+  // to the Supabase attempt (still flags oversize), so behaviour is never worse than before.
+  const isLarge = !!(blob && blob.size > MAX_BYTES);
+  const drive = blob
+    ? (isLarge ? await uploadLargeToDrive(blob, { projectId, discipline, fileName })
+               : await pushFileToDrive(blob, { projectId, discipline, fileName }))
+    : { ok: false, skipped: true };
+  if (drive.ok) return { ok: true, storageKey: null, driveKey: drive.driveKey, oversize: false, large: isLarge, driveError: null, driveSkipped: false };
   const up = await uploadSource(srcId, blob, projectId, discipline);
-  return { ok: up.ok, storageKey: up.storageKey || null, driveKey: null, oversize: !!up.oversize,
+  return { ok: up.ok, storageKey: up.storageKey || null, driveKey: null, oversize: !!up.oversize, large: isLarge,
     driveError: drive.skipped ? null : (drive.error || null), driveSkipped: !!drive.skipped };
 }
 

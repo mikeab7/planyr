@@ -68,3 +68,65 @@ describe("driveClient — file ops (B207)", () => {
     await expect(client(f).list({ parentFolderId: "fid" })).rejects.toThrow(/rateLimitExceeded/);
   });
 });
+
+// B409: large files (100 MB+ civil sets) can't ride the multipart-through-Worker path. These
+// assert the resumable session is minted with the right upload headers (incl. Origin for the
+// browser's cross-origin PUT) and that the server-side resumable create PUTs to the session URI.
+describe("driveClient — resumable upload for large files (B409)", () => {
+  // A fetch mock that returns a Location header on the resumable init and accepts the PUT.
+  function resumableFetch({ uploadUri = "https://up.example/session?upload_id=abc", putJson = { id: "newfile" }, initOk = true } = {}) {
+    const calls = [];
+    const fn = async (url, opts = {}) => {
+      const method = opts.method || "GET";
+      calls.push({ url, method, headers: opts.headers || {}, body: opts.body });
+      if (method === "POST" && url.includes("uploadType=resumable")) {
+        return { ok: initOk, status: initOk ? 200 : 403,
+          headers: { get: (k) => (String(k).toLowerCase() === "location" ? uploadUri : null) },
+          json: async () => (initOk ? {} : { error: { message: "init blew up" } }) };
+      }
+      if (method === "PUT" && url === uploadUri) return { ok: true, status: 200, json: async () => putJson };
+      return { ok: false, status: 404, json: async () => ({ error: { message: "no route: " + url } }) };
+    };
+    fn.calls = calls;
+    return fn;
+  }
+
+  it("createResumableSession returns the session URI and sets the upload + Origin headers", async () => {
+    const f = resumableFetch();
+    const r = await client(f).createResumableSession({ name: "big.pdf", parentFolderId: "fid", contentType: "application/pdf", size: 123456789, origin: "https://planyr.io" });
+    expect(r.uploadUri).toBe("https://up.example/session?upload_id=abc");
+    const init = f.calls.find((c) => c.method === "POST");
+    expect(init.url).toMatch(/uploadType=resumable/);
+    expect(init.headers["X-Upload-Content-Type"]).toBe("application/pdf");
+    expect(init.headers["X-Upload-Content-Length"]).toBe("123456789");
+    expect(init.headers["Origin"]).toBe("https://planyr.io"); // binds the session for the cross-origin browser PUT
+    expect(String(init.body)).toContain("big.pdf"); // metadata carries the name + parent
+    expect(String(init.body)).toContain("fid");
+  });
+
+  it("omits Origin when none is given (server-side use)", async () => {
+    const f = resumableFetch();
+    await client(f).createResumableSession({ name: "x", parentFolderId: "fid" });
+    expect(f.calls.find((c) => c.method === "POST").headers.Origin).toBeUndefined();
+  });
+
+  it("createViaResumable inits a session then PUTs the bytes straight to the session URI", async () => {
+    const f = resumableFetch();
+    const r = await client(f).createViaResumable({ bytes: new Uint8Array([1, 2, 3, 4]), contentType: "application/pdf", name: "big.pdf", parentFolderId: "fid" });
+    expect(r.id).toBe("newfile");
+    expect(f.calls.find((c) => c.method === "POST").headers["X-Upload-Content-Length"]).toBe("4"); // real byte length
+    const put = f.calls.find((c) => c.method === "PUT");
+    expect(put.url).toBe("https://up.example/session?upload_id=abc");
+    expect(String(put.headers["content-type"])).toBe("application/pdf");
+  });
+
+  it("a failed resumable init throws a visible error", async () => {
+    const f = resumableFetch({ initOk: false });
+    await expect(client(f).createResumableSession({ name: "x", parentFolderId: "fid" })).rejects.toThrow(/init blew up/);
+  });
+
+  it("a session with no Location header throws rather than returning a bad URI", async () => {
+    const f = async () => ({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({}) });
+    await expect(client(f).createResumableSession({ name: "x" })).rejects.toThrow(/no upload URI/i);
+  });
+});
