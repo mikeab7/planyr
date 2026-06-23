@@ -22,6 +22,67 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-23: owner-dropped chat trio "NEW-1/NEW-2/NEW-3" (paste-at-cursor + rename the module to
+     "Review" + rename the accent token). Highest B# across BACKLOG.md + BACKLOG-DONE.md was B416 and
+     origin/main was confirmed at B416 when filed, so minted **B417 / B418 / B419** (the real next free
+     IDs). Per STANDING RULE #1 all three were filed AND fully implemented + verified the SAME session on
+     branch `claude/gifted-shannon-ycachr` — lint 0 · 1282 tests · build green · headless harness
+     `ui-audit/verify-b417-b419.mjs` 11/11. They are NOT yet merged to main: this remote session's harness
+     opens no pull request without an explicit "ship it / commit", so the ONE owner step left is to say the
+     word and I'll open the PR + merge (then a session moves these blocks to BACKLOG-DONE.md). Per-entry
+     dedup notes below. -->
+
+### B419 — Rename the module accent token `markup` → `review` (names only, values locked) `[Doc Review / theming]` (task)  *(owner-dropped 2026-06-23 as "NEW-3"; minted **B419**)*
+`[ ]` **Implemented + verified on branch `claude/gifted-shannon-ycachr` (awaiting merge).** Pure token-name
+rename; every hex value is byte-for-byte unchanged. `src/index.css` (`:root` + `[data-theme="dark"]`):
+`--accent-markup`→`--accent-review`, `--on-accent-markup`→`--on-accent-review`, `--accent-markup-text`→
+`--accent-review-text` (values #EF9F27 / #412402 / #8A5410 light / #EF9F27 dark). `src/shared/theme/palette.js`:
+`accentMarkup`→`accentReview`, `accentMarkupText`→`accentReviewText` in BOTH LIGHT and DARK. Every consumer
+repointed: `AppHeader` `ACCENT_FILL`/`ACCENT_TEXT`, `DocReview.jsx` (🗂 Files chip), `FileBrowser.jsx` (5
+refs). The machine-enforced contrast guard updated too — `ui-audit/contrast-audit.mjs` (5 token pairs) +
+`test/contrast.test.js` (its allowlist regex `Markup underline`→`Review underline`) — so CI's WCAG check
+stays green. `--warn-text` deliberately untouched (it's the saving/offline amber, a separate token). Verified:
+zero orphaned `accent-markup`/`accentMarkup` refs in `src`/`ui-audit`; runtime probe confirms `--accent-review`
+→ #EF9F27 and `--accent-markup` → "" (gone). **Dedup:** net-new (the only prior token work was defining these
+in B316–B319/B341; this is a pure rename, no value change).
+
+### B418 — Module user-facing label → "Review" + pin the naming in CLAUDE.md `[Doc Review]` (task)  *(owner-dropped 2026-06-23 as "NEW-2"; minted **B418**)*
+`[ ]` **Implemented + verified on branch `claude/gifted-shannon-ycachr` (awaiting merge).** The module's
+canonical user-facing name is now **"Review"** everywhere it self-names: the row-2 module **tab** (`AppHeader`
+MODULES), the assembling-loader caption (`moduleLoaderTheme.js` "Loading markup…"→"Loading review…"), the
+Shell workspace label + error-boundary text (`Shell.jsx` "Document Review"→"Review"), and the empty-state
+heading in `DocReview.jsx`. Internal id `doc-review`, the folder, the `/markup` route + prefetch keys, and the
+data-model `markups` are all UNCHANGED (route test still green). The accent-token rename is B419. **Dedup +
+GROUNDED-THE-REPORT:** NEW-2 assumed the tab read "Markup" and warned to leave a separate "📁 Library" button
+alone — but the live code had already moved on (B404 renamed the tab "Markup"→"Library" and the old 📁 Library
+door was replaced by the 🗂 Files drawer). So in reality the only "Library" string left WAS the module tab, and
+renaming it "Library"→"Review" actually RESOLVES the tab-vs-button name collision B404 introduced. Not a dup of
+B404 (that's done) — this is its follow-on correction. **CLAUDE.md pinned** under a new "Module naming" note:
+user-facing name = "Review"; internal id `doc-review`; folder `src/workspaces/doc-review/`; accent token
+`--accent-review`; historical names "Markup"/"Document Review"/"Library" all mean this module.
+
+### B417 — Paste lands at the cursor in BOTH the Site Planner and Review canvases `[Site Planner + Doc Review]` (feature)  *(owner-dropped 2026-06-23 as "NEW-1"; minted **B417**)*
+`[ ]` **Implemented + verified on branch `claude/gifted-shannon-ycachr` (awaiting merge).** A pasted copy now
+drops **centered under the mouse** (Bluebeam behaviour), in both canvases. **Site Planner** (`SitePlanner.jsx`):
+a new `lastPtrFt` ref records the live cursor in WORLD feet on every canvas move (ref-only, no setState in the
+hot path); `pasteClip()` anchors there, runs the anchor through the existing `snapPt` (grid/snap toggle, held-Alt
+bypass), sets a rect's `cx/cy` to it and translates a polygon so its bbox center lands on it; a null/non-finite
+ref falls back to the old fixed offset (never a no-op). `duplicateEl`/`duplicateGroup` (Ctrl/⌘+D) keep their
+fixed offset (duplicate ≠ paste). **Review** (`DocReview.jsx`): net-new copy/cut/paste (there was none) — a
+component `clip` ref + `copyMarkup`/`cutMarkup`/`pasteMarkup`, wired into `onKeyRef` (⌘/Ctrl+C/X/V, gated so
+they only `preventDefault` when they act, leaving native behaviour otherwise); paste clones with a fresh `uid()`,
+sets `page` to the current sheet, and centers the markup's bbox on the live `cursor` (text = its single point),
+with a small fixed page-unit fallback. The centering math is a shared, unit-tested helper
+(`src/shared/geometry/pasteGeom.js` `centerOn`/`bboxCenter`, 9 tests) so both canvases agree and it can't
+silently regress. Markups stay on the editable overlay — the immutable PDF backdrop is untouched. Scope:
+single-element clipboard only (both `copySel`/`sel` are single-object); repeated Ctrl+V restamps at the current
+cursor. **Verified:** placement math unit-tested; headless harness boots the planner, confirms the Ctrl+V wiring
+no-ops gracefully on an empty clipboard, and (where drivable) that a paste lands under the cursor — note that
+selecting a canvas element via *synthetic* pointer events isn't reliable headless (pointerdown reaches the
+canvas but React selection doesn't always engage), so the live click-through of an actual copy→paste is the one
+thing pending a real-browser pass (cohort, not the owner). **Dedup:** net-new (NOT the existing fixed-offset
+`pasteClip`/`duplicateEl`, which this builds on).
+
 <!-- 2026-06-23: owner-dropped bug "NEW-1" (live) — "no way to reach the Split tool; the 'Split a parcel'
      control is not shown on screen." Highest B# across both files was B415, so minted **B416** = the next
      free ID. Deduped: net-new — NOT B128 (concave-cut split GEOMETRY, intact), NOT B96 (the shared

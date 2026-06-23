@@ -34,13 +34,13 @@
   /* Module accents — FILLS fixed in both themes; the -text variants swap per theme. */
   --accent-site:          #1D9E75;
   --accent-schedule:      #7F77DD;
-  --accent-markup:        #EF9F27;
+  --accent-review:        #EF9F27;
   --on-accent-site:       #FFFFFF;
   --on-accent-schedule:   #FFFFFF;
-  --on-accent-markup:     #412402;   /* dark text on amber — never white */
+  --on-accent-review:     #412402;   /* dark text on amber — never white */
   --accent-site-text:     #0F6E56;
   --accent-schedule-text: #534AB7;
-  --accent-markup-text:   #8A5410;
+  --accent-review-text:   #8A5410;
 
   /* Semantic TEXT colors (success / danger / info) — theme-aware so a colored label
      stays AA on a themed panel in BOTH themes. A hardcoded #15803d / #b3361b / #1d4ed8
@@ -138,7 +138,7 @@
   /* Module accent TEXT — light-on-dark set (for the dark chrome). Fills unchanged. */
   --accent-site-text:     #5DCAA5;
   --accent-schedule-text: #AFA9EC;
-  --accent-markup-text:   #EF9F27;
+  --accent-review-text:   #EF9F27;
 
   /* Semantic TEXT colors — lightened for legibility on the dark panels (B354). */
   --success-text: #4FBF7B;

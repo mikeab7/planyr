@@ -25,7 +25,7 @@ describe("theme token contrast (WCAG AA)", () => {
     );
     for (const l of labels) {
       expect(
-        /on-fill · (Site|Schedule)|Markup underline|strong border/.test(l),
+        /on-fill · (Site|Schedule)|Review underline|strong border/.test(l),
         `unexpected accepted exception: ${l}`,
       ).toBe(true);
     }

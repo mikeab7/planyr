@@ -23,6 +23,7 @@ import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx"
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
+import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
@@ -1355,6 +1356,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
+  const lastPtrFt = useRef(null); // live pointer in WORLD feet (updated every canvas move) → paste-at-cursor (B417)
 
   // Live mirror of the drawn-layer state for the undo/redo stack. Assigned during
   // render (NOT a passive effect) so pushHistory/undo/redo always read the TRUE
@@ -1796,10 +1798,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pasteClip = () => {
     if (!clip.current) return;
     const src = detachClone(clip.current); // a pasted copy starts standalone (no host/court links)
-    const off = (settings.gridSize || 10) * 2; // nudge the copy so it's visible
-    const el = src.points
-      ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
-      : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+    const anchor = lastPtrFt.current;      // live cursor in feet (B417) — paste lands centered here, Bluebeam-style
+    let el;
+    if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+      const a = snapPt(anchor);            // honor the grid/snap toggle (held-Alt bypasses, same as a drag)
+      if (src.points) {
+        el = { ...src, id: uid(), points: centerOn(src.points, a) }; // polygon: bbox center sits under the cursor
+      } else {
+        el = { ...src, id: uid(), cx: a.x, cy: a.y }; // a rect's cx/cy IS its center
+      }
+    } else {
+      const off = (settings.gridSize || 10) * 2; // fallback (no pointer seen yet): the old fixed nudge — never a no-op
+      el = src.points
+        ? { ...src, id: uid(), points: src.points.map((p) => ({ x: p.x + off, y: p.y + off })) }
+        : { ...src, id: uid(), cx: src.cx + off, cy: src.cy + off };
+    }
     pushHistory();
     setEls((a) => [...a, el]);
     setSel({ kind: "el", id: el.id });
@@ -2547,6 +2560,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const onMove = (e) => {
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
+    lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
     setCursor(fp);
     if (roadStart && tool === "road" && roadWidth !== "free") { // live fixed-width road preview
       const B = snapPt(fp), A = roadStart, curb = +settings.roadCurb || CURB;
