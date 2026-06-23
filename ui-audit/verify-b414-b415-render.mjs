@@ -1,4 +1,4 @@
-/* Verify B412 (no white flash on zoom-settle) + B413 (Bluebeam-class sharpness via a two-layer,
+/* Verify B414 (no white flash on zoom-settle) + B415 (Bluebeam-class sharpness via a two-layer,
  * viewport-clipped render) against the REAL built viewer (vite preview on :4173).
  *
  * Builds a LARGE E-size sheet (2448×1584 pt) with a big filled black rectangle + text, opens it
@@ -7,17 +7,17 @@
  *
  *   A. Two-layer structure — a BACKDROP canvas fills the page box and a DETAIL canvas sits over it.
  *   B. The backdrop is rendered (opaque linework present) = the no-white floor under everything.
- *   C. SHARPNESS (B413): zoomed in on the big sheet, the DETAIL canvas's backing-store density is
+ *   C. SHARPNESS (B415): zoomed in on the big sheet, the DETAIL canvas's backing-store density is
  *      ~the device pixel ratio (native), whereas the OLD whole-page raster would have dropped well
  *      below that at the same zoom (budget spread across the whole sheet). detail ÷ would-be-whole.
- *   D. NO WHITE FLASH (B412): on zoom the backdrop is NEVER re-rastered (its backing dims are
+ *   D. NO WHITE FLASH (B414): on zoom the backdrop is NEVER re-rastered (its backing dims are
  *      unchanged → it can't blank), and polling the detail canvas through the settle never catches
  *      it blank (the double-buffered swap keeps the prior frame up until the new one is ready).
  *   E. The markup overlay still draws through the two-layer change (pointer pipeline intact).
  *   F. No uncaught page errors.
  *
  * Run:  npm run build && npx vite preview --port 4173   (one shell)
- *       node ui-audit/verify-b412-b413-render.mjs        (another)
+ *       node ui-audit/verify-b414-b415-render.mjs        (another)
  */
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
@@ -30,7 +30,7 @@ const PAGE_W = 2448, PAGE_H = 1584; // E-size in PDF points
 function buildPdf() {
   // A big filled black rectangle covering the page centre (a guaranteed opaque region to sample)
   // + large text. Two pages so a sheet-switch path exists.
-  const content = `q 0 0 0 rg 424 392 1600 800 re f Q BT /F1 90 Tf 300 1300 Td (E-SIZE CIVIL SHEET C-5 B412/B413) Tj ET`;
+  const content = `q 0 0 0 rg 424 392 1600 800 re f Q BT /F1 90 Tf 300 1300 Td (E-SIZE CIVIL SHEET C-5 B414/B415) Tj ET`;
   const c2 = `q 0 0 0 rg 424 392 1600 800 re f Q BT /F1 90 Tf 300 1300 Td (E-SIZE CIVIL SHEET C-6) Tj ET`;
   const mb = `[0 0 ${PAGE_W} ${PAGE_H}]`;
   const objs = [

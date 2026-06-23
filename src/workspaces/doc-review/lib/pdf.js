@@ -92,7 +92,7 @@ export async function extractPageItems(pdf, pageNum) {
   }
 }
 
-/* Render a page — or just a sub-rectangle of it — into `canvas`, DOUBLE-BUFFERED (B412/B413).
+/* Render a page — or just a sub-rectangle of it — into `canvas`, DOUBLE-BUFFERED (B414/B415).
  *
  * Reassigning a visible canvas's width/height clears it to transparent, which (with a white
  * page box behind) flashes white for the async gap until pdf.js refills it. So we rasterise
@@ -132,7 +132,7 @@ export async function renderInto(pdf, pageNum, canvas, { scale = 1, density = 1,
   if (isStale && isStale()) return null; // a newer render won while we rasterised — don't blit a stale frame
   if (canvas.width !== bw) canvas.width = bw;   // guard skips a needless clear when dims are unchanged
   if (canvas.height !== bh) canvas.height = bh;
-  canvas.getContext("2d").drawImage(off, 0, 0); // same synchronous tick as the resize → no visible blank (B412)
+  canvas.getContext("2d").drawImage(off, 0, 0); // same synchronous tick as the resize → no visible blank (B414)
   return { baseW: base.width, baseH: base.height, w: bw, h: bh, region: { rx, ry, rw, rh }, density: S };
 }
 

@@ -38,7 +38,7 @@ describe("renderBudget — backing-store pixel budget (NEW-2)", () => {
   });
 });
 
-describe("backdropDensity — the fixed whole-page floor (B413)", () => {
+describe("backdropDensity — the fixed whole-page floor (B415)", () => {
   it("uses device density on a small sheet and stays under the backdrop budget on a big one", () => {
     expect(backdropDensity(612, 792, 2)).toBe(2);   // letter: budget is generous → full device density (capped 2)
     expect(backdropDensity(612, 792, 1)).toBe(1);
@@ -59,7 +59,7 @@ describe("backdropDensity — the fixed whole-page floor (B413)", () => {
   });
 });
 
-describe("visibleRegion — the page-rect the detail layer rasterises (B413)", () => {
+describe("visibleRegion — the page-rect the detail layer rasterises (B415)", () => {
   const PAGE = { w: E_W, h: E_H };
 
   it("returns ~the whole page at fit, with the visible rect inside the margined region", () => {
@@ -96,7 +96,7 @@ describe("visibleRegion — the page-rect the detail layer rasterises (B413)", (
   });
 });
 
-describe("the detail layer stays native-sharp where the whole page goes soft (B413 sharpness)", () => {
+describe("the detail layer stays native-sharp where the whole page goes soft (B415 sharpness)", () => {
   it("renders the visible window at full device density even when the whole sheet can't", () => {
     // 300% on an E-size sheet, viewport centred: the OLD whole-page raster drops well below 1×…
     const wholePage = backingScale(E_W, E_H, 3, 2);
@@ -110,7 +110,7 @@ describe("the detail layer stays native-sharp where the whole page goes soft (B4
   });
 });
 
-describe("tileCovers — when a settle needs no re-raster (B413)", () => {
+describe("tileCovers — when a settle needs no re-raster (B415)", () => {
   const visible = { rx: 100, ry: 100, rw: 200, rh: 150 };
   it("covers when the tile contains the visible rect at the same scale", () => {
     expect(tileCovers({ rx: 50, ry: 50, rw: 400, rh: 300, scale: 2 }, visible, 2)).toBe(true);

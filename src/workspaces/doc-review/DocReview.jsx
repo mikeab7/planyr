@@ -33,7 +33,7 @@ import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinc
 let lastConsumedDocToken = null;
 
 // Device pixel ratio (capped use is in renderBudget) — the detail layer renders at this density
-// so linework is native-sharp on the visible window regardless of sheet size (B413).
+// so linework is native-sharp on the visible window regardless of sheet size (B415).
 const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
@@ -99,15 +99,15 @@ export default function DocReview({
   projectId = null, onNavigate, crossProject = false,
 } = {}) {
   const wrapRef = useRef(null);
-  const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B413)
-  const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B413)
+  const backdropRef = useRef(null);     // whole-page floor canvas — always present, no white (B415)
+  const detailRef = useRef(null);       // viewport-clipped sharp canvas over the backdrop (B415)
   const pdfRef = useRef(null);
   const fileRef = useRef(null);
   const renderTok = useRef(0);
   const renderTaskRef = useRef(null);   // current DETAIL pdf.js RenderTask, cancellable (B40)
   const backdropTok = useRef(0);
   const backdropTaskRef = useRef(null); // current BACKDROP RenderTask, cancellable (B40)
-  const detailTileRef = useRef(null);   // {rx,ry,rw,rh,scale} of the rastered detail tile (coverage check, B413)
+  const detailTileRef = useRef(null);   // {rx,ry,rw,rh,scale} of the rastered detail tile (coverage check, B415)
   // Destroy the previous PDF document before swapping in a new one — frees the worker
   // + retained ArrayBuffer; without this every re-open leaks the prior doc (B39).
   const setPdfDoc = (next) => {
@@ -132,12 +132,12 @@ export default function DocReview({
   // Viewport transform (B329): ONE shared pan/zoom model with the Site map. `view` is
   // { scale, tx, ty } — pixels per page-unit + the page origin's position in the viewport —
   // so the sheet pans freely in any direction (not trapped inside a scroll box). The bitmaps
-  // are decoupled from view.scale (B413): during a gesture the page box CSS-rescales the
+  // are decoupled from view.scale (B415): during a gesture the page box CSS-rescales the
   // already-drawn backdrop + detail (cheap, no flash); on settle the detail re-rasterises the
   // visible window crisp. View transform ONLY — it never touches stored markups or calibration.
   const [view, setView] = useState(null);          // { scale, tx, ty } | null until first fit
   const [pageBase, setPageBase] = useState(null);  // { w, h } current page at scale 1
-  const [detailTile, setDetailTile] = useState(null); // {rx,ry,rw,rh,scale} placing the sharp detail canvas (B413)
+  const [detailTile, setDetailTile] = useState(null); // {rx,ry,rw,rh,scale} placing the sharp detail canvas (B415)
   const [backdropReq, setBackdropReq] = useState(0);  // bump → re-raster the whole-page backdrop (page/load only)
   const [detailReq, setDetailReq] = useState(0);      // bump → re-raster the viewport detail (page/load + settle)
   const [busy, setBusy] = useState(false);
@@ -160,7 +160,7 @@ export default function DocReview({
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
-  const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B413)
+  const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B415)
   const pageBaseRef = useRef(pageBase); pageBaseRef.current = pageBase;
   const panRef = useRef(null);        // active pan drag { sx, sy, tx0, ty0 } (B329)
   const pointersRef = useRef(new Map()); // live touch pointers → viewport-relative {x,y} (B331)
@@ -372,7 +372,7 @@ export default function DocReview({
   // Re-raster the sharp DETAIL layer once a pan/zoom gesture settles (debounced). The backdrop
   // never re-rasters on zoom, so during the gesture the page box just CSS-rescales the existing
   // bitmaps (cheap, no flash); on settle we redraw only the visible window at full density. The
-  // tileCovers check inside renderDetail makes a settle that didn't move the window a no-op. (B413)
+  // tileCovers check inside renderDetail makes a settle that didn't move the window a no-op. (B415)
   useEffect(() => {
     if (!view) return;
     const id = setTimeout(() => setDetailReq((n) => n + 1), 140);
@@ -382,7 +382,7 @@ export default function DocReview({
 
   // BACKDROP — the whole page at a fixed, zoom-independent density, rendered once per page (never
   // on zoom), double-buffered so a page change swaps with no white flash. Always present under the
-  // detail layer as a no-white floor. Reads live refs so its identity stays stable. (B412/B413)
+  // detail layer as a no-white floor. Reads live refs so its identity stays stable. (B414/B415)
   const renderBackdrop = useCallback(async () => {
     const pdf = pdfRef.current, canvas = backdropRef.current, base = pageBaseRef.current;
     if (!pdf || !canvas || !base) return;
@@ -397,7 +397,7 @@ export default function DocReview({
 
   // DETAIL — only the visible window (+ margin) at full device density, re-rastered on settle and
   // double-buffered. tileCovers skips the work when the existing tile still covers the view; the
-  // budget is spent on the REGION (not the whole sheet), so density stays native when zoomed in. (B413)
+  // budget is spent on the REGION (not the whole sheet), so density stays native when zoomed in. (B415)
   const renderDetail = useCallback(async () => {
     const pdf = pdfRef.current, canvas = detailRef.current, wrap = wrapRef.current;
     const v = viewRef.current, base = pageBaseRef.current;
@@ -1204,7 +1204,7 @@ export default function DocReview({
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
             {pageBase && view && (
               <div style={{ position: "absolute", left: 0, top: 0, width: pageBase.w * view.scale, height: pageBase.h * view.scale, transform: `translate(${view.tx}px, ${view.ty}px)`, transformOrigin: "0 0", background: "#fff", boxShadow: "0 4px 18px rgba(0,0,0,0.25)" }}>
-              {/* Two layers (B413). BACKDROP: the whole page at a fixed density, filling the page
+              {/* Two layers (B415). BACKDROP: the whole page at a fixed density, filling the page
                   box — never re-rastered on zoom, so it's always present as a no-white floor. DETAIL:
                   just the visible window at full device density, positioned over the backdrop, sized
                   in page-units × view.scale (so it CSS-rescales with a zoom gesture, then re-rasters

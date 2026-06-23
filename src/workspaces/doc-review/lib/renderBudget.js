@@ -36,7 +36,7 @@ export function backingPixels(baseW, baseH, scale, devicePixelRatio = 1) {
   return Math.floor(Math.max(1, baseW * scale) * dpr) * Math.floor(Math.max(1, baseH * scale) * dpr);
 }
 
-/* ---- Two-layer viewport rendering (B413) ----------------------------------------------
+/* ---- Two-layer viewport rendering (B415) ----------------------------------------------
  *
  * The whole-page-at-one-density model above goes soft when zoomed in on a large sheet: the
  * 24 MP budget is spread across the ENTIRE sheet, so the visible window can't reach device
@@ -46,7 +46,7 @@ export function backingPixels(baseW, baseH, scale, devicePixelRatio = 1) {
  *   • backdrop — the whole page at a FIXED, zoom-independent density (below). Rendered once
  *     per page, never on zoom, so it costs nothing during pan/zoom and is always present as a
  *     no-white floor under everything (removing the whole-page settle re-raster that flashed
- *     white, B412). A small budget keeps it crisp at fit without holding a second dense page.
+ *     white, B414). A small budget keeps it crisp at fit without holding a second dense page.
  *   • detail — only the visible page-rect (+ a margin), at full device density, budget-bounded
  *     on the REGION not the page (so `backingScale` above is reused on the region size and
  *     returns full dpr when the window is small). Re-rastered on settle, over the backdrop.

@@ -1,9 +1,9 @@
-/* Verify B247 — Doc Review page render honours devicePixelRatio (now via the B413 two-layer
+/* Verify B247 — Doc Review page render honours devicePixelRatio (now via the B415 two-layer
  * render, which carries the HiDPI-crispness guarantee forward on the DETAIL canvas).
  *
  * The original bug: the page canvas sized its backing store to (scale × base) with NO
  * devicePixelRatio factor, so on a HiDPI display the bitmap was upscaled by the screen →
- * blurry note text. B413 replaced the single whole-page canvas with a fixed-density BACKDROP
+ * blurry note text. B415 replaced the single whole-page canvas with a fixed-density BACKDROP
  * (the no-white floor) + a DETAIL canvas that renders the visible window at full device dpr.
  * The HiDPI guarantee now lives on the DETAIL canvas — so we measure THAT (the 2nd canvas in
  * the page box, the one positioned over the backdrop).
