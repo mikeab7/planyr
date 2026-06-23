@@ -54,14 +54,15 @@ async function probeGantt() {
     let minX0 = 1e9, maxX1 = -1e9, earliestBarX = 1e9;
     names.forEach((t) => { const bb = t.getBBox(); if (bb.x < minX0) minX0 = bb.x; if (bb.x + bb.width > maxX1) maxX1 = bb.x + bb.width; });
     [...svg.querySelectorAll("rect[rx]")].forEach((r) => { const x = +r.getAttribute("x"); if (x > 0 && x < earliestBarX) earliestBarX = x; });
-    // dep paths
+    // dep paths "M sx,sBot C c1x,c1y c2x,c2y tx,tTop" — arrive from ABOVE (c2y<tTop) and leave
+    // DOWNWARD (c1y>sBot), with the entry angle free across the top-left arc (no longer rigidly vertical).
     const deps = [...svg.querySelectorAll("path.dep")];
-    let curved = 0, vertEntry = 0;
+    let curved = 0, aboveEntry = 0, downExit = 0;
     const colors = new Set();
-    deps.forEach((p) => { const d = p.getAttribute("d") || ""; colors.add(p.getAttribute("stroke")); if (/C/.test(d)) curved++; const n = (d.match(/-?\d+(\.\d+)?/g) || []).map(Number); if (n.length >= 8 && Math.abs(n[4] - n[6]) < 2) vertEntry++; });
-    // down arrowheads: a filled triangle path whose tip y > its base y (points down)
-    const heads = [...svg.querySelectorAll("path:not(.dep)")].filter((p) => { const n = (p.getAttribute("d") || "").match(/-?\d+(\.\d+)?/g)?.map(Number) || []; return n.length === 6 && n[1] > n[3] && Math.abs(n[3] - n[5]) < 0.6; }).length;
-    return { gridLines, months, years, W, minX0: Math.round(minX0), maxX1: Math.round(maxX1), earliestBarX: Math.round(earliestBarX), depCount: deps.length, curved, vertEntry, downHeads: heads, colors: [...colors] };
+    deps.forEach((p) => { const d = p.getAttribute("d") || ""; colors.add(p.getAttribute("stroke")); if (/C/.test(d)) curved++; const n = (d.match(/-?\d+(\.\d+)?/g) || []).map(Number); if (n.length >= 8) { if (n[5] < n[7] - 1) aboveEntry++; if (n[3] > n[1] + 1) downExit++; } });
+    // arrowhead: a filled triangle whose tip (1st point) is the LOWEST → it points down into the target
+    const heads = [...svg.querySelectorAll("path:not(.dep)")].filter((p) => { const n = (p.getAttribute("d") || "").match(/-?\d+(\.\d+)?/g)?.map(Number) || []; return n.length === 6 && n[1] >= n[3] - 0.6 && n[1] >= n[5] - 0.6; }).length;
+    return { gridLines, months, years, W, minX0: Math.round(minX0), maxX1: Math.round(maxX1), earliestBarX: Math.round(earliestBarX), depCount: deps.length, curved, aboveEntry, downExit, downHeads: heads, colors: [...colors] };
   });
 }
 // click a SegBtn option (a <span>) by its label, scoped to a sibling label that disambiguates
@@ -97,16 +98,17 @@ try {
   ok("B361 — toolbar exposes page Zoom (%) and a Time stretch group", tb.pct && tb.timeTag);
 
   const fit = await probeGantt();
-  console.log("  FIT:", JSON.stringify({ gridLines: fit.gridLines, years: fit.years, minX0: fit.minX0, maxX1: fit.maxX1, earliestBarX: fit.earliestBarX, deps: fit.depCount, curved: fit.curved, vertEntry: fit.vertEntry, downHeads: fit.downHeads }));
+  console.log("  FIT:", JSON.stringify({ gridLines: fit.gridLines, years: fit.years, minX0: fit.minX0, maxX1: fit.maxX1, earliestBarX: fit.earliestBarX, deps: fit.depCount, curved: fit.curved, aboveEntry: fit.aboveEntry, downExit: fit.downExit, downHeads: fit.downHeads }));
 
   // ── B401 auto-fit: no clip + lead room ──
   ok("B401 — no name label clips the left/right chart edges", fit.minX0 >= -1 && fit.maxX1 <= fit.W + 1, `x0=${fit.minX0} x1=${fit.maxX1} W=${fit.W}`);
   ok("B401 — auto-fit leaves lead room (earliest bar not jammed at x=0)", fit.earliestBarX >= 3, `earliestBarX=${fit.earliestBarX}`);
 
-  // ── B402 connectors: curved + 12 o'clock vertical entry + down arrowheads ──
+  // ── B402 connectors: curved + arrive-from-above (9–12 arc) + leave-downward (4–6 arc) + arrowheads ──
   ok("B402 — dependency connectors stay CURVED and on-palette", fit.depCount > 0 && fit.curved === fit.depCount && fit.colors.every((c) => ["#0969da", "#7c3aed", "#0891b2", "#be185d"].includes(c)), `${fit.curved}/${fit.depCount} curved`);
-  ok("B402 — connectors enter the target at 12 o'clock (vertical: ctrl.x == end.x)", fit.depCount > 0 && fit.vertEntry >= fit.depCount * 0.9, `${fit.vertEntry}/${fit.depCount} vertical`);
-  ok("B402 — down-pointing arrowheads present (entering from above)", fit.downHeads >= fit.depCount * 0.9, `${fit.downHeads} heads / ${fit.depCount} deps`);
+  ok("B402 — connectors arrive from ABOVE the target (clear the side date; 9–12 arc)", fit.depCount > 0 && fit.aboveEntry >= fit.depCount * 0.9, `${fit.aboveEntry}/${fit.depCount} from above`);
+  ok("B402 — connectors leave the source DOWNWARD (clear the side date; 4–6 arc)", fit.depCount > 0 && fit.downExit >= fit.depCount * 0.9, `${fit.downExit}/${fit.depCount} downward`);
+  ok("B402 — arrowheads point down into the target", fit.downHeads >= fit.depCount * 0.9, `${fit.downHeads} heads / ${fit.depCount} deps`);
 
   // ── B361 discrete selector narrows the window ──
   await clickSeg("Mo", "Qtr");

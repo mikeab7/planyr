@@ -8831,26 +8831,20 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     for(const p of projects){
       const ix=new Map();
       p.tasks.forEach((t,i)=>ix.set(t.id, base+i));
-      // Source departs from its bar CENTER; the target is entered at 12 o'clock — straight down
-      // into the TOP edge at the dependency's own connection x (start for FS/SS, end for FF/SF),
-      // i.e. exactly where the link lands — so it clears the date label at the side (B402). NOT
-      // the bar's geometric center (that made long bars' connectors sweep far off to the middle).
-      const ycOf=(task,gidx)=>{
-        const yTop=HEADER_H+gidx*ROW_H;
-        if(task.duration!==0 && p.tasks.some(x=>x.parentId===task.id)){
-          const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
-          return yTop+(ROW_H-2-LG-SP)+SP/2;
-        }
-        return yTop+ROW_H*0.5;
-      };
-      const topYOf=(task,gidx)=>{
+      // The connector LEAVES the source from its BOTTOM edge (≈4–6 o'clock — clears the date at
+      // the source's side) and ARRIVES at the target's TOP edge (≈9–12 o'clock — clears the date
+      // at the target's side), both at the link's own connection x (start for FS/SS, end for
+      // FF/SF). Tangents follow the natural travel direction (NOT forced rigidly vertical), so the
+      // arrow can enter anywhere across the top-left arc and leave anywhere across the lower arc —
+      // whatever reads naturally. Curves kept (owner pick, B396/B402).
+      const edgeYOf=(task,gidx,which)=>{   // which:'top'|'bot' → that edge of the glyph
         const yTop=HEADER_H+gidx*ROW_H, midY=yTop+ROW_H*0.5;
-        if(task.duration===0) return midY-5;                                   // diamond top vertex
-        if(p.tasks.some(x=>x.parentId===task.id)){                             // summary bracket top
+        if(task.duration===0) return which==='top'?midY-5:midY+5;                       // diamond vertices
+        if(p.tasks.some(x=>x.parentId===task.id)){                                      // summary bracket
           const dd=getDepth(p.tasks,task.id), SP=[4,3.5,3,3][dd], LG=[0.14,0.10,0.08,0.06][dd]*ROW_H;
-          return yTop+(ROW_H-2-LG-SP);
+          const top=yTop+(ROW_H-2-LG-SP); return which==='top'?top:top+SP+LG;
         }
-        return midY-(ROW_H*0.30)/2;                                            // leaf bar top
+        const LH=ROW_H*0.30; return which==='top'?midY-LH/2:midY+LH/2;                  // leaf bar edges
       };
       for(const t of p.tasks){
         const preds=Array.isArray(t.predecessors)?t.predecessors:[];
@@ -8861,18 +8855,20 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
           const pi=ix.get(pr.id), si=ix.get(t.id);
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
-          const x1=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);   // source: link's exit x
-          const y1=ycOf(pt,pi);                                            // source: bar center (B396)
-          const x2=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);     // target: link's connection x
-          const ty=topYOf(t,si);                                           // target: glyph TOP edge (B402)
-          const aDir=x2>=x1?1:-1;
-          const h=Math.min(30,Math.abs(x2-x1)*0.45+4);                     // horizontal departure handle
-          const lead=Math.max(5,Math.min(16,(ty-y1)*0.5));                 // vertical descent handle — small for near rows, so no hump
+          const sx=(type==="SS"||type==="SF")?xOf(pt.start):xOf(pt.end);   // source link x
+          const sBot=edgeYOf(pt,pi,'bot');                                 // leave from the source BOTTOM
+          const tx=(type==="FF"||type==="SF")?xOf(t.end):xOf(t.start);     // target link x
+          const tTop=edgeYOf(t,si,'top');                                  // arrive at the target TOP
+          const dx=tx-sx, dy=tTop-sBot;
+          const vh=dy>=0?Math.max(7,Math.min(26,dy*0.55)):Math.max(6,Math.min(10,-dy*0.3));   // vertical handle
+          const c1x=sx+dx*0.30, c1y=sBot+vh;                              // exit: down + toward target (lower arc)
+          const c2x=tx-dx*0.30, c2y=tTop-vh;                              // entry: from above + source side (top-left arc)
+          // Arrowhead oriented along the ENTRY tangent, so an angled (9–12 o'clock) entry reads right.
+          const ex=tx-c2x, ey=tTop-c2y, el=Math.hypot(ex,ey)||1, ux=ex/el, uy=ey/el;
+          const a1x=tx-ux*6-uy*3, a1y=tTop-uy*6+ux*3, a2x=tx-ux*6+uy*3, a2y=tTop-uy*6-ux*3;
           const color=DEP_C[type]||DEP_C.FS;
-          // Curved (B396) but descending vertically into the target's top at the link point (B402),
-          // clearing the endpoint date label that sits at the side.
-          arrows+=`<path class="dep" d="M${x1},${y1} C${(x1+h*aDir).toFixed(1)},${y1} ${x2},${(ty-lead).toFixed(1)} ${x2},${ty.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
-            +`<path d="M${x2},${ty.toFixed(1)} L${x2-3},${(ty-5).toFixed(1)} L${x2+3},${(ty-5).toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
+          arrows+=`<path class="dep" d="M${sx},${sBot.toFixed(1)} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${tx},${tTop.toFixed(1)}" stroke="${color}" stroke-width="1.2" fill="none" stroke-dasharray="4 3" opacity="0.7"/>`
+            +`<path d="M${tx},${tTop.toFixed(1)} L${a1x.toFixed(1)},${a1y.toFixed(1)} L${a2x.toFixed(1)},${a2y.toFixed(1)}Z" fill="${color}" opacity="0.7"/>`;
         }
       }
       base+=p.tasks.length;
