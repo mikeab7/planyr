@@ -1330,7 +1330,7 @@ export default function DocReview({
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
+    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}

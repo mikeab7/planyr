@@ -49,9 +49,12 @@ test.describe("markup tools (signed in)", () => {
     await signIn(page);
   });
 
-  test("the Review workspace opens and shows its tool rail", async ({ page }) => {
+  test("the Review workspace mounts", async ({ page }) => {
     await openModule(page, "doc-review");
-    await expect(page.getByTestId("markup-rail")).toBeVisible({ timeout: 20_000 });
+    // The module's landing surface (file browser / empty state) — present whether or not a
+    // PDF is open. The tool rail itself only renders once a review is open (asserted, with a
+    // graceful skip, in the per-tool block below), so we don't hard-require it here.
+    await expect(page.getByTestId("doc-review-root")).toBeVisible({ timeout: 20_000 });
   });
 
   /* Per-tool rail-arm assertions, generated 1:1 from the matrix.
