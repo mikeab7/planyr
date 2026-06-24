@@ -49,18 +49,24 @@
   --success-text: #15803D;
   --danger-text:  #B3361B;
   --info-text:    #1D4ED8;
+  /* Vivid alert/error FILL (icons · borders · the cloud-off badge · a failed layer
+     dot · destructive ×) — the loud red that is RESERVED for genuine alert/error and
+     never used for an inert state like a Dead deal (B423). Distinct from the darker
+     AA-tuned --danger-text above (small red label on a panel). */
+  --danger:       #E24B4A;
 
-  /* Project-status palette (B234; re-hued B365) as tokens so DOM badges theme live.
-     The canonical hexes mirror src/shared/ui/statusTokens.js (map pins read those
-     directly — pins sit on the aerial map, a theme-neutral surface). Salience tracks
-     importance: Pursuit = warm coral (loudest), Active = blue (NOT green, so it never
-     collides with the Site module accent), settled stages recede. Dark = lighter
-     variants (B320). */
+  /* Project-status palette (B234; re-hued B365; Dead off red B423) as tokens so DOM
+     badges theme live. The canonical hexes mirror src/shared/ui/statusTokens.js (map
+     pins read those directly — pins sit on the aerial map, a theme-neutral surface).
+     Salience tracks importance: Pursuit = warm coral (loudest), Active = blue (NOT
+     green, so it never collides with the Site module accent), settled stages recede.
+     Dead is neutral gray (same as Complete — red is reserved for --danger, never an
+     inert state). Dark = lighter variants (B320). */
   --status-pursuit:  #D85A30;
   --status-active:   #378ADD;
   --status-onhold:   #BA7517;
   --status-complete: #888780;
-  --status-dead:     #E24B4A;
+  --status-dead:     #888780;
 
   /* Work surfaces — drafting canvas + Markup mat (B319). */
   --canvas-bg:          #EDF1F6;   /* cool drafting field (retires the warm cream) */
@@ -144,13 +150,15 @@
   --success-text: #4FBF7B;
   --danger-text:  #F2706F;
   --info-text:    #6FB4F0;
+  --danger:       #F2706F;   /* vivid alert/error fill, lightened for dark (B423) */
 
-  /* Status — lighter variants so saturated values don't go muddy on dark cards (B320) */
+  /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).
+     Dead = the same gray as Complete (red lives in --danger now, B423). */
   --status-pursuit:  #F08A5D;
   --status-active:   #6FB4F0;
   --status-onhold:   #E0A23E;
   --status-complete: #9DA3AD;
-  --status-dead:     #F2706F;
+  --status-dead:     #9DA3AD;
 
   /* Work surfaces */
   --canvas-bg:          #0E1014;

@@ -69,19 +69,13 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
  * deliberately NOT used here — they belong to the tab row. */
 
 // The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
-// never raster). Keyed off the token `shape`, and drawn CENTERED on (cx,cy) — each
-// glyph's bounding box is balanced about that point so it sits dead-center in the
-// marker head regardless of the body shape. B365.
+// never raster). Keyed off the token `shape`, drawn CENTERED on (cx,cy) so it sits
+// dead-center in the bulb. Only the SETTLED stages carry a glyph (the colorblind-safe
+// second cue); Pursuit and Active are glyphless solid discs — color + size + the
+// ground-ring progress sweep distinguish them (B423). "" → no glyph.
 function statusGlyph(shape, cx, cy) {
   const n = (v) => +v.toFixed(2);
   switch (shape) {
-    case "flag": {  // Pursuit — a planted flag (pole left, pennant balanced right).
-      const px = n(cx - 2.5);
-      return `<path d="M${px},${n(cy + 5.5)} L${px},${n(cy - 5.8)}" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>` +
-             `<path d="M${px},${n(cy - 5.3)} L${n(cx + 3.5)},${n(cy - 3.1)} L${px},${n(cy - 0.9)} Z" fill="#fff"/>`;
-    }
-    case "pulse":   // Active build — an activity/heartbeat line.
-      return `<polyline points="${n(cx - 6.5)},${cy} ${n(cx - 3.5)},${cy} ${n(cx - 1.5)},${n(cy - 4.4)} ${n(cx + 1.5)},${n(cy + 4.4)} ${n(cx + 3.5)},${cy} ${n(cx + 6.5)},${cy}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
     case "pause":   // On hold — two bars.
       return `<rect x="${n(cx - 3.3)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/><rect x="${n(cx + 0.7)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/>`;
     case "check":   // Complete.
@@ -92,52 +86,70 @@ function statusGlyph(shape, cx, cy) {
   }
 }
 
-/* Status map pin (B365): a FLAT-TOP shield "Planyr site" marker (flat top edge,
- * tapering to a point at the bottom that lands on the exact spot), kept constant
- * across states so it always reads as a site — only the FILL color, white halo, size
- * tier, glyph, and opacity vary, and they vary WITH importance (Pursuit loudest →
- * Complete recessive; see statusTokens.js).
- *  • White HALO only (a fattened white copy under the body) — no drop-shadow, which
- *    flashes on re-render and costs perf; the halo is what guarantees legibility over
- *    both bright (tan/developed) and dark (water/forest) tiles.
- *  • A FIXED hit box for every state → the anchor never drifts when a pin's status/
- *    size changes, and the small Complete pin keeps the big pin's generous click
- *    target (shrinking the art never shrinks the tap target).
- * `active` = the currently-open site (a small extra size bump + float-to-top z). */
-function buildingPinIcon(status, active) {
+// Progress fraction per status (Path B — DERIVED from status until a real
+// progress_pct column lands, B161/B163). The retired building marker drew this as an
+// arc ring; the precision pin folds the SAME source into the ground ring (B424).
+const STATUS_PROGRESS = { pursuit: 0.10, active: 0.60, onhold: 0.30, complete: 1.00, dead: 0 };
+
+/* Status map pin (B424) — the "precision pin": a small color BULB on a short vertical
+ * STALK seated over a GROUND RING (a survey-monument read). The ground-ring CENTER is
+ * the anchor — it sits exactly on the site coordinate (it replaces the old building/
+ * shield bottom-tip anchor). Kept constant across states so it always reads as a site;
+ * only the bulb FILL color, the glyph, the size tier, the opacity, and the ground-ring
+ * progress sweep vary — and they vary WITH importance (Pursuit loudest/largest → Dead
+ * quietest/smallest; statusTokens.js).
+ *  • SOLID bulb + a WHITE keyline (the white disc/halo behind it) — the standing rule:
+ *    never a transparent/hollow primary marker on the aerial (B423). A soft white halo
+ *    on every stroke keeps it legible over both bright (tan/developed) and dark (water/
+ *    forest) tiles; no drop-shadow (it flashes on re-render) EXCEPT a single subtle one
+ *    on the open site.
+ *  • PROGRESS folds into the ground ring: it sweeps 0–100% clockwise from 12 o'clock
+ *    (pursuit 10 · active 60 · onhold 30 · complete 100 · dead 0) — the same source the
+ *    retired building arc used. A faint full track keeps the ring readable at 0%.
+ *  • A FIXED hit box for every state → the anchor never drifts when status/size change.
+ *    The ground-ring center sits at the viewBox bottom edge, so it maps to the hit-box
+ *    bottom-center (the iconAnchor) at EVERY size tier; its lower half overflows below.
+ *  • The glyph (‖/✓/✕) rides inside the bulb as the colorblind-safe second cue; Pursuit
+ *    and Active are glyphless solid discs (color + size + sweep carry them).
+ * `active` = the currently-open site (a small size bump + a subtle drop-shadow + top z). */
+function sitePinIcon(status, active) {
   const t = statusToken(status);
-  // Fixed hit box ≥ the old largest marker (~32×41) so the tap target never regresses.
-  const HIT_W = 34, HIT_H = 44;
-  // Size tracks importance, dropped ~25% overall from the old single size; the open
-  // site gets a small bump on top of its tier.
-  const vs = 0.75 * (t.tier || 1) * (active ? 1.12 : 1);
-  const w = +(28 * vs).toFixed(1), h = +(36 * vs).toFixed(1);
+  // Fixed hit box ≥ the old tap target (~32×41) so it never regresses when the art shrinks.
+  const HIT_W = 34, HIT_H = 46;
+  // Size tracks importance; the open site gets a small bump (1.15×) on top of its tier.
+  const vs = 0.80 * (t.tier || 1) * (active ? 1.15 : 1);
+  const w = +(26 * vs).toFixed(1), h = +(34 * vs).toFixed(1);
   const op = t.mapOpacity ?? 1;
   const halo = t.halo || 2;
-  // Flat-top shield: flat top edge (5,10)–(23,10), straight sides to y=22, then a clean
-  // taper to the point at (14,35) that lands on the geographic spot. The glyph centers
-  // on the head zone x[5,23] × y[10,22] → (14,16).
-  const body = "M14,35 L5,22 L5,10 L23,10 L23,22 Z";
-  const GX = 14, GY = 16;
-  let shapeSvg;
-  if (t.mapHollow) {
-    // Lost/passed deal: a faint hollow outline (only ever shown when filtered to Dead).
-    shapeSvg =
-      `<path d="${body}" fill="none" stroke="#fff" stroke-width="${halo * 2}" stroke-linejoin="round" opacity="0.7"/>` +
-      `<path d="${body}" fill="none" stroke="${t.color}" stroke-width="1.4" stroke-linejoin="round"/>`;
-  } else {
-    shapeSvg =
-      // white halo underlay (round joins → uniform outer ring), then the colored body
-      `<path d="${body}" fill="#fff" stroke="#fff" stroke-width="${halo * 2}" stroke-linejoin="round"/>` +
-      `<path d="${body}" fill="${t.color}" stroke="${darken(t.color, 0.28)}" stroke-width="0.75" stroke-linejoin="round"/>` +
-      statusGlyph(t.shape, GX, GY);
-  }
-  // SVG bottom-aligned + horizontally centered in the fixed box → the pin tip sits at
-  // the box's bottom-center, which is the icon anchor (the geographic point), for EVERY
-  // size tier. overflow:visible so the halo isn't clipped.
+  const col = t.color, edge = darken(col, 0.26);
+  // viewBox 0 0 26 34. Ground-ring center = (13, 34) (bottom edge) so it maps to the
+  // hit-box bottom-center for every tier; bulb up top, stalk between.
+  const CX = 13, BULB_CY = 10.5, BULB_R = 6.8, RING_CY = 34, RING_R = 5;
+  const STALK_TOP = +(BULB_CY + BULB_R - 0.5).toFixed(2);  // bulb bottom
+  const STALK_BOT = +(RING_CY - RING_R + 0.4).toFixed(2);  // ring top
+  const pct = STATUS_PROGRESS[status] ?? 0;
+  const C = +(2 * Math.PI * RING_R).toFixed(2);
+  const sweep = +(C * pct).toFixed(2);
+  // White keyline/halo underlay for the whole silhouette → legible over any imagery.
+  const whiteHalo =
+    `<circle cx="${CX}" cy="${BULB_CY}" r="${(BULB_R + halo).toFixed(1)}" fill="#fff"/>` +
+    `<line x1="${CX}" y1="${STALK_TOP}" x2="${CX}" y2="${STALK_BOT}" stroke="#fff" stroke-width="${(2.4 + halo).toFixed(1)}" stroke-linecap="round"/>` +
+    `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="#fff" stroke-width="${(2 + halo).toFixed(1)}"/>`;
+  const stalk = `<line x1="${CX}" y1="${STALK_TOP}" x2="${CX}" y2="${STALK_BOT}" stroke="${col}" stroke-width="2.4" stroke-linecap="round"/>`;
+  // Ground ring: a faint full track (so the ring still reads at 0%) + the progress arc.
+  const ringTrack = `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="${col}" stroke-width="2" opacity="0.32"/>`;
+  const ringSweep = sweep > 0
+    ? `<circle cx="${CX}" cy="${RING_CY}" r="${RING_R}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round" stroke-dasharray="${sweep} ${C}" transform="rotate(-90 ${CX} ${RING_CY})"/>`
+    : "";
+  // Bulb: solid fill + a thin same-hue edge for crispness; the white disc behind is the
+  // white keyline. The glyph (settled stages only) rides centered inside the bulb.
+  const bulb = `<circle cx="${CX}" cy="${BULB_CY}" r="${BULB_R}" fill="${col}" stroke="${edge}" stroke-width="0.6"/>`;
+  const shapeSvg = whiteHalo + stalk + ringTrack + ringSweep + bulb + statusGlyph(t.shape, CX, BULB_CY);
+  // overflow:visible so the halo + the ground ring's lower half aren't clipped.
+  const shadow = active ? "filter:drop-shadow(0 1px 2px rgba(0,0,0,0.38));" : "";
   const html =
-    `<div style="position:relative;width:${HIT_W}px;height:${HIT_H}px;opacity:${op}">` +
-    `<svg width="${w}" height="${h}" viewBox="0 0 28 36" ` +
+    `<div style="position:relative;width:${HIT_W}px;height:${HIT_H}px;opacity:${op};${shadow}">` +
+    `<svg width="${w}" height="${h}" viewBox="0 0 26 34" ` +
     `style="position:absolute;left:${((HIT_W - w) / 2).toFixed(1)}px;bottom:0;overflow:visible">` +
     shapeSvg +
     `</svg></div>`;
@@ -146,7 +158,7 @@ function buildingPinIcon(status, active) {
     html,
     iconSize: [HIT_W, HIT_H],
     iconAnchor: [HIT_W / 2, HIT_H],
-    tooltipAnchor: [0, -(h - 2)],
+    tooltipAnchor: [0, -(h - 4)],
   });
 }
 
@@ -535,7 +547,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
         // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
-        const marker = L.marker([lat, lon], { icon: buildingPinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
+        const marker = L.marker([lat, lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
       }
@@ -844,7 +856,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
-          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}{(s.els?.length ? ` · ${s.els.length} elem` : "")}</div>
+          <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
             only the non-destructive locate (⊕) stays here. */}
@@ -1064,7 +1076,9 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                     style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 99, cursor: "pointer", fontFamily: "inherit",
                       fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
                       background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
-                    <span style={{ color: on ? "#fff" : t.color, fontSize: 11 }}>{t.glyph}</span>
+                    {/* Solid status disc (matches the map pin): filled dot off, inverted on.
+                        Pursuit/Active are glyphless discs; settled stages carry ‖/✓/✕ (B423). */}
+                    <span style={{ width: 12, height: 12, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: on ? "rgba(255,255,255,0.92)" : t.color, color: on ? t.color : "#fff", fontSize: 7.5, lineHeight: 1 }}>{t.glyph}</span>
                     {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
                   </button>
                 );
@@ -1087,7 +1101,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                       <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
                         style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
                         <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
-                        <span style={{ color: t.color, fontSize: 11 }}>{t.glyph}</span>
+                        {/* Solid status disc, matching the map pin (B423). */}
+                        <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
                         <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
                         <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>
                       </button>

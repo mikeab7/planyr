@@ -15,8 +15,8 @@ const OUT = new URL("./screens/b232-b236/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
-// Token colors we expect to see (B234).
-const TOK = { pursuit: "#378ADD", active: "#639922", onhold: "#BA7517", complete: "#888780", dead: "#E24B4A" };
+// Token colors we expect to see (B234; re-hued B365; Dead off red B423).
+const TOK = { pursuit: "#D85A30", active: "#378ADD", onhold: "#BA7517", complete: "#888780", dead: "#888780" };
 
 // Seven sites clustered near the Harris default center so the pins sit on-screen
 // at the landing zoom. status is TOP-LEVEL (statusOf reads site.status for raw seeds).
@@ -50,16 +50,19 @@ async function run() {
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(2500);
 
-  // ---- B234: pins paint in the status-token colors ----
-  const fills = await page.$$eval(".leaflet-marker-icon svg path", (ps) =>
-    ps.map((p) => ({ fill: p.getAttribute("fill"), stroke: p.getAttribute("stroke") })));
-  const allCols = fills.flatMap((f) => [f.fill, f.stroke]).filter(Boolean).map((c) => c.toLowerCase());
-  ok("pins render", fills.length >= 5, `${fills.length} pin paths`);
-  ok("B234 active pin = green #639922", allCols.includes(TOK.active.toLowerCase()));
-  ok("B234 pursuit pin = blue #378ADD (hollow stroke)", allCols.includes(TOK.pursuit.toLowerCase()));
+  // ---- B234 / B423 / B424: pins paint in the status-token colors. The full
+  // precision-pin structure + per-status fills/progress/anchor are verified in
+  // ui-audit/verify-precision-pin.mjs; here we just confirm the shared tokens reach
+  // the map (bulb/stalk/ring are <circle>/<line>, not <path>) and no MODULE accent
+  // leaks onto a pin (the bug B234 closes). Dead is hidden by default. ----
+  const allCols = await page.$$eval(".leaflet-marker-icon svg *", (els) =>
+    els.flatMap((e) => [e.getAttribute("fill"), e.getAttribute("stroke")]).filter(Boolean).map((c) => c.toLowerCase()));
+  ok("pins render", allCols.length >= 4, `${allCols.length} pin colors`);
+  ok("B423 pursuit pin = coral #D85A30", allCols.includes(TOK.pursuit.toLowerCase()));
+  ok("B423 active pin = blue #378ADD", allCols.includes(TOK.active.toLowerCase()));
   ok("B234 onhold pin = amber #BA7517", allCols.includes(TOK.onhold.toLowerCase()));
   ok("B234 complete pin = gray #888780", allCols.includes(TOK.complete.toLowerCase()));
-  ok("B234 dead pin = red #E24B4A", allCols.includes(TOK.dead.toLowerCase()));
+  ok("B423 no red (#E24B4A) on any pin", !allCols.includes("#e24b4a"));
   // module accent colors must NOT appear as a pin (the bug B234 closes)
   ok("B234 module amber #EF9F27 NOT used as a pin", !allCols.includes("#ef9f27"));
   ok("B234 module teal #1D9E75 NOT used as a pin", !allCols.includes("#1d9e75"));

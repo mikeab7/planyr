@@ -149,6 +149,9 @@ const PAIRS = [
   ["--status-onhold", "--surface-raised", "status On-hold glyph · card", U],
   ["--status-complete", "--surface-raised", "status Complete glyph · card", U],
   ["--status-dead", "--surface-raised", "status Dead glyph · card", U],
+  // Alert/error fill (cloud-off badge, failed-layer dot, destructive ×) — the loud
+  // red reserved for genuine errors (B423), as an icon/border graphic on a card.
+  ["--danger", "--surface-raised", "danger icon · card", U],
   // Global interactive accent as a focus/active graphic on surfaces
   ["--accent", "--surface-raised", "accent stroke · card", U],
   ["--accent", "--chrome-bg", "accent stroke · chrome", U],

@@ -27,7 +27,7 @@ const STATUS = {
   loading: { color: "var(--warn-text)", label: "loading…" },
   loaded: { color: "var(--status-active)", label: "loaded" },
   empty: { color: "var(--text-tertiary)", label: "no data" },
-  failed: { color: "var(--status-dead)", label: "failed" },
+  failed: { color: "var(--danger)", label: "failed" },
   unconfigured: { color: "var(--text-tertiary)", label: "needs setup" }, // NEW-4: not a failure, just not set up
 };
 const RELEVANCE_LABEL = { all: "Show all", dim: "Dim", hide: "Hide" };
