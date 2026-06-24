@@ -22,6 +22,7 @@ import { autofilingProvider } from "./lib/autofiling.js";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
+import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -39,6 +40,7 @@ import { writeProp } from "../../shared/markup/propertySchema.js";
 // in via the module tab would re-fire the previous open on mount. Mirrors SitePlannerApp's
 // lastConsumedNavToken. (NEW-1)
 let lastConsumedDocToken = null;
+
 
 // Device pixel ratio (capped use is in renderBudget) — the detail layer renders at this density
 // so linework is native-sharp on the visible window regardless of sheet size (B415).
@@ -179,6 +181,7 @@ export default function DocReview({
   const [backdropReq, setBackdropReq] = useState(0);  // bump → re-raster the whole-page backdrop (page/load only)
   const [detailReq, setDetailReq] = useState(0);      // bump → re-raster the viewport detail (page/load + settle)
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState(""); // file name shown in the "Opening…" overlay (B446)
   const [err, setErr] = useState("");
 
   const [tool, setTool] = useState("select");
@@ -351,11 +354,18 @@ export default function DocReview({
   const groups = useMemo(() => groupSheets(orderedMeta), [orderedMeta]);
 
   const openFile = async (file) => {
-    if (!file) return;
+    // A null/no-op drop must not be silent (B446): name it on the always-visible banner so
+    // "nothing happened" is never mistaken for a crash ("silence is a crash").
+    if (!file) { setOpenErr("No file was received from that drop. Try the Open PDF… button, or drop a single .pdf."); return; }
     // Validate before buffering the whole file into memory (a non-PDF / 0-byte / huge
-    // file would otherwise be read via arrayBuffer() and only then fail).
-    if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { setErr("Please drop a PDF file."); return; }
-    setBusy(true); setErr(""); setBrowsing(false); // opening a PDF → show the review canvas
+    // file would otherwise be read via arrayBuffer() and only then fail). Surface the reject on
+    // BOTH the inline empty-state hint (err) AND the top banner (openErr) so it shows whether or
+    // not a document is already open (B446 — the drop-over-open path renders no empty state).
+    if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) {
+      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — drop a .pdf file.`;
+      setErr(msg); setOpenErr(msg); return;
+    }
+    setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); setBrowsing(false); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
     try {
       const pdf = await loadPdf(file);
       setPdfDoc(pdf);
@@ -377,6 +387,7 @@ export default function DocReview({
       const srcId = keepId || newSourceId();
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
+      cacheSourceBytes(srcId, file); // B448: keep the dropped bytes so a switch/reload mid-upload never loses the backdrop
       setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
@@ -385,8 +396,11 @@ export default function DocReview({
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
       }).catch(() => {}); // best-effort store; a rejection mustn't become an unhandled rejection
     } catch (e) {
-      setErr("Couldn't open that PDF. Make sure it's a valid PDF file.");
-    } finally { setBusy(false); }
+      // A read failure must surface on the always-visible banner too (the canvas may already show
+      // the prior doc, where the inline `err` hint never renders). (B446)
+      const msg = "Couldn't open that PDF. Make sure it's a valid PDF file.";
+      setErr(msg); setOpenErr(msg);
+    } finally { setBusy(false); setBusyLabel(""); }
   };
 
   /* ---- prepare page + fit (B329) ---- */
@@ -549,22 +563,30 @@ export default function DocReview({
   const fetchSourceBytes = async (src, tok) => {
     const superseded = () => tok != null && tok !== loadTok.current; // a newer open won
     if (superseded()) return; // superseded before fetching
-    // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B405).
-    // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
-    const pre = classifySource(src, { signedIn });
-    if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }
-    // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
-    // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
-    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
-    if (superseded()) return; // superseded while downloading
-    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
-    if (superseded()) return; // a newer review opened while downloading
-    // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
-    // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
-    if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
-    const pdf = await loadPdf(buf);
+    // B448: the bytes dropped this session win over everything — even if the source is still
+    // keyless because its upload is mid-flight, the backdrop stays viewable. A File re-reads
+    // cleanly (unlike a worker-transferred ArrayBuffer), so this never strands a blank canvas.
+    let blob = src && src.srcId ? getSourceBytes(src.srcId) : null;
+    if (!blob) {
+      // Name the PRECISE cause, never a silent return or a one-size "Couldn't fetch" (B405).
+      // Pre-download states: no source / never-stored / oversize / signed-out all surface here.
+      const pre = classifySource(src, { signedIn });
+      if (pre) { setRedrop(sourceUnavailableMessage(pre, { name: src?.name })); return; }
+      // Read-back: prefer Google Drive (the file's home), fall back to Supabase Storage so a
+      // pre-Drive file — or any Drive miss — still opens. (B207 read-back, fallback-safe.)
+      let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+      if (superseded()) return; // superseded while downloading
+      if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+      if (superseded()) return; // a newer review opened while downloading
+      // The file IS stored (it had a key) but the bytes didn't come back — a transient fetch /
+      // permission failure, NOT a missing file. Distinct, retryable wording; auth if signed out.
+      if (!buf) { setRedrop(sourceUnavailableMessage(signedIn ? "fetch-failed" : "signed-out", { name: src.name })); return; }
+      blob = buf;
+    }
+    const pdf = await loadPdf(blob);
     if (tok != null && tok !== loadTok.current) { try { pdf.destroy(); } catch (_) {} return; } // superseded — free the doc we just loaded
     setPdfDoc(pdf);
+    setRedrop(""); // bytes came back (from cache or cloud) — clear any stale "re-drop" banner (B448)
     setNumPages(pdf.numPages); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // refit on load (B329)
     scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
   };
@@ -574,6 +596,11 @@ export default function DocReview({
     setBrowsing(false); // a review is opening → leave the browser for the review canvas
     const s = rec.single || {};
     const src = (rec.sources || [])[0] || null;
+    // B446: a clear canvas-level "Opening…" overlay covers the whole load (setPdfDoc(null) below
+    // blanks the backdrop, so without this the switch looks like nothing registered). Cleared in
+    // the finally — but ONLY by the still-current load, so a rapid A→B switch doesn't let A's
+    // late finally hide B's overlay (B447).
+    setBusy(true); setBusyLabel(src?.name || rec.title || rec.item || "file");
     setPdfDoc(null);
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
     setReviewId(rec.id);
@@ -585,7 +612,8 @@ export default function DocReview({
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
     setDraft(null); setSel(null); setTool("select"); setRedrop(""); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
-    await fetchSourceBytes(src, tok);
+    try { await fetchSourceBytes(src, tok); }
+    finally { if (tok === loadTok.current) { setBusy(false); setBusyLabel(""); } } // only the winning load clears the overlay (B447)
   };
   const resetSingle = () => {
     setBrowsing(false); // "New" → a fresh blank review canvas (still in the current project)
@@ -604,18 +632,34 @@ export default function DocReview({
   // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
   // never fail silently again (NEW-1).
   const openReview = async (row) => {
-    if (!row || !row.id) return;
+    // Even a malformed open request is named, never silent (B446).
+    if (!row || !row.id) { setOpenErr("That file can't be opened (its reference is missing). Browse the Files list and try again."); return; }
     setOpenErr("");
+    // B447 — switching is deterministic: flush the OUTGOING review's pending write to the cloud
+    // BEFORE the incoming load starts. The debounced autosave's timer is cancelled the instant
+    // this load changes the deps, so without this the outgoing edit would live only in the local
+    // mirror — and returning to that file would load the stale cloud copy and clobber it.
+    try { await saveNow(); } catch (_) {}
+    setBusy(true); setBusyLabel(row.title || row.item || "file"); // B446: overlay up immediately so the click visibly registers
+    setBrowsing(false); // leave the Files browser now so the "Opening…" overlay (not the file list) is what's on screen during the load
     let rec = null;
-    try { rec = await loadReview(row.id); } catch (_) { rec = null; }
+    try {
+      // B447 — reconcile the cloud record with this file's local mirror, exactly as resume does,
+      // so a switch-back picks up the just-made edit even if its cloud write hadn't landed.
+      const uid = await currentUid();
+      rec = reconcile(await loadReview(row.id), readDraft(uid, row.id));
+    } catch (_) { rec = null; }
     if (!rec) {
+      setBusy(false); setBusyLabel("");
       setOpenErr(`Couldn't open “${row.title || row.item || "that file"}”. It may have been removed, or the cloud is unreachable — try again.`);
       return;
     }
     // Carry the project context through so the breadcrumb reflects the opened file (single
     // reviews also navigate inside loadSingleReview; this also covers stitch).
     if (rec.projectId) onNavigate?.({ projectId: rec.projectId });
-    if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); }
+    // A stitch hands off to <Stitcher>; the single path owns the overlay through its own load
+    // (loadSingleReview clears busy in its finally, token-guarded).
+    if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel(""); }
     else { setMode("review"); await loadSingleReview(rec); }
   };
 
@@ -1347,6 +1391,24 @@ export default function DocReview({
     );
   };
 
+  // Canvas-level "Opening…" overlay (B446): the instant ANY entry path accepts a file
+  // (drop / Open… / a Files-panel open / a switch), a clear, unmistakable cover appears with the
+  // file name + a spinner — so an open can never look like "nothing happened" (the old "Opening…"
+  // text only rendered in the empty state, leaving the drop-over-open and switch paths silent).
+  const openingOverlay = busy ? (
+    <div data-testid="opening-overlay" style={{ position: "absolute", inset: 0, zIndex: 30, display: "grid", placeItems: "center",
+      background: "var(--scrim, rgba(255,255,255,0.78))", backdropFilter: "blur(1px)", WebkitBackdropFilter: "blur(1px)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderRadius: 10, background: "var(--surface-raised)",
+        border: `1px solid ${PAL.line}`, boxShadow: "0 6px 24px rgba(0,0,0,0.18)", color: PAL.ink, fontFamily: "system-ui, sans-serif" }}>
+        <span aria-hidden="true" style={{ flex: "none", width: 18, height: 18, borderRadius: "50%", border: "2.5px solid var(--border-default)",
+          borderTopColor: "var(--accent)", animation: "spin 0.8s linear infinite" }} />
+        <span style={{ fontSize: 13.5, fontWeight: 600, maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          Opening {busyLabel || "file"}…
+        </span>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <AppHeader
@@ -1432,16 +1494,17 @@ export default function DocReview({
         />
       ) : !pdfRef.current ? (
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
-          style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
+          style={{ flex: 1, position: "relative", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>Review</div>
             <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open or drop a construction PDF to review."}</div>
             <div style={{ fontSize: 12 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
             {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: 12.5 }}>{err}</div>}
           </div>
+          {openingOverlay}
         </div>
       ) : (
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{ flex: 1, display: "flex", minHeight: 0, position: "relative" }}>
           {/* sheet list — logical sheets (B348) with real labels (B266) */}
           <div style={{ flex: "none", width: 200, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
             {/* Prev/Next pager (B306) — also ← / → and PageUp/PageDown on the keyboard */}
@@ -1670,6 +1733,9 @@ export default function DocReview({
               <span style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", whiteSpace: "nowrap" }}>◂ Takeoff</span>
             </button>
           )}
+          {/* "Opening…" overlay covers the whole canvas area, including the drop-over-an-open-doc
+              path (B294/B446) where the prior sheet is still showing underneath. */}
+          {openingOverlay}
         </div>
       )}
 

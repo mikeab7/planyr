@@ -22,6 +22,33 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" — the Document Review open/switch state &
+     feedback bugs (drop gives no signal · switching files loses state · backdrop vanishes mid-upload).
+     Highest real B# across both files was B445, so minted **B446 / B447 / B448**. Per STANDING RULE #1
+     all three were filed AND fixed + verified the SAME session on branch `claude/vibrant-pascal-wkg50i`
+     — full [x] blocks live in BACKLOG-DONE.md.
+       • B446 (NEW-1) — a GAP in B294 (drop-over-open) + the docIntent/B405 open paths, NOT a duplicate:
+         B294 wired the drop handler but the "Opening…" text only rendered in the empty state, so the
+         drop-over-open and Files-panel/openReview paths showed no loading signal. Added a canvas-level
+         "Opening <name>…" overlay (data-testid="opening-overlay") driven by `busy`, set on EVERY entry
+         path (openFile / openReview / loadSingleReview). openErr/err now fire on every no-op/null/invalid
+         branch (null drop, non-PDF reject, loadReview→null) so an open is never silent. Headless V131
+         (`ui-audit/verify-open-feedback.mjs`, 6/6, logged out).
+       • B447 (NEW-2) — a GAP in B52 (load-supersede token) + the resume effect: B52 stops a late load
+         landing on the wrong review, but a switch never FLUSHED the outgoing review's pending write, and
+         openReview didn't reconcile with the local mirror — so the cancelled debounce left the last edit
+         only in localStorage and a switch-back loaded the stale cloud copy (the "forgets which file"
+         clobber). Fix: openReview `await saveNow()` (flush outgoing) THEN `reconcile(loadReview, readDraft)`
+         (incoming picks up its newer local mirror), exactly like resume. The lazy-mount resume effect was
+         confirmed to already stand down for an in-workspace switch (booted-once + projectId + bootDocIntent
+         guards). Auth-only (two saved cloud reviews) → signed-in live check logged V131.
+       • B448 (NEW-3) — net-new safety net under B447: a session byte cache (pure `lib/sessionBytes.js`,
+         5 unit tests) keyed by srcId holds the dropped File, so a switch/reload BEFORE the Drive/Supabase
+         upload resolves (source still keyless) re-opens the backdrop from memory instead of the re-drop
+         banner / a blank canvas. `fetchSourceBytes` checks the cache before classifySource/Drive/Supabase.
+         Logged-out render-from-cache verified V131; the keyless-mid-upload path's signed-in confirm logged.
+     lint 0 errors · 1434 tests · build green. -->
+
 <!-- 2026-06-24: owner-reported trio (screenshot + voice) on the parcel-MERGE banner — "NEW-1/NEW-2/NEW-3".
      Highest real B# across both files was B441, so minted **B442 / B443 / B444**. Per STANDING RULE #1
      all three were filed AND fixed + headless-verified (`ui-audit/verify-merge-banner.mjs`, 6/6) +
