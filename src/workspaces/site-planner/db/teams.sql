@@ -24,6 +24,10 @@ create table if not exists public.teams (
   created_by  uuid not null default auth.uid() references auth.users(id),
   created_at  timestamptz not null default now()
 );
+-- If the table already existed (hand-created in the dashboard) and is missing columns,
+-- add them so the INSERT policy and createTeam() can reference created_by.
+alter table if exists public.teams add column if not exists created_by uuid not null default auth.uid() references auth.users(id);
+alter table if exists public.teams add column if not exists created_at timestamptz not null default now();
 
 -- 2) Membership --------------------------------------------------------------
 create table if not exists public.team_members (
@@ -166,6 +170,30 @@ language sql stable security definer set search_path = public as $$
   where m.team_id = p_team and public.is_team_member(p_team);
 $$;
 grant execute on function public.list_team_members(uuid) to authenticated;
+
+-- 9b) Atomic team creation (SECURITY DEFINER) --------------------------------
+-- Create a team AND the creator's admin membership in one transaction. Runs as
+-- the function owner (RLS bypassed inside), returning the new id directly. This
+-- avoids the two-step client insert, whose .select() RETURNING on public.teams
+-- is blocked by the "members read team" SELECT policy (the creator isn't a
+-- member yet) → "new row violates row-level security policy for table teams".
+create or replace function public.create_team(p_name text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_name text := trim(coalesce(p_name, ''));
+  v_id   uuid;
+begin
+  if v_uid is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if v_name = '' then raise exception 'Team name is required' using errcode = '22023'; end if;
+  insert into public.teams (name, created_by) values (v_name, v_uid) returning id into v_id;
+  insert into public.team_members (team_id, user_id, role, added_by)
+    values (v_id, v_uid, 'admin', v_uid) on conflict (team_id, user_id) do nothing;
+  return v_id;
+end;
+$$;
+revoke all on function public.create_team(text) from public;
+grant execute on function public.create_team(text) to authenticated;
 
 -- 10) Auto-claim invites on signup — extend handle_new_user (from db/profiles.sql) --
 -- Re-created here (AFTER the team tables exist) so a brand-new user lands on any team they

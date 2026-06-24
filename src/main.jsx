@@ -4,7 +4,7 @@ import Shell from "./app/Shell.jsx";
 import { ThemeProvider } from "./shared/theme/ThemeProvider.jsx";
 import { installChunkReloadGuard } from "./app/chunkReload.js";
 import { installClientErrorTelemetry } from "./shared/telemetry/clientErrors.js";
-import { registerGisSw } from "./workspaces/site-planner/lib/registerGisSw.js";
+import { retireGisSw } from "./workspaces/site-planner/lib/registerGisSw.js";
 import "./index.css";
 
 // Self-report runtime errors (B279): global error / unhandledrejection / preloadError
@@ -19,10 +19,11 @@ installClientErrorTelemetry();
 // build. Registered before render so it covers every lazy workspace.
 installChunkReloadGuard();
 
-// Cache county/agency map IMAGERY so saved sites paint instantly + survive a server outage
-// (B438). Host-scoped (only cross-origin ArcGIS imagery), fail-safe, after load — never
-// touches app assets, never blocks first paint.
-registerGisSw();
+// County/agency map IMAGERY is now cached server-side (durable copy in Google Drive, served via
+// /api/gis-cache/*, B439) instead of in the browser — cross-device, survives a server outage, and
+// off the user's machine. This retires the old browser-side service-worker cache (B438) so a
+// returning visitor stops using it. Fail-safe, after load.
+retireGisSw();
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>

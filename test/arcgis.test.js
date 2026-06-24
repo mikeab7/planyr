@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   outerRingsLngLat, queryAtPoint, identifyParcelDetailed, identifyParcelEager,
-  ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError,
+  ParcelFetchError, PARCEL_FETCH_TIMEOUT_MS, humanizeError, geoJsonToEsriFeature,
 } from "../src/workspaces/site-planner/lib/arcgis.js";
 
 const LAYER = "https://example.test/MapServer/0";
@@ -60,6 +60,38 @@ describe("outerRingsLngLat — multipart parcel support (Pearland B36c fix)", ()
     expect(outerRingsLngLat(null)).toEqual([]);
     expect(outerRingsLngLat({})).toEqual([]);
     expect(outerRingsLngLat({ geometry: { rings: [] } })).toEqual([]);
+  });
+});
+
+// geoJsonToEsriFeature converts an esri-leaflet display-layer GeoJSON polygon into the
+// esri-shaped { geometry:{rings}, attributes } the identify/highlight path consumes —
+// so an already-drawn outline can feed the optimistic-highlight pick (B441). Output
+// must round-trip cleanly through outerRingsLngLat (the next stage in that path).
+describe("geoJsonToEsriFeature — GeoJSON display feature → esri feature (B441)", () => {
+  const gjPolygon = (rings) => ({ type: "Feature", properties: { OBJECTID: 7 }, geometry: { type: "Polygon", coordinates: rings } });
+  const ring = (lon, lat, h) => [[lon - h, lat - h], [lon + h, lat - h], [lon + h, lat + h], [lon - h, lat + h], [lon - h, lat - h]];
+
+  it("flattens a Polygon's rings and carries properties → attributes", () => {
+    const out = geoJsonToEsriFeature(gjPolygon([ring(-95.4, 29.58, 0.001)]));
+    expect(out.geometry.rings).toHaveLength(1);
+    expect(out.attributes.OBJECTID).toBe(7);
+    expect(outerRingsLngLat(out)).toHaveLength(1); // round-trips into the highlight path
+  });
+
+  it("flattens a MultiPolygon into one flat ring list (each tract preserved)", () => {
+    const mp = {
+      type: "Feature", properties: {},
+      geometry: { type: "MultiPolygon", coordinates: [[ring(-95.41, 29.58, 0.0008)], [ring(-95.40, 29.58, 0.0009)]] },
+    };
+    const out = geoJsonToEsriFeature(mp);
+    expect(out.geometry.rings).toHaveLength(2);
+    expect(outerRingsLngLat(out)).toHaveLength(2); // both tracts survive (multipart-safe)
+  });
+
+  it("returns null for a non-polygon / empty / missing geometry", () => {
+    expect(geoJsonToEsriFeature(null)).toBeNull();
+    expect(geoJsonToEsriFeature({ geometry: { type: "Point", coordinates: [0, 0] } })).toBeNull();
+    expect(geoJsonToEsriFeature({ geometry: { type: "Polygon", coordinates: [] } })).toBeNull();
   });
 });
 

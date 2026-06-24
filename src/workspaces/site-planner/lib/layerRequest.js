@@ -10,6 +10,13 @@
  * FULL pinned sublayer set for the whole view, in or out of coverage. There is no
  * coverage parameter here by construction; test/coverage.test.js locks it down.
  */
+import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
+
+// Route a service URL through the same-origin Drive-backed cache proxy (B439) when asked. This
+// is a pure TRANSPORT swap — the layer still requests its full pinned sublayer set for the whole
+// view; the proxy only adds a durable copy + outage fallback in front (and fails open to the same
+// upstream). Off → the original direct-to-agency URL, exactly as before.
+const layerUrl = (cfg, proxy) => (proxy ? proxyServiceUrl(cfg.url) : cfg.url);
 
 // The transient HTTP statuses worth a retry — 429 (rate-limited) + 5xx (server blips).
 // One definition shared by fetchWithRetry (the ?f=json probe), withTileRetry (raster
@@ -20,16 +27,16 @@ export const isTransientStatus = (code) => TRANSIENT_STATUS.includes(Number(code
 
 /* esri dynamicMapLayer (server-rendered f=image export) options. The pinned `layers`
  * set is passed through WHOLE — never trimmed by anything (incl. coverage). */
-export function dynamicLayerOptions(cfg, opacity, pane) {
-  const o = { url: cfg.url, opacity, f: "image" };
+export function dynamicLayerOptions(cfg, opacity, pane, { proxy = false } = {}) {
+  const o = { url: layerUrl(cfg, proxy), opacity, f: "image" };
   if (pane) o.pane = pane;
   if (cfg.layers) o.layers = cfg.layers;
   return o;
 }
 
 /* esri imageMapLayer (ImageServer) options. */
-export function imageLayerOptions(cfg, opacity, pane) {
-  const o = { url: cfg.url, opacity };
+export function imageLayerOptions(cfg, opacity, pane, { proxy = false } = {}) {
+  const o = { url: layerUrl(cfg, proxy), opacity };
   if (pane) o.pane = pane;
   if (cfg.rendering) o.renderingRule = { rasterFunction: cfg.rendering };
   return o;

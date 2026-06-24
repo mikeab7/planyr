@@ -1,21 +1,27 @@
-/* Register the GIS imagery service worker (B438).
+/* Retire the old GIS imagery service worker (B439 supersedes B438).
  *
- * Best-effort + fail-safe: only on a secure context that supports service workers, only after
- * load (so it never competes with first paint), and any failure is swallowed (the app works
- * exactly as before — caching is a pure enhancement). The SW itself is host-scoped (it only
- * touches cross-origin ArcGIS imagery), so registering it can't affect app behaviour.
- *
- * Path: the SW lives at the site root (`public/gis-sw.js` → `/gis-sw.js`); scope `/` is correct
- * at the deployed root and on the localhost preview. `swUrl`/`scope` are overridable for tests.
+ * The browser-side imagery cache (a service worker) was replaced by a server-side, cross-device
+ * cache (durable copy in Google Drive, served via /api/gis-cache/*). This actively UNREGISTERS
+ * any previously-installed Planyr GIS worker so a returning visitor stops using the old
+ * browser-local cache — belt-and-suspenders with the self-unregistering tombstone at
+ * public/gis-sw.js (a browser only re-checks the SW file on navigation, so we also unregister
+ * here on boot). Best-effort + fail-safe: never throws into app boot. `scope` is overridable
+ * for tests.
  */
-export function registerGisSw(opts = {}) {
+export function retireGisSw(opts = {}) {
   try {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-    if (typeof window !== "undefined" && window.isSecureContext === false) return; // http:// (non-localhost) → skip
-    const swUrl = opts.swUrl || "/gis-sw.js";
-    const scope = opts.scope || "/";
-    const reg = () => { navigator.serviceWorker.register(swUrl, { scope }).catch(() => {}); };
-    if (typeof document !== "undefined" && document.readyState === "complete") reg();
-    else if (typeof window !== "undefined") window.addEventListener("load", reg, { once: true });
+    const run = () => {
+      try {
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          for (const reg of regs || []) {
+            const url = (reg && reg.active && reg.active.scriptURL) || "";
+            if (url.indexOf("gis-sw.js") !== -1) reg.unregister().catch(() => {});
+          }
+        }).catch(() => {});
+      } catch (_) { /* ignore */ }
+    };
+    if (typeof document !== "undefined" && document.readyState === "complete") run();
+    else if (typeof window !== "undefined") window.addEventListener("load", run, { once: true });
   } catch (_) { /* never throw into boot */ }
 }

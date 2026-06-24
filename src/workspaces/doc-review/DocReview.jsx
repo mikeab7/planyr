@@ -31,7 +31,7 @@ import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinc
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
 import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
-import { propsForTool, columnMeta } from "../../shared/markup/tools.matrix.js";
+import { propsForTool, columnMeta, toolById } from "../../shared/markup/tools.matrix.js";
 import { writeProp } from "../../shared/markup/propertySchema.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
@@ -182,6 +182,9 @@ export default function DocReview({
   const [err, setErr] = useState("");
 
   const [tool, setTool] = useState("select");
+  // Bluebeam-style arming: a single click arms a tool for ONE markup (after which it reverts to
+  // Select and selects the new markup); double-clicking the rail button LOCKS it for repeated use.
+  const [toolLock, setToolLock] = useState(false);
   // Per-tool style overrides (B426): the user's last-set value for each property key becomes
   // the sticky default for the next markup of that tool kind. Stored as canonical keys.
   const [propStyle, setPropStyle] = useState({});
@@ -710,9 +713,13 @@ export default function DocReview({
         : columnMeta(key)?.default;
       if (v !== undefined) style[key] = v;
     });
+    const id = uid();
     pushHistory();
-    setMarkups((a) => [...a, { id: uid(), page, ...style, ...mk }]);
+    setMarkups((a) => [...a, { id, page, ...style, ...mk }]);
     setDraft(null);
+    // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
+    // (so its properties show + you can tweak it); a locked tool stays armed.
+    if (!toolLock) { setTool("select"); setSel(id); }
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -729,11 +736,14 @@ export default function DocReview({
 
   const panMode = () => tool === "pan" || spaceHeld;
 
-  // Property panel onChange (B426): patch the selected markup + update the sticky style default.
+  // Property panel onChange (B426 + B437): patch the selected markup if one is selected, and ALWAYS
+  // update the sticky style default — so the panel also works for an ARMED tool with nothing selected
+  // (set color/weight/fill/font BEFORE drawing; new markups inherit it via commit()).
   const onPropChange = (key, value) => {
-    if (!sel) return;
-    pushHistory();
-    setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
+    if (sel) {
+      pushHistory();
+      setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
+    }
     setPropStyle((s) => ({ ...s, [key]: value }));
   };
 
@@ -747,7 +757,13 @@ export default function DocReview({
     if (!text) { if (ed.id) { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== ed.id)); } return; } // empty → drop / delete
     pushHistory();
     if (ed.id) setMarkups((a) => a.map((m) => (m.id === ed.id ? { ...m, text } : m)));
-    else setMarkups((a) => [...a, { id: uid(), page: ed.page, kind: "text", pts: [ed.pt], text }]);
+    else {
+      const style = {}; // honor the sticky text style (size/color/bold/…) set before drawing
+      propsForTool("text").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
+      const id = uid();
+      setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...style, text }]);
+      if (!toolLock) { setTool("select"); setSel(id); } // revert + select like the other tools
+    }
   };
 
   const onDown = (e) => {
@@ -1222,7 +1238,9 @@ export default function DocReview({
 
   // Right-side tool rail (B330): the drawing/measure tools + zoom controls, Bluebeam-style.
   const railItems = [
-    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
+    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: `${t.hint}${t.id !== "select" && t.id !== "pan" ? "  (double-click to keep this tool active)" : ""}`, icon: <MkIcon id={t.id} />, active: tool === t.id,
+      onClick: () => { setTool(t.id); setToolLock(false); setDraft(null); setCalInput(null); },
+      onDoubleClick: () => { setTool(t.id); setToolLock(true); setDraft(null); setCalInput(null); } })),
     { kind: "spacer" },
     { kind: "header", label: "Zoom" },
     { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
@@ -1481,20 +1499,23 @@ export default function DocReview({
                 );
               })}
             </div>
-            {/* Properties section (B426) — appears below the sheet list when a markup is selected.
-                Driven by schemaForMarkup → PropertyPanel; edits patch the markup via onPropChange. */}
-            {sel && (() => {
-              const selM = pageMarks.find((mm) => mm.id === sel);
-              if (!selM) return null;
+            {/* Properties (B426 + B437) — shows for a SELECTED markup, OR for the ARMED drawable tool
+                so you can set color/weight/fill/font BEFORE drawing (new markups inherit the sticky
+                style via commit()). Driven by schemaForMarkup → PropertyPanel. */}
+            {(() => {
+              const selM = sel ? pageMarks.find((mm) => mm.id === sel) : null;
+              const armed = (!selM && toolById(tool) && propsForTool(tool).length) ? tool : null;
+              if (!selM && !armed) return null;
+              const subject = selM || { kind: armed, ...propStyle };
               return (
                 <div style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
                   <div style={{ padding: "6px 12px 4px", fontSize: 10, color: PAL.muted, fontWeight: 700,
                     textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>Properties</span>
-                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{selM.kind}</span>
+                    <span>{selM ? "Properties" : "Tool style"}</span>
+                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{selM ? selM.kind : `${armed} · default`}</span>
                   </div>
-                  <div style={{ maxHeight: 220, overflowY: "auto" }}>
-                    <PropertyPanel markup={selM} onChange={onPropChange} />
+                  <div data-testid="property-panel" style={{ maxHeight: 220, overflowY: "auto" }}>
+                    <PropertyPanel markup={subject} onChange={onPropChange} />
                   </div>
                 </div>
               );
