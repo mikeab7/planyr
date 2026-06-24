@@ -1,4 +1,4 @@
-/* Pure helpers for the same-origin GIS imagery cache proxy (B439).
+/* Pure helpers for the same-origin GIS imagery cache proxy (B445).
  *
  * Plain-English: the county/agency map layers (FEMA flood, wetlands, city utilities) are drawn
  * on THEIR servers and streamed back as pictures. Those servers go down, and they don't send

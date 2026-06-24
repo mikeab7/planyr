@@ -1,4 +1,4 @@
-/* Retire the old GIS imagery service worker (B439 supersedes B438).
+/* Retire the old GIS imagery service worker (B445 supersedes B438).
  *
  * The browser-side imagery cache (a service worker) was replaced by a server-side, cross-device
  * cache (durable copy in Google Drive, served via /api/gis-cache/*). This actively UNREGISTERS

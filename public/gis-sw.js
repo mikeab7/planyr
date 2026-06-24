@@ -1,4 +1,4 @@
-/* Planyr GIS imagery service worker — RETIRED (B439 supersedes B438).
+/* Planyr GIS imagery service worker — RETIRED (B445 supersedes B438).
  *
  * The browser-side imagery cache was replaced by a server-side, cross-device cache (the durable
  * copy lives in Google Drive, served via /api/gis-cache/*), because a per-browser cache doesn't
