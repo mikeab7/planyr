@@ -22,13 +22,25 @@ export async function signIn(page) {
   await expect(emailField.first()).toBeVisible();
   await emailField.first().fill(E2E_EMAIL);
   await page.locator('input[type="password"]').first().fill(E2E_PASSWORD);
-  await page.getByRole("button", { name: /^sign in$/i }).click();
+  // The submit button has a dedicated testid — the form ALSO renders a "Sign in" mode-toggle
+  // tab, so targeting by name "/^sign in$/" hit a strict-mode violation (two matches). The
+  // testid is unambiguous and mode-independent.
+  await page.getByTestId("auth-submit").click();
   // Signed-in: the email field is gone and the app chrome shows the module tabs.
   await expect(page.getByTestId("module-tab-site-planner")).toBeVisible({ timeout: 15_000 });
 }
 
 /* Switch to a workspace module by its tab. moduleId is the internal id
- * ("site-planner" | "doc-review" | …) — the user-facing label may differ ("Review"). */
+ * ("site-planner" | "doc-review" | …) — the user-facing label may differ ("Review").
+ *
+ * A transient overlay (a post-sign-in "cloud on"/sync toast, or a closing auth-panel backdrop)
+ * can briefly sit over the header tabs and intercept the click. Retry the whole click→verify
+ * until the tab actually becomes current, rather than failing on the first interception. */
 export async function openModule(page, moduleId) {
-  await page.getByTestId(`module-tab-${moduleId}`).click();
+  const tab = page.getByTestId(`module-tab-${moduleId}`);
+  await tab.waitFor({ state: "visible", timeout: 20_000 });
+  await expect(async () => {
+    await tab.click({ timeout: 3_000 });
+    await expect(tab).toHaveAttribute("aria-current", "page", { timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
 }
