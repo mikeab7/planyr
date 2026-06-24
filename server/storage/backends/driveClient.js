@@ -118,8 +118,17 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
 
     async list({ parentFolderId }) {
       const query = `'${parentFolderId}' in parents and trashed=false`;
-      const r = await api("GET", `${DRIVE}/files?q=${q(query)}&fields=files(id,name,size,mimeType,parents)&pageSize=1000`);
+      const r = await api("GET", `${DRIVE}/files?q=${q(query)}&fields=files(id,name,size,mimeType,parents,modifiedTime)&pageSize=1000`);
       return r.files || [];
+    },
+
+    // One targeted lookup of a single file by exact name under a parent — returns
+    // { id, modifiedTime, size } or null. Used by the GIS imagery cache (B439) so a cache
+    // hit costs one small query, not a list of the whole folder.
+    async findFile(name, parentFolderId) {
+      const query = `name='${name.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and trashed=false`;
+      const r = await api("GET", `${DRIVE}/files?q=${q(query)}&fields=files(id,name,size,modifiedTime)&orderBy=modifiedTime desc&pageSize=1`);
+      return (r.files && r.files[0]) || null;
     },
 
     async update(fileId, { addParents, removeParents, name } = {}) {
