@@ -50,24 +50,6 @@ export async function handleGisCache({
   if (!upstream) return json({ error: "Unsupported GIS request." }, 400);
   const key = `${cacheKey(upstream.url)}.bin`;
 
-  // TEMP read-only diagnostic (B439 bring-up): why does prod fail open? Reports whether the Drive
-  // client wired, whether the cache folder resolves, and what the agency returns to a server-side
-  // fetch — without serving/redirecting. Remove once the cache is confirmed live.
-  if (sp.get("diag") === "1") {
-    const out = { diag: true, upstream: upstream.url, hasClient: !!client };
-    if (client) {
-      try { out.folderId = await folderIdFor(); out.folderOk = true; }
-      catch (e) { out.folderOk = false; out.folderErr = String((e && e.message) || e); }
-    }
-    // With a browser UA (what the fix uses):
-    try { const r = await fetchImpl(upstream.url, { headers: UPSTREAM_HEADERS }); out.uaStatus = r.status; out.uaOk = r.ok; out.uaType = r.headers.get("content-type"); }
-    catch (e) { out.uaErr = String((e && e.message) || e); }
-    // With Cloudflare's default UA (the old behavior):
-    try { const r = await fetchImpl(upstream.url); out.defStatus = r.status; out.defOk = r.ok; }
-    catch (e) { out.defErr = String((e && e.message) || e); }
-    return json(out);
-  }
-
   try {
     if (!client) return metaMode ? json({ cached: false }) : redirectTo(upstream.url); // no creds → live-only
     const folderId = await folderIdFor();

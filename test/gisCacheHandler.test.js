@@ -97,6 +97,17 @@ describe("handleGisCache — cache hit", () => {
   });
 });
 
+describe("handleGisCache — upstream fetch carries a browser User-Agent (gov hosts 403 a bare UA)", () => {
+  it("sends a non-empty user-agent header when fetching the agency on a miss", async () => {
+    let seenHeaders = null;
+    const recordingFetch = async (_url, opts) => { seenHeaders = (opts && opts.headers) || {}; return new Response("IMG", { status: 200, headers: { "content-type": "image/png" } }); };
+    const bag = deferBag();
+    await handleGisCache({ client: fakeDrive(), segs: SEGS, search: SEARCH, fetchImpl: recordingFetch, folderIdFor, defer: bag.defer });
+    expect(seenHeaders).toBeTruthy();
+    expect(String(seenHeaders["user-agent"] || "")).toMatch(/Mozilla/);
+  });
+});
+
 describe("handleGisCache — fail-open", () => {
   it("302-redirects to the real upstream when there are no Drive creds", async () => {
     const res = await handleGisCache({ client: null, segs: SEGS, search: SEARCH, folderIdFor });
