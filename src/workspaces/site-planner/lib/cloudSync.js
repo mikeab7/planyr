@@ -64,11 +64,15 @@ export async function cloudUpsert(uid, model) {
   if (r.conflict) return { ok: false, conflict: true };
   if (r.degrade) {
     // The `version` column isn't migrated in yet → fall back to a plain upsert (today's
-    // last-write-wins). In that (pre-version) DB state the PK is still (user_id, id) and team_id
-    // doesn't exist either, so upsert without team_id keyed on the composite PK. Saving is never
-    // blocked by the feature being un-migrated; the guard is simply dormant.
+    // last-write-wins). Target the live single-column PK "id" (post db/team_sharing.sql);
+    // only if THAT 42P10s on a genuinely pre-migration DB (still composite (user_id, id))
+    // do we retry the old target. Mirrors upsertFileFacts' id-first→composite fallback so a
+    // version-less DB never breaks saving regardless of which PK it's on. team_id is dropped
+    // (the column may be un-migrated too). Saving is never blocked by an un-migrated feature.
     const { team_id, ...noTeam } = row;
-    const { error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" });
+    let { error } = await supabase.from("sites").upsert(noTeam, { onConflict: "id" });
+    if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change DB: target is (user_id,id)
+      ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
     return { ok: !error, error: error ? error.message : null };
   }
   return { ok: false, error: r.error || "cloud write failed" };

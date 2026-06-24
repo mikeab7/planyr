@@ -124,10 +124,21 @@ export async function upsertReview(record) {
   let r = await attempt((x) => x);
   if (r.ok === false && r.error && isMissingColumn(r.error, "team_id")) // team_id column absent → drop it
     r = await attempt(stripTeam);
-  if (r.degrade) { // version column absent → plain upsert (pre-version DB: no team_id, old composite PK)
-    let { error } = await supabase.from("doc_reviews").upsert({ ...stripTeam(full), user_id: uid }, { onConflict: "user_id,id" });
-    if (error && /column|project_id|doc_date|revision|item|schema cache/i.test(error.message || ""))
-      ({ error } = await supabase.from("doc_reviews").upsert({ ...stripTeam(base), user_id: uid }, { onConflict: "user_id,id" }));
+  if (r.degrade) { // version column absent → plain upsert. Target the live single-column PK
+    // "id" (post db/team_sharing.sql); fall back to the old composite (user_id,id) only if that
+    // 42P10s on a genuinely pre-migration DB. Mirrors upsertFileFacts' id-first→composite fallback.
+    const isPkMismatch = (e) => /on conflict|no unique|constraint|exclusion/i.test(e || "");
+    const isLibColMiss = (e) => /column|project_id|doc_date|revision|item|schema cache/i.test(e || "");
+    const plainUpsert = async (onConflict, withUid) => {
+      const stamp = (row) => (withUid ? { ...row, user_id: uid } : row);
+      let { error } = await supabase.from("doc_reviews").upsert(stamp(stripTeam(full)), { onConflict });
+      if (error && isLibColMiss(error.message)) // library index columns un-migrated → core row
+        ({ error } = await supabase.from("doc_reviews").upsert(stamp(stripTeam(base)), { onConflict }));
+      return error;
+    };
+    let error = await plainUpsert("id", false);
+    if (isPkMismatch(error && error.message)) // pre-PK-change DB: target is (user_id,id)
+      error = await plainUpsert("user_id,id", true);
     if (!error) writeDraft(uid, data);
     return { ok: !error, error: error ? error.message : null };
   }

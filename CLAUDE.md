@@ -691,7 +691,13 @@ create table public.sites (
   id text not null, user_id uuid not null default auth.uid() references auth.users(id),
   group_id text, site text, name text, county text,
   updated_at timestamptz not null default now(), data jsonb not null,
-  primary key (user_id, id) );
+  primary key (id) );
+  -- NOTE: live PK is single-column (id) — verified against planyr-production 2026-06-23.
+  -- The table was CREATED with primary key (user_id, id); db/team_sharing.sql later changed
+  -- it to (id) so one row exists per project regardless of which teammate edits it. user_id
+  -- is KEPT as the creator/owner column and is the RLS predicate (never part of the PK now).
+  -- Upserts must therefore target onConflict "id" (with a "user_id,id" fallback only for a
+  -- not-yet-migrated DB) — never "user_id,id" alone, which 42P10s on the live schema.
 ```
 **RLS (private-by-default; applied in the dashboard):**
 ```sql
@@ -743,7 +749,11 @@ create table public.doc_reviews (
   id text not null, user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   title text, kind text, project text, discipline text,
   updated_at timestamptz not null default now(), data jsonb not null,
-  primary key (user_id, id) );
+  primary key (id) );
+-- NOTE: live PK is single-column (id) — same story as public.sites: CREATEd with
+-- primary key (user_id, id), migrated to (id) by db/team_sharing.sql (verified against
+-- planyr-production 2026-06-23). user_id stays the owner column + RLS predicate; upserts
+-- target onConflict "id" (with a "user_id,id" fallback only for a not-yet-migrated DB).
 -- RLS: same 4 own-rows policies as public.sites (private by default).
 -- Storage bucket 'doc-review-files' (private, 50 MB cap): 4 own-folder policies on
 -- storage.objects keyed by (storage.foldername(name))[1] = auth.uid()::text.

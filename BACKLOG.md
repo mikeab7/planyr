@@ -23,8 +23,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 ## 🔲 Open
 
 <!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" (status-marker palette + the precision-pin
-     map marker + drop the saved-row element count). Highest B# across both files was B422, so minted
-     **B433 / B434 / B435**. Per STANDING RULE #1 all three were filed AND fixed + headless-verified
+     map marker + drop the saved-row element count). Highest B# was B422 when filed, but a concurrent
+     `main` (#321, the Shared markup engine batch) took B423–B432 while this was in flight, so
+     renumbered to **B433 / B434 / B435** = the real next free band. Per STANDING RULE #1 all three
+     were filed AND fixed + headless-verified
      (V123, `ui-audit/verify-precision-pin.mjs`, 18/18) + shipped the SAME session on branch
      `claude/stoic-albattani-8bmtp0` — full [x] blocks live in BACKLOG-DONE.md.
        • B433 (NEW-1) — AMENDS B234 (the shared status tokens, edited IN PLACE — not a parallel set) +
@@ -41,6 +43,19 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
        • B435 (NEW-3) — net-new; dropped the ` · N elem` suffix from the left-rail site rows.
      Deduped: B433 is the residual of B365 (not a re-file); B434 replaces B161's shape (progress kept).
      lint 0 errors · 1335 tests · build green. -->
+
+### B423 — Shared markup/measure tool engine + Bluebeam-parity refinement loop `[Site Planner + Doc Review / Markup]` (umbrella)  *(owner-dropped 2026-06-23 as the "Shared Markup/Measure Tool Engine" brief; first minted B421 but RENUMBERED to **B423** on merge-in of main — the concurrent PR #320 had already taken B421 (Arrange) + B422 (Layers); B423 = highest real B# across both files (B422) + 1; plan — `/root/.claude/plans/planyr-shared-tidy-avalanche.md`)*
+One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (and the Stitcher) consume, bringing every tool to Bluebeam-equivalent behavior, plus a committed machine-checkable tool×property matrix + an automated tester so future tool work converges on its own. The brief's "NEW-#" are scratch labels; real filed IDs are B424+. Owner decisions locked: tools RIGHT / properties LEFT in both; Arrow = an arrowhead toggle on Line; verifier = the full cloud rig (B278/B280/B281) built first. Sub-items, in dependency order:
+- `[x]` **B424 (NEW-1) — the tool×property matrix as data. DONE this session.** (see BACKLOG-DONE.md)
+- `[x]` **B425 (NEW-2) — the shared engine's PURE layer. DONE this session.** (see BACKLOG-DONE.md)
+- `[ ]` **B426 (NEW-2 cont./NEW-3) — shared `MarkupRenderer.jsx` + `PropertyPanel.jsx` + host wiring; unify layout (Site rail → right, Doc gains a left property panel).** Not started.
+- `[ ]` **B427 (NEW-4) — Document Review parity tools: Line, Polyline, Polygon, Ellipse, Callout via the engine.**
+- `[ ]` **B428 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).**
+- `[ ]` **B429 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.**
+- `[ ]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.**
+- `[ ]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).**
+- `[ ]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.**
+- **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[ ]` **B280 (seeded test account) = OWNER action, seed file delivered** (`e2e/seed/`) — the one remaining gate before the auth-gated loop runs in CI.
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
@@ -593,30 +608,12 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
      **chromium-1228** build runs it — Doc-Review headless checks must use 1228 (corrects the V63/V65
      "can't run pdf.js" note). These 9 are shipped — eligible to move to BACKLOG-DONE.md on a future pass. -->
 
-### B278 — Playwright regression harness against preview deploys `[Infra / E2E]` (task)  *(arrived as "NEW-1" 2026-06-20 owner chat; filed **B278** — jumped past B271–B277, consumed by concurrent `main` + PR #217; batch B278–B281)*
-`[ ]` Stand up Playwright as the **deterministic regression net** — headless in CI, **not** via Cowork. **Why not Cowork:** its vision/screenshot tokens cost multiples more per run; reserve Cowork for exploratory discovery + live sign-off, use Playwright for the repeatable assertions.
-- **Approach:** add `@playwright/test`; config targets the Cloudflare **per-branch preview URL** (read from an env var so CI injects the branch's preview). Log in via a **dedicated test account** (B280), never the owner's real creds.
-- **First flows (highest-severity paths):** (1) login succeeds + app comes up **Cloud on** — assert the "Cloud off" state is NOT present (the silent `VITE_SUPABASE_URL`/`ANON_KEY`-missing build is a known crash-severity incident); (2) load a **Pearland** parcel → assert correct county resolution (point-in-polygon: Brazoria/Harris/Fort Bend) → guards the boundary-mismatch bug; (3) draw a measurement → save → reload → assert value persisted → directly tests silent-save-failure; (4) run **Site Analysis** on a multi-parcel selection → assert *source unavailable* renders distinct from *not present*.
-- **Gotchas:** tests must run against a **properly built preview** (env vars baked in pre-build) or flow (1) will *correctly* fail — that's the point, but document it so a red run isn't misread as a harness bug. Use stable **`data-testid`** selectors, not text/CSS that the brand refactor will churn.
-- **Files likely touched:** new `/e2e` (or `/tests/e2e`) dir, `playwright.config.ts`; add `data-testid` to the AppHeader cloud-status indicator, the save button, the parcel/county readout, and the Site Analysis result rows.
-- **Dedup:** NET-NEW — not a duplicate of the `ui-audit/*.mjs` harnesses (ad-hoc single-purpose Chromium screenshot/verify scripts against local `vite preview`); this is the deterministic regression suite. REUSE their cert-proxy launch flag (`--ignore-certificate-errors`, see CLAUDE.md "Playwright / ui-audit in the sandbox"). `package.json` today has **vitest** only — no e2e runner.
-- **⛔ Verify-blocker (in-sandbox):** the suite only goes green against a deployed preview URL + the B280 test account's creds (CI secrets) — neither exists in the sandbox, so it can't be self-verified headless here; this is the CI-bound part B280/B281 provision. Write the code; green it in CI.
-- **✅ RESOLVED (Cowork live, 2026-06-20) — decision = option (a), previews use the production env.** Original finding ("preview is un-secreted, comes up Cloud off") was *almost* right but the root cause was different: the Preview scope **did** have `VITE_SUPABASE_URL`/`ANON_KEY`, but they were **stale** — pointing at the **defunct legacy Supabase project `ksetjztkplttbcehyicv`** (old `planar_*` schema) with a malformed trailing `/rest/v1/` URL, so previews silently talked to a dead project (which is why preview telemetry never reached production). Fixed by setting the Preview scope to the **production** values (`https://lyeqzkuiwngunutlkkmi.supabase.co` + the production publishable key) and redeploying; verified a fresh preview now writes to production `public.client_errors`. **So B278's flow (1) ("app comes up Cloud on") will now pass against branch previews.** ⚠ Caveat: previews now read/write the **production** DB (preview clicks touch live data) — acceptable at this scale; a separate staging DB with the current schema is the "purest" future option. Detail in `COWORK-RESULT-2026-06-20-walkthrough-token-and-preview-env.md`.
-> **Pairs with B280** (the seed data is the assertion contract) and **feeds B281** (CI wiring). Do B280 alongside or first.
-
-### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task)  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
-`[ ]` Create a **dedicated test user** with deterministic seeded data on a preview/staging deploy; **never** use the owner's real login in automated loops.
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task) — OWNER ACTION, file ready  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
+`[ ]` **The seed package is BUILT and delivered (2026-06-23) — `e2e/seed/seed.sql` + `e2e/seed/README.md` (handed to the owner via the file tool).** Remaining = the one owner step: create the `e2e@planyr.test` Supabase user, run `seed.sql`, add the 3 CI secrets (`E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL`). Until then the auth-gated specs skip (never a false fail) and the logged-out smoke still runs. The fixture is a known 500×400 ft lot (200,000 sf ≈ 4.59 ac) so measure assertions have a fixed value. Create a **dedicated test user** with deterministic seeded data; **never** use the owner's real login in automated loops.
 - **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
 - **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
 - **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
 > Do alongside B278 — its assertions are blocked without these fixed values.
-
-### B281 — CI wiring: Playwright on preview + failure auto-files an @claude issue `[Infra / CI]` (feature) — depends on B278 + B280  *(arrived as "NEW-4" 2026-06-20 owner chat; filed **B281**; batch B278–B281)*
-`[ ]` Run B278 in **GitHub Actions** on each preview branch; on failure, **auto-open an issue tagged `@claude`** so Claude Code picks it up async — the genuinely remote/async scenario the previously-parked `@claude` workflow was reserved for.
-- **Dependency:** requires **B278** (the suite) + **B280** (the seeded account). **Defer until those land.**
-- **Edge case:** **dedupe issue creation** — don't open a fresh issue every run for the same persistent failure; update/reuse the existing one.
-- **Dedup:** NET-NEW — the "previously-parked `@claude` workflow" it references was **never filed** in either backlog file (a chat parking, not a tracked item), so this is its first real entry, not a collision. Extends the existing `.github/workflows/build.yml` ("it builds" required check) with an e2e job; doesn't replace it.
-> Last of the tranche — gated on B278 + B280. Build the net first (B278/B280), then automate the alarm (B281).
 
 <!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
      overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard

@@ -42,7 +42,7 @@ export default [
   },
   // Tooling / test files run in Node and use Node globals.
   {
-    files: ["test/**/*.js", "**/*.config.js", "server/**/*.js"],
+    files: ["test/**/*.js", "**/*.config.js", "server/**/*.js", "e2e/**/*.js"],
     languageOptions: { globals: { ...globals.node } },
   },
 ];

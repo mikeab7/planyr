@@ -15,9 +15,9 @@ import { Fragment } from "react";
 
 const CHROME = "#191613", INK = "#ece7db", MUTED = "#9b9482";
 
-export function RailButton({ icon, label, title, active, accent, onClick, disabled }) {
+export function RailButton({ icon, label, title, active, accent, onClick, disabled, "data-testid": testId }) {
   return (
-    <button type="button" title={title} onClick={onClick} disabled={disabled} aria-pressed={!!active}
+    <button type="button" title={title} onClick={onClick} disabled={disabled} aria-pressed={!!active} data-testid={testId}
       style={{
         display: "flex", flexDirection: "column", alignItems: "center", gap: 2, width: "100%",
         padding: "6px 1px", borderRadius: 9, cursor: disabled ? "default" : "pointer",
@@ -42,7 +42,7 @@ export default function ToolRail({ items = [], accent = "#EF9F27", width = 64, s
         if (it.kind === "spacer") return <div key={i} style={{ flex: 1, minHeight: 6 }} />;
         if (it.kind === "header") return <div key={i} style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: MUTED, textAlign: "center", padding: "3px 0 1px" }}>{it.label}</div>;
         if (it.kind === "node") return <Fragment key={i}>{it.render}</Fragment>;
-        return <RailButton key={it.id || i} icon={it.icon} label={it.label} title={it.title} active={it.active} disabled={it.disabled} onClick={it.onClick} accent={accent} />;
+        return <RailButton key={it.id || i} icon={it.icon} label={it.label} title={it.title} active={it.active} disabled={it.disabled} onClick={it.onClick} accent={accent} data-testid={it.id ? `tool-${it.id}` : undefined} />;
       })}
     </div>
   );
