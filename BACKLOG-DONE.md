@@ -1,5 +1,25 @@
 ## ✅ Done
 
+### B441 — Rename / delete projects from the breadcrumb switcher (right-click + kebab) `[Header-Nav / Site Planner]` (feature)  *(owner-dropped 2026-06-24; originally mislabeled B439 in BACKLOG.md — collision with B439 GIS caching; renumbered to B441, the real next free ID)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1418 tests · build green. Headless: breadcrumb dropdown + "New project" button confirmed visible.**
+- **Per-row ⋯ kebab + right-click → portal context menu** (z-index 5000/4999 above the AnchoredMenu at 4001/4000) with **Rename** (inline `<input>` autoFocus, Enter/blur commits, Esc cancels via `skipNextBlurRef` so blur doesn't double-commit) and **Delete** (two-step inline confirm: "Delete 'Name'?" → [Cancel] [Delete]; error surfaces inline on failure).
+- **`deleteSiteGroup(groupId)`** added to `storage.js`: loads all plans in the group, calls `deleteSite` for each, gathers results, surfaces error if any fail.
+- **`renameProject`/`deleteProject`** added to `shared/projects/projects.js` (imports `renameSiteGroup`/`deleteSiteGroup` from storage).
+- **`AppHeader.jsx`** forwards two new optional props — `onRenameProject`/`onDeleteProject` — down to `ProjectBreadcrumb`.
+- **`ProjectBreadcrumb.jsx`** rewritten: uncontrolled mode (Site Planner) calls store + `refresh()`; controlled mode (Scheduler) calls the provided callbacks. Inline-editor only — no `window.prompt`/`confirm` (owner rule).
+- **Deduped:** distinct from B158 (Open — that's the ✕ on the *YOUR SITES* sidebar list rows; these act on the *breadcrumb project switcher dropdown* for site-groups).
+
+### B440 — Extend the Schedule iframe bridge for rename / delete `[Scheduler / Header-Nav]` (feature)  *(owner-dropped 2026-06-24; minted B440; depends on B441)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). Verified: bridge posts new commands; sequence app handles without window.confirm.**
+- **`Scheduler.jsx`** passes `onRenameProject`/`onDeleteProject` to `AppHeader`, each posting the appropriate `planar:nav-rename`/`planar:nav-delete` command down the iframe bridge (the shell has already confirmed via B441's inline confirm step — no second dialog in the iframe).
+- **`public/sequence/index.html`** postMessage handler gains two new branches alongside the existing `nav-select`/`nav-dashboard`/`nav-new` commands: `planar:nav-rename` (trims + writes to `d.projects[id].name` via `setData`; no-ops on empty/missing project) and `planar:nav-delete` (no-ops if the project is the last one; snapshots the pre-delete state for safety; removes the project from `d.projects`; switches `aPid` + `section` to the first remaining project if the active project was deleted). Both use `setData` directly — no `window.confirm` in the bridge path (the shell's inline confirm step is the canonical gate).
+- **Re-emits `planar:nav-state`** automatically via the embedded app's existing `useEffect` on data changes → the breadcrumb updates in real-time.
+
+### B437 — Callout tool for the Doc Review markup engine `[Doc Review / Markup]` (feature)  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1418 tests · build green.**
+- Added the **Callout** tool to the shared markup engine and Doc Review workspace: two-point draw (tail anchor → label box); leader renders as a line with an arrowhead; label editable inline via the `foreignObject` `<textarea>` pattern (no `window.prompt`, per owner rule). Property panel exposes stroke, fill, text, and font-size controls via `schemaForMarkup`.
+- `tools.matrix.js` row added; `propertySchema.js` updated; `MarkupRenderer.jsx` renders the leader + label box; `ToolRail` registration with `data-testid="tool-callout"` + `aria-pressed`. Section A matrix conformance assertion passes; Section B rail-arm test passes.
+
 ### B436 — e2e: open a PDF so the per-tool rail-arm assertions actually execute `[Doc Review / Markup, Infra]` (task) — follow-up from B432/B280  *(2026-06-24)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · build green · mechanism verified headless (`ui-audit/verify-b436-fixture-pdf.mjs`, 8/8).**
 - **The gap:** the B280 fixture seeds a *site*, not a *doc_review with a PDF*, so on CI the Review module opened to the file browser and the tool rail never rendered → Section B's per-tool `aria-pressed` tests all skipped (green, but the ARM path — the heart of NEW-9 — wasn't exercised; only Section A schema conformance was).

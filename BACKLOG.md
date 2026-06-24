@@ -45,8 +45,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      lint 0 errors · 1335 tests · build green. -->
 
 <!-- 2026-06-24: owner-dropped pair "NEW-1/NEW-2" (rename/delete projects from the breadcrumb switcher +
-     extend the Schedule iframe bridge for it). Highest B# across both files was B438, so minted
-     **B439** (NEW-1) + **B440** (NEW-2). Grounded against the code before filing — all anchors confirmed:
+     extend the Schedule iframe bridge for it). Filed as **B439** (NEW-1) + **B440** (NEW-2) — NOTE: B439
+     was a collision (B439 GIS caching was already in BACKLOG-DONE.md); the rename/delete breadcrumb is
+     correctly **B441**. Grounded against the code before filing — all anchors confirmed:
      `src/shared/ui/ProjectBreadcrumb.jsx` exists with a controlled/uncontrolled split; `renameSiteGroup`
      lives at `site-planner/lib/storage.js:463` (rewrites `site` on every plan in the group via
      `loadPlansOfGroup`); `src/shared/projects/projects.js` exists; `Scheduler.jsx` posts
@@ -56,56 +57,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      rows*; these act on the *breadcrumb project switcher dropdown* (a different component) and a "project"
      here is a Site-group, not a single site row. B440 depends on B439. -->
 
-### B439 — Rename / delete projects from the breadcrumb switcher (right-click + kebab) `[Header-Nav / Site Planner]` (feature)  *(owner-dropped 2026-06-24 as "NEW-1"; minted **B439** = highest B# across both files (B438) + 1)*
-`[ ]` Add per-row **Rename** and **Delete** to the project switcher dropdown in `src/shared/ui/ProjectBreadcrumb.jsx`, working in both **uncontrolled** mode (Site Planner + Markup, backed by the Site store) and as the **prop surface** B440 plugs the Schedule bridge into.
-- **WHAT:** Right-clicking a project row — **and** a hover-revealed kebab `⋯` on the row (right-click is invisible and dead on touch, so both open the *same* menu) — opens a small menu: **Rename**, **Delete**. Rename edits the row label **in place** (Enter commits, Esc cancels, blur commits; trim; reject empty/whitespace-only → keep the prior name). Delete shows a **confirm step** before acting (destructive).
-- **HOW:**
-  - New optional props `onRenameProject(id, newName)` and `onDeleteProject(id)`. Mirror the existing controlled/uncontrolled split: when the props are omitted (uncontrolled = Site/Markup), the component calls the store directly and `refresh()`s — exactly how it already falls back to `listProjects()` when `projects` is omitted.
-  - Store wiring in `site-planner/lib/storage.js` surfaced through `src/shared/projects/projects.js`: expose `renameProject(id, name)` as a thin wrapper over the existing `renameSiteGroup(groupId, site)`. Add a new `deleteSiteGroup(groupId)` — loop `loadPlansOfGroup(groupId)`, remove each from the local store and `cloudDelete` each in the cloud cache. The active store is localStorage-primary, cloud is the fire-and-forget mirror.
-  - The context menu must be a **second portal layer** at document root (project rule — z-index stacking traps) nested above the existing `AnchoredMenu`. **Critical gotcha:** a click inside the context menu must **not** register as an outside-click that closes the parent dropdown — exclude the context-menu node from the parent's outside-click handler.
-- **Edge cases / gotchas:**
-  - **Silent failure = crash-severity (standing rule).** RLS DELETE can match zero rows and still return success — `deleteSiteGroup` must verify the deleted row count and surface a real error on a zero-match, never a false "deleted." Same for a rename that fails to persist.
-  - **Deleting the current/active project:** after a successful delete of the project that's currently open, route to the all-projects view (`onDashboard`) — the open project no longer exists.
-  - **Rename must update both surfaces:** the active project name renders in the crumb itself *and* in its row (the known B191 duplication). Refresh both.
-  - **Multi-tab:** the uncontrolled list already refreshes on the `planarfit:sites` storage event, so another tab's rename/delete propagates for free — keep that.
-
-### B440 — Extend the Schedule iframe bridge for rename / delete `[Scheduler / Header-Nav]` (feature) — depends on B439  *(owner-dropped 2026-06-24 as "NEW-2"; minted **B440**)*
-`[ ]` Make rename/delete work in the **Schedule** module's picker, which is the postMessage bridge (B203), **not** the Site store.
-- **WHAT:** The B439 menu actions, when the breadcrumb is in **controlled (Schedule)** mode, drive the embedded scheduler's own `hs-v1` record instead of the Site store.
-- **HOW:**
-  - `src/workspaces/scheduler/Scheduler.jsx`: pass `onRenameProject={(id, name) => post({ type: "planar:nav-rename", id, name })}` and `onDeleteProject={(id) => post({ type: "planar:nav-delete", id })}`, alongside the existing `nav-select`/`nav-dashboard`/`nav-new` commands.
-  - `public/sequence/index.html` (the embedded app): handle `planar:nav-rename` / `planar:nav-delete` on its own project record, then re-emit `planar:nav-state` so the breadcrumb updates. **Verify first:** the `Scheduler.jsx` header comment claims `nav-state` already re-emits "on every project add/rename/delete/switch," which implies the sequence app already has internal rename/delete to reuse — if so this is just command plumbing; if not, the in-app rename/delete on the `hs-v1` record is the bulk of this item. **Flag the correction if the code contradicts the comment.**
-  - Apply the same "deleting the active project routes home" behavior — here that's the scheduler's Dashboard (reports) section.
-
-### B423 — Shared markup/measure tool engine + Bluebeam-parity refinement loop `[Site Planner + Doc Review / Markup]` (umbrella)  *(owner-dropped 2026-06-23 as the "Shared Markup/Measure Tool Engine" brief; first minted B421 but RENUMBERED to **B423** on merge-in of main — the concurrent PR #320 had already taken B421 (Arrange) + B422 (Layers); B423 = highest real B# across both files (B422) + 1; plan — `/root/.claude/plans/planyr-shared-tidy-avalanche.md`)*
-One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (and the Stitcher) consume, bringing every tool to Bluebeam-equivalent behavior, plus a committed machine-checkable tool×property matrix + an automated tester so future tool work converges on its own. The brief's "NEW-#" are scratch labels; real filed IDs are B424+. Owner decisions locked: tools RIGHT / properties LEFT in both; Arrow = an arrowhead toggle on Line; verifier = the full cloud rig (B278/B280/B281) built first. Sub-items, in dependency order:
-- `[x]` **B424 (NEW-1) — the tool×property matrix as data. DONE this session.** (see BACKLOG-DONE.md)
-- `[x]` **B425 (NEW-2) — the shared engine's PURE layer. DONE this session.** (see BACKLOG-DONE.md)
-- `[x]` **B426 (NEW-2 cont./NEW-3) — shared `MarkupRenderer.jsx` + `PropertyPanel.jsx` + host wiring; DocReview gains left property panel.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 5842a78). (see BACKLOG-DONE.md)
-- `[x]` **B427 (NEW-4) — Document Review parity tools: Line, Polyline, Polygon, Ellipse.** DONE same commit as B426. (see BACKLOG-DONE.md)
-- `[x]` **B428 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 192c63a). (see BACKLOG-DONE.md)
-- `[x]` **B429 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-- `[x]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 285836b). (see BACKLOG-DONE.md)
-- `[x]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-- `[x]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-- **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
-
-<!-- B438 (browser-side GIS imagery cache: service worker + IndexedDB) was SUPERSEDED mid-session by
-     B439 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
-     — a per-browser cache doesn't follow you between computers + isn't the professional home for
-     outage resilience. The SW/IndexedDB code was retired (gis-sw.js → self-unregistering tombstone;
-     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B439 (shipped) blocks live in
-     BACKLOG-DONE.md. -->
-
-### B439 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24)*
-`[x]` Government layer *pictures* (FEMA flood, wetlands, utilities) keep painting when the agency server is down, follow the user between devices, and are stored off the user's machine — replacing the browser-side B438. The map points raster (export-image) layers at a same-origin Cloudflare Function `/api/gis-cache/*` that fetches the agency server-side (no CORS wall), keeps a durable copy in the existing Google Drive, refreshes in the background (stale-while-revalidate), and FAILS OPEN (302 → agency) on any miss-and-failure / missing creds / error. Client also one-shot falls back to the direct agency URL if the proxy isn't serving, so a layer always renders (caching is pure enhancement). Default ON; `VITE_GIS_PROXY=0` is the kill switch. Pure core `src/shared/gis/gisProxyCore.js` (svc-URL encode/parse + cache key + freshness, 15 tests) + testable handler `functions/api/gis-cache/_handler.js` (SWR/fail-open, 12 tests, in-memory Drive). Age badge via the proxy's `?meta=1` sidecar → existing onStatus `{ts,stale}` channel. Reuses the live Drive creds (`GOOGLE_*`, server-side only) — no Supabase, no new secret. DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, PRs #328 + #329); see BACKLOG-DONE.md. **Bring-up fix (#329):** the gov host (`hazards.fema.gov`) 403s a bare server-side User-Agent → every request fail-opened (nothing cached); fixed by sending a browser UA on upstream fetches (root cause isolated live via a temporary `?diag=1` probe; the datacenter-IP-block fear was disproven). **✅ VERIFIED LIVE on planyr.io:** real FEMA export → 200 image/png and `?meta=1` → `cached:true` with a ts (fetch → Drive store → serve → age, end-to-end). Only an in-app visual glance remains (V129).
-
-- `[x]` **B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-
-### B437 — Callout tool missing from the Document Review rail (matrix↔rail drift) `[Doc Review / Markup]` (bug/feature)  *(found 2026-06-24 by the B432 loop)*
-`[ ]` **The shared tool matrix lists `callout` as a `doc` tool (and the B427 parity plan included it), but `DocReview.jsx`'s `TOOLS` rail array omits it** — so it has no `tool-callout` rail button and can't be drawn in Review. The B432/B436 per-tool e2e loop caught this: callout is the one tool that *skips* (its rail button is absent) instead of arming. Per the loop rule, the fix is in the CODE, not the matrix: wire callout into Review.
-- **Scope (real feature wiring, not a 1-liner):** add `callout` to the `TOOLS` rail; implement its `point`-mode placement (it's a text box + a leader line to a target — distinct from plain `text`, which Review already has). Reuse the shared `MarkupRenderer` callout rendering (already built for the Site Planner) + the inline text editor pattern (`openEditor`). Confirm the leader anchor + box-move interactions.
-- **Until then:** the loop stays green (callout skips gracefully via the deploy-tolerance guard) — honest, but the gap is real. Distinct from the Site Planner, which already has callout.
+<!-- B423 umbrella (all sub-items B424–B432 done), B437 (callout), B441 (rename/delete breadcrumb —
+     originally mislabeled B439 in the filing comment above; B439 was already taken by GIS caching,
+     so renumbered to B441, the real next free ID), B440 (schedule bridge), and the stale in-place
+     B439-GIS + B436 entries have all shipped and moved to BACKLOG-DONE.md. Next free B# = B442. -->
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new

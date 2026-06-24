@@ -12,6 +12,13 @@
  * transient toast when a switch happens while the cloud is unreachable — so a switch
  * is never silent about an at-risk save, but is also never blocked on one.
  *
+ * Rename / delete (B439): each project row exposes a hover-revealed ⋯ kebab (and
+ * right-click) that opens a small portal context menu with Rename and Delete. Rename
+ * edits the row label in place (Enter/blur commits; Esc cancels; trim; reject empty).
+ * Delete shows an inline confirm step before acting. In uncontrolled mode (Site /
+ * Markup) the component calls the store directly; in controlled mode (Schedule) it
+ * calls the onRenameProject / onDeleteProject callbacks.
+ *
  * Props
  *   currentProject  — { id, name } | null   (null = we're on the Dashboard)
  *   accent          — module accent color (New-project highlight + active crumb)
@@ -19,11 +26,13 @@
  *   onSelectProject — (id, name) => void
  *   onNewProject    — () => void
  *   saveState       — "synced"|"saving"|"offline"|"error"|"local"|null  (current project)
+ *   onRenameProject — (id, newName) => void   optional; omit = uncontrolled store
+ *   onDeleteProject — (id) => void            optional; omit = uncontrolled store
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
-import { listProjects, filterProjects, relTime } from "../projects/projects.js";
+import { listProjects, filterProjects, relTime, renameProject, deleteProject } from "../projects/projects.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -81,6 +90,14 @@ const row = (extra) => ({
 
 const divider = { height: 1, background: "var(--border-default)", margin: "6px 4px" };
 
+const ctxItem = (extra) => ({
+  display: "block", width: "100%", textAlign: "left",
+  padding: "7px 10px", border: "none", borderRadius: 6,
+  background: "transparent", cursor: "pointer",
+  fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
+  ...extra,
+});
+
 export default function ProjectBreadcrumb({
   currentProject,
   accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B341)
@@ -97,6 +114,11 @@ export default function ProjectBreadcrumb({
   // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
   // the project crumb reads "All projects" instead of a single name. Off by default.
   cross = false,
+  // Rename / delete callbacks (B439). When omitted the component uses the uncontrolled
+  // Site store path (renameProject / deleteProject from projects.js). When provided
+  // (Schedule bridge) the component calls these instead and the workspace drives the state.
+  onRenameProject,
+  onDeleteProject,
 }) {
   const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
@@ -111,6 +133,12 @@ export default function ProjectBreadcrumb({
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
   const anchorRef = useRef(null);
   const toastTimer = useRef(null);
+
+  // Rename / delete state (B439)
+  const [renaming, setRenaming] = useState(null);   // { id, name } | null
+  const [ctxMenu, setCtxMenu] = useState(null);     // { id, name, x, y, confirm } | null
+  const [deleteErr, setDeleteErr] = useState(null); // error string shown in confirm view
+  const skipNextBlurRef = useRef(false);             // prevents blur from committing after Esc
 
   const refresh = () => { if (!controlled) setInternalProjects(listProjects()); };
   // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when
@@ -143,6 +171,72 @@ export default function ProjectBreadcrumb({
     onSelectProject?.(id, name);
   };
   const newProject = () => { setOpen(false); flagIfAtRisk(); onNewProject?.(); };
+
+  // ── Rename / delete (B439) ────────────────────────────────────────────────
+
+  const openCtxForRow = (x, y, id, name) => {
+    // Cancel any in-progress rename on a different row first
+    if (renaming && renaming.id !== id) { skipNextBlurRef.current = true; setRenaming(null); }
+    setDeleteErr(null);
+    // Clamp to viewport so the menu never clips off-screen
+    const vw = window.innerWidth, vh = window.innerHeight;
+    setCtxMenu({ id, name, x: Math.min(x, vw - 172), y: Math.min(y + 4, vh - 90), confirm: false });
+  };
+
+  const closeCtxMenu = () => { setCtxMenu(null); setDeleteErr(null); };
+
+  const startRename = () => {
+    if (!ctxMenu) return;
+    const { id, name } = ctxMenu;
+    closeCtxMenu();
+    setRenaming({ id, name });
+  };
+
+  const cancelRename = () => {
+    skipNextBlurRef.current = true;
+    setRenaming(null);
+  };
+
+  const commitRename = (id, rawName) => {
+    const name = (rawName || "").trim();
+    if (!name) { setRenaming(null); return; }
+    if (onRenameProject) {
+      onRenameProject(id, name);
+    } else {
+      renameProject(id, name);
+      refresh();
+    }
+    setRenaming(null);
+  };
+
+  const handleRenameKeyDown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); commitRename(renaming.id, renaming.name); }
+    if (e.key === "Escape") { e.stopPropagation(); cancelRename(); }
+  };
+
+  const handleRenameBlur = () => {
+    if (skipNextBlurRef.current) { skipNextBlurRef.current = false; return; }
+    commitRename(renaming.id, renaming.name);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!ctxMenu) return;
+    const { id } = ctxMenu;
+    setDeleteErr(null);
+    const isActive = id === currentProject?.id;
+    if (onDeleteProject) {
+      onDeleteProject(id);
+      closeCtxMenu();
+    } else {
+      const res = await deleteProject(id).catch((e) => ({ ok: false, error: String(e) }));
+      if (!res.ok) { setDeleteErr(res.error || "Delete failed — please try again."); return; }
+      closeCtxMenu();
+      refresh();
+      if (isActive) onDashboard?.();
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   const onDash = !currentProject; // we're at the all-projects view
   const filtered = filterProjects(projects, q);
@@ -238,21 +332,80 @@ export default function ProjectBreadcrumb({
           ) : (
             filtered.map((p) => {
               const cur = p.id === currentProject?.id;
+              const isRenaming = renaming?.id === p.id;
+              const isCtxOpen = ctxMenu?.id === p.id;
               return (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => pickProject(p.id, p.name)}
-                  onMouseEnter={() => setHoverRow(p.id)}
-                  onMouseLeave={() => setHoverRow(null)}
-                  style={row({ background: hoverRow === p.id ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
+                  style={{ position: "relative", display: "flex", alignItems: "center" }}
+                  onContextMenu={(e) => { e.preventDefault(); openCtxForRow(e.clientX, e.clientY, p.id, p.name); }}
                 >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                    {p.name}
-                  </span>
-                  {cur
-                    ? <span style={{ color: accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>
-                    : <span style={{ color: "var(--text-tertiary)", fontSize: 11, flex: "none" }}>{relTime(p.updatedAt)}</span>}
-                </button>
+                  {isRenaming ? (
+                    /* ── Inline rename input ── */
+                    <div style={{ flex: 1, padding: "3px 9px" }}>
+                      <input
+                        autoFocus
+                        value={renaming.name}
+                        onChange={(e) => setRenaming((r) => ({ ...r, name: e.target.value }))}
+                        onKeyDown={handleRenameKeyDown}
+                        onBlur={handleRenameBlur}
+                        style={{
+                          width: "100%", boxSizing: "border-box",
+                          padding: "5px 7px", borderRadius: 5, outline: "none",
+                          border: "1px solid var(--accent, #4f6ef7)",
+                          fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)",
+                          background: "var(--surface-page)",
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    /* ── Normal project row ── */
+                    <button
+                      onClick={() => pickProject(p.id, p.name)}
+                      onMouseEnter={() => setHoverRow(p.id)}
+                      onMouseLeave={() => setHoverRow(null)}
+                      style={row({
+                        flex: 1,
+                        paddingRight: 30, // space for the kebab button
+                        background: hoverRow === p.id || isCtxOpen ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent"),
+                      })}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                        {p.name}
+                      </span>
+                      {cur
+                        ? <span style={{ color: accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>
+                        : <span style={{ color: "var(--text-tertiary)", fontSize: 11, flex: "none" }}>{relTime(p.updatedAt)}</span>}
+                    </button>
+                  )}
+
+                  {/* ⋯ kebab — hover-reveal; also persists while ctx menu is open for this row */}
+                  {!isRenaming && (
+                    <button
+                      onMouseEnter={() => setHoverRow(p.id)}
+                      onMouseLeave={() => setHoverRow(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        openCtxForRow(r.left, r.bottom, p.id, p.name);
+                      }}
+                      title="Rename or delete"
+                      aria-label="Project options"
+                      style={{
+                        position: "absolute", right: 5, top: "50%", transform: "translateY(-50%)",
+                        width: 22, height: 22, borderRadius: 4,
+                        border: "none", background: "transparent", cursor: "pointer",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: "var(--text-secondary)", fontSize: 14, lineHeight: 1,
+                        opacity: hoverRow === p.id || isCtxOpen ? 1 : 0,
+                        pointerEvents: hoverRow === p.id || isCtxOpen ? "auto" : "none",
+                        transition: "opacity 0.1s",
+                      }}
+                    >
+                      ⋯
+                    </button>
+                  )}
+                </div>
               );
             })
           )}
@@ -273,6 +426,83 @@ export default function ProjectBreadcrumb({
           </span>
         </button>
       </AnchoredMenu>
+
+      {/* Context menu — portal above AnchoredMenu backdrop (z-index 5000 > 4001) */}
+      {ctxMenu && createPortal(
+        <>
+          {/* Click-away backdrop: closes ctx menu without closing the main dropdown */}
+          <div onClick={closeCtxMenu} style={{ position: "fixed", inset: 0, zIndex: 4999 }} />
+          <div
+            style={{
+              position: "fixed", left: ctxMenu.x, top: ctxMenu.y, zIndex: 5000,
+              minWidth: 162,
+              background: "var(--surface-raised)", color: "var(--text-primary)",
+              border: "1px solid var(--border-default)", borderRadius: 8,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+              padding: 4,
+              fontFamily: "system-ui, sans-serif",
+            }}
+          >
+            {!ctxMenu.confirm ? (
+              <>
+                <button
+                  onClick={startRename}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--hover-ghost)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  style={ctxItem()}
+                >
+                  ✎ Rename
+                </button>
+                <button
+                  onClick={() => setCtxMenu((m) => ({ ...m, confirm: true }))}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--hover-ghost)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  style={ctxItem({ color: "var(--danger, #d63032)" })}
+                >
+                  Delete
+                </button>
+              </>
+            ) : (
+              /* Inline confirm step — no window.prompt, no dialog */
+              <>
+                <div style={{ padding: "6px 10px 4px", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                  Delete "{ctxMenu.name}"?
+                </div>
+                {deleteErr && (
+                  <div style={{ padding: "3px 10px 5px", fontSize: 11.5, color: "var(--danger, #d63032)" }}>
+                    {deleteErr}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 4, padding: "2px 4px 4px" }}>
+                  <button
+                    onClick={() => { setCtxMenu((m) => ({ ...m, confirm: false })); setDeleteErr(null); }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "var(--hover-ghost)"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                    style={{
+                      flex: 1, padding: "5px 0", borderRadius: 5, border: "1px solid var(--border-default)",
+                      background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeleteConfirm}
+                    style={{
+                      flex: 1, padding: "5px 0", borderRadius: 5, border: "none",
+                      background: "var(--danger, #d63032)", cursor: "pointer",
+                      fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: "#fff",
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>,
+        document.body,
+      )}
 
       {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss */}
       {toast && createPortal(

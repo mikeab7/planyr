@@ -4346,6 +4346,29 @@ function App() {
       } else if (m.type === "planar:nav-new") {
         addProject();
         setData(d => ({ ...d, section: "projects" }));
+      } else if (m.type === "planar:nav-rename" && m.id != null && m.name != null) {
+        // Rename without a confirm dialog — the shell breadcrumb already handled UX (B440).
+        const newName = String(m.name).trim();
+        if (newName) {
+          setData(d => {
+            if (!d.projects || !d.projects[m.id]) return d;
+            return { ...d, projects: { ...d.projects, [m.id]: { ...d.projects[m.id], name: newName } } };
+          });
+        }
+      } else if (m.type === "planar:nav-delete" && m.id != null) {
+        // Delete without a confirm dialog — the shell breadcrumb already confirmed (B440).
+        // If only one project exists it can't be deleted (guard matches the internal deleteProject).
+        setData(d => {
+          if (!d.projects || !d.projects[m.id]) return d;
+          if (Object.keys(d.projects).length <= 1) return d;
+          try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-delete-project", skipSanity: true }); } catch (_) {}
+          const newProjects = { ...d.projects };
+          delete newProjects[m.id];
+          const remaining = Object.keys(newProjects).map(Number);
+          const newAPid = d.aPid === m.id ? remaining[0] : d.aPid;
+          const newSection = d.aPid === m.id ? "reports" : d.section;
+          return { ...d, aPid: newAPid, section: newSection, projects: newProjects };
+        });
       }
     };
     window.addEventListener("message", onMsg);

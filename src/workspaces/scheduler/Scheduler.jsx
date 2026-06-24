@@ -110,6 +110,8 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
         onSelectProject={(id) => post({ type: "planar:nav-select", id })}
         onDashboard={() => post({ type: "planar:nav-dashboard" })}
         onNewProject={() => post({ type: "planar:nav-new" })}
+        onRenameProject={(id, name) => post({ type: "planar:nav-rename", id, name })}
+        onDeleteProject={(id) => post({ type: "planar:nav-delete", id })}
         // B388 — the embedded app's toolbar, lifted into the unified header (center = view +
         // review; right = zoom/export/save/history/contacts/automation/format/settings).
         toolbarCenter={<ScheduleCenter toolbar={toolbar} post={post} />}
