@@ -24,22 +24,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" (status-marker palette + the precision-pin
      map marker + drop the saved-row element count). Highest B# across both files was B422, so minted
-     **B423 / B424 / B425**. Per STANDING RULE #1 all three were filed AND fixed + headless-verified
+     **B433 / B434 / B435**. Per STANDING RULE #1 all three were filed AND fixed + headless-verified
      (V123, `ui-audit/verify-precision-pin.mjs`, 18/18) + shipped the SAME session on branch
      `claude/stoic-albattani-8bmtp0` — full [x] blocks live in BACKLOG-DONE.md.
-       • B423 (NEW-1) — AMENDS B234 (the shared status tokens, edited IN PLACE — not a parallel set) +
+       • B433 (NEW-1) — AMENDS B234 (the shared status tokens, edited IN PLACE — not a parallel set) +
          touches B320 (dark `--status-*`). Mostly already LIVE via B365 (coral Pursuit / blue Active /
          fixed salience were drafted against the pre-B365 baseline); the residual shipped here = Dead
          off red → gray, a dedicated `--danger` alert-red token (cloud-off badge / failed-layer dot /
          delete × repointed to it), glyphless Pursuit/Active solid discs, solid (not hollow) Dead, and
          the chip/section-header discs. `ProjectLibrary.jsx STATUS_COLOR` was already gone (no dup to
          reconcile). The three standing rules were added to CLAUDE.md (KEY DECISIONS).
-       • B424 (NEW-2) — AMENDS B161 (the marker shape), depends on B423. `buildingPinIcon`→`sitePinIcon`
+       • B434 (NEW-2) — AMENDS B161 (the marker shape), depends on B433. `buildingPinIcon`→`sitePinIcon`
          (bulb + stalk + ground ring, ring-center anchor); B161's progress arc was restored as the
          ground-ring sweep (it had been silently dropped by B365's shield), same status-derived source.
          Superseded `verify-b365-markers.mjs`.
-       • B425 (NEW-3) — net-new; dropped the ` · N elem` suffix from the left-rail site rows.
-     Deduped: B423 is the residual of B365 (not a re-file); B424 replaces B161's shape (progress kept).
+       • B435 (NEW-3) — net-new; dropped the ` · N elem` suffix from the left-rail site rows.
+     Deduped: B433 is the residual of B365 (not a re-file); B434 replaces B161's shape (progress kept).
      lint 0 errors · 1335 tests · build green. -->
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#

@@ -51,11 +51,11 @@
   --info-text:    #1D4ED8;
   /* Vivid alert/error FILL (icons · borders · the cloud-off badge · a failed layer
      dot · destructive ×) — the loud red that is RESERVED for genuine alert/error and
-     never used for an inert state like a Dead deal (B423). Distinct from the darker
+     never used for an inert state like a Dead deal (B433). Distinct from the darker
      AA-tuned --danger-text above (small red label on a panel). */
   --danger:       #E24B4A;
 
-  /* Project-status palette (B234; re-hued B365; Dead off red B423) as tokens so DOM
+  /* Project-status palette (B234; re-hued B365; Dead off red B433) as tokens so DOM
      badges theme live. The canonical hexes mirror src/shared/ui/statusTokens.js (map
      pins read those directly — pins sit on the aerial map, a theme-neutral surface).
      Salience tracks importance: Pursuit = warm coral (loudest), Active = blue (NOT
@@ -150,10 +150,10 @@
   --success-text: #4FBF7B;
   --danger-text:  #F2706F;
   --info-text:    #6FB4F0;
-  --danger:       #F2706F;   /* vivid alert/error fill, lightened for dark (B423) */
+  --danger:       #F2706F;   /* vivid alert/error fill, lightened for dark (B433) */
 
   /* Status — lighter variants so saturated values don't go muddy on dark cards (B320).
-     Dead = the same gray as Complete (red lives in --danger now, B423). */
+     Dead = the same gray as Complete (red lives in --danger now, B433). */
   --status-pursuit:  #F08A5D;
   --status-active:   #6FB4F0;
   --status-onhold:   #E0A23E;

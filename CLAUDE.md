@@ -357,13 +357,13 @@ server/                   # placeholder README only — NOT built or deployed; b
   reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
   lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
   live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
-- **Project-status palette + map markers (owner rules, B423/B424; the single source is
+- **Project-status palette + map markers (owner rules, B433/B434; the single source is
   `src/shared/ui/statusTokens.js`, mirrored to the `--status-*` CSS vars in `index.css`).** Three
   standing rules govern how a deal stage looks, everywhere (map pins, left-rail chips, list markers,
   section headers, the status menu):
   1. **Map markers are always solid-filled with a white keyline — never a transparent/hollow primary
      marker on the aerial** (a thin hollow ring vanishes over green imagery). The zoomed-out marker is
-     the **precision pin** (`sitePinIcon`, B424): a color **bulb** on a short **stalk** seated over a
+     the **precision pin** (`sitePinIcon`, B434): a color **bulb** on a short **stalk** seated over a
      **ground ring**, the ring center being the anchor (it sits exactly on the site coordinate). Progress
      (derived from status until a real `progress_pct` lands — B161/B163) folds into the ground-ring
      **sweep** (pursuit 10 · active 60 · onhold 30 · complete 100 · dead 0).

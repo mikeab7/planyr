@@ -5,11 +5,11 @@ The live checklist is `VERIFICATION.md`. Items land here once fully verified wit
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
 
-### V123 — Precision-pin map markers + corrected status palette (B423/B424/B425) ✅ (self-verified headless — fully done, logged-out map finder, nothing pending)
+### V123 — Precision-pin map markers + corrected status palette (B433/B434/B435) ✅ (self-verified headless — fully done, logged-out map finder, nothing pending)
 - **Harness:** `ui-audit/verify-precision-pin.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Seeds one site per status (top-level `status`, the logged-out path), then inspects every `.leaflet-marker-icon` SVG + Leaflet anchor margins; also clicks the **Dead** chip to filter the hidden Dead pin into view. No auth needed (the map finder is the logged-out landing), so fully covered.
 - **Result:** PASS 2026-06-24 — **18/18**.
   - **Precision pin:** every pin = bulb + stalk + ground ring; the ground-ring center is the anchor (Leaflet margins `-17/-46` = hit-box bottom-center); progress sweep tracks status (Complete 31.42 > Active 18.85 > On-hold 9.43 > Pursuit 3.14); size tiers Pursuit 20.8 > Active 18.7 > On-hold 17.1 > Complete 15 > Dead 13.3; bulb solid-filled + white keyline (never hollow).
-  - **Palette (B423):** coral Pursuit / blue Active / amber On-hold / gray Complete; **no `#E24B4A` on any marker**; Dead (filtered in) is a SOLID gray ✕ disc, dimmed (opacity 0.5), smallest. Left rail eyeballed — chips + section headers render solid color discs matching the pins; Dead chip + header are gray + struck (screenshots `screens/precision-pin/`). 0 page errors.
+  - **Palette (B433):** coral Pursuit / blue Active / amber On-hold / gray Complete; **no `#E24B4A` on any marker**; Dead (filtered in) is a SOLID gray ✕ disc, dimmed (opacity 0.5), smallest. Left rail eyeballed — chips + section headers render solid color discs matching the pins; Dead chip + header are gray + struck (screenshots `screens/precision-pin/`). 0 page errors.
 - Retired the superseded `ui-audit/verify-b365-markers.mjs`; refreshed `verify-b232-b236.mjs`'s stale color constants (its status section re-passes with the new palette).
 
 ### V122 — Markup z-order "Arrange" via Bluebeam shortcuts + right-click menu (B421) ✅ (self-verified headless — fully done, nothing pending)

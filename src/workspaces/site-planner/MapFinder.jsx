@@ -72,7 +72,7 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
 // never raster). Keyed off the token `shape`, drawn CENTERED on (cx,cy) so it sits
 // dead-center in the bulb. Only the SETTLED stages carry a glyph (the colorblind-safe
 // second cue); Pursuit and Active are glyphless solid discs — color + size + the
-// ground-ring progress sweep distinguish them (B423). "" → no glyph.
+// ground-ring progress sweep distinguish them (B433). "" → no glyph.
 function statusGlyph(shape, cx, cy) {
   const n = (v) => +v.toFixed(2);
   switch (shape) {
@@ -88,10 +88,10 @@ function statusGlyph(shape, cx, cy) {
 
 // Progress fraction per status (Path B — DERIVED from status until a real
 // progress_pct column lands, B161/B163). The retired building marker drew this as an
-// arc ring; the precision pin folds the SAME source into the ground ring (B424).
+// arc ring; the precision pin folds the SAME source into the ground ring (B434).
 const STATUS_PROGRESS = { pursuit: 0.10, active: 0.60, onhold: 0.30, complete: 1.00, dead: 0 };
 
-/* Status map pin (B424) — the "precision pin": a small color BULB on a short vertical
+/* Status map pin (B434) — the "precision pin": a small color BULB on a short vertical
  * STALK seated over a GROUND RING (a survey-monument read). The ground-ring CENTER is
  * the anchor — it sits exactly on the site coordinate (it replaces the old building/
  * shield bottom-tip anchor). Kept constant across states so it always reads as a site;
@@ -99,7 +99,7 @@ const STATUS_PROGRESS = { pursuit: 0.10, active: 0.60, onhold: 0.30, complete: 1
  * progress sweep vary — and they vary WITH importance (Pursuit loudest/largest → Dead
  * quietest/smallest; statusTokens.js).
  *  • SOLID bulb + a WHITE keyline (the white disc/halo behind it) — the standing rule:
- *    never a transparent/hollow primary marker on the aerial (B423). A soft white halo
+ *    never a transparent/hollow primary marker on the aerial (B433). A soft white halo
  *    on every stroke keeps it legible over both bright (tan/developed) and dark (water/
  *    forest) tiles; no drop-shadow (it flashes on re-render) EXCEPT a single subtle one
  *    on the open site.
@@ -1077,7 +1077,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                       fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, border: `1px solid ${on ? t.color : PAL.panelLine}`,
                       background: on ? t.color : "var(--surface-raised)", color: on ? "#fff" : PAL.ink, opacity: anySel && !on ? 0.55 : 1, textDecoration: t.struck ? "line-through" : "none" }}>
                     {/* Solid status disc (matches the map pin): filled dot off, inverted on.
-                        Pursuit/Active are glyphless discs; settled stages carry ‖/✓/✕ (B423). */}
+                        Pursuit/Active are glyphless discs; settled stages carry ‖/✓/✕ (B433). */}
                     <span style={{ width: 12, height: 12, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: on ? "rgba(255,255,255,0.92)" : t.color, color: on ? t.color : "#fff", fontSize: 7.5, lineHeight: 1 }}>{t.glyph}</span>
                     {STATUS_META[st]?.label || st}<span style={{ color: on ? "rgba(255,255,255,0.85)" : PAL.muted, fontWeight: 700 }}>{n}</span>
                   </button>
@@ -1101,7 +1101,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                       <button onClick={() => toggleGroup(st)} title={collapsed ? "Expand" : "Collapse"}
                         style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "var(--surface-raised)", borderTop: `1px solid ${PAL.panelLine}`, borderLeft: "none", borderRight: "none", borderBottom: "none", cursor: "pointer", fontFamily: "inherit", padding: "5px 12px" }}>
                         <span style={{ fontSize: 8, lineHeight: 1, transform: collapsed ? "rotate(-90deg)" : "none", display: "inline-block", color: PAL.muted }}>▼</span>
-                        {/* Solid status disc, matching the map pin (B423). */}
+                        {/* Solid status disc, matching the map pin (B433). */}
                         <span style={{ width: 14, height: 14, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, background: t.color, color: "#fff", fontSize: 8.5, lineHeight: 1 }}>{t.glyph}</span>
                         <span style={{ flex: 1, textAlign: "left", fontSize: 11, fontWeight: 700, color: PAL.ink, textDecoration: t.struck ? "line-through" : "none" }}>{STATUS_META[st]?.label || st}</span>
                         <span style={{ color: PAL.muted, fontWeight: 700, fontSize: 11 }}>{rows.length}</span>

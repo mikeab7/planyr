@@ -14,7 +14,7 @@
  *     DELIBERATELY SEPARATE palette — never source a status color from an accent
  *     token, and vice versa (B365).
  *
- * VISUAL-HIERARCHY rules (B365, refined B423) — three standing rules:
+ * VISUAL-HIERARCHY rules (B365, refined B433) — three standing rules:
  *   1. Salience is MONOTONIC, Pursuit loudest → Dead quietest. Pursuit is the
  *      biggest, fullest-opacity disc; settled stages recede (Complete + Dead are
  *      smaller, gray, and dimmed). The earlier scheme inverted this.

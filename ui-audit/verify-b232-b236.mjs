@@ -15,7 +15,7 @@ const OUT = new URL("./screens/b232-b236/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 
-// Token colors we expect to see (B234; re-hued B365; Dead off red B423).
+// Token colors we expect to see (B234; re-hued B365; Dead off red B433).
 const TOK = { pursuit: "#D85A30", active: "#378ADD", onhold: "#BA7517", complete: "#888780", dead: "#888780" };
 
 // Seven sites clustered near the Harris default center so the pins sit on-screen
@@ -50,7 +50,7 @@ async function run() {
   await page.goto(BASE, { waitUntil: "load" });
   await page.waitForTimeout(2500);
 
-  // ---- B234 / B423 / B424: pins paint in the status-token colors. The full
+  // ---- B234 / B433 / B434: pins paint in the status-token colors. The full
   // precision-pin structure + per-status fills/progress/anchor are verified in
   // ui-audit/verify-precision-pin.mjs; here we just confirm the shared tokens reach
   // the map (bulb/stalk/ring are <circle>/<line>, not <path>) and no MODULE accent
@@ -58,11 +58,11 @@ async function run() {
   const allCols = await page.$$eval(".leaflet-marker-icon svg *", (els) =>
     els.flatMap((e) => [e.getAttribute("fill"), e.getAttribute("stroke")]).filter(Boolean).map((c) => c.toLowerCase()));
   ok("pins render", allCols.length >= 4, `${allCols.length} pin colors`);
-  ok("B423 pursuit pin = coral #D85A30", allCols.includes(TOK.pursuit.toLowerCase()));
-  ok("B423 active pin = blue #378ADD", allCols.includes(TOK.active.toLowerCase()));
+  ok("B433 pursuit pin = coral #D85A30", allCols.includes(TOK.pursuit.toLowerCase()));
+  ok("B433 active pin = blue #378ADD", allCols.includes(TOK.active.toLowerCase()));
   ok("B234 onhold pin = amber #BA7517", allCols.includes(TOK.onhold.toLowerCase()));
   ok("B234 complete pin = gray #888780", allCols.includes(TOK.complete.toLowerCase()));
-  ok("B423 no red (#E24B4A) on any pin", !allCols.includes("#e24b4a"));
+  ok("B433 no red (#E24B4A) on any pin", !allCols.includes("#e24b4a"));
   // module accent colors must NOT appear as a pin (the bug B234 closes)
   ok("B234 module amber #EF9F27 NOT used as a pin", !allCols.includes("#ef9f27"));
   ok("B234 module teal #1D9E75 NOT used as a pin", !allCols.includes("#1d9e75"));

@@ -1,8 +1,8 @@
 /**
- * B423 + B424 — verify the precision-pin map markers + the corrected status palette.
+ * B433 + B434 — verify the precision-pin map markers + the corrected status palette.
  *
  * Seeds one site per status (status at TOP LEVEL, the logged-out path). Confirms:
- *   B424 (the precision pin):
+ *   B434 (the precision pin):
  *     1. Pursuit/Active/On-hold/Complete render; Dead is HIDDEN by default.
  *     2. Each pin is a BULB + STALK + GROUND RING (the survey-monument read).
  *     3. The ground-ring center sits at the viewBox bottom (cy=34) and the icon anchor
@@ -11,7 +11,7 @@
  *        (Complete 100% > Active 60% > On-hold 30% > Pursuit 10%).
  *     5. Size tiers track importance: Pursuit > Active > On-hold > Complete > Dead.
  *     6. SOLID bulb fill + a WHITE keyline (white disc behind it) — never hollow.
- *   B423 (the palette):
+ *   B433 (the palette):
  *     7. Correct fills (coral Pursuit, blue Active, amber On-hold, gray Complete).
  *     8. RED (#E24B4A) appears on NO marker.
  *     9. Dead (filtered in) is a SOLID gray disc with a ✕ glyph + dimmed (opacity 0.5).

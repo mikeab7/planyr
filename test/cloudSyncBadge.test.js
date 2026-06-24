@@ -44,7 +44,7 @@ describe("cloudBadgeView — presentation truth-table", () => {
     expect(v.actionable).toBe(true);
     expect(v.variant).toBe("cloud-slash");
     // RED is reserved for genuine alert/error via the dedicated --danger token —
-    // the cloud-off badge no longer borrows the (now-gray) Dead status color (B423).
+    // the cloud-off badge no longer borrows the (now-gray) Dead status color (B433).
     expect(v.color).toBe("var(--danger)");
   });
 
