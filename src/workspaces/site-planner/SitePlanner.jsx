@@ -927,6 +927,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
   const [overlayBusy, setOverlayBusy] = useState(false);
+  // Drag-and-drop affordance for the site-plan overlay (NEW-1). Two independent hover flags:
+  // the left "Site-plan overlay" panel dropzone, and a full-canvas "drop to place" hint.
+  const [overlayDropOver, setOverlayDropOver] = useState(false);
+  const [canvasDropOver, setCanvasDropOver] = useState(false);
   // Parcel-attached drawings (B67): immutable backdrop + pixel-relative markup, per parcel.
   const [parcelDrawings, setParcelDrawings] = useState(() => restored?.parcelDrawings || []);
   const [openDrawingId, setOpenDrawingId] = useState(null);   // the drawing shown in the markup modal
@@ -1069,6 +1073,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
+  // the window (NEW-1). Without this, releasing a file a few pixels off the real dropzone
+  // makes the browser open the PDF in a new tab — which reads as the file vanishing. Our own
+  // dropzones stopPropagation + run first, so this only catches the "missed everything" case.
+  useEffect(() => {
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onOver = (e) => { if (hasFiles(e)) e.preventDefault(); };
+    const onDrop = (e) => { if (hasFiles(e)) e.preventDefault(); };
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => { window.removeEventListener("dragover", onOver); window.removeEventListener("drop", onDrop); };
+  }, []);
   const xsecBusyRef = useRef(false); // in-flight guard for the async ditch cross-section (B56b)
   const titlePdfRef = useRef(null);
 
@@ -5832,8 +5848,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ flex: 1, position: "relative", minWidth: 0, order: 2, background: PAL.paper }}
-          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
-          onDrop={(e) => { const f = e.dataTransfer?.files?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); addOverlayFile(f); } }}>
+          onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setCanvasDropOver(true); } }}
+          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setCanvasDropOver(true); } }}
+          onDragLeave={(e) => { if (e.currentTarget === e.target) setCanvasDropOver(false); }}
+          onDrop={(e) => { setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
@@ -5849,6 +5867,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", background: basemapOn ? "#3f3f3f" : PAL.paper }}>
               <div ref={geoWrapRef} style={{ position: "absolute", inset: -GEO_OVERSCAN, background: basemapOn ? "#3f3f3f" : PAL.paper }} />
+            </div>
+          )}
+          {/* "Drop to place" hint — mounts only during an active file drag over the canvas
+              (NEW-1). pointerEvents:none so it never blocks map interaction; sits above the
+              SVG (zIndex 1) so the cue reads clearly over the drawing. */}
+          {canvasDropOver && (
+            <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: PAL.accentSoft, display: "grid", placeItems: "center" }}>
+              <span style={{ background: "var(--surface-raised)", color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
           )}
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
@@ -7170,10 +7196,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {/* site-plan overlay (B72) */}
           {leftPanel === "overlay" && (
           <Section title="Site-plan overlay">
-            <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={() => overlayFileRef.current?.click()}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
-            <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7, lineHeight: 1.5 }}>
-              Drop a site-plan PDF onto the map (or browse). Drag it to move; set size, rotation &amp; opacity below, then Lock it to draw on top. White paper is knocked out so the map shows through. <i>(Sizing to the drawing scale comes next.)</i>
+            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
+                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
+                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
+            <div
+              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
+              onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) { e.preventDefault(); setOverlayDropOver(true); } }}
+              onDragLeave={(e) => { if (e.currentTarget === e.target) setOverlayDropOver(false); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}
+              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : "var(--surface-raised)", transition: "border-color 120ms, background 120ms" }}>
+              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add site plan (PDF / image)…"}</button>
+              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
+                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this site plan</b> : <>Drop a site-plan PDF or image <b>here or on the map</b> — or browse. Drag it to move; set size, rotation &amp; opacity below, then Lock it to draw on top. White paper is knocked out so the map shows through. <i>(Sizing to the drawing scale comes next.)</i></>}
+              </div>
             </div>
             {!sheetOverlays.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
