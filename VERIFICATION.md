@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V130 — B439/B440: rename + delete projects from the breadcrumb switcher ✅ Site path headless 7/7 + 4 unit tests + lint 0 + 1416 tests + build; ⏳ one signed-in **Schedule** module click-through
+- **NOTE — B# collision on `main`:** a concurrent session also minted **B439** for the server-side GIS imagery cache (see V129 below), so `main` carries TWO meanings of "B439" — this rename/delete feature (filed via PR #327's BACKLOG entry) and the GIS cache. Both shipped. The cohort should reconcile the numbering; this entry keeps the rename/delete code's own B439/B440 references intact.
+- **What changed.** Every project row in the Row-1 switcher dropdown gains a hover kebab `⋯` + right-click menu → **Rename** (inline edit) / **Delete** (inline confirm). Works in the Site Planner/Markup (store-backed) AND the Schedule module (bridged to the embedded scheduler over postMessage — B440). This was the owner's live report: "i cant change names or delete in the schedule module."
+- **Verified (sandbox, headless).** `ui-audit/verify-b439-b440-project-manage.mjs` 7/7 on the **Site (uncontrolled)** path: kebab reveals on hover; right-click opens Rename/Delete; the parent dropdown stays open under the menu (the second-portal gotcha); rename relabels the store; empty rename rejected; delete asks to confirm then removes the group. Plus `test/deleteSiteGroup.test.js` (4) on the store layer.
+- **Why ⏳.** The **Schedule** half drives the embedded `/sequence/` app, which can't boot in the offline sandbox (its CDN libs + its own Supabase backend are blocked — the same wall `verify-schedule-picker.mjs` hits here), so the bridge can't be exercised headless. On planyr.io it boots normally. **Signed-in live check:** open the **Schedule** module → project switcher → right-click (or hover ⋯) a project → **Rename** it (the name updates in the crumb + the scheduler) and **Delete** a project (it disappears; deleting the open one lands you on the Dashboard). Cadence: once after ship. Last checked: sandbox green (Site path).
+
 <!-- V128 (B438 browser-side GIS imagery service worker) was SUPERSEDED by V129/B439 — the
      browser SW was retired in favour of the server-side Drive-backed cache. No production check
      needed for the SW itself — B438 HAD shipped (PR #326), so gis-sw.js is now a

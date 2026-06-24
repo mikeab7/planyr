@@ -18,12 +18,23 @@
  *   onDashboard     — () => void            (also the logo's secondary route)
  *   onSelectProject — (id, name) => void
  *   onNewProject    — () => void
+ *   onRenameProject — (id, newName) => void  (B439; optional — uncontrolled falls back to the store)
+ *   onDeleteProject — (id) => void           (B439; optional — uncontrolled falls back to the store)
  *   saveState       — "synced"|"saving"|"offline"|"error"|"local"|null  (current project)
+ *
+ * Per-row rename/delete (B439): every project row carries a hover-revealed kebab (⋯) and a
+ * right-click menu (both open the SAME menu — right-click is invisible and dead on touch) with
+ * Rename (edits the row label in place) and Delete (a confirm step before acting). In controlled
+ * mode (e.g. the Schedule module) the workspace supplies onRenameProject/onDeleteProject to drive
+ * its own store over the bridge; uncontrolled (Site Planner / Markup) falls back to the site store.
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
-import { listProjects, filterProjects, relTime } from "../projects/projects.js";
+import {
+  listProjects, filterProjects, relTime,
+  renameProject as storeRename, deleteProject as storeDelete,
+} from "../projects/projects.js";
 
 // Crumbs sit on the chrome bar, which now themes WITH the app (B318) — so these are
 // chrome tokens, not the retired warm-dark hexes (white-on-light was the B341 bug).
@@ -81,12 +92,26 @@ const row = (extra) => ({
 
 const divider = { height: 1, background: "var(--border-default)", margin: "6px 4px" };
 
+// Per-row manage menu (B439) — Rename / Delete, rendered as its own portal layer ABOVE the
+// dropdown's click-away backdrop so a click inside it never closes the parent dropdown.
+const menuItem = (extra) => ({
+  display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+  padding: "7px 9px", borderRadius: 6, border: "none", background: "transparent",
+  cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", ...extra,
+});
+const btnSm = {
+  cursor: "pointer", border: "none", borderRadius: 6, padding: "5px 11px",
+  fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+};
+
 export default function ProjectBreadcrumb({
   currentProject,
   accent = "var(--accent-site-text)", // foreground text token (AA), not the fill (B341)
   onDashboard,
   onSelectProject,
   onNewProject,
+  onRenameProject,
+  onDeleteProject,
   saveState,
   // When `projects` is supplied the breadcrumb is "controlled": the workspace owns the
   // list (e.g. the Schedule module feeds in its embedded scheduler's own projects).
@@ -109,8 +134,17 @@ export default function ProjectBreadcrumb({
   const projects = (controlled ? controlledProjects : internalProjects).filter(Boolean);
   const [hoverRow, setHoverRow] = useState(null);
   const [toast, setToast] = useState(null); // transient "saved on device" notice (B193)
+  const [menuFor, setMenuFor] = useState(null); // {id, name, x, y, confirm} — per-row manage menu (B439)
+  const [editingId, setEditingId] = useState(null); // project id being renamed inline (B439)
+  const [editVal, setEditVal] = useState("");
   const anchorRef = useRef(null);
   const toastTimer = useRef(null);
+
+  // Rename/Delete are available when the workspace wired the props (controlled, e.g. Schedule) OR
+  // when we're uncontrolled and can drive the site store directly (Site Planner / Markup). B439.
+  const canRename = !!onRenameProject || !controlled;
+  const canDelete = !!onDeleteProject || !controlled;
+  const canManage = canRename || canDelete;
 
   const refresh = () => { if (!controlled) setInternalProjects(listProjects()); };
   // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when
@@ -125,7 +159,7 @@ export default function ProjectBreadcrumb({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlled]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) { refresh(); setQ(""); } }, [open]);
+  useEffect(() => { if (open) { refresh(); setQ(""); } else { setMenuFor(null); setEditingId(null); } }, [open]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   // Surface (don't block) an at-risk save when leaving the current project (B193).
@@ -143,6 +177,59 @@ export default function ProjectBreadcrumb({
     onSelectProject?.(id, name);
   };
   const newProject = () => { setOpen(false); flagIfAtRisk(); onNewProject?.(); };
+
+  // A same-tab store write does NOT fire the native 'storage' event, so after an uncontrolled
+  // rename/delete we nudge the app's existing planarfit:sites listeners (SitePlannerApp's site/
+  // map list + this breadcrumb) to refresh — so the change shows on EVERY surface immediately,
+  // not just on reload (B439, "update both surfaces"). Cross-tab already works for free.
+  const notifyStoreChange = () => {
+    try { window.dispatchEvent(new StorageEvent("storage", { key: "planarfit:sites:v1" })); } catch (_) {}
+  };
+
+  // Transient toast helper, reused for an honest delete-failure surface (B439).
+  const flashToast = (msg, ms = 7000) => {
+    clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), ms);
+  };
+
+  // Open the per-row manage menu (B439) — from a right-click (at the cursor) or the kebab
+  // (just under the button). preventDefault stops the browser's native context menu; the menu
+  // is its own portal above the dropdown's backdrop, so opening it never closes the dropdown.
+  const openManageMenu = (e, p) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX || r.left;
+    const y = (e.clientY || r.bottom) + 2;
+    setMenuFor({ id: p.id, name: p.name, x, y, confirm: false });
+  };
+  const startRename = (p) => { setMenuFor(null); setEditingId(p.id); setEditVal(p.name || ""); };
+  const commitRename = (id) => {
+    const v = (editVal || "").trim();
+    setEditingId(null);
+    if (!v) return; // reject empty/whitespace-only — keep the prior name
+    if (onRenameProject) onRenameProject(id, v);
+    else { storeRename(id, v); refresh(); notifyStoreChange(); }
+  };
+  const doDelete = (id) => {
+    const wasCurrent = id === currentProject?.id;
+    setMenuFor(null);
+    if (onDeleteProject) {
+      onDeleteProject(id); // controlled (Schedule) — the bridge deletes + routes home in the embedded app
+      return;
+    }
+    // Uncontrolled (site store): optimistic local removal + an HONEST cloud-failure surface (B439) —
+    // a silent zero-row delete would otherwise reappear on reload claiming it was "deleted".
+    Promise.resolve(storeDelete(id)).then((res) => {
+      if (res && res.ok === false) flashToast(res.error || "That project couldn't be fully deleted — it may reappear when you reload.");
+      refresh();
+      notifyStoreChange();
+    });
+    refresh();
+    notifyStoreChange();
+    if (wasCurrent) onDashboard?.(); // the open project no longer exists → go to all-projects
+  };
 
   const onDash = !currentProject; // we're at the all-projects view
   const filtered = filterProjects(projects, q);
@@ -238,21 +325,67 @@ export default function ProjectBreadcrumb({
           ) : (
             filtered.map((p) => {
               const cur = p.id === currentProject?.id;
+              const editing = editingId === p.id;
+              const active = hoverRow === p.id || menuFor?.id === p.id; // row highlighted while its menu is open
               return (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => pickProject(p.id, p.name)}
+                  data-testid={`project-row-${p.id}`}
+                  onContextMenu={canManage ? (e) => openManageMenu(e, p) : undefined}
                   onMouseEnter={() => setHoverRow(p.id)}
                   onMouseLeave={() => setHoverRow(null)}
-                  style={row({ background: hoverRow === p.id ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
+                  style={row({ padding: 0, background: active ? "var(--hover-ghost)" : (cur ? "var(--hover-menu)" : "transparent") })}
                 >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                    {p.name}
-                  </span>
-                  {cur
-                    ? <span style={{ color: accent, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>
-                    : <span style={{ color: "var(--text-tertiary)", fontSize: 11, flex: "none" }}>{relTime(p.updatedAt)}</span>}
-                </button>
+                  {editing ? (
+                    <input
+                      autoFocus
+                      value={editVal}
+                      onChange={(e) => setEditVal(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); commitRename(p.id); }
+                        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setEditingId(null); }
+                      }}
+                      onBlur={() => commitRename(p.id)}
+                      aria-label={`Rename ${p.name}`}
+                      style={{
+                        flex: 1, minWidth: 0, margin: "2px 4px", padding: "5px 7px",
+                        border: "1px solid var(--accent-site-text, #2563eb)", borderRadius: 6, outline: "none",
+                        fontFamily: "inherit", fontSize: 12.5, color: "var(--text-primary)", background: "var(--surface-page)",
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => pickProject(p.id, p.name)}
+                        title={p.name}
+                        style={row({ flex: 1, minWidth: 0, background: "transparent" })}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                          {p.name}
+                        </span>
+                      </button>
+                      <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
+                        {canManage && active ? (
+                          <button
+                            onClick={(e) => openManageMenu(e, p)}
+                            title="Rename or delete"
+                            aria-label={`Manage ${p.name}`}
+                            data-testid={`project-kebab-${p.id}`}
+                            style={{
+                              flex: "none", cursor: "pointer", border: "none", background: "transparent",
+                              color: "var(--text-secondary)", borderRadius: 5, padding: "0 5px",
+                              fontSize: 16, lineHeight: 1, fontFamily: "inherit",
+                            }}
+                          >⋯</button>
+                        ) : cur ? (
+                          <span style={{ color: accent, fontSize: 10.5, fontWeight: 700 }}>current</span>
+                        ) : (
+                          <span style={{ color: "var(--text-tertiary)", fontSize: 11 }}>{relTime(p.updatedAt)}</span>
+                        )}
+                      </span>
+                    </>
+                  )}
+                </div>
               );
             })
           )}
@@ -273,6 +406,71 @@ export default function ProjectBreadcrumb({
           </span>
         </button>
       </AnchoredMenu>
+
+      {/* Per-row manage menu (B439) — Rename / Delete, a SECOND portal layer above the dropdown's
+          click-away backdrop, so clicking inside it never closes the parent dropdown. */}
+      {menuFor && createPortal(
+        <>
+          <div
+            onClick={() => setMenuFor(null)}
+            onContextMenu={(e) => { e.preventDefault(); setMenuFor(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 5000 }}
+          />
+          <div
+            data-testid="project-manage-menu"
+            style={{
+              ...panel, position: "fixed", zIndex: 5001, minWidth: 180, padding: 5,
+              left: Math.min(menuFor.x, window.innerWidth - 196),
+              top: Math.min(menuFor.y, window.innerHeight - 132),
+            }}
+          >
+            {!menuFor.confirm ? (
+              <>
+                {canRename && (
+                  <button
+                    data-testid="project-rename"
+                    onClick={() => startRename(menuFor)}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    style={menuItem()}
+                  >
+                    <span aria-hidden style={{ fontSize: 12, opacity: 0.8 }}>✎</span> Rename
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    data-testid="project-delete"
+                    onClick={() => setMenuFor((m) => ({ ...m, confirm: true }))}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    style={menuItem({ color: "var(--danger, #dc2626)" })}
+                  >
+                    <span aria-hidden style={{ fontSize: 12 }}>🗑</span> Delete
+                  </button>
+                )}
+              </>
+            ) : (
+              <div style={{ padding: "5px 7px" }}>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.45, marginBottom: 9 }}>
+                  Delete <strong style={{ color: "var(--text-primary)" }}>{menuFor.name}</strong>? This can't be undone.
+                </div>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => setMenuFor((m) => ({ ...m, confirm: false }))}
+                    style={{ ...btnSm, background: "var(--hover-menu)", color: "var(--text-primary)" }}
+                  >Cancel</button>
+                  <button
+                    data-testid="project-delete-confirm"
+                    onClick={() => doDelete(menuFor.id)}
+                    style={{ ...btnSm, background: "var(--danger, #dc2626)", color: "#fff" }}
+                  >Delete</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>,
+        document.body,
+      )}
 
       {/* Transient at-risk-switch notice (B193) — non-blocking, auto-dismiss */}
       {toast && createPortal(

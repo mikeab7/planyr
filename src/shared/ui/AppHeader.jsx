@@ -224,6 +224,11 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
+  // Per-row rename/delete in the switcher (B439) — optional; passed straight through to the
+  // breadcrumb. Controlled callers (Schedule) wire them to their bridge; omitting them lets the
+  // uncontrolled breadcrumb fall back to the site store.
+  onRenameProject,
+  onDeleteProject,
   saveState,
   // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
   // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
@@ -330,6 +335,8 @@ export default function AppHeader({
                 onDashboard={onDashboard}
                 onSelectProject={onSelectProject}
                 onNewProject={onNewProject}
+                onRenameProject={onRenameProject}
+                onDeleteProject={onDeleteProject}
                 saveState={saveState}
                 projects={projects}
                 homeLabel={homeLabel}
