@@ -84,13 +84,15 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
 
 <!-- B438 (browser-side GIS imagery cache: service worker + IndexedDB) was SUPERSEDED mid-session by
-     B439 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
+     B445 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
      — a per-browser cache doesn't follow you between computers + isn't the professional home for
      outage resilience. The SW/IndexedDB code was retired (gis-sw.js → self-unregistering tombstone;
-     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B439 (shipped) blocks live in
-     BACKLOG-DONE.md. -->
+     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B445 (shipped) blocks live in
+     BACKLOG-DONE.md. (Renumbered B439→B445 on 2026-06-24: a concurrent session had also minted B439
+     for the breadcrumb rename/delete feature — see BACKLOG-DONE.md B439/B440 — so this GIS item took
+     the next free B# to clear the collision.) -->
 
-### B439 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24)*
+### B445 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24; renumbered from B439 to clear a collision)*
 `[x]` Government layer *pictures* (FEMA flood, wetlands, utilities) keep painting when the agency server is down, follow the user between devices, and are stored off the user's machine — replacing the browser-side B438. The map points raster (export-image) layers at a same-origin Cloudflare Function `/api/gis-cache/*` that fetches the agency server-side (no CORS wall), keeps a durable copy in the existing Google Drive, refreshes in the background (stale-while-revalidate), and FAILS OPEN (302 → agency) on any miss-and-failure / missing creds / error. Client also one-shot falls back to the direct agency URL if the proxy isn't serving, so a layer always renders (caching is pure enhancement). Default ON; `VITE_GIS_PROXY=0` is the kill switch. Pure core `src/shared/gis/gisProxyCore.js` (svc-URL encode/parse + cache key + freshness, 15 tests) + testable handler `functions/api/gis-cache/_handler.js` (SWR/fail-open, 12 tests, in-memory Drive). Age badge via the proxy's `?meta=1` sidecar → existing onStatus `{ts,stale}` channel. Reuses the live Drive creds (`GOOGLE_*`, server-side only) — no Supabase, no new secret. DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, PRs #328 + #329); see BACKLOG-DONE.md. **Bring-up fix (#329):** the gov host (`hazards.fema.gov`) 403s a bare server-side User-Agent → every request fail-opened (nothing cached); fixed by sending a browser UA on upstream fetches (root cause isolated live via a temporary `?diag=1` probe; the datacenter-IP-block fear was disproven). **✅ VERIFIED LIVE on planyr.io:** real FEMA export → 200 image/png and `?meta=1` → `cached:true` with a ts (fetch → Drive store → serve → age, end-to-end). Only an in-app visual glance remains (V129).
 
 - `[x]` **B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
