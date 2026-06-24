@@ -28,7 +28,9 @@ async function arm(page, id) {
 async function draw(page, box, id) {
   const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
   const m = page.mouse, g = modeOf(id);
-  if (g === "twoPoint" || g === "region") {
+  if (g === "twoPoint") { // click-click (the real interaction model)
+    await m.click(cx - 60, cy - 40); await m.click(cx + 60, cy + 40);
+  } else if (g === "region") {
     await m.move(cx - 60, cy - 40); await m.down(); await m.move(cx + 60, cy + 40, { steps: 6 }); await m.up();
   } else if (g === "freehand") {
     await m.move(cx - 50, cy); await m.down(); await m.move(cx, cy - 30, { steps: 6 }); await m.move(cx + 50, cy, { steps: 6 }); await m.up();
@@ -71,26 +73,46 @@ const run = async () => {
 
   const all = [...GESTURES.twoPoint, ...GESTURES.multiPoint, ...GESTURES.point, ...GESTURES.freehand, ...GESTURES.region];
   console.log("\n=== DOCUMENT REVIEW — per-tool audit ===");
-  console.log("tool".padEnd(12), "armed", "drew", "panelOnArm", "propsOnSelect");
+  console.log("tool".padEnd(12), "armed", "drew", "propsOnArm", "revertedToSelect", "autoSelectedProps");
   for (const id of all) {
+    await page.keyboard.press("Escape").catch(() => {}); // clear any prior selection
     const armed = await arm(page, id);
-    // How many property CONTROLS show just from ARMING the tool (before drawing/selecting)?
     await page.waitForTimeout(80);
-    const panelOnArm = await page.locator('[data-testid="property-panel"] input, [data-testid="property-panel"] select').count();
+    const propsOnArm = await page.locator('[data-testid="property-panel"] input, [data-testid="property-panel"] select').count();
     if (id === "line") await page.screenshot({ path: "ui-audit/out-line-armed.png" }).catch(() => {});
     const before = await countMarkups(page);
     await draw(page, wrap, id).catch((e) => console.log("draw err", id, e.message));
     const after = await countMarkups(page);
     const drew = after > before;
-    // Select it: arm select, click where we drew.
-    await arm(page, "select");
-    await page.mouse.click(wrap.x + wrap.width / 2, wrap.y + wrap.height / 2).catch(() => {});
-    await page.waitForTimeout(150);
-    const propsOnSelect = await page.locator('[data-testid="property-panel"] input, [data-testid="property-panel"] select').count();
-    console.log(String(id).padEnd(12), String(armed).padEnd(5), String(drew).padEnd(4), String(panelOnArm).padEnd(10), propsOnSelect);
-    // Clear selection for the next tool.
-    await page.keyboard.press("Escape").catch(() => {});
+    // Bluebeam revert: after a single-use draw the tool should flip to Select and auto-select the
+    // new markup (so its panel shows). Measured WITHOUT any extra click.
+    await page.waitForTimeout(120);
+    const reverted = (await page.getByTestId("tool-select").getAttribute("aria-pressed").catch(() => null)) === "true";
+    const autoSelProps = await page.locator('[data-testid="property-panel"] input, [data-testid="property-panel"] select').count();
+    console.log(String(id).padEnd(12), String(armed).padEnd(5), String(drew).padEnd(4), String(propsOnArm).padEnd(10), String(reverted).padEnd(16), autoSelProps);
   }
+
+  // Color-instant check: draw a rect (auto-selected), change Line color, read the rendered stroke.
+  console.log("\n=== COLOR-INSTANT (selected markup shows its real color live) ===");
+  await page.keyboard.press("Escape").catch(() => {});
+  await arm(page, "rect");
+  const cx = wrap.x + wrap.width / 2, cy = wrap.y + wrap.height / 2;
+  await page.mouse.click(cx - 70, cy - 50); await page.mouse.click(cx + 70, cy + 50); // click-click
+  await page.waitForTimeout(150);
+  const colorInput = page.locator('[data-testid="property-panel"] input[type="color"]').first();
+  const had = await colorInput.count();
+  if (had) {
+    await colorInput.evaluate((el) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(el, "#00cc44"); // React tracks value — use the native setter so onChange fires
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await page.waitForTimeout(200);
+  }
+  const strokes = await page.evaluate(() => [...document.querySelectorAll('[data-testid="markup-overlay"] rect[stroke]')].map((r) => r.getAttribute("stroke")));
+  console.log("rect strokes after setting #00cc44:", JSON.stringify(strokes), strokes.some((s) => /00cc44/i.test(s || "")) ? "✓ live" : "✗ not applied");
+  await page.screenshot({ path: "ui-audit/out-color-instant.png" }).catch(() => {});
 
   // Site Planner: is there ANY shared property panel at all?
   console.log("\n=== SITE PLANNER — property panel present? ===");

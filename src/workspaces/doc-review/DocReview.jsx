@@ -182,6 +182,9 @@ export default function DocReview({
   const [err, setErr] = useState("");
 
   const [tool, setTool] = useState("select");
+  // Bluebeam-style arming: a single click arms a tool for ONE markup (after which it reverts to
+  // Select and selects the new markup); double-clicking the rail button LOCKS it for repeated use.
+  const [toolLock, setToolLock] = useState(false);
   // Per-tool style overrides (B426): the user's last-set value for each property key becomes
   // the sticky default for the next markup of that tool kind. Stored as canonical keys.
   const [propStyle, setPropStyle] = useState({});
@@ -710,9 +713,13 @@ export default function DocReview({
         : columnMeta(key)?.default;
       if (v !== undefined) style[key] = v;
     });
+    const id = uid();
     pushHistory();
-    setMarkups((a) => [...a, { id: uid(), page, ...style, ...mk }]);
+    setMarkups((a) => [...a, { id, page, ...style, ...mk }]);
     setDraft(null);
+    // Bluebeam: a single-use tool reverts to Select after one markup and selects the new one
+    // (so its properties show + you can tweak it); a locked tool stays armed.
+    if (!toolLock) { setTool("select"); setSel(id); }
   };
 
   // Erase pen/highlight markups whose points overlap the given box (two corner pts).
@@ -753,7 +760,9 @@ export default function DocReview({
     else {
       const style = {}; // honor the sticky text style (size/color/bold/…) set before drawing
       propsForTool("text").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
-      setMarkups((a) => [...a, { id: uid(), page: ed.page, kind: "text", pts: [ed.pt], ...style, text }]);
+      const id = uid();
+      setMarkups((a) => [...a, { id, page: ed.page, kind: "text", pts: [ed.pt], ...style, text }]);
+      if (!toolLock) { setTool("select"); setSel(id); } // revert + select like the other tools
     }
   };
 
@@ -1229,7 +1238,9 @@ export default function DocReview({
 
   // Right-side tool rail (B330): the drawing/measure tools + zoom controls, Bluebeam-style.
   const railItems = [
-    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: t.hint, icon: <MkIcon id={t.id} />, active: tool === t.id, onClick: () => { setTool(t.id); setDraft(null); setCalInput(null); } })),
+    ...TOOLS.map((t) => ({ kind: "tool", id: t.id, label: t.label, title: `${t.hint}${t.id !== "select" && t.id !== "pan" ? "  (double-click to keep this tool active)" : ""}`, icon: <MkIcon id={t.id} />, active: tool === t.id,
+      onClick: () => { setTool(t.id); setToolLock(false); setDraft(null); setCalInput(null); },
+      onDoubleClick: () => { setTool(t.id); setToolLock(true); setDraft(null); setCalInput(null); } })),
     { kind: "spacer" },
     { kind: "header", label: "Zoom" },
     { kind: "node", render: <div style={{ textAlign: "center", fontSize: 10, color: "var(--chrome-muted)", fontWeight: 600, padding: "1px 0 2px" }}>{Math.round((view?.scale || 0) * 100)}%</div> },
