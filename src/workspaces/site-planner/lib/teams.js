@@ -24,11 +24,11 @@ export async function currentIdentity() {
   } catch (_) { return { uid: null, email: null }; }
 }
 
-// A Supabase error meaning the RPC isn't deployed yet (DB not migrated to create_team).
+// A Supabase error meaning an RPC isn't deployed yet (DB not migrated to that function).
 const isMissingFunction = (error) => {
   const msg = String((error && error.message) || "").toLowerCase();
   return (error && error.code === "PGRST202") || msg.includes("could not find the function") ||
-    (msg.includes("create_team") && msg.includes("does not exist"));
+    (msg.includes("function") && msg.includes("does not exist"));
 };
 
 // Create a team and make the creator its first admin. Returns { ok, teamId, error }.
@@ -59,28 +59,47 @@ export async function createTeam(name) {
 }
 
 // Teams the signed-in user belongs to, with their own role in each. Newest first.
-// Returns [{ id, name, role, created_by }]. Throws on a real fetch error (caller distinguishes
-// "no teams" from "offline"), matching cloudList.
+// Returns [{ id, name, role, created_by, created_at }]. Throws on a real fetch error (caller
+// distinguishes "no teams" from "offline"), matching cloudList.
+//
+// Preferred path: the list_my_teams RPC (SECURITY DEFINER) joins team_members→teams server-side,
+// immune to PostgREST's embedded-join relationship cache (which can transiently 404 right after
+// the tables change, making a just-created team vanish). Falls back to the embedded join only
+// when the RPC isn't deployed yet.
+const mapTeamRows = (rows) => (rows || [])
+  .map((r) => ({ id: r.id, name: r.name, role: r.role, created_by: r.created_by, created_at: r.created_at }))
+  .sort((a, b) => (new Date(b.created_at || 0)) - (new Date(a.created_at || 0)));
+
+const schemaNotReady = (error) => {
+  const msg = String((error && error.message) || "").toLowerCase();
+  return /does not exist|schema cache|could not find|relationship/i.test(msg) ||
+    error.code === "42P01" || error.code === "42703" || error.code === "PGRST200";
+};
+
 export async function listMyTeams() {
   if (!supabase) return [];
   const { uid } = await currentIdentity();
   if (!uid) return [];
-  // My membership rows (role) joined to the team (name). RLS returns only teams I'm in.
+
+  const rpc = await supabase.rpc("list_my_teams");
+  if (!rpc.error) return mapTeamRows(rpc.data);
+  if (!isMissingFunction(rpc.error)) {
+    if (schemaNotReady(rpc.error)) return []; // tables not migrated yet → "no teams"
+    throw new Error(rpc.error.message || "couldn't load teams");
+  }
+
+  // Legacy fallback (RPC not deployed): embedded join. RLS returns only teams I'm in.
   const { data, error } = await supabase
     .from("team_members")
     .select("role, team:teams(id, name, created_by, created_at)")
     .eq("user_id", uid);
   if (error) {
-    // Table/column not yet migrated — degrade to "no teams" rather than a connection error.
-    const msg = String(error.message || "").toLowerCase();
-    if (/does not exist|schema cache|could not find|relationship/i.test(msg) ||
-        error.code === "42P01" || error.code === "42703" || error.code === "PGRST200") return [];
+    if (schemaNotReady(error)) return [];
     throw new Error(error.message || "couldn't load teams");
   }
-  return (data || [])
+  return mapTeamRows((data || [])
     .filter((r) => r && r.team)
-    .map((r) => ({ id: r.team.id, name: r.team.name, role: r.role, created_by: r.team.created_by, created_at: r.team.created_at }))
-    .sort((a, b) => (new Date(b.created_at || 0)) - (new Date(a.created_at || 0)));
+    .map((r) => ({ id: r.team.id, name: r.team.name, role: r.role, created_by: r.team.created_by, created_at: r.team.created_at })));
 }
 
 // Roster of a team (name + email + role), via the SECURITY DEFINER RPC so we don't open
@@ -162,5 +181,23 @@ export async function leaveTeam(teamId) {
   const { uid } = await currentIdentity();
   if (!uid) return { ok: false, error: "Not signed in." };
   const { error } = await supabase.from("team_members").delete().eq("team_id", teamId).eq("user_id", uid);
+  return { ok: !error, error: error ? error.message : null };
+}
+
+// Rename a team (admin action). Relies on the "admins update team" RLS policy. Returns { ok, error }.
+export async function renameTeam(teamId, name) {
+  if (!supabase || !teamId) return { ok: false, error: "missing args" };
+  const clean = (name == null ? "" : String(name)).trim();
+  if (!clean) return { ok: false, error: "Give the team a name." };
+  const { error } = await supabase.from("teams").update({ name: clean }).eq("id", teamId);
+  return { ok: !error, error: error ? error.message : null };
+}
+
+// Delete a team (admin action). Relies on the "admins delete team" RLS policy. FK cascades remove
+// memberships + invites; shared projects revert to private (team_id → null, on delete set null), so
+// no project data is lost. Returns { ok, error }.
+export async function deleteTeam(teamId) {
+  if (!supabase || !teamId) return { ok: false, error: "missing args" };
+  const { error } = await supabase.from("teams").delete().eq("id", teamId);
   return { ok: !error, error: error ? error.message : null };
 }
