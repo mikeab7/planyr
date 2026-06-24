@@ -51,7 +51,13 @@ export async function listMyTeams() {
     .from("team_members")
     .select("role, team:teams(id, name, created_by, created_at)")
     .eq("user_id", uid);
-  if (error) throw new Error(error.message || "couldn't load teams");
+  if (error) {
+    // Table/column not yet migrated — degrade to "no teams" rather than a connection error.
+    const msg = String(error.message || "").toLowerCase();
+    if (/does not exist|schema cache|could not find|relationship/i.test(msg) ||
+        error.code === "42P01" || error.code === "42703" || error.code === "PGRST200") return [];
+    throw new Error(error.message || "couldn't load teams");
+  }
   return (data || [])
     .filter((r) => r && r.team)
     .map((r) => ({ id: r.team.id, name: r.team.name, role: r.role, created_by: r.team.created_by, created_at: r.team.created_at }))
