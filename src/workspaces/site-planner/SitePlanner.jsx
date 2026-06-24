@@ -159,7 +159,7 @@ const TOOLS = [
   { id: "pond", label: "Detention Pond", hint: "Drag for a rectangle, or click points to outline an irregular detention area (double-click to close)" },
   { id: "road", label: "Road", hint: "Pick a width and click two points to lay a road at any angle; Free draw to drag a rectangle. 6″ curb each side (24′ road = 25′ wide)" },
   { id: "easement", label: "Easement", hint: "Draw an easement (Easement ▾ for mode). Centerline+width: click a path, double-click/Enter to finish — it builds a strip of the set width. Boundary: click points, close on the first dot. Offset from parcel edge: click a parcel's edges then Enter. Edit attributes (type/holder/width…) in the Element panel; width re-offsets the strip live" },
-  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), or Area (outline a region, click the first dot or double-click to close)" },
+  { id: "measure", label: "Measure", hint: "Pick a mode from Measure ▾ — Length (two-point distance), Polylength (click a path, double-click / Enter to finish), Area (outline a region, click the first dot or double-click to close), or Count (click to mark items, Enter to finish)" },
   { id: "calibrate", label: "Calibrate", hint: "Underlay scale: click two points a known distance apart on the screenshot, then enter the real length at right" },
   { id: "mline", label: "Line", hint: "Markup line (L): drag end-to-end. Hold Shift for 45° increments" },
   { id: "mrect", label: "Rectangle", hint: "Markup rectangle (R): drag a box. Hold Shift for a square" },
@@ -172,7 +172,7 @@ const MARKUP_TOOLS = ["mline", "mrect", "mellipse", "mpolygon", "mpolyline"];
 // Measure-mode display names — Bluebeam's terms (Length / Polylength / Area). The
 // internal mode value stays line/polyline/area (persisted in localStorage), so this is
 // label-only; "Polylength" also disambiguates the measurement from the markup "Polyline".
-const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"]];
+const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", "Area"], ["count", "Count"]];
 const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
@@ -2111,6 +2111,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishMeasure = () => {
     if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "polyline", pts: measDraft }]); }
     else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "area", pts: measDraft }]); flashPolyWarn(measDraft, "Measured area"); }
+    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, { id: uid(), mode: "count", pts: measDraft }]); }
     setMeasDraft([]);
   };
   // Split the selected parcel (or whichever parcel the cut crosses) along a
@@ -2449,7 +2450,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || !sel) return null;
     if (sel.kind === "parcel") { const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
     if (sel.kind === "el") { const el = els.find((x) => x.id === sel.id); return el && el.points && !el.locked ? { layer: "el", id: el.id, pts: el.points, closed: true, min: 3 } : null; }
-    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min: closed ? 3 : 2 }; }
+    if (sel.kind === "measure") { const m = measures[sel.i]; if (!m) return null; const closed = measMode(m) === "area"; const min = closed ? 3 : measMode(m) === "count" ? 1 : 2; return { layer: "measure", id: sel.i, pts: measPts(m), closed, min }; }
     if (sel.kind === "markup") {
       const m = markups.find((x) => x.id === sel.id); if (!m || m.locked) return null;
       if (m.kind === "easement") { const closed = m.mode === "boundary"; return { layer: "ease", id: m.id, pts: easeEditPath(m), closed, min: closed ? 3 : 2 }; }
@@ -2490,7 +2491,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id && pc.points.length > 3 ? { ...pc, points: rm(pc.points) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id && x.points && x.points.length > 3 ? { ...x, points: rm(x.points) } : x));
-    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => { if (k !== id) return mm; const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : 2; return pts.length > min ? { ...mm, mode: measMode(mm), pts: rm(pts) } : mm; }));
+    else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => { if (k !== id) return mm; const pts = measPts(mm), min = measMode(mm) === "area" ? 3 : measMode(mm) === "count" ? 1 : 2; return pts.length > min ? { ...mm, mode: measMode(mm), pts: rm(pts) } : mm; }));
     else if (layer === "ease") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const p = easeEditPath(x), min = x.mode === "boundary" ? 3 : 2; return p.length > min ? setEasePath(x, rm(p)) : x; }));
     else if (layer === "markup") setMarkups((a) => a.map((x) => { if (x.id !== id) return x; const pts = mkPts(x); return pts.length > mkMinPts(x) ? setMkPts(x, rm(pts)) : x; }));
     setSelVtx(null);
@@ -2941,7 +2942,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishActiveDrawing = () => {
     if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
-    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : 2)) { finishMeasure(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "parcel" && draftPoly?.length >= 3) { closePoly(); return true; }
@@ -6338,18 +6339,57 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 );
               })()}
 
-              {/* measurements — line (distance), polyline (path length), area */}
+              {/* measurements — line (distance), polyline (path length), area, count */}
               {measures.map((m, i) => {
                 const fpts = measPts(m);
-                if (fpts.length < 2) return null;
                 const mode = measMode(m);
+                if (mode === "count" ? fpts.length < 1 : fpts.length < 2) return null;
                 const pts = fpts.map(f2p);
                 const isSel = sel?.kind === "measure" && sel.i === i;
+                const warn = calibrationState === "uncalibrated";
+                const mcolor = warn ? "#b45309" : PAL.accent;
+
+                if (mode === "count") {
+                  const lastPt = pts[pts.length - 1];
+                  const countLbl = `${fpts.length} item${fpts.length !== 1 ? "s" : ""}`;
+                  return (
+                    <g key={m.id || `m${i}`}>
+                      {pts.map((p, k) => (
+                        <g key={k} pointerEvents="none">
+                          <circle cx={p.x} cy={p.y} r={8} fill={mcolor + "28"} stroke={mcolor} strokeWidth={1.5} />
+                          <text x={p.x} y={p.y + 3.5} fontSize="8.5" textAnchor="middle" fill={mcolor} fontWeight="700">{k + 1}</text>
+                        </g>
+                      ))}
+                      <text x={lastPt.x} y={lastPt.y - 14} textAnchor="middle" fontSize="12" fontFamily="ui-monospace, Menlo, monospace"
+                        fill={mcolor} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700" pointerEvents="none">{countLbl}</text>
+                      {/* hit targets — one transparent circle per marker */}
+                      {pts.map((p, k) => (
+                        <circle key={`h${k}`} cx={p.x} cy={p.y} r={12} fill="transparent" stroke="transparent"
+                          pointerEvents={tool === "select" ? "all" : "none"} style={{ cursor: "pointer" }} onPointerDown={(e) => selectMeasure(e, i)} />
+                      ))}
+                      {isSel && tool === "select" && (
+                        <g>
+                          {pts.map((p, k) => {
+                            const on = !!selVtx && selVtx.layer === "measure" && selVtx.id === i && selVtx.index === k;
+                            return (
+                              <rect key={`mv${k}`} x={p.x - 5} y={p.y - 5} width={10} height={10} rx={2}
+                                fill={on ? PAL.paper : mcolor} stroke={on ? mcolor : PAL.paper} strokeWidth={on ? 2 : 1.5}
+                                style={{ cursor: "move" }} onPointerDown={(e) => startMeasureVertex(e, i, k)} />
+                            );
+                          })}
+                          <g style={{ cursor: "pointer" }} onPointerDown={(e) => { e.stopPropagation(); pushHistory(); setMeasures((arr) => arr.filter((_, idx) => idx !== i)); setSel(null); }}>
+                            <circle cx={lastPt.x} cy={lastPt.y - 26} r={8.5} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.5} />
+                            <text x={lastPt.x} y={lastPt.y - 26} dy={3.5} textAnchor="middle" fontSize="12" fontWeight="700" fill={PAL.accent} pointerEvents="none">×</text>
+                          </g>
+                        </g>
+                      )}
+                    </g>
+                  );
+                }
+
                 const isArea = mode === "area";
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 // label + anchor point. Area shows area + perimeter; amber + ⚠ when uncalibrated.
-                const warn = calibrationState === "uncalibrated";
-                const mcolor = warn ? "#b45309" : PAL.accent;
                 const perim = pathLen([...fpts, fpts[0]]);
                 const lbl = (warn ? "⚠ " : "") + (isArea
                   ? `${f0(polyArea(fpts))} sf · ${f2(polyArea(fpts) / SQFT_PER_ACRE)} ac · ${f0(perim)}′ perim`
@@ -6400,6 +6440,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const live = cursor ? snapPt(cursor) : null;
                 const all = live ? [...measDraft, live] : measDraft;
                 const pts = all.map(f2p);
+                if (measureMode === "count") {
+                  const lp = pts[pts.length - 1];
+                  return (
+                    <g pointerEvents="none">
+                      {measDraft.map((p, k) => { const c = f2p(p); return (
+                        <g key={k}>
+                          <circle cx={c.x} cy={c.y} r={8} fill={PAL.accent + "28"} stroke={PAL.accent} strokeWidth={1.5} />
+                          <text x={c.x} y={c.y + 3.5} fontSize="8.5" textAnchor="middle" fill={PAL.accent} fontWeight="700">{k + 1}</text>
+                        </g>
+                      ); })}
+                      {live && <circle cx={lp.x} cy={lp.y} r={8} fill={PAL.accent + "14"} stroke={PAL.accent} strokeWidth={1} strokeDasharray="3 2" />}
+                      <text x={lp.x} y={lp.y - 14} textAnchor="middle" fontSize="11" fontFamily="ui-monospace, Menlo, monospace" fill={PAL.accent} stroke={PAL.paper} strokeWidth={3} paintOrder="stroke" fontWeight="700">{measDraft.length} item{measDraft.length !== 1 ? "s" : ""}</text>
+                    </g>
+                  );
+                }
                 const ptsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
                 const isArea = measureMode === "area";
                 const lp = pts[pts.length - 1];
