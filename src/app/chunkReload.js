@@ -33,6 +33,7 @@
  * and (b) re-arms a fresh one-time recovery for a *later, separate* deploy in the
  * same long-lived tab.
  */
+import { flushAll } from "./flushRegistry.js";
 
 export const RELOAD_GUARD_KEY = "planyr:chunkReloadAt";
 export const RELOAD_COOLDOWN_MS = 10_000;
@@ -45,6 +46,43 @@ export function shouldReloadAfterPreloadError(now, lastReloadAt, cooldownMs = RE
   const last = Number(lastReloadAt) || 0;
   return !(last > 0 && now - last < cooldownMs);
 }
+
+/* Which recovery action fits a chunk-load failure right now (B447)? Three outcomes:
+ *  - "reload": no fresh reload tried yet (or the cooldown elapsed) → cache-bust to the
+ *    freshest build. This is the normal stale-after-deploy recovery.
+ *  - "stuck":  this very page-load ARRIVED via a fresh reload (the ?_r= cache-buster was
+ *    on the URL) and a chunk STILL failed → the fresh build is ALSO missing it (the
+ *    server is mid-deploy / an edge node is skewed). Reloading again just dead-ends, so
+ *    we stop auto-reloading and let the ErrorBoundary show an honest "finishing a
+ *    deploy" message with a manual escape.
+ *  - "cooldown": we auto-reloaded very recently (within the window) on a load that did
+ *    NOT arrive via _r → suppress to avoid a tight loop; let the error surface.
+ * Pure + unit-testable; the DOM wiring lives in installChunkReloadGuard. */
+export function recoveryStage(arrivedViaFreshReload, now, lastReloadAt, cooldownMs = RELOAD_COOLDOWN_MS) {
+  if (arrivedViaFreshReload) return "stuck";
+  return shouldReloadAfterPreloadError(now, lastReloadAt, cooldownMs) ? "reload" : "cooldown";
+}
+
+/* Was the cache-busting ?_r= param present on the current URL? Read BEFORE
+ * stripReloadParam tidies it away, this tells us the page arrived via a fresh reload —
+ * the signal recoveryStage() uses to detect a still-failing-after-fresh-reload deploy. */
+export function hasReloadParam(win = typeof window !== "undefined" ? window : undefined) {
+  if (!win || !win.location) return false;
+  try { return new URL(win.location.href).searchParams.has(RELOAD_PARAM); } catch { return false; }
+}
+
+/* Forget the last-auto-reload timestamp so the very next preloadError (or a manual
+ * retry button) is allowed to reload immediately instead of being suppressed by the
+ * cooldown. Used by the ErrorBoundary "Try again" escape on a stuck (mid-deploy) page. */
+export function clearReloadGuard(win = typeof window !== "undefined" ? window : undefined) {
+  if (!win) return;
+  try { win.sessionStorage.removeItem(RELOAD_GUARD_KEY); } catch { /* storage blocked — nothing to clear */ }
+}
+
+// Captured once at guard install (before the URL is tidied): did THIS page-load arrive
+// via a fresh cache-busting reload? The ErrorBoundary reads it to pick its message.
+let _arrivedViaFreshReload = false;
+export function arrivedViaFreshReload() { return _arrivedViaFreshReload; }
 
 /* Does this error look like a failed code-split/dynamic-import load (a stale or
  * missing chunk) rather than an ordinary render crash? Matches the phrasings Chrome,
@@ -65,6 +103,10 @@ export function isChunkLoadError(error) {
  * leaves no back-button trap. Falls back to a plain reload if URL building fails. */
 export function reloadFresh(win = typeof window !== "undefined" ? window : undefined) {
   if (!win || !win.location) return;
+  // Give every live workspace one last synchronous chance to flush (local save +
+  // keepalive cloud push) before we navigate away (B452) — a forced reload must not
+  // strand the last edits in memory. Best-effort: never let a flush block the reload.
+  try { flushAll(); } catch { /* flush is best-effort */ }
   try {
     const url = new URL(win.location.href);
     url.searchParams.set(RELOAD_PARAM, String(Date.now()));
@@ -92,12 +134,17 @@ export function stripReloadParam(win = typeof window !== "undefined" ? window : 
  * to call once at startup; no-ops where there is no window (e.g. tests/SSR). */
 export function installChunkReloadGuard(win = typeof window !== "undefined" ? window : undefined) {
   if (!win || typeof win.addEventListener !== "function") return;
+  // Capture the "arrived via fresh reload" signal from the ?_r= param BEFORE we strip it
+  // — a chunk failure on such a load means even the fresh build is missing the chunk.
+  _arrivedViaFreshReload = hasReloadParam(win);
   stripReloadParam(win); // we may have just recovered via reloadFresh — tidy the URL
   win.addEventListener("vite:preloadError", () => {
     let lastReloadAt = 0;
     try { lastReloadAt = Number(win.sessionStorage.getItem(RELOAD_GUARD_KEY)) || 0; }
     catch { /* storage blocked (private mode / sandbox) — treat as no prior reload */ }
-    if (!shouldReloadAfterPreloadError(Date.now(), lastReloadAt)) return; // already tried — let it surface
+    // Only "reload" auto-recovers; "stuck" (still failing after a fresh reload) and
+    // "cooldown" (just reloaded) fall through to the ErrorBoundary instead of looping.
+    if (recoveryStage(_arrivedViaFreshReload, Date.now(), lastReloadAt) !== "reload") return;
     try { win.sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now())); }
     catch { /* storage blocked — reload anyway; worst case we can't suppress a loop */ }
     reloadFresh(win);

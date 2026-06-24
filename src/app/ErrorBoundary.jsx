@@ -17,7 +17,7 @@
  * chunk and fails identically, which is exactly the dead-end users were hitting.
  */
 import { Component } from "react";
-import { isChunkLoadError, reloadFresh } from "./chunkReload.js";
+import { isChunkLoadError, reloadFresh, arrivedViaFreshReload, clearReloadGuard } from "./chunkReload.js";
 import { reportClientError } from "../shared/telemetry/clientErrors.js";
 
 const S = {
@@ -64,6 +64,27 @@ export default class ErrorBoundary extends Component {
     // can't fix that (same dead chunk) — only a fresh, cache-busting reload can. Make
     // that the primary, and frame it as an update rather than an error.
     if (isChunkLoadError(error)) {
+      // Stuck path (B447): we already arrived via a fresh cache-busting reload and a
+      // chunk STILL failed — the fresh build is also missing it (server mid-deploy /
+      // edge node skewed). Reloading again just dead-ends, so frame it as "finishing a
+      // deploy" and make the escape clear the reload cooldown first so the retry isn't
+      // suppressed.
+      if (arrivedViaFreshReload()) {
+        return (
+          <div style={S.wrap}>
+            <div style={S.card}>
+              <p style={S.title}>Planyr is finishing a deploy</p>
+              <p style={S.body}>A new version is still rolling out, so {String(label).toLowerCase()} couldn't load yet. Give it a minute, then try again — your work is saved.</p>
+              <pre style={S.msg}>{String((error && error.message) || error)}</pre>
+              <div style={S.row}>
+                <button style={S.btn} onClick={() => { clearReloadGuard(); reloadFresh(); }}>Try again</button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      // First failure: a newer build replaced the chunk this (stale) tab points at. A
+      // cache-busting reload picks up the fresh build — make that the primary action.
       return (
         <div style={S.wrap}>
           <div style={S.card}>

@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   shouldReloadAfterPreloadError,
+  recoveryStage,
+  hasReloadParam,
+  clearReloadGuard,
   RELOAD_COOLDOWN_MS,
+  RELOAD_GUARD_KEY,
   RELOAD_PARAM,
   isChunkLoadError,
   reloadFresh,
@@ -62,6 +66,55 @@ describe("isChunkLoadError (B239)", () => {
     expect(isChunkLoadError(new Error("cfgOf is not defined"))).toBe(false);
     expect(isChunkLoadError(null)).toBe(false);
     expect(isChunkLoadError(undefined)).toBe(false);
+  });
+});
+
+// B447 — escape the dead-end when even the FRESH build is still missing the chunk
+// (server mid-deploy / edge skew). A page that arrived via the ?_r= cache-buster and
+// still fails must stop auto-reloading and surface a manual escape, not loop.
+describe("recoveryStage (B447)", () => {
+  it("first failure with no prior reload → reload", () => {
+    expect(recoveryStage(false, 1_000_000, 0)).toBe("reload");
+  });
+
+  it("first failure after the cooldown elapsed → reload (a later, separate deploy)", () => {
+    const last = 1_000_000;
+    expect(recoveryStage(false, last + RELOAD_COOLDOWN_MS, last)).toBe("reload");
+  });
+
+  it("just reloaded (within cooldown) but NOT via _r → cooldown (suppress, don't loop)", () => {
+    const last = 1_000_000;
+    expect(recoveryStage(false, last + 500, last)).toBe("cooldown");
+  });
+
+  it("arrived via a fresh reload and STILL failed → stuck (regardless of timing)", () => {
+    expect(recoveryStage(true, 1_000_000, 0)).toBe("stuck");
+    // even long after the cooldown, an _r arrival that fails again is stuck, not a reload
+    expect(recoveryStage(true, 9_999_999, 1_000_000)).toBe("stuck");
+  });
+});
+
+describe("hasReloadParam (B447)", () => {
+  it("detects the cache-busting param", () => {
+    expect(hasReloadParam({ location: { href: "https://planyr.io/?_r=123" } })).toBe(true);
+    expect(hasReloadParam({ location: { href: "https://planyr.io/?keep=1&_r=9#x" } })).toBe(true);
+  });
+  it("false when absent / no window", () => {
+    expect(hasReloadParam({ location: { href: "https://planyr.io/?keep=1" } })).toBe(false);
+    expect(hasReloadParam(undefined)).toBe(false);
+  });
+});
+
+describe("clearReloadGuard (B447)", () => {
+  it("removes the cooldown stamp so the next retry isn't suppressed", () => {
+    const store = { [RELOAD_GUARD_KEY]: "1000" };
+    const win = { sessionStorage: { removeItem: (k) => { delete store[k]; } } };
+    clearReloadGuard(win);
+    expect(store[RELOAD_GUARD_KEY]).toBeUndefined();
+  });
+  it("no-ops without a window / when storage is blocked", () => {
+    expect(() => clearReloadGuard(undefined)).not.toThrow();
+    expect(() => clearReloadGuard({ sessionStorage: { removeItem() { throw new Error("blocked"); } } })).not.toThrow();
   });
 });
 

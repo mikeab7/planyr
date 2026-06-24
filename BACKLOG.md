@@ -22,6 +22,33 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-24: owner-dropped data-loss + deploy-hygiene batch "NEW-1…NEW-9" (one chat, tied to the
+     8 South / Plan 1 building-loss that happened DURING a stale-chunk deploy crash). Highest real B#
+     across both files was B448, so minted **B449–B457**. Per STANDING RULE #1 the eight CODE items
+     (B449–B456) were filed AND shipped the SAME session on branch `claude/youthful-volta-ns1n75` —
+     full [x] blocks live in BACKLOG-DONE.md. lint 0 · 1468 tests · build green · lazy chunks intact.
+     Three brief premises were CORRECTED against real code (flagged, not silently followed): NEW-5
+     (B453) boot reconciliation already union-merges → became verify+regression-test; NEW-4 (B452) the
+     local flush already runs → the real gap was the keepalive CLOUD push; NEW-1 (B449) the prescribed
+     `/* → index.html` catch-all would CAUSE the masking → used a no-catch-all `_redirects` (hash routing).
+     Live-edge paths (Cloudflare 404, deploy-escape screen, survive-forced-reload, the read-only lockout)
+     are delegated to Cowork on preview/prod — see VERIFICATION.md; NOT marked done on the sandbox alone.
+       • B449 (NEW-1) `public/_redirects` (+`404.html`) — missing /assets/* now 404s honestly, no SPA catch-all.
+       • B450 (NEW-2) chunk-recovery "stuck" escape (`recoveryStage`) when the fresh build is ALSO missing the chunk.
+       • B451 (NEW-3) Vite `base:"/"` for the Cloudflare root deploy.
+       • B452 (NEW-4) keepalive cloud push on a forced reload (`flushRegistry` + version-guarded `keepaliveCasPush`).
+       • B453 (NEW-5) verified boot reconciliation already unions local mirror ∪ cloud; locked with a regression test.
+       • B454 (NEW-6) written root cause — ruled out CAS-bypass; most-likely conflict-then-strand, closed by B452+B455.
+       • B455 (NEW-7) conflict loud+blocking · Web Locks single-active-editor read-only lockout · 6s save watchdog.
+       • B456 (NEW-8) Version History real building counts + content summary + distinguishable timestamps. -->
+
+### B457 — Recover lost buildings on 8 South / Plan 1 (one-time) `[Persistence]` (task) — DATA-LOSS  *(owner-dropped 2026-06-24 as "NEW-9"; owner + Cowork action, not a code task)*
+`[ ]` **Tracked, not code.** The cloud row went road-only (1 element / 0 buildings @ 21:17 UTC) and the 3:35 PM-local snapshot restored empty. The free Supabase tier has **no PITR**, so the overwritten prior cloud state is **not** server-recoverable. The code fixes (B452/B453/B455) prevent a recurrence; this item is the one-time recovery attempt.
+- **Remaining shots (owner + Cowork — unreachable by Claude Code):**
+  1. **Account-wide `data->'els'` building sweep** across the user's rows (Cowork, signed in) — in case a fuller copy survived under another plan/row.
+  2. **Owner's on-device localStorage / IndexedDB scan** (`planarfit:sites:cloud:<uid>`, `planarfit:sites:history:v1`) on the machine where the buildings were drawn — the autosave mirror or the local version-history ring may still hold them. NOTE: B456 fixed the "0 buildings" label that made the history rows *look* empty, so re-check Version History in the app first.
+- **Close as recovered or unrecoverable once those run.** No action for Michael beyond the on-device scan (step 2); Cowork drives step 1.
+
 <!-- 2026-06-24: owner-reported (screenshot) — the Site-plan overlay panel "does not allow anything to
      actually be dropped in, should work like enterprise software". Highest real B# across both files was
      B444, so minted **B445**. Per STANDING RULE #1 filed AND fixed + headless-verified

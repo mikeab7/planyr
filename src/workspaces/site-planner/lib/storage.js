@@ -8,8 +8,8 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions } from "./cloudSync.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush } from "./cloudSync.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
@@ -254,6 +254,15 @@ export async function pushSiteToCloud(id) {
   if (!m) return { ok: false, error: "missing" };
   return cloudUpsert(activeUser, m);
 }
+// Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
+// write that survives the navigation. Reads the freshly-saved local copy so the cloud
+// gets the very latest. No-op when logged out. Returns true if a request was dispatched.
+export function keepaliveFlushSite(id) {
+  if (!activeUser || !id) return false;
+  const m = loadSite(id);
+  if (!m) return false;
+  return keepaliveCloudPush(activeUser, m);
+}
 // Single-slot autosave of the live working canvas (separate from named scenarios).
 export const AUTOSAVE_KEY = "planarfit:autosave:v1";
 
@@ -330,9 +339,39 @@ export function snapshotVersion(model) {
   all[m.id] = list.slice(0, HISTORY_PER_SITE);
   writeHistoryAll(all);
 }
-// Versions available to restore for a site (newest first; lightweight metadata only).
+// Human content summary of a snapshot for the version-history list (B456/NEW-8). Computed
+// from the stored full model so it's correct even for OLD snapshots, and counts REAL
+// buildings (isBuilding excludes only dog-ear sub-pieces) — the old label used
+// mainBuildingCount, which ALSO excludes attached additions and so read a misleading
+// "0 buildings" on plans whose buildings were all attached. Lists the other drawn
+// collections too, so rows saved seconds apart are distinguishable. Pure; unit-tested.
+export function summarizeVersion(model) {
+  const m = createSiteModel(model || {});
+  const buildings = (m.els || []).filter(isBuilding).length;
+  const roads = (m.els || []).filter((e) => e && e.type === "road").length;
+  const parts = [];
+  if ((m.parcels || []).length) parts.push(`${m.parcels.length} parcel${m.parcels.length === 1 ? "" : "s"}`);
+  if (roads) parts.push(`${roads} road${roads === 1 ? "" : "s"}`);
+  parts.push(`${buildings} building${buildings === 1 ? "" : "s"}`);
+  const notes = (m.measures || []).length + (m.markups || []).length + (m.callouts || []).length;
+  if (notes) parts.push(`${notes} markup${notes === 1 ? "" : "s"}`);
+  return { buildings, summary: parts.join(" · ") };
+}
+// Versions available to restore for a site (newest first). Each row carries a real content
+// summary + true building count (B456/NEW-8), and adjacent rows that collapse to the same
+// second AND the same shape are de-duped so the list isn't a wall of identical-looking rows.
 export function listVersions(id) {
-  return (historyAll()[id] || []).map((v) => ({ at: v.at, buildings: v.buildings, sig: v.sig }));
+  const out = [];
+  let lastKey = null;
+  for (const v of (historyAll()[id] || [])) {
+    const sec = Math.floor((v.at || 0) / 1000);
+    const key = `${sec}|${v.sig}`;
+    if (key === lastKey) continue; // same second + same shape as the row just above → drop the dupe
+    lastKey = key;
+    const { buildings, summary } = summarizeVersion(v.model);
+    out.push({ at: v.at, buildings, summary, sig: v.sig });
+  }
+  return out;
 }
 // The full saved snapshot for one version (normalized Site Model), or null.
 export function getVersion(id, at) {

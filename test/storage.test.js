@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 // A plain building element (what users mostly lose); `bld("a")` etc.
@@ -143,6 +143,24 @@ describe("mergePulledSites — content merge end-to-end (B126)", () => {
   });
 });
 
+// B453 (NEW-5) — the exact 8 South / Plan 1 incident shape: the on-device autosave mirror
+// (which IS the cloud-cache key saveSite writes to) still held 5 buildings, while the cloud
+// row had gone road-only (0 buildings) after a thin save won. Boot reconciliation must UNION
+// the local mirror with the cloud pull — never blind-replace local with the thin cloud — so
+// the buildings survive the reload AND are re-pushed to heal the cloud. This guards the very
+// path the data-loss could have finished through.
+describe("mergePulledSites — boot reconcile keeps a fuller local mirror over a road-only cloud (B453/NEW-5)", () => {
+  const road = { id: "r1", type: "road", cx: 0, cy: 0, w: 100, h: 10 };
+  it("5 local buildings + a road survive a 0-building (road-only) cloud row, and re-push", () => {
+    const localMirror = { s: site("s", 1000, [bld("a"), bld("b"), bld("c"), bld("d"), bld("e"), road]) };
+    const cloudRoadOnly = [site("s", 9999, [road])]; // cloud is newer in time but road-only (thin save won)
+    const { map, toPush } = mergePulledSites(localMirror, cloudRoadOnly, "u1");
+    const buildings = map.s.els.filter((e) => e.type === "building").map((e) => e.id).sort();
+    expect(buildings).toEqual(["a", "b", "c", "d", "e"]); // every building present in EITHER copy is kept
+    expect(toPush).toContain("s"); // merged is fuller than the cloud → re-push heals the split
+  });
+});
+
 // B126 — automatic local backups: each save snapshots the prior version so any
 // overwrite (including a thin one) is recoverable.
 describe("version history — every save backs up the prior version (B126)", () => {
@@ -178,6 +196,58 @@ describe("version history — every save backs up the prior version (B126)", () 
 
   it("contentCount tallies drawn work across collections", () => {
     expect(contentCount({ els: [bld("a")], parcels: [{ id: "p" }] })).toBe(2);
+  });
+});
+
+// B456 (NEW-8) — the version-history list read "0 buildings" on every row (it used
+// mainBuildingCount, which excludes attached additions) and rows were indistinguishable.
+// Now each row gets a real content summary + a true building count, computed from the
+// stored model so OLD snapshots benefit too.
+describe("summarizeVersion — real building counts + content summary (B456/NEW-8)", () => {
+  const attached = (id) => ({ id, type: "building", attachedTo: "a", cx: 0, cy: 0, w: 50, h: 50 });
+  const dogEar = (id) => ({ id, type: "building", dogEar: true, cx: 0, cy: 0, w: 10, h: 10 });
+  const road = { id: "r", type: "road", cx: 0, cy: 0, w: 100, h: 10 };
+
+  it("counts a building whose pieces are ALL attached (the old code read 0)", () => {
+    const { buildings, summary } = summarizeVersion({ els: [bld("a"), attached("b")] });
+    expect(buildings).toBe(2);          // a real building + its attached addition
+    expect(summary).toContain("2 buildings");
+  });
+
+  it("excludes dog-ear sub-pieces from the count", () => {
+    expect(summarizeVersion({ els: [bld("a"), dogEar("d")] }).buildings).toBe(1);
+  });
+
+  it("builds a distinguishing summary across collections", () => {
+    const { summary } = summarizeVersion({ parcels: [{ id: "p1" }, { id: "p2" }], els: [road, bld("a")], measures: [{ id: "m" }] });
+    expect(summary).toBe("2 parcels · 1 road · 1 building · 1 markup");
+  });
+
+  it("never reads a misleading empty string — always reports the building count", () => {
+    expect(summarizeVersion({}).summary).toBe("0 buildings");
+    expect(summarizeVersion(null).summary).toBe("0 buildings");
+  });
+});
+
+describe("listVersions — rows carry a summary + de-dupe same-second/same-shape (B456/NEW-8)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("each row exposes a content summary string", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c"), bld("d"), bld("e")] }); // fat
+    saveSite({ id: "s", els: [bld("a")] });                                          // thinned → snapshots the fat one
+    const rows = listVersions("s");
+    expect(rows[0].summary).toContain("5 buildings");
+    expect(typeof rows[0].at).toBe("number");
   });
 });
 

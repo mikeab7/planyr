@@ -21,10 +21,12 @@ const BUILD_ID = (() => {
 // entry below and point that county's URL in src/lib/counties.js at the local path
 // (e.g. "/gis-harris/HCAD/Parcels/MapServer/0").
 export default defineConfig(({ command }) => ({
-  // Relative asset paths so the production build works when served from a
-  // GitHub Pages subfolder (https://<user>.github.io/<repo>/), while local
-  // `npm run dev` still serves from the root.
-  base: command === "build" ? "./" : "/",
+  // Absolute (root) asset paths. Production is Cloudflare Pages served at the domain
+  // root (planyr.io) — root-absolute /assets/… URLs resolve identically on every page
+  // and avoid the relative-path ambiguity that made a missing chunk easy to mis-serve
+  // (B451). The retired GitHub Pages subfolder deploy is the only thing that needed the
+  // old relative "./" base; set PLANYR_BASE if a subpath build is ever resurrected.
+  base: command === "build" ? (process.env.PLANYR_BASE || "/") : "/",
   // Compile-time constant for error telemetry (B279); read via a typeof guard in
   // src/shared/telemetry/clientErrors.js (falls back to "dev" under dev/test).
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
