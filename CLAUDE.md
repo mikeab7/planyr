@@ -357,6 +357,24 @@ server/                   # placeholder README only — NOT built or deployed; b
   reads fine until the chrome flips theme — always repoint to tokens. **The Light/Dark/System picker
   lives in the row-1 Settings gear (⚙) popover** (`AppHeader`), reachable signed-out; the "System"
   live OS listener is in `ThemeProvider`, independent of where the control mounts. (B316–B320, B341, B342)
+- **Project-status palette + map markers (owner rules, B433/B434; the single source is
+  `src/shared/ui/statusTokens.js`, mirrored to the `--status-*` CSS vars in `index.css`).** Three
+  standing rules govern how a deal stage looks, everywhere (map pins, left-rail chips, list markers,
+  section headers, the status menu):
+  1. **Map markers are always solid-filled with a white keyline — never a transparent/hollow primary
+     marker on the aerial** (a thin hollow ring vanishes over green imagery). The zoomed-out marker is
+     the **precision pin** (`sitePinIcon`, B434): a color **bulb** on a short **stalk** seated over a
+     **ground ring**, the ring center being the anchor (it sits exactly on the site coordinate). Progress
+     (derived from status until a real `progress_pct` lands — B161/B163) folds into the ground-ring
+     **sweep** (pursuit 10 · active 60 · onhold 30 · complete 100 · dead 0).
+  2. **Status salience is MONOTONIC, Pursuit loudest → Dead quietest** — size + opacity track importance;
+     settled stages (Complete, Dead) are smaller + dimmed. Never invert this.
+  3. **RED is reserved for genuine alert/error** (the `--danger` CSS token — cloud-off badge, a failed
+     layer dot, a destructive ×), **never an inert state.** Dead is therefore neutral **gray** (✕ +
+     strike), the same gray as Complete (distinguished by glyph + strike, not hue). Active is **blue**
+     (not green — green blends into green imagery and coral+green is the red-green-colorblind confusion
+     pair); Pursuit is **coral**. Pursuit/Active are glyphless solid discs; the colorblind-safe glyph
+     (‖/✓/✕) rides only on the settled stages.
 - **No dialog-box edits — inline editors only (owner rule, 2026-06-17).** NEVER edit a value
   with `window.prompt`/`confirm`/`alert` (owner: "that is horrible UI"). Editing a number/text
   on the canvas must use an **inline editor in place** — e.g. the shared `numEdit` inline

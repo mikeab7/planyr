@@ -107,7 +107,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
                     {r.kind === "stitch" ? "Stitched set" : "Single sheet"}{r.project ? ` · ${r.project}` : ""}{r.discipline ? ` · ${r.discipline}` : ""} · {fmtWhen(r.updated_at)}
                   </div>
                 </div>
-                <button onClick={(e) => del(e, r.id)} title="Delete review" style={{ flex: "none", border: "none", background: "transparent", color: "var(--status-dead)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
+                <button onClick={(e) => del(e, r.id)} title="Delete review" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 4 }}>×</button>
               </div>
             ))}
           </div>
