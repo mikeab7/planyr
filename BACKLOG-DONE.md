@@ -1,5 +1,21 @@
 ## ✅ Done
 
+### B427 — Document Review parity tools: Line, Polyline, Polygon, Ellipse `[Doc Review / Markup]` (feature) — NEW-4, part of the B423 umbrella  *(2026-06-24; same commit as B426)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 5842a78). 1390 tests · lint 0 · build green.**
+- DocReview TOOLS expanded from 10 → 14 tools. New: `line` (two-point drag), `polyline` (multi-point, open), `polygon` (multi-point, snap-to-close), `ellipse` (two-point bounding box). Rail icons added for all four.
+- `TWOPOINT` + `MULTIPOINT` Sets replace ad-hoc string checks; `onDown`/`finishDraft`/`onDbl` extended uniformly. Polygon snaps-to-close on click within 12 px of first vertex.
+- `propStyle` state stamps sticky per-tool defaults on each commit (properties the user last set carry forward to the next markup of the same kind).
+- `hitTest` extended for ellipse (ellipse equation inequality) and polygon (`pointInPoly`).
+- `drawDraft` rewritten to preview ellipse bounding box and polygon close-loop indicator dot.
+- **Dedup:** NET-NEW tools for DocReview; not B116 (measures, already shipped) or B142/B143 (Site Planner text/callout select+edit).
+
+### B426 — Shared `MarkupRenderer.jsx` + `PropertyPanel.jsx`; DocReview left property panel `[Site Planner + Doc Review / Markup]` (task) — NEW-2 cont./NEW-3, part of the B423 umbrella  *(2026-06-24; minted **B426** = B425 + 1)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 5842a78). 1390 tests · lint 0 · build green.**
+- **`src/shared/markup/MarkupRenderer.jsx`** — pure SVG React component. Renders one markup given `{markup, view, selected, ftPerUnit}`. Handles 12 kinds: distance/polylength/perimeter/area/count (measures) + rect/cloud/ellipse/line/polyline/polygon/text (shapes). Reads style via `readProp`/`propertySchema` (matrix drives defaults). Local `cloudPath()` (same algorithm, module-local). Replaces DocReview's inline `draw()` function; the host SVG just maps `pageMarks.map(m => <MarkupRenderer ... />)`.
+- **`src/shared/markup/PropertyPanel.jsx`** — pure property editor driven by `schemaForMarkup(markup)`. Sub-controls: ColorControl/NumberControl/RangeControl/BoolControl/EnumControl. WCAG AA theme tokens only (no raw hex). Host wires `onChange(key, value)` → `writeProp`. `"Select a markup"` / `"No editable properties."` empty states.
+- **DocReview.jsx wiring** — imports the two shared components + `writeProp`/`propsForTool`/`columnMeta`. `onPropChange(key, value)` applies `writeProp` to the selected markup AND syncs `propStyle` for the next commit. PropertyPanel appears at the bottom of the left sheet-list panel when a markup is selected (scrollable 220px area, `Properties / <kind>` header). Old inline `draw()` function removed; SVG layer uses `<MarkupRenderer>` with optional `dragPreview` overlay.
+- **Dedup:** NET-NEW shared components; not the Site Planner's existing inline renderer (which stays in SitePlanner.jsx for now — extraction is B431+).
+
 ### B281 — CI: Playwright on the deploy + failure auto-files an @claude issue `[Infra / CI]` (feature) — the B423 loop's alarm  *(2026-06-23; built the SAME session as B278)*
 `[x]` **Built. New workflow `.github/workflows/e2e.yml` mirrors the proven idempotent `gis-drift.yml` pattern.** Runs `npm run e2e` against the deploy (`E2E_BASE_URL` secret; `github.event.inputs.base_url` override for manual runs) on a weekday schedule + `workflow_dispatch`. On failure → opens (or BUMPS — never duplicates) a single `@claude` issue labeled `e2e-drift` with the report tail (last 5 KB) + the "do NOT edit the matrix to pass" rule; on green → auto-closes any open `e2e-drift` issue. Uploads the Playwright HTML report as an artifact (14-day retention). Permissions `contents:read` + `issues:write`. **This is the verifier that drives the autonomous implement→test→fix→advance loop** for the remaining tool rows (B426+). Extends `build.yml` (the required "build" check), doesn't replace it. Gated on B280's secrets — without them the auth specs skip, the smoke still runs (a useful signal, not a false alarm). **Dedup:** NET-NEW; first real filing of the long-parked `@claude` e2e workflow.
 

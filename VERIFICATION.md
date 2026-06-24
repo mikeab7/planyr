@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V123 — B426/B427: shared MarkupRenderer + PropertyPanel + 4 new DocReview tools (Line/Polyline/Polygon/Ellipse) ✅ build + 1390 tests + lint clean; logged-out smoke clean (no JS crash); ⏳ one signed-in draw+property round-trip
+- **What changed.** `src/shared/markup/MarkupRenderer.jsx` (pure SVG renderer, 12 kinds) and `src/shared/markup/PropertyPanel.jsx` (inline property editor driven by the matrix) created. DocReview.jsx wired to use both: SVG layer now `<MarkupRenderer>` instead of inline `draw()`, property panel appears at bottom of left panel when a markup is selected. Four new drawing tools added to DocReview: Line (two-point drag), Polyline (multi-click, open), Polygon (multi-click, snap-to-close), Ellipse (two-point bounding box). `propStyle` sticky defaults for per-tool style inheritance.
+- **Why ⏳.** The tool rail only renders when a PDF is loaded; logged-out headless smoke can only confirm no JS crash, not that tools draw. The formal per-tool E2E assertions (B432/NEW-9) cover this in CI once the auth-gated suite is wired.
+- **Steps / Expect.** Sign in → open Review → drop a PDF → arm Line → drag → release → a red line appears. Arm Polygon → click 4 points → click first dot → polygon closes. Select a markup → property panel appears in left panel (shows Stroke, Line weight, Dash, Opacity). Change stroke color → markup re-renders in the new color. Polyline and Ellipse draw correctly. Cadence: once. Last checked: —.
+
 ### V122 — Live PK is single-column `id`; docs corrected + degrade-branch upserts repointed (B280 follow-up) ✅ seed ran clean on planyr-production (fixture row present), docs+code fix lint/test/build-green; ⏳ one signed-in cloud-save round-trip on a version-less DB to exercise the new fallback
 - **What changed.** A Cowork session with live-DB access confirmed (via `pg_constraint`) that
   `public.sites` AND `public.doc_reviews` have **`PRIMARY KEY (id)`** on planyr-production — NOT the
