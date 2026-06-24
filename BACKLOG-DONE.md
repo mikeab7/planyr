@@ -1,5 +1,12 @@
 ## ✅ Done
 
+### B442 — Markup polyline/polygon (& easement) preview snapped to 45° even without Shift `[Site Planner / UI]` (bug)  *(owner-dropped 2026-06-24: "it seemed to only go at specific angles"; minted **B442**)*
+`[x]` **Fixed + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1442 tests · build green · headless `ui-audit/verify-polyline-free-angle.mjs` 4/4.**
+- **Symptom (owner):** drawing a markup Polyline, the line "only seemed to go at specific angles" — i.e. it looked locked to 45° increments even when not holding Shift.
+- **Root cause:** the rubber-band PREVIEW (`SitePlanner.jsx` mkPoly draft, shared by Polyline + Polygon; and the easement draft) applied `snap45()` to the live segment **unconditionally**, while the actual committed point (onDown) only snaps to 45° when Shift is held. So the dashed preview jumped to 0/45/90° as you moved the mouse — and worse, the placed point then landed at the free cursor position, a confusing mismatch. The Line tool (`mkDraw`) was already correct (snap45 gated behind `e.shiftKey`).
+- **Fix:** gate the preview's `snap45` on the existing `shiftHeld` state (already tracked via window keydown/keyup, B230), so the preview is **free-angle by default and 45°-constrained only while Shift is held** — exactly matching the commit and the standard CAD/Bluebeam convention. Two one-line changes (mkPoly preview + easement preview).
+- **Verified headless:** with NO Shift, the preview segment follows the cursor's true ~20° angle (was snapping to 0°); WITH Shift, it still snaps to 45° (the intentional constraint kept). Regression guard committed.
+
 ### B384 — "Add by address" inside the planner's ＋ Add parcel menu (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1442 tests · build green · headless V133 (`ui-audit/verify-b384-add-by-address.mjs`, 5/5). The live geocode→GIS round-trip is the one network-gated live-verify (V133, same gate as the map's address search).**
 - **One pipeline, never a fork (B383's reuse rule):** extracted `geocodeAddress(q, center)` out of `MapFinder.jsx` into shared **`lib/geocode.js`** (Esri World geocoder first, Nominatim fallback, centre-biased). MapFinder now imports it; the planner imports the same.

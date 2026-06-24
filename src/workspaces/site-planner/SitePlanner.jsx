@@ -6218,7 +6218,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
               })()}
               {mkPoly && (() => {
-                const live = cursor ? (mkPoly.pts.length ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                // The rubber-band segment must match how the NEXT click commits (line ~2016): free
+                // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
+                // 45° unconditionally made the polyline look like it "only goes at specific angles"
+                // even though the placed point was free — fixed by gating on shiftHeld.
+                const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
                 const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
@@ -6230,7 +6234,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
               {tool === "easement" && easeMode !== "parceledge" && easeDraft && (() => {
-                const live = cursor ? (easeDraft.pts.length ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                // Same fix as the markup polyline above — preview is free-angle unless Shift is held,
+                // matching how the easement click commits (line ~2026).
+                const live = cursor ? ((shiftHeld && easeDraft.pts.length) ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
                 const all = live ? [...easeDraft.pts, live] : easeDraft.pts;
                 const tcol = easementType(easeType).color;
                 const ghost = easeMode === "centerline" && all.length >= 2 ? bufferPolyline(all, easeWidth)
