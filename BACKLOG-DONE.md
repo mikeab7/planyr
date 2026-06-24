@@ -1,5 +1,10 @@
 ## ✅ Done
 
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task) — OWNER ACTION  *(arrived as "NEW-3" 2026-06-20; built 2026-06-23, owner-completed 2026-06-24)*
+`[x]` **DONE — owner completed the one manual step 2026-06-24.** The `e2e@planyr.test` Supabase user, the `seed.sql` fixture (a known 500×400 ft lot = 200,000 sf ≈ 4.59 ac so measure assertions have a fixed value), and the three CI secrets (`E2E_EMAIL` / `E2E_PASSWORD` / `E2E_BASE_URL`) are all live in planyr-production + the GitHub repo. The auth-gated e2e suite (B278 / the B432 markup loop) now runs in CI on the schedule + on demand; the B281 auto-`@claude` issue loop is armed.
+- **Built + delivered (2026-06-23):** `e2e/seed/seed.sql` + `e2e/seed/README.md` (copy-paste-ready, handed over via the file tool). Dedicated test user, deterministic seed, RLS-respecting — never the owner's real login.
+- **Contract:** the seed values ARE the contract B278's assertions reference by exact value; co-located with the suite. Creds live only as CI secrets, never committed.
+
 ### B432 — Per-tool matrix assertions + loop driver in CLAUDE.md `[Doc Review / Markup]` (task) — NEW-9, closes the B423 umbrella  *(2026-06-24)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. V127.**
 - **`e2e/markup-tools.spec.js` upgraded** with two sections:

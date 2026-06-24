@@ -54,7 +54,7 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - `[x]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 285836b). (see BACKLOG-DONE.md)
 - `[x]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
 - `[x]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-- **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[ ]` **B280 (seeded test account) = OWNER action, seed file delivered** (`e2e/seed/`) — the one remaining gate before the auth-gated loop runs in CI.
+- **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
@@ -606,13 +606,6 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
      older sandbox Chromium-1194 can't raster pdf.js (it throws `getOrInsertComputed`); the newer
      **chromium-1228** build runs it — Doc-Review headless checks must use 1228 (corrects the V63/V65
      "can't run pdf.js" note). These 9 are shipped — eligible to move to BACKLOG-DONE.md on a future pass. -->
-
-### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task) — OWNER ACTION, file ready  *(arrived as "NEW-3" 2026-06-20 owner chat; filed **B280**; batch B278–B281)*
-`[ ]` **The seed package is BUILT and delivered (2026-06-23) — `e2e/seed/seed.sql` + `e2e/seed/README.md` (handed to the owner via the file tool).** Remaining = the one owner step: create the `e2e@planyr.test` Supabase user, run `seed.sql`, add the 3 CI secrets (`E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL`). Until then the auth-gated specs skip (never a false fail) and the logged-out smoke still runs. The fixture is a known 500×400 ft lot (200,000 sf ≈ 4.59 ac) so measure assertions have a fixed value. Create a **dedicated test user** with deterministic seeded data; **never** use the owner's real login in automated loops.
-- **Approach:** seed script creates the test user + a **known project** with fixed parcels/measurements that assertions reference **by exact value**. Creds stored as **CI secrets**, injected at run time, never committed. **Respect RLS** — the test user sees only its own seeded data, consistent with the no-cross-user-visibility design.
-- **Contract:** the seed values **are** the contract B278's Playwright assertions depend on — if seed values change, B278's tests change with them. Keep them **co-located / documented** with the suite.
-- **Dedup:** NET-NEW — no existing seeded-test-account item in either file. Distinct from B269's real-PDF Doc-Review build fixtures (those are owner-supplied drawings for the Markup features, not an automated-test account).
-> Do alongside B278 — its assertions are blocked without these fixed values.
 
 <!-- 2026-06-20: owner-dropped chat batch NEW-1..NEW-4 (data-integrity / multi-session safety +
      overlay lifecycle). ALL FOUR fixed + shipped this session → BACKLOG-DONE.md. Numbers churned hard
