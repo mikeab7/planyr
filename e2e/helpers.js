@@ -21,11 +21,13 @@ export async function signIn(page) {
   }
   await expect(emailField.first()).toBeVisible();
   await emailField.first().fill(E2E_EMAIL);
-  await page.locator('input[type="password"]').first().fill(E2E_PASSWORD);
-  // The submit button has a dedicated testid — the form ALSO renders a "Sign in" mode-toggle
-  // tab, so targeting by name "/^sign in$/" hit a strict-mode violation (two matches). The
-  // testid is unambiguous and mode-independent.
-  await page.getByTestId("auth-submit").click();
+  const pwField = page.locator('input[type="password"]').first();
+  await pwField.fill(E2E_PASSWORD);
+  // Submit via Enter on the password field. The form renders TWO "Sign in" buttons (a mode tab
+  // + the submit), so a name-based click hit a strict-mode violation; and the auth-submit testid
+  // only exists once this branch deploys. Enter commits the form on the CURRENT live build too,
+  // so this works deploy-independently. (The auth-submit testid stays for explicit future use.)
+  await pwField.press("Enter");
   // Signed-in: the email field is gone and the app chrome shows the module tabs.
   await expect(page.getByTestId("module-tab-site-planner")).toBeVisible({ timeout: 15_000 });
 }

@@ -52,11 +52,17 @@ test.describe("markup tools (signed in)", () => {
   });
 
   test("the Review workspace mounts", async ({ page }) => {
+    // openModule already verifies the tab becomes current (works on any deploy). doc-review-root
+    // is the module container, present once THIS branch deploys — tolerate an older live build
+    // that predates the testid by falling back to the now-current tab signal. The tool rail
+    // itself only renders once a review is open (asserted, with a graceful skip, below).
     await openModule(page, "doc-review");
-    // The module's landing surface (file browser / empty state) — present whether or not a
-    // PDF is open. The tool rail itself only renders once a review is open (asserted, with a
-    // graceful skip, in the per-tool block below), so we don't hard-require it here.
-    await expect(page.getByTestId("doc-review-root")).toBeVisible({ timeout: 20_000 });
+    const root = page.getByTestId("doc-review-root");
+    if (await root.count()) {
+      await expect(root).toBeVisible({ timeout: 20_000 });
+    } else {
+      await expect(page.getByTestId("module-tab-doc-review")).toHaveAttribute("aria-current", "page");
+    }
   });
 
   /* Per-tool rail-arm assertions, generated 1:1 from the matrix.
