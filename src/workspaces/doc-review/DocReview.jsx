@@ -1,8 +1,9 @@
 /* Document Review — PDF review core (browser-only). PDF.js viewer + multi-sheet
  * nav, calibrate-to-scale, measure tools (distance / area / perimeter / count),
- * redline (rectangle / cloud / text), and a takeoff rollup. The PDF is an
- * IMMUTABLE backdrop; all markups live on an SVG overlay (an editable layer over
- * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
+ * redline (rectangle / cloud / text / line / polyline / polygon / ellipse), and a
+ * takeoff rollup. The PDF is an IMMUTABLE backdrop; all markups live on an SVG
+ * overlay (an editable layer over it) and are stored in PAGE UNITS so they survive
+ * zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -28,6 +29,10 @@ import ToolRail from "../../shared/ui/ToolRail.jsx";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 import { screenToWorld, zoomAround, fitView, shouldPan, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
+import MarkupRenderer from "../../shared/markup/MarkupRenderer.jsx";
+import PropertyPanel from "../../shared/markup/PropertyPanel.jsx";
+import { propsForTool, columnMeta } from "../../shared/markup/tools.matrix.js";
+import { writeProp } from "../../shared/markup/propertySchema.js";
 
 // Last cross-workspace "open this review" intent already acted on. Module-scoped (not a
 // ref) so it survives this lazy workspace unmounting/remounting — otherwise switching back
@@ -45,18 +50,26 @@ const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 
 const TOOLS = [
-  { id: "select", label: "Select", hint: "Click a markup to select; drag to move; double-click a text note to edit; Delete removes it." },
-  { id: "pan", label: "Pan", hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
+  { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note to edit; Delete removes it." },
+  { id: "pan",       label: "Pan",       hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then enter the real length." },
-  { id: "distance", label: "Distance", hint: "Click two points to measure a distance." },
+  { id: "distance",  label: "Distance",  hint: "Click two points to measure a distance." },
   { id: "perimeter", label: "Perimeter", hint: "Click points around a shape; double-click / Enter to close." },
-  { id: "area", label: "Area", hint: "Click points around a region; double-click / Enter to close." },
-  { id: "count", label: "Count", hint: "Click each item (stall, dock door); Enter / double-click to finish." },
-  { id: "rect", label: "Rect", hint: "Click two opposite corners." },
-  { id: "cloud", label: "Cloud", hint: "Revision cloud: click two opposite corners." },
-  { id: "text", label: "Text", hint: "Click to place a text note." },
+  { id: "area",      label: "Area",      hint: "Click points around a region; double-click / Enter to close." },
+  { id: "count",     label: "Count",     hint: "Click each item (stall, dock door); Enter / double-click to finish." },
+  { id: "line",      label: "Line",      hint: "Drag end-to-end. Arrow toggles in Properties." },
+  { id: "polyline",  label: "Polyline",  hint: "Click points; double-click / Enter to finish an open path." },
+  { id: "polygon",   label: "Polygon",   hint: "Click points; click the first dot or double-click to close." },
+  { id: "rect",      label: "Rect",      hint: "Drag a box. Hold Shift for a square." },
+  { id: "ellipse",   label: "Ellipse",   hint: "Drag a bounding box. Hold Shift for a circle." },
+  { id: "cloud",     label: "Cloud",     hint: "Revision cloud: drag a box; the scalloped outline traces it." },
+  { id: "text",      label: "Text",      hint: "Click to place a text note." },
 ];
 const MEASURE = new Set(["distance", "perimeter", "area", "count"]);
+// Tools with two-point (click-click or drag) draw mode
+const TWOPOINT = new Set(["distance", "calibrate", "rect", "cloud", "line", "ellipse"]);
+// Tools with multi-point (click-click-dbl) draw mode
+const MULTIPOINT = new Set(["area", "perimeter", "count", "polygon", "polyline"]);
 
 // Rail icons for the Markup tools + zoom controls (B330). 16×16, stroke = currentColor so a
 // button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
@@ -68,7 +81,11 @@ const MK_ICONS = {
   perimeter: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" strokeDasharray="2.4 1.6" />,
   area: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" fill="currentColor" fillOpacity="0.3" />,
   count: <><circle cx="4.7" cy="5.2" r="1.7" fill="currentColor" stroke="none" /><circle cx="10.9" cy="6.1" r="1.7" fill="currentColor" stroke="none" /><circle cx="6.7" cy="11.2" r="1.7" fill="currentColor" stroke="none" /></>,
+  line: <path d="M3 13 L13 3" />,
+  polyline: <path d="M2.5 13 L6 8 L10 11 L13.5 4" />,
+  polygon: <path d="M8 2.5 L14 7 L11.5 13.5 L4.5 13.5 L2 7 Z" />,
   rect: <rect x="2.5" y="3.5" width="11" height="9" rx="0.5" />,
+  ellipse: <ellipse cx="8" cy="8" rx="5.5" ry="4" />,
   cloud: <path d="M5.2 11.6 a2.3 2.3 0 0 1-.5-4.5 a2.7 2.7 0 0 1 5.1-1 a2.2 2.2 0 0 1 2.6 3.2 a2.1 2.1 0 0 1-1.5 2.9 a2.3 2.3 0 0 1-2.2.9 a2.4 2.4 0 0 1-3-.4 Z" />,
   text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
   zoomIn: <path d="M8 3.4 V12.6 M3.4 8 H12.6" strokeWidth="1.7" />,
@@ -147,6 +164,9 @@ export default function DocReview({
   const [err, setErr] = useState("");
 
   const [tool, setTool] = useState("select");
+  // Per-tool style overrides (B426): the user's last-set value for each property key becomes
+  // the sticky default for the next markup of that tool kind. Stored as canonical keys.
+  const [propStyle, setPropStyle] = useState({});
   const [markups, setMarkups] = useState([]);       // all pages; coords in PAGE UNITS
   const [calByPage, setCalByPage] = useState({});   // pageNum -> ftPerUnit
   const [calInfo, setCalInfo] = useState({});       // pageNum -> { src:'auto'|'manual'|'nts', label } (B267)
@@ -654,9 +674,28 @@ export default function DocReview({
     pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
   };
 
-  const commit = (mk) => { pushHistory(); setMarkups((a) => [...a, { id: uid(), page, ...mk }]); setDraft(null); };
+  const commit = (mk) => {
+    // Stamp the new markup with the current sticky style for its tool kind. The user's overrides
+    // (propStyle) take precedence over column defaults; explicit fields inside mk win over both.
+    const style = {};
+    propsForTool(mk.kind).forEach((key) => {
+      const v = propStyle[key] !== undefined ? propStyle[key] : columnMeta(key)?.default;
+      if (v !== undefined) style[key] = v;
+    });
+    pushHistory();
+    setMarkups((a) => [...a, { id: uid(), page, ...style, ...mk }]);
+    setDraft(null);
+  };
 
   const panMode = () => tool === "pan" || spaceHeld;
+
+  // Property panel onChange (B426): patch the selected markup + update the sticky style default.
+  const onPropChange = (key, value) => {
+    if (!sel) return;
+    pushHistory();
+    setMarkups((a) => a.map((m) => m.id === sel ? { ...m, ...writeProp(m, key, value) } : m));
+    setPropStyle((s) => ({ ...s, [key]: value }));
+  };
 
   const openEditor = (ed) => { editDoneRef.current = false; setEditing(ed); };
   const closeEditor = (save) => {
@@ -710,7 +749,7 @@ export default function DocReview({
       return;
     }
     if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B293)
-    if (tool === "calibrate" || tool === "distance" || tool === "rect" || tool === "cloud") {
+    if (TWOPOINT.has(tool)) {
       if (!draft) setDraft({ kind: tool, pts: [p] });
       else {
         const pts = [draft.pts[0], p];
@@ -720,8 +759,18 @@ export default function DocReview({
       }
       return;
     }
-    if (tool === "area" || tool === "perimeter" || tool === "count") {
-      setDraft((d) => (d && d.kind === tool ? { ...d, pts: [...d.pts, p] } : { kind: tool, pts: [p] }));
+    if (MULTIPOINT.has(tool)) {
+      setDraft((d) => {
+        if (d && d.kind === tool) {
+          // Close polygon on click near the first point (snap to close)
+          if (tool === "polygon" && d.pts.length >= 3) {
+            const tol = 12 / (view?.scale || 1);
+            if (dist(p, d.pts[0]) <= tol) { commit({ kind: tool, pts: d.pts }); return null; }
+          }
+          return { ...d, pts: [...d.pts, p] };
+        }
+        return { kind: tool, pts: [p] };
+      });
       return;
     }
   };
@@ -787,10 +836,17 @@ export default function DocReview({
   const finishDraft = () => {
     if (!draft) return;
     const { kind, pts } = draft;
-    // Area + perimeter need ≥3 points to be real polygons; a 2-point area is 0 sf and a
-    // 2-point perimeter is a single segment, both meaningless in the takeoff (B302).
-    if ((kind === "count" || kind === "area" || kind === "perimeter") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
-    else setDraft(null);
+    // Measures: area + perimeter need ≥3 points. Shapes: polyline ≥2, polygon ≥3.
+    if (MEASURE.has(kind) || kind === "count") {
+      if (canCommitMeasure(kind, pts.length)) commit({ kind, pts });
+      else setDraft(null);
+    } else if (kind === "polyline" && pts.length >= 2) {
+      commit({ kind, pts });
+    } else if (kind === "polygon" && pts.length >= 3) {
+      commit({ kind, pts });
+    } else {
+      setDraft(null);
+    }
   };
   const onDbl = (e) => {
     if (tool === "select") { // double-click a text note → edit it inline (B293)
@@ -802,13 +858,14 @@ export default function DocReview({
     // The browser fires TWO pointerdowns before a dblclick, each appending a coincident
     // point at the finish spot — strip that trailing run so a Count isn't inflated and a
     // poly isn't distorted. Enter (no extra downs) keeps every point. (B291)
-    if (draft.kind === "area" || draft.kind === "perimeter" || draft.kind === "count") {
+    if (MULTIPOINT.has(draft.kind)) {
       const d = toPage(e), tol = 6 / view.scale;
       const pts = draft.pts.slice();
       while (pts.length && dist(pts[pts.length - 1], d) <= tol) pts.pop();
-      // Same min-point gate as Enter/finishDraft so a 2-point area/perimeter can't slip in
-      // via double-click either (count ≥1, area/perimeter ≥3). (B302)
-      if (canCommitMeasure(draft.kind, pts.length)) commit({ kind: draft.kind, pts });
+      const { kind } = draft;
+      if ((MEASURE.has(kind) || kind === "count") && canCommitMeasure(kind, pts.length)) commit({ kind, pts });
+      else if (kind === "polyline" && pts.length >= 2) commit({ kind, pts });
+      else if (kind === "polygon" && pts.length >= 3) commit({ kind, pts });
       else setDraft(null);
     } else finishDraft();
   };
@@ -860,24 +917,27 @@ export default function DocReview({
         const a = pts[0], b = pts[1]; if (!a || !b) continue;
         const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
         if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
+      } else if (m.kind === "ellipse") {
+        const a = pts[0], b = pts[1]; if (!a || !b) continue;
+        const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+        const rx = Math.abs(b.x - a.x) / 2 + tol, ry = Math.abs(b.y - a.y) / 2 + tol;
+        if (rx > 0 && ry > 0 && ((p.x - cx) * (p.x - cx)) / (rx * rx) + ((p.y - cy) * (p.y - cy)) / (ry * ry) <= 1) { d = 0; interior = true; }
       } else if (m.kind === "text") {
         // the text box (offsets mirror the render; screen px → page units via /scale) (B33)
         const q = pts[0]; if (!q) continue;
         const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
         if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
-      } else if (m.kind === "area") {
-        // B33 generalized to the AREA polygon (B374): its FILLED interior is grabbable, so a click
-        // anywhere inside selects it — not just an edge/vertex (the dead-centre bug Michael hit). A
-        // thin / degenerate (<3-pt) area still selects by its edge or vertex via the fallback.
+      } else if (m.kind === "area" || m.kind === "polygon") {
+        // Filled interior is grabbable (B374); edge+vertex fallback for thin/degenerate shapes.
         if (pts.length >= 3 && pointInPoly(p, pts)) { d = 0; interior = true; }
         else {
           for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
-          if (pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
+          if (pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0]));
         }
       } else {
-        // distance / perimeter / count: nearest vertex OR segment (so the line body selects)
+        // distance / perimeter / count / line / polyline: nearest vertex OR segment
         for (let i = 0; i < pts.length; i++) { d = Math.min(d, dist(p, pts[i])); if (i > 0) d = Math.min(d, segDist(pts[i - 1], pts[i])); }
-        if (m.kind === "perimeter" && pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0])); // closing edge
+        if ((m.kind === "perimeter") && pts.length > 2) d = Math.min(d, segDist(pts[pts.length - 1], pts[0]));
       }
       const a = interior ? bboxArea(pts) : Infinity;
       if (d < bd - 1e-6 || (d <= bd + 1e-6 && a < bArea)) { bd = d; best = m.id; bArea = a; }
@@ -1057,63 +1117,59 @@ export default function DocReview({
     />
   );
 
-  // SVG element for one markup (coords ×scale)
-  const draw = (m, selected) => {
-    const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
-    const stroke = selected ? PAL.accent : (MEASURE.has(m.kind) ? "#0e7490" : "#b91c1c");
-    const lbl = MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : null;
-    const labelAt = (x, y, text, color) => (
-      <text x={x} y={y} fontSize="11" fontWeight="700" fill={color} style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }} pointerEvents="none">{text}</text>
-    );
-    if (m.kind === "distance" || m.kind === "perimeter") {
-      const pts = m.pts.map(S);
-      const closed = m.kind === "perimeter";
-      const dd = (closed ? [...pts, pts[0]] : pts).map((q) => `${q.x},${q.y}`).join(" ");
-      const mid = midOfPath(pts, closed); // true arc-length midpoint, not a vertex (B307)
-      return <g key={m.id}><polyline points={dd} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />{pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3} fill={stroke} />)}{lbl && labelAt(mid.x + 4, mid.y - 4, lbl, "#0e7490")}</g>;
-    }
-    if (m.kind === "area") {
-      const pts = m.pts.map(S);
-      const c = centroidOf(pts); // area-weighted centroid, clamped inside concave shapes (B307)
-      return <g key={m.id}><polygon points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="#0e749022" stroke={stroke} strokeWidth={selected ? 3 : 2} />{lbl && labelAt(c.x, c.y, lbl, "#0e7490")}</g>;
-    }
-    if (m.kind === "count") {
-      const pts = m.pts.map(S);
-      return <g key={m.id}>{pts.map((q, i) => <g key={i}><circle cx={q.x} cy={q.y} r={7} fill="#0e749033" stroke={stroke} strokeWidth={1.5} /><text x={q.x} y={q.y + 3} fontSize="8" textAnchor="middle" fill="#0e7490" fontWeight="700" pointerEvents="none">{i + 1}</text></g>)}</g>;
-    }
-    if (m.kind === "rect" || m.kind === "cloud") {
-      const a = S(m.pts[0]), b = S(m.pts[1]);
-      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-      return m.kind === "cloud"
-        ? <path key={m.id} d={cloudPath(x, y, w, h)} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />
-        : <rect key={m.id} x={x} y={y} width={w} height={h} fill="none" stroke={stroke} strokeWidth={selected ? 3 : 2} />;
-    }
-    if (m.kind === "text") {
-      const q = S((m.pts && m.pts[0]) || { x: 0, y: 0 });
-      const text = m.text || ""; // guard a missing text (mirrors hitTest) so one bad note can't crash the overlay
-      return <g key={m.id}><rect x={q.x - 2} y={q.y - 12} width={(text.length * 6.5) + 6} height={16} fill="#fff" stroke={stroke} strokeWidth={1} rx={3} /><text x={q.x + 2} y={q.y} fontSize="11" fill="#b91c1c" fontWeight="600" pointerEvents="none">{text}</text></g>;
-    }
-    return null;
-  };
+  // drawMarkup() is now handled by <MarkupRenderer> (B426); the local `draw()` alias is gone.
 
   const drawDraft = () => {
-    if (!draft) return null;
+    if (!draft || !view) return null;
     const S = (q) => ({ x: q.x * view.scale, y: q.y * view.scale });
     const pts = draft.pts.map(S);
     const cur = cursor ? S(cursor) : null;
     const col = draft.kind === "calibrate" ? PAL.accent : MEASURE.has(draft.kind) ? "#0e7490" : "#b91c1c";
-    if (draft.kind === "distance" || draft.kind === "calibrate") {
+
+    // Two-point drafts (line, distance, calibrate, rect, cloud, ellipse)
+    if (TWOPOINT.has(draft.kind)) {
       const a = pts[0]; if (!a) return null;
-      return <g>{cur && <line x1={a.x} y1={a.y} x2={cur.x} y2={cur.y} stroke={col} strokeWidth={2} strokeDasharray="5 4" />}<circle cx={a.x} cy={a.y} r={3} fill={col} /></g>;
+      if (!cur) return <g><circle cx={a.x} cy={a.y} r={3} fill={col} /></g>;
+      if (draft.kind === "rect" || draft.kind === "cloud") {
+        const x = Math.min(a.x, cur.x), y = Math.min(a.y, cur.y), w = Math.abs(cur.x - a.x), h = Math.abs(cur.y - a.y);
+        return draft.kind === "cloud"
+          ? <path d={cloudPath(x, y, w, h)} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />
+          : <rect x={x} y={y} width={w} height={h} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />;
+      }
+      if (draft.kind === "ellipse") {
+        const cx = (a.x + cur.x) / 2, cy = (a.y + cur.y) / 2;
+        const rx = Math.abs(cur.x - a.x) / 2, ry = Math.abs(cur.y - a.y) / 2;
+        return <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />;
+      }
+      // line / distance / calibrate — a simple segment preview
+      return <g><line x1={a.x} y1={a.y} x2={cur.x} y2={cur.y} stroke={col} strokeWidth={2} strokeDasharray="5 4" /><circle cx={a.x} cy={a.y} r={3} fill={col} /></g>;
     }
-    if (draft.kind === "rect" || draft.kind === "cloud") {
-      const a = pts[0]; if (!a || !cur) return <g><circle cx={a?.x} cy={a?.y} r={3} fill={col} /></g>;
-      const x = Math.min(a.x, cur.x), y = Math.min(a.y, cur.y), w = Math.abs(cur.x - a.x), h = Math.abs(cur.y - a.y);
-      return draft.kind === "cloud" ? <path d={cloudPath(x, y, w, h)} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" /> : <rect x={x} y={y} width={w} height={h} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />;
-    }
-    // poly / count
+
+    // Multi-point drafts (polygon, polyline, area, perimeter, count)
     const seq = cur ? [...pts, cur] : pts;
-    return <g>{seq.length > 1 && <polyline points={seq.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />}{pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={3.5} fill={col} />)}{draft.kind === "count" && <text x={(pts[pts.length-1]||{x:8}).x + 8} y={(pts[pts.length-1]||{y:8}).y} fontSize="11" fontWeight="700" fill={col}>{pts.length}</text>}</g>;
+    const isClosingDraft = draft.kind === "polygon" && pts.length >= 3;
+    const closeSegment = isClosingDraft && cur
+      ? <line x1={cur.x} y1={cur.y} x2={pts[0].x} y2={pts[0].y} stroke={col} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.5} />
+      : null;
+    return (
+      <g>
+        {seq.length > 1 && (
+          <polyline points={seq.map((q) => `${q.x},${q.y}`).join(" ")}
+            fill={draft.kind === "polygon" || draft.kind === "area" ? col + "18" : "none"}
+            stroke={col} strokeWidth={2} strokeDasharray="5 4" />
+        )}
+        {closeSegment}
+        {pts.map((q, i) => (
+          <circle key={i} cx={q.x} cy={q.y} r={i === 0 && isClosingDraft ? 5 : 3.5}
+            fill={i === 0 && isClosingDraft ? col : col}
+            stroke={i === 0 && isClosingDraft ? "#fff" : "none"} strokeWidth={1.5} />
+        ))}
+        {draft.kind === "count" && (
+          <text x={(pts[pts.length - 1] || { x: 8 }).x + 8} y={(pts[pts.length - 1] || { y: 8 }).y}
+            fontSize="11" fontWeight="700" fill={col}>{pts.length}</text>
+        )}
+      </g>
+    );
   };
 
   return (
@@ -1268,6 +1324,24 @@ export default function DocReview({
                 );
               })}
             </div>
+            {/* Properties section (B426) — appears below the sheet list when a markup is selected.
+                Driven by schemaForMarkup → PropertyPanel; edits patch the markup via onPropChange. */}
+            {sel && (() => {
+              const selM = pageMarks.find((mm) => mm.id === sel);
+              if (!selM) return null;
+              return (
+                <div style={{ flex: "none", borderTop: `1px solid ${PAL.line}` }}>
+                  <div style={{ padding: "6px 12px 4px", fontSize: 10, color: PAL.muted, fontWeight: 700,
+                    textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>Properties</span>
+                    <span style={{ fontWeight: 500, color: PAL.ink, textTransform: "none", letterSpacing: 0, fontSize: 11 }}>{selM.kind}</span>
+                  </div>
+                  <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                    <PropertyPanel markup={selM} onChange={onPropChange} />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* canvas + overlay — a transform viewport (B329). The sheet is a page-sized box
@@ -1295,7 +1369,11 @@ export default function DocReview({
                 width: detailTile ? detailTile.rw * view.scale : 0, height: detailTile ? detailTile.rh * view.scale : 0,
                 display: detailTile ? "block" : "none", pointerEvents: "none" }} />
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                {pageMarks.map((m) => draw(dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m, m.id === sel))}
+                {pageMarks.map((m) => (
+                  <MarkupRenderer key={m.id}
+                    markup={dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m}
+                    view={view} selected={m.id === sel} ftPerUnit={ftPerUnit} />
+                ))}
                 {drawDraft()}
               </svg>
               {/* On-canvas delete affordance (B375): a clear × on the selected markup so removing it
