@@ -5,7 +5,9 @@
  * it) and are stored in PAGE UNITS so they survive zoom. Lazy-loaded by the shell.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
+import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
 import { backingScale, backdropDensity, visibleRegion, tileCovers } from "./lib/renderBudget.js";
 import { readSheetMeta } from "../../shared/files/sheetMeta.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../shared/files/sheetGroups.js";
@@ -159,6 +161,7 @@ export default function DocReview({
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
+  const [ctxMenu, setCtxMenu] = useState(null);     // right-click Arrange menu { x, y (client px), id } | null (B421)
   const [loadNonce, setLoadNonce] = useState(0);    // bump to force a fresh fit on open / reset / load (B329)
   const viewRef = useRef(view); viewRef.current = view; // live view for the once-bound wheel handler
   const pageRef = useRef(page); pageRef.current = page; // live page for the ref-driven render callbacks (B415)
@@ -913,6 +916,33 @@ export default function DocReview({
     return true;
   };
 
+  // Arrange — change the selected markup's z-order within its same-page peers (B421, Bluebeam's
+  // four ops). Draw order IS z-order (the overlay paints pageMarks in array order), so the pure
+  // reorderWithinPage permutes only this sheet's group. It returns the SAME array for a no-op
+  // (already at that end / a lone markup), so a top/bottom arrange leaves history untouched.
+  const arrange = (mode) => {
+    if (!sel) return false;
+    const next = reorderWithinPage(markups, sel, mode);
+    if (next === markups) return false; // no-op (already topmost/bottom, or only one on the sheet)
+    pushHistory(); setMarkups(next);
+    return true;
+  };
+  // Stack position of the current selection — drives the menu's greyed-out items (atTop disables
+  // Bring to Front/Forward; atBottom disables Send to Back/Backward; a lone markup reads both).
+  const arrangeState = () => arrangeFlags(markups, sel);
+
+  // Right-click a markup → open the Arrange context menu at the cursor (B421). hitTest (B33) at the
+  // press point: a hit selects that markup and opens the menu; a MISS does nothing — preventDefault
+  // is not called, so the native browser menu shows over blank canvas (no empty custom menu).
+  const onContextMenu = (e) => {
+    if (!pageBase || !view || editing || calInput) return; // not while an inline editor / calibrate entry is open
+    const hitId = hitTest(toPage(e));
+    if (!hitId) return; // empty canvas → let the default context menu through
+    e.preventDefault();
+    setSel(hitId);
+    setCtxMenu({ x: e.clientX, y: e.clientY, id: hitId });
+  };
+
   // keyboard: Enter finishes a poly/count draft; Esc cancels; Delete removes selection.
   // Keep the handler in a ref (refreshed each render with live closures) and bind the
   // window listener ONCE — the old no-deps effect re-subscribed on every render, and
@@ -926,10 +956,22 @@ export default function DocReview({
     if (mod && (e.key === "c" || e.key === "C")) { if (copyMarkup()) e.preventDefault(); return; }  // ⌘/Ctrl-C copy selected markup (B417)
     if (mod && (e.key === "x" || e.key === "X")) { if (cutMarkup()) e.preventDefault(); return; }   // ⌘/Ctrl-X cut
     if (mod && (e.key === "v" || e.key === "V")) { if (pasteMarkup()) e.preventDefault(); return; } // ⌘/Ctrl-V paste at the cursor
+    // Arrange z-order chords (B421), Bluebeam-style. Match e.code (physical key), NOT e.key — Shift
+    // turns e.key "]"→"}", which would silently miss the Bring-to-Front chord. ] = up the stack,
+    // [ = down; Shift = jump to the end. Gated on a selection; ⌘ is covered by `mod` (metaKey).
+    if (mod && sel && (e.code === "BracketRight" || e.code === "BracketLeft")) {
+      e.preventDefault();
+      if (e.code === "BracketRight") arrange(e.shiftKey ? "front" : "forward");   // ⌘/Ctrl(+Shift)+]
+      else arrange(e.shiftKey ? "back" : "backward");                            // ⌘/Ctrl(+Shift)+[
+      return;
+    }
     if (mod) return; // leave any other modified keys to the browser
     if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
-    else if (e.key === "Escape") { setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null); }
+    else if (e.key === "Escape") {
+      if (ctxMenu) { setCtxMenu(null); return; } // close the Arrange menu first, keeping the selection (B421)
+      setDraft(null); setSel(null); setDragPreview(null); dragRef.current = null; setCalInput(null);
+    }
     else if (e.key === "Delete" || e.key === "Backspace") {
       if (removeLastVertex()) { e.preventDefault(); return; }            // trim a draft vertex first (B303)
       if (sel) { e.preventDefault(); pushHistory(); setMarkups((a) => a.filter((m) => m.id !== sel)); setSel(null); }
@@ -1234,6 +1276,7 @@ export default function DocReview({
               live on the viewport itself, so a pan can begin anywhere — even off the sheet. */}
           <div ref={attachWrap}
             onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onDoubleClick={onDbl} onPointerLeave={() => setCursor(null)}
+            onContextMenu={onContextMenu}
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) openFile(f); }}
             style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: "var(--canvas-mat)", touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
               cursor: panning ? "grabbing" : panMode() ? "grab" : tool === "select" ? "default" : "crosshair" }}>
@@ -1370,6 +1413,61 @@ export default function DocReview({
           <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
+
+      {/* Right-click Arrange menu (B421) — Bluebeam-style z-order + Edit/Delete on the clicked
+          markup. Portalled to <body> (like AnchoredMenu / the Site-row menu) so the canvas's
+          overflow:hidden + stacking can't clip it; positioned at the cursor, viewport-clamped,
+          dismissed on click-away / right-click-away / Escape. Arrange items grey out at the top /
+          bottom of the stack. */}
+      {ctxMenu && (() => {
+        const m = pageMarks.find((mm) => mm.id === ctxMenu.id);
+        if (!m) return null; // the selection went away (e.g. deleted) — nothing to arrange
+        const st = arrangeState() || { atTop: true, atBottom: true };
+        const close = () => setCtxMenu(null);
+        const run = (fn) => () => { fn(); close(); };
+        const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+        const K = isMac ? "⌘" : "Ctrl+", SH = isMac ? "⌘⇧" : "Ctrl+Shift+";
+        const ops = [
+          { label: "Bring to Front", hint: `${SH}]`, disabled: st.atTop, on: () => arrange("front") },
+          { label: "Bring Forward", hint: `${K}]`, disabled: st.atTop, on: () => arrange("forward") },
+          { label: "Send Backward", hint: `${K}[`, disabled: st.atBottom, on: () => arrange("backward") },
+          { label: "Send to Back", hint: `${SH}[`, disabled: st.atBottom, on: () => arrange("back") },
+        ];
+        const VW = typeof window !== "undefined" ? window.innerWidth : 1200;
+        const VH = typeof window !== "undefined" ? window.innerHeight : 800;
+        const W = 216, H = m.kind === "text" ? 268 : 232;
+        const left = Math.max(8, Math.min(ctxMenu.x, VW - W - 8));
+        const top = Math.max(8, Math.min(ctxMenu.y, VH - H - 8));
+        const row = (extra = {}) => ({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, width: "100%", textAlign: "left", padding: "7px 12px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 500, color: PAL.ink, ...extra });
+        return createPortal(
+          <div onPointerDown={close} onContextMenu={(e) => { e.preventDefault(); close(); }}
+            style={{ position: "fixed", inset: 0, zIndex: 4000 }}>
+            <div onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()} role="menu"
+              style={{ position: "fixed", left, top, width: W, background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0", fontFamily: "system-ui, sans-serif", zIndex: 4001 }}>
+              <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px" }}>Arrange</div>
+              {ops.map((it) => (
+                <button key={it.label} role="menuitem" disabled={it.disabled} onClick={run(it.on)}
+                  style={row({ cursor: it.disabled ? "default" : "pointer", color: it.disabled ? "var(--text-tertiary)" : PAL.ink, opacity: it.disabled ? 0.55 : 1 })}>
+                  <span>{it.label}</span>
+                  <span style={{ color: it.disabled ? "var(--text-tertiary)" : PAL.muted, fontSize: 11, fontFamily: "ui-monospace, monospace" }}>{it.hint}</span>
+                </button>
+              ))}
+              <div style={{ borderTop: "1px solid var(--border-default)", margin: "4px 0" }} />
+              {m.kind === "text" && (
+                <button role="menuitem" onClick={run(() => openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" }))} style={row()}>
+                  <span>Edit text…</span>
+                </button>
+              )}
+              <button role="menuitem" onClick={run(() => { pushHistory(); setMarkups((a) => a.filter((x) => x.id !== m.id)); setSel(null); })}
+                style={row({ color: "var(--danger-text)", fontWeight: 600 })}>
+                <span>Delete</span>
+                <span style={{ color: "var(--text-tertiary)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>Del</span>
+              </button>
+            </div>
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }
