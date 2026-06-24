@@ -56,6 +56,11 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - `[x]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
 - **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
 
+### B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes `[Doc Review / Markup, Infra]` (task)  *(filed 2026-06-24; follow-up from B432/B280)*
+`[ ]` **Section B per-tool ARM assertions currently SKIP on CI.** The B280 fixture seeds a *site*, not a *doc_review with a PDF*, so opening the Review module lands on the file browser and the tool rail never renders → each per-tool `aria-pressed` test skips gracefully (green, but not exercised). The loop is green + fast (~1 min, V127) but the per-tool arm — the heart of NEW-9 — isn't being run.
+- **Fix (code-only, no owner action):** add a tiny valid fixture PDF under `e2e/fixtures/`, and in the per-tool `beforeEach` load it via the Review file input (`setInputFiles`) / drag-drop so the rail renders; then the existing `tool-<id>` + `aria-pressed="true"` assertions run for real. Wait for `markup-rail` visible before arming. Keep the graceful-skip as the fallback when the fixture can't load.
+- **Why it matters:** until this lands, a tool that stops *arming* (vs. a schema drift, which Section A catches) wouldn't be caught by CI. Distinct from a measure-value fixture (a later step — drawing a known calibrated length and asserting the readout).
+
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
      (NOT B397 Scheduler-Gantt z-order, NOT the CSS stacking-context fixes, NOT B33/B374 markup
