@@ -1988,7 +1988,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     if (tool === "select") {
-      if (e.shiftKey) { // Shift-drag empty canvas → marquee select
+      if (e.shiftKey) {
+        // Shift-click a parcel BODY → toggle it into the merge selection. B420 makes the
+        // parcel interior click-through (only its boundary hit-stroke grabs), so a Shift-press
+        // in the body lands here on the background — without this it started a marquee and the
+        // merge pick was silently missed, which read as "Shift-click needs several tries" (NEW-2).
+        // Topmost (last-drawn) parcel under the point wins, matching the boundary-stroke path.
+        if (settings.parcelSelect) {
+          const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+          if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
+        }
+        // Shift-drag empty canvas → marquee select
         drag.current = { mode: "marquee", a: fp };
         setMarquee({ a: fp, b: fp });
         svgRef.current.setPointerCapture(e.pointerId);
@@ -2530,11 +2540,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const fp = p2f(e.clientX, e.clientY);
     const { v, e: edge } = hitEditPath(path, fp);
     if (e.button === 0 && e.shiftKey && edge && !v) { // Shift+click an edge (away from a corner) → insert here
-      e.preventDefault(); e.stopPropagation();
-      altSnapOffRef.current = !!e.altKey;
-      insertVtx(path.layer, path.id, edge.index, edge.pt);
-      setInsHint(null);
-      return;
+      // …unless the press is inside ANOTHER parcel's body — then it's a Shift-click to merge that
+      // neighbor (which often shares this very edge), not a vertex-insert on the selected path.
+      // Let it fall through to the merge-toggle (onBgDown / startMoveParcel). (NEW-2)
+      const onOtherParcel = parcels.some((pc) => pc.id !== (path.layer === "parcel" ? path.id : null) && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+      if (!onOtherParcel) {
+        e.preventDefault(); e.stopPropagation();
+        altSnapOffRef.current = !!e.altKey;
+        insertVtx(path.layer, path.id, edge.index, edge.pt);
+        setInsHint(null);
+        return;
+      }
     }
     if (e.button === 0 && !e.shiftKey) setSelVtx(v ? { layer: path.layer, id: path.id, index: v.index } : null);
   };
@@ -6985,20 +7001,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
           })()}
 
-          {/* Merge selection banner — Shift-click parcels to multi-select, then Merge */}
+          {/* Merge selection banner — Shift-click parcels to multi-select, then Merge.
+              zIndex must clear the SVG canvas (zIndex:1) or the transparent canvas paints
+              OVER the banner and swallows its button clicks (the grab-cursor / "Clear pans
+              the map" bug — NEW-1). stopPropagation is belt-and-suspenders for any future
+              reparenting under a pointer-handling ancestor. whiteSpace:nowrap keeps the
+              count label on one line so the buttons can never crowd onto it (NEW-3). */}
           {tool === "select" && combineSel.length > 0 && (
-            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              {combineSel.length < 2 ? `Shift-click another parcel to merge — ${combineSel.length} selected` : `${combineSel.length} parcels selected`}
+            <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              <span>{combineSel.length < 2 ? `Shift-click another parcel to merge — ${combineSel.length} selected` : `${combineSel.length} parcels selected`}</span>
               <button className="dbtn" style={{ ...btn(combineSel.length >= 2), padding: "5px 12px", opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }}
                 disabled={combineSel.length < 2} onClick={mergeParcels}>Merge parcels ⏎</button>
               <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setCombineSel([])}>Clear</button>
             </div>
           )}
 
-          {/* Parcel-edge easement banner (NEW-3) — click edges to build a run, then create */}
+          {/* Parcel-edge easement banner — click edges to build a run, then create.
+              Same zIndex/stopPropagation guard as the merge banner above so its buttons
+              clear the SVG canvas and stay clickable (NEW-1). */}
           {tool === "easement" && easeMode === "parceledge" && (
-            <div style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              {easeEdges && easeEdges.idx.length ? `${easeEdges.idx.length} edge${easeEdges.idx.length > 1 ? "s" : ""} · ${easeWidth}′ inset` : "Click a parcel's edges to select a contiguous run"}
+            <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
+              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              <span>{easeEdges && easeEdges.idx.length ? `${easeEdges.idx.length} edge${easeEdges.idx.length > 1 ? "s" : ""} · ${easeWidth}′ inset` : "Click a parcel's edges to select a contiguous run"}</span>
               <button className="dbtn" style={{ ...btn(!!(easeEdges && easeEdges.idx.length)), padding: "5px 12px", opacity: (easeEdges && easeEdges.idx.length) ? 1 : 0.5, cursor: (easeEdges && easeEdges.idx.length) ? "pointer" : "default" }}
                 disabled={!(easeEdges && easeEdges.idx.length)} onClick={finishEaseEdges}>Create easement ⏎</button>
               {easeEdges && <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => setEaseEdges(null)}>Clear</button>}

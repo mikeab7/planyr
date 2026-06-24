@@ -1,4 +1,4 @@
-/* /api/gis-cache/* — same-origin GIS imagery cache proxy (B439).
+/* /api/gis-cache/* — same-origin GIS imagery cache proxy (B445).
  *
  * Cloudflare Pages Function (thin wrapper). The map points its county/agency layers (FEMA flood,
  * USFWS wetlands, City-of-Houston utilities) at THIS instead of straight at the agency. The real

@@ -123,7 +123,7 @@ export function createDriveClient({ getAccessToken, fetchImpl = fetch, appRootNa
     },
 
     // One targeted lookup of a single file by exact name under a parent — returns
-    // { id, modifiedTime, size } or null. Used by the GIS imagery cache (B439) so a cache
+    // { id, modifiedTime, size } or null. Used by the GIS imagery cache (B445) so a cache
     // hit costs one small query, not a list of the whole folder.
     async findFile(name, parentFolderId) {
       const query = `name='${name.replace(/'/g, "\\'")}' and '${parentFolderId}' in parents and trashed=false`;

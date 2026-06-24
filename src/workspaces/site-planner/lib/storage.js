@@ -463,6 +463,27 @@ export function loadPlansOfGroup(groupId) {
 export function renameSiteGroup(groupId, site) {
   loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
 }
+// Delete a whole site (group) — every plan in it, locally (instant/optimistic) AND from the
+// cloud when signed in. Returns a promise resolving { ok, removed, error? } aggregated across
+// the group's plans, so a caller can AWAIT it and surface a LOUD error if any cloud removal
+// actually failed or matched zero rows (B439 honesty rule: a silent survivor reappears on the
+// next pull — never report a false "deleted"). Logged out, every plan resolves ok (nothing
+// server-side to remove). An empty/unknown group is a no-op success.
+export function deleteSiteGroup(groupId) {
+  const plans = loadPlansOfGroup(groupId);
+  if (!plans.length) return Promise.resolve({ ok: true, removed: 0 });
+  // deleteSite removes locally right away and returns the cloud-delete promise; run them all.
+  return Promise.all(plans.map((s) => deleteSite(s.id))).then((results) => {
+    const failed = results.find((r) => r && r.ok === false);
+    // signed-in delete that matched zero rows = an ownership/RLS mismatch the row survived (the
+    // cloud call "succeeded" but removed nothing) — treat it as a real failure, not a clean delete.
+    const zeroMatch = results.find((r) => r && r.ok && !r.skipped && r.removed === 0);
+    const removed = results.filter((r) => r && r.ok !== false).length;
+    if (failed) return { ok: false, error: failed.error || "Cloud delete failed", removed };
+    if (zeroMatch) return { ok: false, error: "The cloud copy could not be removed (it may belong to another account). It may reappear when you reload.", removed };
+    return { ok: true, removed: plans.length };
+  });
+}
 // loadSite returns the canonical Site Model (migrated/normalized); saveSite merges
 // the partial onto the existing record and normalizes it back through the schema,
 // so storage is a thin persistence layer over the model.
@@ -519,15 +540,3 @@ export function deleteSite(id) {
 }
 export function getCurrentSiteId() { try { return localStorage.getItem(CURRENT_KEY) || null; } catch (_) { return null; } }
 export function setCurrentSiteId(id) { try { id ? localStorage.setItem(CURRENT_KEY, id) : localStorage.removeItem(CURRENT_KEY); } catch (_) {} }
-
-// Delete every plan in a group (local + cloud) and return an aggregate result.
-// A logged-out user gets { ok:true, skipped:true } — no cloud row to remove.
-// A cloud remove returning removed:0 is surfaced as an error (B439 rule: never false "deleted").
-export async function deleteSiteGroup(groupId) {
-  const plans = loadPlansOfGroup(groupId);
-  if (!plans.length) return { ok: true, removed: 0 };
-  const results = await Promise.all(plans.map((s) => deleteSite(s.id)));
-  const failed = results.filter((r) => !r.ok);
-  if (failed.length) return { ok: false, error: failed[0].error || "Delete failed" };
-  return { ok: true, removed: plans.length };
-}

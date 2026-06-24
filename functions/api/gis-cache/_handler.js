@@ -1,4 +1,4 @@
-/* Testable core of the GIS imagery cache proxy (B439).
+/* Testable core of the GIS imagery cache proxy (B445).
  *
  * All the request logic lives here so it unit-tests in plain Node (test/gisCacheHandler.test.js)
  * with an injected in-memory Drive client + fake fetch + clock — no Cloudflare runtime, no

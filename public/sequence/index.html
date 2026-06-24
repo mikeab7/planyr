@@ -4289,15 +4289,17 @@ function App() {
     });
   }, []);
 
-  const deleteProject = useCallback((id) => {
+  const deleteProject = useCallback((id, { skipConfirm = false } = {}) => {
     setData(d => {
       if (Object.keys(d.projects).length <= 1) return d;
       const proj = d.projects[id];
       const taskCount = proj?.tasks?.length || 0;
       const name = proj?.name || `Project ${id}`;
       // Guardrail: confirm + write a labeled snapshot BEFORE applying the deletion
-      // so the user can restore via the History panel if they regret it.
-      if (!window.confirm(`Delete project "${name}"? This removes ${taskCount} task${taskCount===1?"":"s"}.\n\nA backup snapshot will be saved — you can restore it from Version History.`)) {
+      // so the user can restore via the History panel if they regret it. The shell
+      // breadcrumb (B440) already confirms inline, so it passes skipConfirm to avoid a
+      // second native prompt — the snapshot still gets written either way.
+      if (!skipConfirm && !window.confirm(`Delete project "${name}"? This removes ${taskCount} task${taskCount===1?"":"s"}.\n\nA backup snapshot will be saved — you can restore it from Version History.`)) {
         return d;
       }
       // Fire-and-forget the labeled snapshot of the PRE-delete state
@@ -4346,34 +4348,23 @@ function App() {
       } else if (m.type === "planar:nav-new") {
         addProject();
         setData(d => ({ ...d, section: "projects" }));
-      } else if (m.type === "planar:nav-rename" && m.id != null && m.name != null) {
-        // Rename without a confirm dialog — the shell breadcrumb already handled UX (B440).
-        const newName = String(m.name).trim();
-        if (newName) {
-          setData(d => {
-            if (!d.projects || !d.projects[m.id]) return d;
-            return { ...d, projects: { ...d.projects, [m.id]: { ...d.projects[m.id], name: newName } } };
-          });
-        }
+      } else if (m.type === "planar:nav-rename" && m.id != null && typeof m.name === "string") {
+        // B440 — rename from the shell breadcrumb. The breadcrumb already trimmed/validated;
+        // guard once more so an empty name can never blank a project label.
+        const name = m.name.trim();
+        if (name) renameProject(m.id, name);
       } else if (m.type === "planar:nav-delete" && m.id != null) {
-        // Delete without a confirm dialog — the shell breadcrumb already confirmed (B440).
-        // If only one project exists it can't be deleted (guard matches the internal deleteProject).
-        setData(d => {
-          if (!d.projects || !d.projects[m.id]) return d;
-          if (Object.keys(d.projects).length <= 1) return d;
-          try { window.storage.set("hs-v1", JSON.stringify(d), { label: "pre-delete-project", skipSanity: true }); } catch (_) {}
-          const newProjects = { ...d.projects };
-          delete newProjects[m.id];
-          const remaining = Object.keys(newProjects).map(Number);
-          const newAPid = d.aPid === m.id ? remaining[0] : d.aPid;
-          const newSection = d.aPid === m.id ? "reports" : d.section;
-          return { ...d, aPid: newAPid, section: newSection, projects: newProjects };
-        });
+        // B440 — delete from the shell breadcrumb (already confirmed inline → skipConfirm).
+        // If the deleted project was the active one, route home to the Dashboard (reports),
+        // matching the "the open project no longer exists → go home" behavior.
+        const wasActive = latestData.current && latestData.current.aPid === m.id;
+        deleteProject(m.id, { skipConfirm: true });
+        if (wasActive) setData(d => ({ ...d, section: "reports" }));
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [inShell, addProject]);
+  }, [inShell, addProject, renameProject, deleteProject]);
 
   // ── Embedded-mode TOOLBAR bridge (Planyr shell, B388) ──────────────────────
   // The shell hides our in-iframe action toolbar (`.in-iframe .app-header`) and re-renders

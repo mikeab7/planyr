@@ -335,12 +335,12 @@ export default function AppHeader({
                 onDashboard={onDashboard}
                 onSelectProject={onSelectProject}
                 onNewProject={onNewProject}
+                onRenameProject={onRenameProject}
+                onDeleteProject={onDeleteProject}
                 saveState={saveState}
                 projects={projects}
                 homeLabel={homeLabel}
                 cross={cross}
-                onRenameProject={onRenameProject}
-                onDeleteProject={onDeleteProject}
               />
             </>
           )}

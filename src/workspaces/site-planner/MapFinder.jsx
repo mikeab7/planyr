@@ -10,6 +10,7 @@ import {
   resolveLayerUrl,
   identifyParcelEager,
   outerRingsLngLat,
+  geoJsonToEsriFeature,
   lngLatRingToFeet,
   feetToLatLng,
   aerialPlacement,
@@ -22,6 +23,8 @@ import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
+import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
+import { listMyTeams, currentIdentity } from "./lib/teams.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -224,7 +227,7 @@ function ringsAcres(rings) {
 // the headline facts beyond address/account that help identify a tract at a glance.
 const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
-export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
@@ -294,6 +297,32 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     if (name && name !== original) onRenameSiteRef.current && onRenameSiteRef.current(id, name);
   };
   const cancelRename = () => { skipRenameBlurRef.current = true; setRenaming(null); };
+
+  // ── Team sharing (share a project with a team) ──────────────────────────────
+  const [myUid, setMyUid] = useState(null);
+  const [myTeams, setMyTeams] = useState([]);
+  const [shareBusy, setShareBusy] = useState(false);
+  const teamName = (id) => { const t = myTeams.find((x) => x.id === id); return t ? t.name : "a team"; };
+  const refreshTeams = async () => {
+    const { uid } = await currentIdentity();
+    setMyUid(uid);
+    if (!uid) { setMyTeams([]); return; }
+    try { setMyTeams(await listMyTeams()); } catch (_) { /* keep prior list on transient error */ }
+  };
+  useEffect(() => { let live = true; (async () => { const { uid } = await currentIdentity(); if (!live) return; setMyUid(uid); if (uid) { try { const t = await listMyTeams(); if (live) setMyTeams(t); } catch (_) {} } })(); return () => { live = false; }; }, []);
+  // Open the per-project menu and refresh the team list so newly-created teams appear.
+  const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
+  // Share a project (site group) with a team, or make it private again (teamId=null).
+  const doShare = async (site, teamId) => {
+    const gid = site.groupId || site.id;
+    setShareBusy(true);
+    const r = teamId ? await shareProject(gid, teamId) : await makeProjectPrivate(gid);
+    setShareBusy(false);
+    setStatusMenu(null);
+    if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
+    if (teamId && r.sites === 0) { setErr("This project isn't in the cloud yet — open it once to sync, then share."); return; }
+    onSharedChange && onSharedChange();
+  };
   // Pipeline counts by status across all sites (for the chips / counts strip).
   const statusCounts = STATUSES.reduce((m, st) => { m[st] = 0; return m; }, {});
   sites.forEach((s) => { statusCounts[statusOf(s)] = (statusCounts[statusOf(s)] || 0) + 1; });
@@ -642,6 +671,57 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return `${county}:${oid}`;
   };
 
+  /* B441 — find the parcel outline already DRAWN under a click, with zero network.
+     The county display layers (makeParcelLayer) are esri-leaflet vector featureLayers,
+     so the lot under the cursor is already client-side geometry; we hit-test it to
+     paint an instant optimistic highlight before the (variable, often multi-second)
+     county identify even starts. Prefers a real county's outline over the statewide
+     TxGIO backup (mirrors identify's source priority), then the tighter parcel when
+     several overlap. Returns a hit shaped like an identify hit ({county, feature}) or
+     null when nothing's loaded under the point (→ fall back to await-identify). */
+  const pointInLngLatRing = (lng, lat, ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  const optimisticHitAt = (latlng) => {
+    let best = null; // { county, feature(esri), acres, real }
+    for (const [county, fl] of Object.entries(displaysRef.current)) {
+      if (!fl || typeof fl.eachFeature !== "function") continue;
+      const real = !STATEWIDE_KEYS.includes(county);
+      fl.eachFeature((layer) => {
+        // Cheap bbox reject first — only convert/test the 1-3 features that could contain it.
+        try { if (layer.getBounds && !layer.getBounds().contains(latlng)) return; } catch (_) { return; }
+        const esri = geoJsonToEsriFeature(layer.feature);
+        if (!esri) return;
+        const parts = outerRingsLngLat(esri); // [[lon,lat]…] per outer tract (multipart-safe)
+        if (!parts.length || !parts.some((p) => pointInLngLatRing(latlng.lng, latlng.lat, p))) return;
+        const acres = ringsAcres(parts) ?? Infinity;
+        if (!best || (!best.real && real) || (best.real === real && acres < best.acres))
+          best = { county, feature: esri, acres, real };
+      });
+    }
+    return best ? { county: best.county, feature: best.feature } : null;
+  };
+
+  // A click inside an ALREADY-highlighted parcel → its key (for an instant local
+  // toggle-off, no network). Tests the live highlight geometry via selectedRef.
+  const selectedHitAt = (latlng) => {
+    const rec = selectedRef.current.find((s) => (s.latlngsList || []).some((ll) => pointInPoly(latlng.lat, latlng.lng, ll)));
+    return rec ? rec.key : null;
+  };
+
+  // Undo an optimistic highlight + its provisional selection record (used when the
+  // authoritative identify disagrees, finds nothing, or errors). Visibly legible: the
+  // flashed highlight vanishes rather than stranding a mismatched outline (B441 rule).
+  const rollbackHit = (key) => {
+    if (hilitesRef.current[key]) { try { mapRef.current.removeLayer(hilitesRef.current[key]); } catch (_) {} delete hilitesRef.current[key]; }
+    setSelected((s) => s.filter((x) => x.key !== key));
+  };
+
   /* Highlight + add ONE identified parcel to the selection (idempotent — never
      toggles off). The SINGLE parcel-pipeline both click-to-select and
      address-search-select use, so they behave identically (B233). `at` is the
@@ -698,7 +778,33 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setBusy(true); setErr(""); setBackupNotice(null);
+    setErr(""); setBackupNotice(null);
+
+    // Instant local toggle-off: a click inside an already-highlighted parcel deselects
+    // it with zero network round-trip — we already have its geometry (B441).
+    const selKey = selectedHitAt(latlng);
+    if (selKey && hilitesRef.current[selKey]) {
+      mapRef.current.removeLayer(hilitesRef.current[selKey]);
+      delete hilitesRef.current[selKey];
+      setSelected((s) => s.filter((x) => x.key !== selKey));
+      return;
+    }
+
+    // B441 — optimistic highlight: paint the outline under the cursor NOW, from the
+    // already-loaded county display layer, before the (variable, often multi-second)
+    // county identify even starts. That network wait was the lag the owner felt; the
+    // authoritative identify below confirms it (filling real attrs) or corrects it.
+    let optKey = null;
+    const opt = optimisticHitAt(latlng);
+    if (opt) {
+      const parts = outerRingsLngLat(opt.feature);
+      if (parts.length) {
+        const k = parcelKey(opt.county, parts, opt.feature.attributes || {});
+        if (!hilitesRef.current[k]) { addParcelHit(opt, latlng); optKey = k; }
+      }
+    }
+
+    setBusy(true);
     try {
       // Eager identify: take the first source that returns a lot (≈2-3s via the
       // statewide layer) instead of stalling on a hung county server's full 8s timeout.
@@ -707,6 +813,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
       });
+      // The authoritative answer always wins: drop the optimistic outline and rebuild
+      // from the identified geometry (full-res + real account/address attrs), so the
+      // IMPORTED parcel is never the simplified display outline. No flash — the
+      // remove+re-add happen in this one synchronous turn (B441).
+      if (optKey) rollbackHit(optKey);
       if (!res.hits.length) {
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
@@ -732,6 +843,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
+      if (optKey) rollbackHit(optKey);
       setErr(humanizeError(e));
     } finally {
       setBusy(false);
@@ -822,14 +934,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
         <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
-          onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+          onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
           style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
             border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
           {t.glyph}
         </button>
+        {s.teamId && (
+          <span title={`Shared with ${teamName(s.teamId)}`} aria-label="Shared with team"
+            style={{ flex: "none", color: PAL.accent, display: "grid", placeItems: "center", lineHeight: 0 }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+          </span>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {renaming && renaming.id === s.id ? (
             <input autoFocus defaultValue={renaming.name}
@@ -1164,7 +1282,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           <div onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
               top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
-              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
+              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", maxHeight: "min(80vh, 520px)", overflowY: "auto", padding: "4px 0" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
               const t = statusToken(st); const cur = statusOf(statusMenu.site) === st;
@@ -1179,6 +1297,45 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 </button>
               );
             })}
+            {/* Share with team (owner only; needs at least one team) */}
+            {myTeams.length > 0 && (() => {
+              const s = statusMenu.site;
+              const owned = !s.ownerId || s.ownerId === myUid;
+              if (!owned) return (
+                <>
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+                  <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 12px" }}>Shared by a teammate</div>
+                </>
+              );
+              return (
+                <>
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>Share with team</div>
+                  {myTeams.map((tm) => {
+                    const on = s.teamId === tm.id;
+                    return (
+                      <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                          background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
+                        <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+                        </span>
+                        <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tm.name}</span>
+                        {on && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
+                      </button>
+                    );
+                  })}
+                  {s.teamId && (
+                    <button disabled={shareBusy} onClick={() => doShare(s, null)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                        background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
+                      <span style={{ width: 15, flex: "none" }} />
+                      <span style={{ flex: 1 }}>Make private</span>
+                    </button>
+                  )}
+                </>
+              );
+            })()}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
             <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setRenaming({ id: s.id, name: s.site || s.name || "" }); }}
               title="Rename this project"

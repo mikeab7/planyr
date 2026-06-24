@@ -24,6 +24,10 @@ create table if not exists public.teams (
   created_by  uuid not null default auth.uid() references auth.users(id),
   created_at  timestamptz not null default now()
 );
+-- If the table already existed (hand-created in the dashboard) and is missing columns,
+-- add them so the INSERT policy and createTeam() can reference created_by.
+alter table if exists public.teams add column if not exists created_by uuid not null default auth.uid() references auth.users(id);
+alter table if exists public.teams add column if not exists created_at timestamptz not null default now();
 
 -- 2) Membership --------------------------------------------------------------
 create table if not exists public.team_members (
@@ -94,6 +98,7 @@ alter table public.team_members enable row level security;
 drop policy if exists "members read roster"  on public.team_members;
 drop policy if exists "admins add members"    on public.team_members;
 drop policy if exists "self add via claim"    on public.team_members;
+drop policy if exists "self join via invite"  on public.team_members;
 drop policy if exists "admins update roles"   on public.team_members;
 drop policy if exists "admins remove members" on public.team_members;
 drop policy if exists "self leave"            on public.team_members;
@@ -101,10 +106,23 @@ create policy "members read roster" on public.team_members
   for select to authenticated using (public.is_team_member(team_id));
 create policy "admins add members" on public.team_members
   for insert to authenticated with check (public.is_team_admin(team_id));
--- backstop so a user can insert THEIR OWN membership when claiming an invite (claim_team_invites
--- runs SECURITY DEFINER and is the normal path; this keeps a direct self-insert narrow to self).
-create policy "self add via claim" on public.team_members
-  for insert to authenticated with check (user_id = (select auth.uid()));
+-- A user may insert THEIR OWN membership only into a team that has an UNCLAIMED invite for their
+-- verified email AT THE SAME ROLE they're inserting — never an arbitrary team or an escalated role.
+-- (The normal join path is claim_team_invites / handle_new_user, which run SECURITY DEFINER and
+-- bypass RLS; this policy is the narrow client-side backstop. The "invitee reads own" SELECT policy
+-- on team_invites makes the EXISTS visible to the invitee.) Replaces the old "self add via claim",
+-- which checked only user_id = auth.uid() and so allowed self-join to any team at any role.
+create policy "self join via invite" on public.team_members
+  for insert to authenticated with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1 from public.team_invites i
+      where i.team_id = team_members.team_id
+        and lower(i.email) = lower((select auth.email()))
+        and i.claimed_at is null
+        and i.role = team_members.role
+    )
+  );
 create policy "admins update roles" on public.team_members
   for update to authenticated using (public.is_team_admin(team_id)) with check (public.is_team_admin(team_id));
 create policy "admins remove members" on public.team_members
@@ -166,6 +184,45 @@ language sql stable security definer set search_path = public as $$
   where m.team_id = p_team and public.is_team_member(p_team);
 $$;
 grant execute on function public.list_team_members(uuid) to authenticated;
+
+-- 9a) Teams the caller belongs to (SECURITY DEFINER) -------------------------
+-- Server-side join so listing doesn't depend on PostgREST's embedded-join relationship
+-- cache (which can transiently 404 right after the tables change, hiding a just-created team).
+create or replace function public.list_my_teams()
+returns table (id uuid, name text, role text, created_by uuid, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select t.id, t.name, m.role, t.created_by, t.created_at
+  from public.team_members m
+  join public.teams t on t.id = m.team_id
+  where m.user_id = auth.uid()
+  order by t.created_at desc;
+$$;
+revoke all on function public.list_my_teams() from public;
+grant execute on function public.list_my_teams() to authenticated;
+
+-- 9b) Atomic team creation (SECURITY DEFINER) --------------------------------
+-- Create a team AND the creator's admin membership in one transaction. Runs as
+-- the function owner (RLS bypassed inside), returning the new id directly. This
+-- avoids the two-step client insert, whose .select() RETURNING on public.teams
+-- is blocked by the "members read team" SELECT policy (the creator isn't a
+-- member yet) → "new row violates row-level security policy for table teams".
+create or replace function public.create_team(p_name text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_name text := trim(coalesce(p_name, ''));
+  v_id   uuid;
+begin
+  if v_uid is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if v_name = '' then raise exception 'Team name is required' using errcode = '22023'; end if;
+  insert into public.teams (name, created_by) values (v_name, v_uid) returning id into v_id;
+  insert into public.team_members (team_id, user_id, role, added_by)
+    values (v_id, v_uid, 'admin', v_uid) on conflict (team_id, user_id) do nothing;
+  return v_id;
+end;
+$$;
+revoke all on function public.create_team(text) from public;
+grant execute on function public.create_team(text) to authenticated;
 
 -- 10) Auto-claim invites on signup — extend handle_new_user (from db/profiles.sql) --
 -- Re-created here (AFTER the team tables exist) so a brand-new user lands on any team they

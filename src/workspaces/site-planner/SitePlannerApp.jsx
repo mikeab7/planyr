@@ -464,6 +464,7 @@ export default function App({
             onDeleteSite={deleteSiteGroup}
             onSetStatus={setSiteStatus}
             onRenameSite={renameSite}
+            onSharedChange={refreshSites}
             onUseParcels={newSiteFromMap}
             onSkip={newBlankSite}
           />

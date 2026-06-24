@@ -22,6 +22,49 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" — the Document Review open/switch state &
+     feedback bugs (drop gives no signal · switching files loses state · backdrop vanishes mid-upload).
+     Highest real B# across both files was B445, so minted **B446 / B447 / B448**. Per STANDING RULE #1
+     all three were filed AND fixed + verified the SAME session on branch `claude/vibrant-pascal-wkg50i`
+     — full [x] blocks live in BACKLOG-DONE.md.
+       • B446 (NEW-1) — a GAP in B294 (drop-over-open) + the docIntent/B405 open paths, NOT a duplicate:
+         B294 wired the drop handler but the "Opening…" text only rendered in the empty state, so the
+         drop-over-open and Files-panel/openReview paths showed no loading signal. Added a canvas-level
+         "Opening <name>…" overlay (data-testid="opening-overlay") driven by `busy`, set on EVERY entry
+         path (openFile / openReview / loadSingleReview). openErr/err now fire on every no-op/null/invalid
+         branch (null drop, non-PDF reject, loadReview→null) so an open is never silent. Headless V131
+         (`ui-audit/verify-open-feedback.mjs`, 6/6, logged out).
+       • B447 (NEW-2) — a GAP in B52 (load-supersede token) + the resume effect: B52 stops a late load
+         landing on the wrong review, but a switch never FLUSHED the outgoing review's pending write, and
+         openReview didn't reconcile with the local mirror — so the cancelled debounce left the last edit
+         only in localStorage and a switch-back loaded the stale cloud copy (the "forgets which file"
+         clobber). Fix: openReview `await saveNow()` (flush outgoing) THEN `reconcile(loadReview, readDraft)`
+         (incoming picks up its newer local mirror), exactly like resume. The lazy-mount resume effect was
+         confirmed to already stand down for an in-workspace switch (booted-once + projectId + bootDocIntent
+         guards). Auth-only (two saved cloud reviews) → signed-in live check logged V131.
+       • B448 (NEW-3) — net-new safety net under B447: a session byte cache (pure `lib/sessionBytes.js`,
+         5 unit tests) keyed by srcId holds the dropped File, so a switch/reload BEFORE the Drive/Supabase
+         upload resolves (source still keyless) re-opens the backdrop from memory instead of the re-drop
+         banner / a blank canvas. `fetchSourceBytes` checks the cache before classifySource/Drive/Supabase.
+         Logged-out render-from-cache verified V131; the keyless-mid-upload path's signed-in confirm logged.
+     lint 0 errors · 1434 tests · build green. -->
+
+<!-- 2026-06-24: owner-reported trio (screenshot + voice) on the parcel-MERGE banner — "NEW-1/NEW-2/NEW-3".
+     Highest real B# across both files was B441, so minted **B442 / B443 / B444**. Per STANDING RULE #1
+     all three were filed AND fixed + headless-verified (`ui-audit/verify-merge-banner.mjs`, 6/6) +
+     shipped the SAME session on branch `claude/gallant-euler-sk8kwd` — full [x] blocks live in BACKLOG-DONE.md.
+       • B442 (NEW-1) — merge/easement banner buttons were unclickable (canvas grab-cursor + pan bled
+         through) because the banner had no z-index over the SVG (`zIndex:1`). Fix = `zIndex:6` + a
+         defensive stopPropagation; same guard applied to the sibling easement banner. Deduped: NOT B271
+         (interrupted-gesture recovery), NOT B441 (MapFinder identify latency).
+       • B443 (NEW-2) — Shift-click multi-select "needed several tries": B420 makes a parcel interior
+         click-through, so a body Shift-click fell to `onBgDown` and started a marquee instead of a
+         merge-toggle. Fix = onBgDown ray-casts the parcel under a shift-press and toggles it; the
+         vertex-insert capture handler yields to a merge-pick on a neighbor.
+       • B444 (NEW-3) — the "4 parces selected" garble was a SYMPTOM of B442 (canvas painting over the
+         behind-z-index banner), not a flex bug; resolved by B442's z-index, hardened with nowrap + a span.
+     lint 0 errors · 1421 tests · build green. -->
+
 <!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" (status-marker palette + the precision-pin
      map marker + drop the saved-row element count). Highest B# was B422 when filed, but a concurrent
      `main` (#321, the Shared markup engine batch) took B423–B432 while this was in flight, so
@@ -44,25 +87,47 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      Deduped: B433 is the residual of B365 (not a re-file); B434 replaces B161's shape (progress kept).
      lint 0 errors · 1335 tests · build green. -->
 
-<!-- 2026-06-24: owner-dropped pair "NEW-1/NEW-2" (rename/delete projects from the breadcrumb switcher +
-     extend the Schedule iframe bridge for it). Filed as **B439** (NEW-1) + **B440** (NEW-2) — NOTE: B439
-     was a collision (B439 GIS caching was already in BACKLOG-DONE.md); the rename/delete breadcrumb is
-     correctly **B441**. Grounded against the code before filing — all anchors confirmed:
-     `src/shared/ui/ProjectBreadcrumb.jsx` exists with a controlled/uncontrolled split; `renameSiteGroup`
-     lives at `site-planner/lib/storage.js:463` (rewrites `site` on every plan in the group via
-     `loadPlansOfGroup`); `src/shared/projects/projects.js` exists; `Scheduler.jsx` posts
-     `planar:nav-select`/`nav-dashboard`/`nav-new` and the embedded `public/sequence/index.html` handles
-     them + emits `planar:nav-state`. NET-NEW (no `deleteSiteGroup`, no `nav-rename`/`nav-delete` yet).
-     Deduped: distinct from **B158** (Open) — that replaces the inline ✕ on the YOUR SITES *sidebar list
-     rows*; these act on the *breadcrumb project switcher dropdown* (a different component) and a "project"
-     here is a Site-group, not a single site row. B440 depends on B439. -->
+<!-- 2026-06-24: B439 (rename/delete from the breadcrumb switcher) + B440 (the Schedule iframe-bridge
+     half) were filed AND built + verified the SAME session per STANDING RULE #1 — full [x] blocks live
+     in BACKLOG-DONE.md (branch `claude/beautiful-archimedes-0qjr3w`). Site (uncontrolled) path proven
+     headless 7/7 (`ui-audit/verify-b439-b440-project-manage.mjs`) + 4 store unit tests; the Schedule
+     (controlled/bridge) path is symmetric command-plumbing reusing the embedded app's existing
+     renameProject/deleteProject — it can't boot headless in the offline sandbox (CDN + its own backend
+     blocked), so it's logged for a signed-in live check in VERIFICATION.md. The brief's "verify first"
+     was confirmed: the embedded scheduler ALREADY had internal renameProject/deleteProject, so B440 was
+     just plumbing (+ a skipConfirm flag so the breadcrumb's inline confirm doesn't double-prompt). -->
 
-<!-- B423 umbrella (all sub-items B424–B432 done), B437 (callout), B441 (rename/delete breadcrumb —
-     originally mislabeled B439 in the filing comment above; B439 was already taken by GIS caching,
-     so renumbered to B441, the real next free ID), B440 (schedule bridge), and the stale in-place
-     B439-GIS + B436 entries have all shipped and moved to BACKLOG-DONE.md. Next free B# = B444
-     (B442 = polyline preview 45°-snap; B443 = tool-gesture parity + road endpoints — both fixed +
-     in BACKLOG-DONE.md). -->
+### B423 — Shared markup/measure tool engine + Bluebeam-parity refinement loop `[Site Planner + Doc Review / Markup]` (umbrella)  *(owner-dropped 2026-06-23 as the "Shared Markup/Measure Tool Engine" brief; first minted B421 but RENUMBERED to **B423** on merge-in of main — the concurrent PR #320 had already taken B421 (Arrange) + B422 (Layers); B423 = highest real B# across both files (B422) + 1; plan — `/root/.claude/plans/planyr-shared-tidy-avalanche.md`)*
+One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (and the Stitcher) consume, bringing every tool to Bluebeam-equivalent behavior, plus a committed machine-checkable tool×property matrix + an automated tester so future tool work converges on its own. The brief's "NEW-#" are scratch labels; real filed IDs are B424+. Owner decisions locked: tools RIGHT / properties LEFT in both; Arrow = an arrowhead toggle on Line; verifier = the full cloud rig (B278/B280/B281) built first. Sub-items, in dependency order:
+- `[x]` **B424 (NEW-1) — the tool×property matrix as data. DONE this session.** (see BACKLOG-DONE.md)
+- `[x]` **B425 (NEW-2) — the shared engine's PURE layer. DONE this session.** (see BACKLOG-DONE.md)
+- `[x]` **B426 (NEW-2 cont./NEW-3) — shared `MarkupRenderer.jsx` + `PropertyPanel.jsx` + host wiring; DocReview gains left property panel.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 5842a78). (see BACKLOG-DONE.md)
+- `[x]` **B427 (NEW-4) — Document Review parity tools: Line, Polyline, Polygon, Ellipse.** DONE same commit as B426. (see BACKLOG-DONE.md)
+- `[x]` **B428 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 192c63a). (see BACKLOG-DONE.md)
+- `[x]` **B429 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
+- `[x]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 285836b). (see BACKLOG-DONE.md)
+- `[x]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
+- `[x]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
+- **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
+
+<!-- B438 (browser-side GIS imagery cache: service worker + IndexedDB) was SUPERSEDED mid-session by
+     B445 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
+     — a per-browser cache doesn't follow you between computers + isn't the professional home for
+     outage resilience. The SW/IndexedDB code was retired (gis-sw.js → self-unregistering tombstone;
+     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B445 (shipped) blocks live in
+     BACKLOG-DONE.md. (Renumbered B439→B445 on 2026-06-24: a concurrent session had also minted B439
+     for the breadcrumb rename/delete feature — see BACKLOG-DONE.md B439/B440 — so this GIS item took
+     the next free B# to clear the collision.) -->
+
+### B445 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24; renumbered from B439 to clear a collision)*
+`[x]` Government layer *pictures* (FEMA flood, wetlands, utilities) keep painting when the agency server is down, follow the user between devices, and are stored off the user's machine — replacing the browser-side B438. The map points raster (export-image) layers at a same-origin Cloudflare Function `/api/gis-cache/*` that fetches the agency server-side (no CORS wall), keeps a durable copy in the existing Google Drive, refreshes in the background (stale-while-revalidate), and FAILS OPEN (302 → agency) on any miss-and-failure / missing creds / error. Client also one-shot falls back to the direct agency URL if the proxy isn't serving, so a layer always renders (caching is pure enhancement). Default ON; `VITE_GIS_PROXY=0` is the kill switch. Pure core `src/shared/gis/gisProxyCore.js` (svc-URL encode/parse + cache key + freshness, 15 tests) + testable handler `functions/api/gis-cache/_handler.js` (SWR/fail-open, 12 tests, in-memory Drive). Age badge via the proxy's `?meta=1` sidecar → existing onStatus `{ts,stale}` channel. Reuses the live Drive creds (`GOOGLE_*`, server-side only) — no Supabase, no new secret. DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, PRs #328 + #329); see BACKLOG-DONE.md. **Bring-up fix (#329):** the gov host (`hazards.fema.gov`) 403s a bare server-side User-Agent → every request fail-opened (nothing cached); fixed by sending a browser UA on upstream fetches (root cause isolated live via a temporary `?diag=1` probe; the datacenter-IP-block fear was disproven). **✅ VERIFIED LIVE on planyr.io:** real FEMA export → 200 image/png and `?meta=1` → `cached:true` with a ts (fetch → Drive store → serve → age, end-to-end). Only an in-app visual glance remains (V129).
+
+- `[x]` **B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
+
+### B437 — Callout tool missing from the Document Review rail (matrix↔rail drift) `[Doc Review / Markup]` (bug/feature)  *(found 2026-06-24 by the B432 loop)*
+`[ ]` **The shared tool matrix lists `callout` as a `doc` tool (and the B427 parity plan included it), but `DocReview.jsx`'s `TOOLS` rail array omits it** — so it has no `tool-callout` rail button and can't be drawn in Review. The B432/B436 per-tool e2e loop caught this: callout is the one tool that *skips* (its rail button is absent) instead of arming. Per the loop rule, the fix is in the CODE, not the matrix: wire callout into Review.
+- **Scope (real feature wiring, not a 1-liner):** add `callout` to the `TOOLS` rail; implement its `point`-mode placement (it's a text box + a leader line to a target — distinct from plain `text`, which Review already has). Reuse the shared `MarkupRenderer` callout rendering (already built for the Site Planner) + the inline text editor pattern (`openEditor`). Confirm the leader anchor + box-move interactions.
+- **Until then:** the loop stays green (callout skips gracefully via the deploy-tolerance guard) — honest, but the gap is real. Distinct from the Site Planner, which already has callout.
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
@@ -121,10 +186,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 `[ ]` **Phase 1 (foundation) BUILT + unit-tested (`src/shared/files/ocrMatchLines.js`, 8 tests); NOT yet wired into the live stitch — see remaining blockers below. Do NOT present a topology-only placement as "aligned" (a wrong stitch is worse than an unstitched one).** The owner's GPL topo slice (C-2/C-3/C-4, "TOPO SURVEY I/II/III", NOT TO SCALE, FOR REFERENCE ONLY, 9-item text layer) carries its "MATCH LINE … SHEET N" labels only in the RASTER — so `autoPlaceGroup` (B337) gets nothing.
 - **DONE — OCR match-line recovery design, proven on the real pages.** `recoverMatchLines(passes, dims)` runs `parseMatchLines` in EACH orientation pass's own upright frame, then maps the label centre back to page space to pick the edge (`framePointToPage`). Verified against real Tesseract reads: C-2's bottom "MATCH LINE ~ SHEET 2" → side bottom; C-4's left (rotated 90°) "MATCH LINE ~ SHEET 2" → side left. Adjacency for the L-layout (C-2 over C-3, C-4 right of C-3) is fully recoverable.
 - **✅ DONE (2026-06-23) — blocker #3, the hard CV tail: pixel-precise seam alignment. BUILT, tested, wired, proven seamless on the owner's real C-2/C-3 scans.** New pure module `src/shared/files/matchLineFit.js` (1-D horizontal CLOSE bridges the dashes → OPEN drops text/crossing strokes → RANSAC fits the line over the full width, with a span guard so a short horizontal note can't masquerade as the seam) + browser glue `doc-review/lib/matchLineRefine.js` (`refineGroupPlacements`: BFS the seam graph, re-derive each neighbor's matrix from the REAL match line via `solveM`, then `slideRefine` connects the crossing linework). Handles the ~1° inter-sheet skew (recovered −0.938° on the real pair, matching a Python reference exactly) and the inset/dashed line. Wired into `Stitcher.jsx` (`renderPageToImageData` → binarize → refine) as a **best-effort, fail-safe** pass: any sheet it can't fit confidently — or whose correction isn't a plausible nudge (`plausibleRefine`) — keeps its label-based placement, so it only ever improves a seam, never breaks one. 24 unit tests; verified end-to-end through the real exported functions on the actual sheets (seamless composite). Removes the old "topology-only ⇒ keep aligned:false" limitation for any set that reaches the refiner.
-- **✅ DONE (2026-06-24) — blocker #2, sequence-target resolution. BUILT, unit-tested.** `autoStitch.buildAdjacency` now resolves a match-line target by sheet CODE first (vector sets: "SEE SHEET C-3"), then — when a bare-numeric target names no code — by SEQUENCE: "SHEET 2" → the 2nd group member (whose own code may be "C-3"). New pure `resolveTarget(rawTarget, byNum, sheets)`; the sequence fallback fires ONLY for a purely-numeric target that matches no code AND is a valid 1-based index (so it can never hijack a real code like "C-2", whose norm is "C2" ≠ "2"; code lookup always wins). The contradiction back-check resolves the same way. +5 unit tests (sequence-pair link, code-wins-first, out-of-range → no phantom edge, scanned L-pair auto-places from sequence labels). 1422 tests · lint 0 · build green.
-- **REMAINING blocker (the RECOGNITION layer that FEEDS the now-working aligner + adjacency; the last mile to fully-automatic on these specific compressed scans):**
-  1. **OCR reliability/perf + live wiring.** Two coupled, file-gated pieces that can only be validated against the owner's REAL compressed scans (Tesseract WASM + the actual JPEGs — neither runs in the sandbox): (a) **reliability/perf** — Tesseract on these compressed scans is inconsistent across scale/orientation/PSM (a label read at one render setting is missed at another) and OCR-ing every sparse page at 3 orientations is slow; needs tuning (edge-band crops at a fixed legible scale, per-orientation PSM) + a conservative trigger (only a sparse-text drawing with no text match-lines) + a worker budget. (b) **live wiring** — `recoverMatchLines` (B413 Phase 1) is built + unit-tested but NOT yet invoked from `Stitcher.addGroup`; wiring it must stay safe-by-construction (a mis-read can only leave a sheet UNPLACED → manual Align, never produce a plausible-but-wrong stitch — gated by the existing scale-band + contradiction + pixel-refine-plausibility guards, ideally requiring pixel confirmation before an OCR-derived seam is trusted). **Can't be merged "live" without the owner's scans to tune the threshold against** — shipping unverified OCR auto-placement would violate the owner's "a wrong stitch is worse than an unstitched one" rule. **Owner step:** hand over the GPL topo set (or any compressed scan set) for an in-session tune + a signed-in spot-check; until then this stays the documented live-verify gate (like B409/B411c).
-- **Honest note for the owner:** the seamless-join ENGINE + the adjacency layer (incl. sequence-numbered labels, as of today) are done and proven on your sheets. The last mile — reliably READING which scanned sheet neighbors which off your compressed JPEGs — needs your real files to tune Tesseract against (it can't be done blind in the sandbox). A vector CAD set (or sheets whose match-line text + numbers read cleanly) auto-stitches AND gets the pixel-perfect seam today.
+- **REMAINING blockers (only the RECOGNITION layer that feeds the now-working aligner; needed for fully-automatic on these specific compressed scans):**
+  1. **OCR reliability/perf.** Tesseract on these COMPRESSED scans is inconsistent across scale/orientation/PSM (a label read at one render setting is missed at another) and OCR-ing every sparse page at 3 orientations is slow. Needs tuning (edge-band crops at a fixed legible scale, per-orientation PSM) + a conservative trigger (only a sparse-text drawing with no text match-lines) and likely a worker budget. Until labels are read, `autoPlaceGroup` builds no adjacency → the aligner isn't invoked → sheet stays manual-Align.
+  2. **Sequence-target resolution.** Labels reference by SEQUENCE ("SHEET 2" = the 2nd sheet = C-3), not the "C-3" code — `autoStitch.buildAdjacency` keys on `sheetNumber`, so a numeric target must resolve to the Nth group member (prototyped, not yet in code).
+- **Honest note for the owner:** the seamless-join ENGINE is done and proven on your sheets. For it to run hands-free on these "FOR REFERENCE ONLY / NOT TO SCALE" compressed scans, the app must also reliably recognize which scanned sheet neighbors which (blockers #1–#2 above). A vector CAD set (or sheets whose match-line text + numbers read cleanly) auto-stitches AND now gets the pixel-perfect seam today.
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (with screenshots) — trailer parking generated on a
      building's NON-dock sides + the building "depth" reading the truck-court depth. First minted B416/B417,
@@ -165,10 +230,10 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      settle) + the B329 viewport harness still 13/13. 1273 tests · lint 0 · build green. -->
 
 ### B411 — Auto-filing residual gaps after the multi-discipline split (B410) `[Doc Review / auto-filing]` (bug/task)  *(spun off from B410, 2026-06-23; minted **B411** = B410 + 1)*
-`[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness. **(a) + (b) shipped 2026-06-24 (branch `claude/determined-shannon-p7unj4`); (c) is the live-verify gate.**
-- **✅ (a) DONE — scanned/image-only sets now read in FILING via OCR.** A no-text-layer drawing read as nothing → holding tray. `localRead.localTitleBlockRead` now OCRs its image-only pages (reusing the Stitcher's B352 Tesseract runner, `doc-review/lib/ocr.js`) on the FREE local path, so a scanned set classifies without the dormant AI backend. Safe-by-construction + best-effort: a page OCR can't read stays no-text and the file degrades to the holding tray exactly as before (a thrown OCR seam → `hasText:false`, never a crash); capped at 24 pages for speed; the `ocr` seam is injectable so the wiring is unit-tested without WASM. New `decision.ocrUsed` counts recovered pages. +6 unit tests. **Live-verify residual:** Tesseract's empirical accuracy on the owner's REAL compressed scans (e.g. "2023.11.06 Mesa - Electrical B1.pdf") can only be confirmed signed-in on planyr.io — same file-gated gate as B413; the worst case is unchanged from today (holding tray), never a misfile.
-- **✅ (b) DONE — issue/revision date now preferred over a base date.** The latest-date picker (`titleBlockParse.latestDate`) blindly took the chronological max, so a base "DATE 04/07/2023" or a stray notes date could beat the real issue date. New `issueDate(text)` prefers a date that FOLLOWS an issue/revision label (IFC / IFP / ISSUED FOR … / REV) — deliberately ignoring a bare "DATE" (the base-date trap) — with an asymmetric window (generous forward, tight backward) so a notes date sitting before the label isn't wrongly promoted; among labeled dates the latest wins (revisions climb); falls back to pure-recency when nothing is labeled (no regression). `readTitleBlockText.date` now uses it. +7 unit tests.
-- **(c) Big combined sets weren't validated here — Drive connector caps downloads at 10 MB.** The richest split cases (GPL Civil IFP 125 MB, Jacintoport MEP 13.6 MB, full Mesa COH sets) couldn't be pulled in-session. Needs a signed-in spot-check on planyr.io (drop a big combined set → expect separate per-discipline PDFs) or a higher-limit fetch path. **Owner step — same live-verify gate as B409:** drop a big combined set signed-in and confirm the per-discipline split + OCR filing (a) both fire on a real ≥100 MB scan.
+`[ ]` Three honest gaps surfaced while testing real Drive files against the new splitter (B410, shipped) — none blocks the shipped feature, but each is a real recognition weakness:
+- **(a) Scanned/image-only sets read as nothing in FILING.** A no-text-layer drawing (e.g. "2023.11.06 Mesa - Electrical B1.pdf") has no embedded text, so the local read returns nothing and the file lands in the holding tray. OCR already exists in the STITCHER (B352, `doc-review/lib/ocr.js`, Tesseract); wire that same OCR into the filing read (`localRead.js`) so scanned sheets classify too. Bigger lift (renders pages to canvas), so it's its own item.
+- **(b) Date sometimes grabs an old BASE date over the issue/revision date.** "Mesa - Site Plan 2025.09.17.pdf" filed with `2023-04-07`; the latest-date picker isn't preferring the issue/rev date in the title block. Tighten the date selection (prefer a date adjacent to "ISSUED/REV/IFC", and weight the title-block zone).
+- **(c) Big combined sets weren't validated here — Drive connector caps downloads at 10 MB.** The richest split cases (GPL Civil IFP 125 MB, Jacintoport MEP 13.6 MB, full Mesa COH sets) couldn't be pulled in-session. Needs a signed-in spot-check on planyr.io (drop a big combined set → expect separate per-discipline PDFs) or a higher-limit fetch path.
 
 ### B409 — Large files (>~100 MB) now upload to Drive via a browser-direct resumable path — no more silent "oversize" `[Doc Review / storage]` (bug)  *(owner-dropped 2026-06-23 as "NEW-1"; minted **B409** = highest B# across both files (B408) + 1)*
 `[ ]` **Code shipped on branch `claude/quirky-galileo-dm786x` — lint 0 · 1238 tests · build green. ONE step left: a signed-in, deployed ≥100 MB Drive round-trip to confirm the live browser→Google CORS PUT (the sandbox can't sign in or reach Drive — same live-verify gate as B405/B406).** Deduped: net-new — NOT B405 (that's the file-OPEN/read-back taxonomy; this is the WRITE/upload path) and NOT B207 (the Drive cutover, which this completes for big files).
@@ -373,6 +438,9 @@ Lets a team share a workspace: invite people by email (activates on signup/sign-
      jurisdiction lookup. Reuses the single add path (`parcelsFromRings`) + the existing query; outlines
      load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
      (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
+
+### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
+`[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
 
 <!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
      floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
@@ -905,6 +973,15 @@ Both are walled-off compute (Cloud Run); keys server-side only. Scope: provision
 - **Toggle placement.** Add a labeled control (e.g. "Task names") in the export sidebar alongside the existing controls (Gantt, Today line, Dep. arrows). On = names visible; off = names suppressed from the exported output only. The live schedule display is never affected.
 - **Persistence.** Toggle state persists for the session (or per-project export preference if that pattern already exists in the codebase).
 - **Acceptance:** default export includes task names; unchecking the toggle produces an export with names removed; the live Gantt is unchanged in both states.
+
+### B158 — Replace inline ✕ delete button with right-click context menu on site list rows `[Site Planner / UI]` (feature)  *(arrived as "NEW-1"; minted B158 — highest B# across both files is B157 in BACKLOG-DONE.md, so this is the real next free ID)*
+`[ ]` **Current:** hovering a site row in the YOUR SITES panel reveals an inline ✕ button directly on the row. **Target:** no inline delete affordance at all — right-clicking any site row opens a small two-item context menu: **Rename** (triggers the existing inline-edit rename flow for that site) and **Delete** (triggers the existing delete confirmation flow). The menu dismisses on click-outside, Escape, or selecting either option. The ⊕ locate/crosshair icon visible on hover may stay if it serves a separate purpose — confirm before removing; only the ✕ is being replaced.
+- **Implementation notes:**
+  - Find the site list item component (the YOUR SITES panel/sidebar) — locate the hover state that renders the ✕ and its `onClick` delete handler. Remove the ✕ UI element; keep the delete handler and wire it to the context menu's Delete option. Keep the existing rename handler and wire it to Rename.
+  - **Portal-mount the context menu** (`ReactDOM.createPortal` to `document.body`) — same durable pattern as `AnchoredMenu` (B127) — so it renders above all sidebar and map layers without clipping, regardless of any ancestor `overflow` or stacking context.
+  - Position at the cursor coordinates from the `contextmenu` event; constrain to viewport edges (clamp so the menu never partially leaves the screen).
+  - Right-click context menu is a standard browser pattern; no tooltip or other affordance hint needed.
+- **Acceptance:** hovering a site row shows no ✕; right-clicking opens the two-item menu at the cursor; Rename triggers the inline-edit flow; Delete triggers the existing confirmation flow; clicking outside or pressing Escape closes the menu; the ⊕ locate icon behavior is unchanged.
 
 ### B155 — Markup selection hit-testing: grab unfilled shapes by their interior, consistently at any zoom `[Document Review + Site Planner / UI]` (bug)  *(arrived as "NEW-1"; minted B155 — `main` concurrently took B147–B154 (easement tool, multipart parcel, Delete-key fix), so this is the real next free ID; provisionally B150 then B154 in earlier drafts — both numbers were taken by `main` while this was in flight)*
 `[ ]` **Repro (owner-reported 2026-06-18):** drawing markups are too finicky to select — an **unfilled rectangle only selects when you click its border stroke** (the thin line), not its interior, so you have to "grab exactly on the line." At low zoom even the stroke is hard to land. **Expected:** forgiving, predictable selection for **every** markup type — clicking anywhere inside a closed shape grabs it, and the "grab feel" is the same whether zoomed way in or out.

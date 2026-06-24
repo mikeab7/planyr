@@ -298,6 +298,26 @@ export function lngLatFeatureToParcel(feature) {
   return { points, latlngs };
 }
 
+/* Convert a GeoJSON polygon feature (as esri-leaflet's vector display layer carries
+ * them, in lon/lat) into the SAME esri-shaped `{ geometry: { rings }, attributes }`
+ * that the identify pipeline and `outerRingsLngLat`/`featureToParcel` consume — so the
+ * already-on-screen parcel outlines can feed the exact same highlight/select path as a
+ * server identify (the B441 optimistic-highlight pick). A GeoJSON Polygon's
+ * `coordinates` is a list of rings; a MultiPolygon's is a list of those — flatten both
+ * to one flat ring list (winding-agnostic: `outerRingsLngLat` re-derives outers vs
+ * holes from ring area, so GeoJSON's RFC-7946 winding vs esri's doesn't matter).
+ * GeoJSON `properties` becomes `attributes`. Returns null if it isn't a polygon. */
+export function geoJsonToEsriFeature(feature) {
+  const g = feature?.geometry;
+  if (!g) return null;
+  let rings;
+  if (g.type === "Polygon") rings = g.coordinates;
+  else if (g.type === "MultiPolygon") rings = g.coordinates.flat();
+  else return null;
+  if (!Array.isArray(rings) || !rings.length) return null;
+  return { geometry: { rings }, attributes: { ...(feature.properties || {}) } };
+}
+
 // The outer ring of a feature as an open [[lon,lat], ...] array (4326).
 export function largestRingLngLat(feature) {
   const rings = feature?.geometry?.rings;

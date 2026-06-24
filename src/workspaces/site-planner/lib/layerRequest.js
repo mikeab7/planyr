@@ -12,7 +12,7 @@
  */
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
-// Route a service URL through the same-origin Drive-backed cache proxy (B439) when asked. This
+// Route a service URL through the same-origin Drive-backed cache proxy (B445) when asked. This
 // is a pure TRANSPORT swap — the layer still requests its full pinned sublayer set for the whole
 // view; the proxy only adds a durable copy + outage fallback in front (and fails open to the same
 // upstream). Off → the original direct-to-agency URL, exactly as before.
