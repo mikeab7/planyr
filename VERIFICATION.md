@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V126 — B431: vertex drag handles, Shift snap, ParcelDrawing inline calibrate ✅ build + lint + 1390 tests green; ⏳ signed-in round-trip
+- **What changed.** (1) DocReview: vertex grip circles render at each vertex of the selected markup; dragging a grip moves only that vertex. (2) Holding Shift while drawing with a two-point tool (Line, Rect, Ellipse, Dimension, Calibrate) snaps the endpoint to the nearest 45°. (3) ParcelDrawing's `window.prompt("Length of this line in feet…")` replaced with an inline `numEdit` box positioned at the scale-line's midpoint.
+- **Why ⏳.** Vertex handles + Shift snap need a loaded PDF; ParcelDrawing calibrate needs a parcel with an attached drawing — both require sign-in.
+- **Steps / Expect.** (A) Sign in → Review → drop PDF → draw a Line → click to select it → small white circles appear at the two endpoints → drag one endpoint → line reshapes, old position undoable. (B) Arm Line → click start → hold Shift + move → preview snaps to 0°/45°/90°/135°. (C) Site Planner → open a site with a parcel drawing → open the drawing → arm "Scale" → draw a line → an inline popup appears at the midpoint asking "Length (ft)" → type 100 → Enter → scale set (no browser dialog). Cadence: once. Last checked: —.
+
 ### V125 — B429: Arc, Dimension, Pen, Highlight, Eraser, Snapshot tools in DocReview ✅ build + lint + 1390 tests green; ⏳ signed-in draw round-trip
 - **What changed.** Six new tools added to DocReview tool rail and drawing engine: Arc (3-point quadratic Bézier), Dimension (line + witness ticks + calibrated label), Pen (freehand stroke), Highlight (wide translucent freehand), Eraser (drag-box removes Pen/Highlight only), Snapshot (dashed region + camera emoji). `TOOL_DEFAULTS` stamps Highlight with yellow + high opacity. `eraseInBox` prunes freehand markups by point intersection. All render via `MarkupRenderer.jsx`.
 - **Why ⏳.** Tool rail only renders when a PDF is open; logged-out smoke confirms no JS crash but cannot exercise drawing. Arrow = arrowhead toggle on Line (property panel, already testable in V124).

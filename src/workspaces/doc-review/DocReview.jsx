@@ -197,6 +197,7 @@ export default function DocReview({
   const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B329)
   const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
+  const [vtxPreview, setVtxPreview] = useState(null);  // live { id, pts } during vertex-grip drag (B431)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const [ctxMenu, setCtxMenu] = useState(null);     // right-click Arrange menu { x, y (client px), id } | null (B421)
@@ -209,6 +210,7 @@ export default function DocReview({
   const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
   const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
+  const vtxDragRef = useRef(null);    // active vertex drag { id, idx, start, origPts } (B431)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
   // --- cloud persistence (single-sheet review) ---
@@ -764,6 +766,21 @@ export default function DocReview({
     }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
+    // Vertex grip hit check — when select tool + markup selected, a click within 8 screen-px
+    // of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
+    if (tool === "select" && sel) {
+      const selM = pageMarks.find((mm) => mm.id === sel);
+      if (selM?.pts?.length && selM.kind !== "pen" && selM.kind !== "highlight") {
+        for (let vi = 0; vi < selM.pts.length; vi++) {
+          const q = selM.pts[vi];
+          if (Math.hypot((p.x - q.x) * view.scale, (p.y - q.y) * view.scale) <= 8) {
+            vtxDragRef.current = { id: sel, idx: vi, start: p, origPts: selM.pts.map((r) => ({ ...r })) };
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+            return;
+          }
+        }
+      }
+    }
     // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
     // pans instead (Bluebeam). hitTest is cheap + math-based, so probe it up front for the rule.
     const hitId = tool === "select" ? hitTest(p) : null;
@@ -800,7 +817,15 @@ export default function DocReview({
     if (TWOPOINT.has(tool)) {
       if (!draft) setDraft({ kind: tool, pts: [p] });
       else {
-        const pts = [draft.pts[0], p];
+        // Shift = snap second point to the nearest 45° from the first (B431)
+        let end = p;
+        if (e.shiftKey && draft.pts.length >= 1) {
+          const o = draft.pts[0], dx = p.x - o.x, dy = p.y - o.y;
+          const ang = Math.atan2(dy, dx), snapped = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+          const len = Math.hypot(dx, dy);
+          end = { x: o.x + Math.cos(snapped) * len, y: o.y + Math.sin(snapped) * len };
+        }
+        const pts = [draft.pts[0], end];
         if (tool === "calibrate") finishCalibrate(pts);
         else commit({ kind: tool, pts });
         setDraft(null);
@@ -841,18 +866,32 @@ export default function DocReview({
       return;
     }
     if (!view) return;
-    const p = toPage(e);
+    const rawP = toPage(e);
+    // Vertex drag: translate only the grabbed vertex, keep all others fixed (B431)
+    if (vtxDragRef.current) {
+      const dx = rawP.x - vtxDragRef.current.start.x, dy = rawP.y - vtxDragRef.current.start.y;
+      setVtxPreview({ id: vtxDragRef.current.id, pts: vtxDragRef.current.origPts.map((q, i) => i === vtxDragRef.current.idx ? { x: q.x + dx, y: q.y + dy } : { ...q }) });
+      return;
+    }
     // Freehand: append every move point to grow the live path
     if (FREEHAND.has(tool) && draft?.kind === tool) {
-      setDraft((d) => d ? { ...d, pts: [...d.pts, p] } : d);
+      setDraft((d) => d ? { ...d, pts: [...d.pts, rawP] } : d);
       return;
     }
     if (dragRef.current) { // moving a markup: translate its page-unit points live (B293)
-      const dx = p.x - dragRef.current.start.x, dy = p.y - dragRef.current.start.y;
-      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(p); return; }
+      const dx = rawP.x - dragRef.current.start.x, dy = rawP.y - dragRef.current.start.y;
+      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(rawP); return; }
       dragRef.current.moved = true;
       setDragPreview({ id: dragRef.current.id, pts: dragRef.current.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) });
       return;
+    }
+    // Shift = snap cursor to 45° from draft start point during TWOPOINT drawing (B431)
+    let p = rawP;
+    if (draft && TWOPOINT.has(tool) && e.shiftKey && draft.pts.length >= 1) {
+      const o = draft.pts[0], dx = rawP.x - o.x, dy = rawP.y - o.y;
+      const ang = Math.atan2(dy, dx), snapped = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+      const len = Math.hypot(dx, dy);
+      p = { x: o.x + Math.cos(snapped) * len, y: o.y + Math.sin(snapped) * len };
     }
     setCursor(p);
   };
@@ -866,6 +905,12 @@ export default function DocReview({
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (vtxDragRef.current) { // commit a single-vertex drag (B431)
+      const d = vtxDragRef.current; vtxDragRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (vtxPreview) { pushHistory(); setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, pts: vtxPreview.pts } : m)); setVtxPreview(null); }
+      return;
+    }
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -902,7 +947,7 @@ export default function DocReview({
     if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
     reseedPinch();
     if (pointersRef.current.size === 0) touchPinchedRef.current = false;
-    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null);
   };
 
   const finishDraft = () => {
@@ -1483,10 +1528,20 @@ export default function DocReview({
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                 {pageMarks.map((m) => (
                   <MarkupRenderer key={m.id}
-                    markup={dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m}
+                    markup={vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
                     view={view} selected={m.id === sel} ftPerUnit={ftPerUnit} />
                 ))}
                 {drawDraft()}
+                {/* Vertex grip handles — small circles at each vertex of the selected markup (B431) */}
+                {sel && !draft && (() => {
+                  const selM = pageMarks.find((mm) => mm.id === sel);
+                  if (!selM?.pts?.length || selM.kind === "pen" || selM.kind === "highlight") return null;
+                  const src = vtxPreview?.id === sel ? vtxPreview.pts : selM.pts;
+                  return src.map((q, i) => (
+                    <circle key={i} cx={q.x * view.scale} cy={q.y * view.scale} r={5}
+                      fill="#fff" stroke="var(--accent)" strokeWidth={1.5} />
+                  ));
+                })()}
               </svg>
               {/* On-canvas delete affordance (B375): a clear × on the selected markup so removing it
                   doesn't depend on knowing the Delete key. Lives OUTSIDE the pointerEvents:none overlay

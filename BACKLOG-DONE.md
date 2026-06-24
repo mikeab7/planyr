@@ -1,5 +1,14 @@
 ## ✅ Done
 
+### B431 — Unified interaction model + edit handles `[Doc Review / Markup + Site Planner]` (feature) — NEW-8, part of the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in round-trip → V126.**
+- **ParcelDrawing `window.prompt` → inline `numEdit`** (the explicit plan blocker). `calibrateFrom` in `ParcelDrawing.jsx` now sets `calBox` state `{pts, px, sx, sy, val, err}` instead of calling `window.prompt`. A positioned inline div renders at the line's midpoint: `Length (ft)` label, input (Enter = commit, Esc = cancel), "Set" button, error message on invalid. `onDown` while calBox is open cancels it. Matches the DocReview inline calibrate (B304) in UX.
+- **`shouldPan` already reused** — `viewportTransform.js`'s `shouldPan` rule was already imported and used in DocReview (B329); no new wiring needed.
+- **Vertex drag handles in DocReview (B431).** When a markup is selected in the Select tool, small white circles with accent outline render at each vertex (skipped for pen/highlight which have too many pts). Clicking within 8 screen-px of a grip starts a single-vertex drag (`vtxDragRef`) instead of a full-markup move. `onMove` translates only the grabbed vertex; `onUp` commits via `pushHistory` + `setMarkups`. The `vtxPreview` state drives a live preview during the drag, and passes into the MarkupRenderer call the same way `dragPreview` does.
+- **Shift snap (45°) during TWOPOINT drawing.** In `onMove`, when `draft && TWOPOINT.has(tool) && e.shiftKey`, the cursor is snapped to the nearest 45° interval from the first point before `setCursor`. In `onDown` for the second-point commit, the same snap is applied before `commit`. So Shift held = perfectly horizontal/vertical/diagonal line constraints for Line, Rect, Ellipse, Dimension, and Calibrate tools.
+- **Reuse mode + set-as-default already done** (B428 `propStyle` sticky defaults — DocReview stays on the same tool after commit, doesn't revert to Pan).
+- **Dedup:** convert-segment-to-arc and rotate/resize handles are deferred (roadmap — complex, low daily use); the high-value pieces (vtx handles, Shift snap, inline calibrate) ship this session per the standing rule.
+
 ### B429 — New tools: Arc, Dimension, Pen, Highlight, Eraser, Snapshot `[Doc Review / Markup]` (feature) — NEW-6, part of the B423 umbrella  *(2026-06-24)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in draw round-trip → V125.**
 - **6 new tools** added to DocReview tool rail and wired end-to-end:
