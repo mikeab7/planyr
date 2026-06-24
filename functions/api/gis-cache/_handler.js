@@ -59,10 +59,12 @@ export async function handleGisCache({
       try { out.folderId = await folderIdFor(); out.folderOk = true; }
       catch (e) { out.folderOk = false; out.folderErr = String((e && e.message) || e); }
     }
-    try {
-      const r = await fetchImpl(upstream.url, { headers: { "user-agent": "Mozilla/5.0 (Planyr GIS cache)" } });
-      out.upstreamStatus = r.status; out.upstreamOk = r.ok; out.upstreamType = r.headers.get("content-type");
-    } catch (e) { out.upstreamErr = String((e && e.message) || e); }
+    // With a browser UA (what the fix uses):
+    try { const r = await fetchImpl(upstream.url, { headers: UPSTREAM_HEADERS }); out.uaStatus = r.status; out.uaOk = r.ok; out.uaType = r.headers.get("content-type"); }
+    catch (e) { out.uaErr = String((e && e.message) || e); }
+    // With Cloudflare's default UA (the old behavior):
+    try { const r = await fetchImpl(upstream.url); out.defStatus = r.status; out.defOk = r.ok; }
+    catch (e) { out.defErr = String((e && e.message) || e); }
     return json(out);
   }
 
