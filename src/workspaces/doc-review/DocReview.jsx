@@ -961,6 +961,26 @@ export default function DocReview({
       else commit({ kind: tool, pts }); // snapshot
       return;
     }
+    // Two-point drag-commit: if the pointer was dragged far enough from the first click,
+    // commit the second point on release (Bluebeam drag gesture). A sub-threshold release
+    // is treated as a plain click (leaves the draft; the second click commits it, as before).
+    if (TWOPOINT.has(tool) && draft && draft.pts.length >= 1) {
+      const end = toPage(e);
+      const dragScreenPx = dist(draft.pts[0], end) * (view?.scale || 1);
+      if (dragScreenPx > 6) {
+        let snapped = end;
+        if (e.shiftKey) {
+          const o = draft.pts[0], dx = end.x - o.x, dy = end.y - o.y;
+          const ang = Math.atan2(dy, dx), a45 = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+          const len = Math.hypot(dx, dy);
+          snapped = { x: o.x + Math.cos(a45) * len, y: o.y + Math.sin(a45) * len };
+        }
+        const pts = [draft.pts[0], snapped];
+        if (tool === "calibrate") finishCalibrate(pts);
+        else commit({ kind: tool, pts });
+      }
+      return;
+    }
     // Text places on release: opening the inline editor here (not on pointer-down) means the
     // click's own focus change has already happened, so autofocus sticks and the empty editor
     // isn't immediately blurred + discarded. (B293)
