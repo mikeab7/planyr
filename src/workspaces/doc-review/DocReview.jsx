@@ -50,7 +50,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
 
 const TOOLS = [
-  { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note to edit; Delete removes it." },
+  { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note or callout to edit; Delete removes it." },
   { id: "pan",       label: "Pan",       hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then enter the real length." },
   { id: "distance",   label: "Distance",  hint: "Click two points to measure a distance." },
@@ -65,6 +65,7 @@ const TOOLS = [
   { id: "ellipse",   label: "Ellipse",   hint: "Drag a bounding box. Hold Shift for a circle." },
   { id: "cloud",     label: "Cloud",     hint: "Revision cloud: drag a box; the scalloped outline traces it." },
   { id: "text",      label: "Text",      hint: "Click to place a text note." },
+  { id: "callout",   label: "Callout",   hint: "Click the pointer target, then click to place the text box." },
   { id: "arc",       label: "Arc",       hint: "Click start, click end, then click a point on the curve to set the bend." },
   { id: "dimension", label: "Dimension", hint: "Drag end-to-end; the calibrated length labels the line with witness ticks." },
   { id: "pen",       label: "Pen",       hint: "Press and draw a freehand path." },
@@ -100,6 +101,7 @@ const MK_ICONS = {
   ellipse: <ellipse cx="8" cy="8" rx="5.5" ry="4" />,
   cloud: <path d="M5.2 11.6 a2.3 2.3 0 0 1-.5-4.5 a2.7 2.7 0 0 1 5.1-1 a2.2 2.2 0 0 1 2.6 3.2 a2.1 2.1 0 0 1-1.5 2.9 a2.3 2.3 0 0 1-2.2.9 a2.4 2.4 0 0 1-3-.4 Z" />,
   text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
+  callout: <><rect x="6" y="2" width="8" height="6" rx="1" /><path d="M6 5 L2 13" /><circle cx="2" cy="13" r="1.3" fill="currentColor" stroke="none" /></>,
   arc:       <path d="M2.5 13 Q 8 1 13.5 13" />,
   dimension: <><path d="M3 8 L13 8" /><path d="M3 5.5 L3 10.5 M13 5.5 L13 10.5" /></>,
   pen:       <path d="M4 13 L4.5 10 L11.5 3 L13.5 4.5 L6.5 12.5 Z M11.5 3 L13.5 4.5" />,
@@ -756,8 +758,16 @@ export default function DocReview({
     const text = (ed.text || "").trim();
     if (!text) { if (ed.id) { pushHistory(); setMarkups((a) => a.filter((m) => m.id !== ed.id)); } return; } // empty → drop / delete
     pushHistory();
-    if (ed.id) setMarkups((a) => a.map((m) => (m.id === ed.id ? { ...m, text } : m)));
-    else {
+    if (ed.id) {
+      setMarkups((a) => a.map((m) => (m.id === ed.id ? { ...m, text } : m)));
+    } else if (ed.calloutTip) {
+      // New callout: pts[0] = leader tip (pointer target), pts[1] = text box anchor
+      const style = {};
+      propsForTool("callout").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
+      const id = uid();
+      setMarkups((a) => [...a, { id, page: ed.page, kind: "callout", pts: [ed.calloutTip, ed.pt], ...style, text }]);
+      if (!toolLock) { setTool("select"); setSel(id); }
+    } else {
       const style = {}; // honor the sticky text style (size/color/bold/…) set before drawing
       propsForTool("text").forEach((k) => { const v = propStyle[k] ?? columnMeta(k)?.default; if (v !== undefined) style[k] = v; });
       const id = uid();
@@ -819,7 +829,7 @@ export default function DocReview({
       }
       return;
     }
-    if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B293)
+    if (tool === "text" || tool === "callout") return; // text/callout open on pointer-UP (below) so focus change can't blur+discard the fresh editor (B293)
     if (FREEHAND.has(tool)) {
       setDraft({ kind: tool, pts: [p] });
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
@@ -955,6 +965,17 @@ export default function DocReview({
     // click's own focus change has already happened, so autofocus sticks and the empty editor
     // isn't immediately blurred + discarded. (B293)
     if (tool === "text" && e.button === 0) openEditor({ id: null, page, pt: toPage(e), text: "" });
+    if (tool === "callout" && e.button === 0) {
+      const p = toPage(e);
+      if (!draft) {
+        // First click: pin the leader tip (pointer target); wait for the second click.
+        setDraft({ kind: "callout", pts: [p] });
+      } else {
+        // Second click: open the inline editor at the text box position.
+        openEditor({ id: null, page, pt: p, text: "", calloutTip: draft.pts[0] });
+        setDraft(null);
+      }
+    }
   };
 
   // Always clear pan/move state on an interrupted gesture so the canvas can't get stuck
@@ -989,6 +1010,7 @@ export default function DocReview({
     if (tool === "select") { // double-click a text note → edit it inline (B293)
       const m = pageMarks.find((mm) => mm.id === hitTest(toPage(e)));
       if (m && m.kind === "text") openEditor({ id: m.id, page, pt: (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
+      if (m && m.kind === "callout") openEditor({ id: m.id, page, pt: (m.pts && m.pts[1]) || (m.pts && m.pts[0]) || { x: 0, y: 0 }, text: m.text || "" });
       return;
     }
     if (!draft) return;
@@ -1064,6 +1086,17 @@ export default function DocReview({
         const q = pts[0]; if (!q) continue;
         const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
         if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
+      } else if (m.kind === "callout") {
+        const tip = pts[0], box = pts[1];
+        if (!tip) continue;
+        const anchor = box || tip;
+        const fs = (m.fontSize || 14) / Z;
+        const textW = Math.max(60 / Z, (m.text || "").length * fs * 0.58 + 8 / Z);
+        const textH = fs + 8 / Z;
+        // Hit the text box body
+        if (p.x >= anchor.x && p.x <= anchor.x + textW && p.y >= anchor.y && p.y <= anchor.y + textH) { d = 0; interior = true; }
+        // Hit the leader line (if both pts present)
+        else if (box) { d = Math.min(d, dist(p, tip), dist(p, box), segDist(tip, box)); }
       } else if (m.kind === "snapshot") {
         const a = pts[0], b = pts[1]; if (!a || !b) continue;
         const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
@@ -1198,7 +1231,7 @@ export default function DocReview({
   // Right-hand value for a row in the per-sheet markup list (B376): a measurement shows its
   // measured value; a text note shows its words; a redline shape has none. Every markup is listed
   // so it can always be found + deleted from the panel, independent of clicking it on the canvas.
-  const markRowValue = (m) => MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : m.kind === "text" ? ((m.text || "").trim() || "empty note") : "";
+  const markRowValue = (m) => MEASURE.has(m.kind) ? measureLabel(m, ftPerUnit) : (m.kind === "text" || m.kind === "callout") ? ((m.text || "").trim() || "empty note") : "";
   // Toolbar buttons: nowrap (so labels never break mid-word into uneven multi-line chips)
   // + tightened padding for density on the single header row (B305).
   const btn = (on) => ({ padding: "5px 9px", fontSize: 12, lineHeight: 1.1, whiteSpace: "nowrap", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, background: on ? PAL.accent : "var(--surface-raised)", color: on ? "var(--on-accent)" : PAL.ink });
@@ -1268,6 +1301,19 @@ export default function DocReview({
     const pts = draft.pts.map(S);
     const cur = cursor ? S(cursor) : null;
     const col = draft.kind === "calibrate" ? PAL.accent : MEASURE.has(draft.kind) ? "#0e7490" : "#b91c1c";
+
+    // Callout draft: first click pins the leader tip; show a rubber-band leader to the cursor
+    if (draft.kind === "callout") {
+      const tip = pts[0]; if (!tip) return null;
+      if (!cur) return <circle cx={tip.x} cy={tip.y} r={3.5} fill={col} />;
+      return (
+        <g>
+          <line x1={tip.x} y1={tip.y} x2={cur.x} y2={cur.y} stroke={col} strokeWidth={2} strokeDasharray="5 4" />
+          <circle cx={tip.x} cy={tip.y} r={3.5} fill={col} />
+          <rect x={cur.x} y={cur.y - 10} width={60} height={20} fill="none" stroke={col} strokeWidth={1.5} strokeDasharray="4 3" rx={2} />
+        </g>
+      );
+    }
 
     // Two-point drafts (line, distance, calibrate, rect, cloud, ellipse)
     if (TWOPOINT.has(draft.kind)) {
@@ -1576,6 +1622,7 @@ export default function DocReview({
                 let rx = -Infinity, ty = Infinity;
                 for (const q of sp) { rx = Math.max(rx, q.x); ty = Math.min(ty, q.y); }
                 if (m.kind === "text") { rx = sp[0].x + ((m.text || "").length * 6.5 + 6); ty = sp[0].y - 12; }
+                if (m.kind === "callout") { const bp = sp[1] || sp[0]; rx = bp.x + ((m.text || "").length * 6.5 + 6); ty = bp.y - 12; }
                 return (
                   <button title="Delete this markup (Del)" aria-label="Delete this markup"
                     onPointerDown={(e) => e.stopPropagation()}
