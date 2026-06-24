@@ -20,6 +20,7 @@ import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
@@ -217,43 +218,6 @@ function ringsAcres(rings) {
     const lon0 = rings[0][0][0], lat0 = rings[0][0][1];
     return rings.reduce((sum, r) => sum + shoelace(lngLatRingToFeet(r, lon0, lat0)), 0) / 43560;
   } catch (_) { return null; }
-}
-
-/* Geocode a free-text address/place to { lat, lon, label }, biased to the current
- * map area so a bare local street address ("19630 Crossbranch") lands near where
- * you're looking instead of in another state. Tries Esri's World geocoder FIRST —
- * it's far better at exact US street addresses and is the same keyless ArcGIS
- * family the app already uses for imagery + parcels — then falls back to OSM
- * Nominatim (also biased to a box around the map). Returns null if neither
- * resolves. The old code only used Nominatim with no biasing, which routinely
- * returned nothing for house-number addresses, so the map never moved (B232). */
-async function geocodeAddress(q, center) {
-  const near = center ? `&location=${center.lng},${center.lat}` : "";
-  // 1) Esri World Geocoding Service — single, non-stored lookup (keyless).
-  try {
-    const u = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
-      `?f=json&singleLine=${encodeURIComponent(q)}&maxLocations=1&outFields=Match_addr&countryCode=USA${near}`;
-    const r = await fetch(u);
-    if (r.ok) {
-      const j = await r.json();
-      const c = j && j.candidates && j.candidates[0];
-      if (c && c.location && isFinite(c.location.y) && isFinite(c.location.x)) {
-        return { lat: c.location.y, lon: c.location.x, label: c.address || q };
-      }
-    }
-  } catch (_) { /* fall through to Nominatim */ }
-  // 2) Nominatim fallback — bias to a ~0.6° viewbox around the map centre.
-  try {
-    let vb = "";
-    if (center) { const d = 0.6; vb = `&viewbox=${center.lng - d},${center.lat + d},${center.lng + d},${center.lat - d}&bounded=0`; }
-    const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}${vb}`;
-    const r = await fetch(u);
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.length) return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name || q };
-    }
-  } catch (_) { /* both failed */ }
-  return null;
 }
 
 // Curated "key appraisal attributes" matchers for the search info card (B233) —

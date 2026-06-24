@@ -38,6 +38,7 @@ import {
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -4170,6 +4171,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [identifyMode, setIdentifyMode] = useState(false);
   const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
+  const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
+  const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
   const parcelOutlineRef = useRef(null);       // the lit county parcel-outline layer (esri-leaflet) while identify mode is on
@@ -4268,6 +4271,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
       setIdentifyRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
+  };
+  // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
+  // hit into the site's feet frame, and run the SAME identify-and-add path (quickAddAt) the click
+  // flow uses. One pipeline (shared lib/geocode + the existing quickAddAt) — never a fork (B383).
+  const addByAddress = async () => {
+    const q = addrQuery.trim();
+    if (!q || addrBusy) return;
+    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring a parcel in from the map first." }); return; }
+    setAddParcelMenu(false);
+    setBasemapOn(true); setJurInfo(null);
+    setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
+    try {
+      const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
+      if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
+      const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
+      setAddrQuery("");
+      await quickAddAt(fp); // identifies the lot at the geocoded point and adds it (or reports no lot there)
+    } finally { setAddrBusy(false); }
   };
   // Light up the county parcel outlines on the basemap while identify mode is armed
   // (B383) — the SAME magenta featureLayer the map's Select-parcels tool uses. Turn the
@@ -7815,6 +7836,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
                     </div>
                   )}
+                  {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
+                      at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
+                  {origin ? (
+                    <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Type a street address — we'll find that lot in the county GIS and add it.</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          value={addrQuery}
+                          onChange={(e) => setAddrQuery(e.target.value)}
+                          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
+                          placeholder="123 Main St, Katy TX"
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "#e2dccb"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                        <button
+                          onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
+                          title="Find this address and add its parcel"
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "#fff", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          {addrBusy ? "…" : "Find"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add-by-address needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
                   {/* Draw a new boundary — always available (no GIS frame needed). */}
                   <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
                     <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
@@ -7891,7 +7939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 )}
                 {identifyRes && (
                   <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
-                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>Querying county GIS…</span>
+                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
                       : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>

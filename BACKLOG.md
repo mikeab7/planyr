@@ -372,9 +372,6 @@ Lets a team share a workspace: invite people by email (activates on signup/sign-
      load at zoom ≥14 like the map (a "zoom in" hint below). Deduped: the headline-UX completion of B383
      (same item family), NOT B233 / B231. lint 0 · 1201 tests · build green · lazy chunk intact. -->
 
-### B384 — "Add by address" inside the Parcel panel (geocode → identify) `[Site Planner]` (feature) — the deferred stretch of B383  *(filed 2026-06-22; minted **B384**)*
-`[ ]` **Open.** Follow-up to B383's ＋ Add parcel menu: a third add method that takes a typed address, geocodes it, and runs the identify pipeline on the resulting point — so a user can add a parcel by address without leaving the planner. **Why not in B383:** the geocode→camera→select logic (`goAddress`/`geocodeAddress`/`selectParcelAt`) currently lives in `MapFinder.jsx` and is wired to the map camera; surfacing it in the planner is a clean-extraction job (pull the geocode + point-identify into a shared helper both surfaces call), not a one-liner — doing it carelessly would fork the address pipeline, the opposite of B383's reuse rule. Scope: extract the geocode + point-query into `lib/` (or reuse `addIdentifiedParcel`'s `identifyAt` with a geocoded point), add an inline address input to the ＋ Add parcel menu, verify it lands the parcel in the site frame.
-
 <!-- 2026-06-22: cross-chat "NEW-1" — the Schedule Gantt/timeline toolbar was reduced to a single
      floating Columns button (timeline zoom, Contacts, Export PDF/print, Version History, the
      Grid/Split/Gantt view switcher, Automation, Settings, Review all gone). First filed B380,
