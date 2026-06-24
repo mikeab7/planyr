@@ -23,6 +23,28 @@ const SUPABASE_ANON = ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KE
 
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
 
+// The bare origin + anon key, for the rare path that must talk to PostgREST directly
+// instead of via the JS client — currently the keepalive cloud push on a forced reload
+// (B452), which needs a fetch({keepalive:true}) the supabase-js client doesn't expose.
+export const supabaseRest = () => ({ url: SUPABASE_URL, anon: SUPABASE_ANON });
+
+// Read the signed-in user's access token SYNCHRONOUSLY from supabase-js's persisted
+// session (localStorage key `sb-<ref>-auth-token`). The async supabase.auth.getSession()
+// can't finish during a page-unload flush, so the keepalive push (B452) reads the token
+// directly. Returns null when signed out / unconfigured / token absent. Never throws.
+export function currentAccessToken() {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !/^sb-.*-auth-token$/.test(k)) continue;
+      const v = JSON.parse(localStorage.getItem(k) || "null");
+      const tok = v && (v.access_token || (v.currentSession && v.currentSession.access_token));
+      if (tok) return tok;
+    }
+  } catch (_) { /* storage blocked / malformed — treat as no token */ }
+  return null;
+}
+
 // Diagnostic snapshot of what the build actually baked in (no full key dump).
 export const connectionInfo = () => ({
   configured: supabaseConfigured(),

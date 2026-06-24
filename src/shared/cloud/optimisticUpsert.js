@@ -81,6 +81,40 @@ export function interpretInsert(rows, error) {
 // match 0 rows and report a false conflict. Access scoping is enforced by RLS (own row OR a row
 // shared with a team you're in); `id` is the primary key, `version` is the concurrency guard. We
 // also DON'T send user_id in the UPDATE payload, so a teammate edit never re-stamps the creator.
+/* Fire-and-forget keepalive CAS write that SURVIVES a page navigation (B452).
+ *
+ * A forced reload (chunk-recovery reloadFresh / ErrorBoundary reload) aborts a normal
+ * in-flight async upsert; fetch({keepalive:true}) is allowed to outlive the unload. This
+ * is the same compare-and-swap as casUpsert — a conditional PATCH guarded by the version
+ * the client last synced — so a stale flush CANNOT clobber a newer cloud row (a wrong
+ * `expected` matches 0 rows and writes nothing). We can't read the response (the page is
+ * leaving), so it's intentionally guard-only, never an insert: a brand-new row (no tracked
+ * version) is left to the synchronous local save + the next-load boot merge.
+ *
+ * Returns true if a request was dispatched, false if it lacked what it needs (no fetch /
+ * url / anon / token / tracked version / row) — in which case the local save + boot merge
+ * remain the guarantee. Subject to the browser's ~64KB keepalive budget, so it may quietly
+ * no-op for a very large plan; that's acceptable for a last-ditch safety net. Never throws.
+ * Pure over an injected `fetchImpl`, so the URL/headers/guard shape is unit-tested. */
+export function keepaliveCasPush({ fetchImpl, url, anon, token, table, id, row, expected }) {
+  const f = fetchImpl || (typeof fetch !== "undefined" ? fetch : null);
+  if (!f || !url || !anon || !token || !table || id == null || expected == null || !row) return false;
+  try {
+    f(`${url}/rest/v1/${encodeURIComponent(table)}?id=eq.${encodeURIComponent(id)}&version=eq.${expected}`, {
+      method: "PATCH",
+      keepalive: true,
+      headers: {
+        apikey: anon,
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({ ...row, version: expected + 1 }),
+    }).catch(() => { /* fire-and-forget; the page is navigating away */ });
+    return true;
+  } catch { return false; }
+}
+
 export async function casUpsert(client, table, { uid, id, row, expected }) {
   try {
     if (expected == null) {

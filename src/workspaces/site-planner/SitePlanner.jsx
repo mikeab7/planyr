@@ -2,7 +2,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, listVersions, getVersion } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, keepaliveFlushSite, listVersions, getVersion } from "./lib/storage.js";
+import { registerFlush } from "../../app/flushRegistry.js";
+import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -1391,6 +1393,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Work is NOT lost: the edit is saved on this device, and reload union-merges it with the
   // other session's change (mergeSiteContent), then re-pushes the combined result.
   const [cloudConflict, setCloudConflict] = useState(false);
+  // B455/NEW-7 — single-active-editor lockout. When the same plan is open in another tab of
+  // THIS browser, only the lock-holder edits; a background tab goes read-only so it can't push
+  // a save over the active tab's newer cloud row (the structural fix for the stale-tab clobber).
+  // Degrades open where Web Locks is unavailable. cloudConflict + readOnly gate the cloud push.
+  const [readOnly, setReadOnly] = useState(false);
+  const conflictRef = useRef(false); conflictRef.current = cloudConflict;
+  const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
+  // Push to the cloud with an unconfirmed-save WATCHDOG (B455/NEW-7): if the write doesn't
+  // resolve within ~6s it's silently stalled, so we go LOUD (the B125 banner + Retry) rather
+  // than leave the badge spinning forever. Tied to the actual in-flight push (not the debounce),
+  // so sustained editing never false-triggers it. Reused by autosave + the manual Retry.
+  const cloudPushWithWatchdog = (id) => {
+    setSaveStatus("saving");
+    const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
+    return pushSiteToCloud(id)
+      .then((c) => { clearTimeout(wd); setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); })
+      .catch(() => { clearTimeout(wd); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+  };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
   const firstSave = useRef(true);
@@ -1412,16 +1432,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
-      if (isCloudActive()) pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
-      else { setSaveStatus("saved"); setCloudSaveFailed(false); }
+      // B455/NEW-7 — DON'T push over a conflict, or from a read-only background tab: the
+      // local save above still ran (work preserved), and reload union-merges it. Pushing
+      // here is exactly the stale-tab clobber we're preventing.
+      if (isCloudActive()) {
+        if (conflictRef.current || readOnlyRef.current) setSaveStatus("unsaved");
+        else cloudPushWithWatchdog(siteId);
+      } else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => clearTimeout(t);
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
-  // Manual "Retry now" for the loud cloud-save-failure banner (B125).
+  // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
+  // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
     if (!siteId) return;
-    setSaveStatus("saving");
-    pushSiteToCloud(siteId).then((c) => { setSaveStatus(c.ok ? "saved" : "unsaved"); setCloudConflict(!!c.conflict); setCloudSaveFailed(!c.ok && !c.conflict); }).catch(() => { setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+    cloudPushWithWatchdog(siteId);
   };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
@@ -1445,8 +1470,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
-    return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); };
+    // B452 — a FORCED reload (chunk-recovery / ErrorBoundary) flushes through this registry
+    // before navigating: the synchronous local save above PLUS a keepalive cloud push that
+    // survives the navigation, so the last edits don't sit only in memory + the local mirror.
+    const offFlush = registerFlush(() => { flush(); if (isCloudActive() && !conflictRef.current && !readOnlyRef.current) keepaliveFlushSite(siteId); });
+    return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); offFlush(); };
   }, [siteId]); // eslint-disable-line
+  // B455/NEW-7 — hold the single-active-editor lock for this plan. A second tab on the same
+  // plan can't get the lock → it goes read-only (setReadOnly) and its cloud pushes are gated
+  // above. createEditorLock degrades open where Web Locks is unavailable, so it never locks
+  // anyone out unexpectedly; the lock hands off automatically when the active tab closes.
+  const editorLockRef = useRef(null);
+  if (!editorLockRef.current) editorLockRef.current = createEditorLock();
+  useEffect(() => { editorLockRef.current.onChange((r) => setReadOnly(!!r.readOnly)); }, []);
+  useEffect(() => { editorLockRef.current.setProject(siteId || null); }, [siteId]);
+  useEffect(() => () => { editorLockRef.current && editorLockRef.current.stop(); }, []);
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
   // background storage event never yanks the canvas out from under an active edit.
   const busyRef = useRef(false);
@@ -5813,11 +5851,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
         onPlaceOnMap={() => setFilesOpen(false)}
       />
+      {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
+          until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
+          stay on this device and union-merge in on reload. */}
       {cloudConflict && (
-        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 660, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⟳ This project was <b>changed in another session</b>. Your edit is saved on this device — <b>reload</b> to merge in the latest before saving, so nothing gets overwritten.</span>
+        <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 680, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>⟳ This project was <b>changed in another session</b>. Saving is paused so nothing gets overwritten — your edits are safe on this device. <b>Reload</b> to merge in the latest, then saving resumes.</span>
           <button onClick={() => window.location.reload()} title="Reload to get the latest version, then your change merges in" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
-          <button onClick={() => setCloudConflict(false)} title="Dismiss (your edit stays on this device; reload later to reconcile)" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {/* B455/NEW-7 — single-active-editor read-only banner. This plan is being edited in
+          another tab of this browser; this tab is read-only so it can't save over the active
+          one. Closes automatically (lock handoff) when the other tab is closed. */}
+      {readOnly && !cloudConflict && (
+        <div role="status" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 680, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>👁 This plan is <b>being edited in another tab</b>. This tab is <b>read-only</b> for now so your work in the other tab can't be overwritten — switch to that tab, or close it to edit here.</span>
         </div>
       )}
       {cloudSaveFailed && (
@@ -8262,12 +8310,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {versionList.map((v) => {
                   const d = new Date(v.at);
-                  const when = isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                  // Seconds included so two backups in the same minute aren't indistinguishable (B456/NEW-8).
+                  const when = isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
                   return (
                     <div key={v.at} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: 9 }}>
                       <span style={{ fontSize: 12.5, color: PAL.ink }}>
                         <span style={{ fontWeight: 650 }}>{when}</span>
-                        <span style={{ color: PAL.muted }}> · {v.buildings} building{v.buildings === 1 ? "" : "s"}</span>
+                        {/* A real content summary (5 buildings · 1 road · …), never a misleading "0 buildings" (B456/NEW-8). */}
+                        <span style={{ color: PAL.muted }}> · {v.summary}</span>
                       </span>
                       <button style={{ ...chip, flex: "none" }} onClick={() => restoreVersion(v.at)} title="Replace the canvas with this saved version">Restore</button>
                     </div>

@@ -14,9 +14,11 @@
  * never written), and a `deps` array that changes whenever the review changes.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
-import { upsertReview, writeDraft, currentUid, cloudReady } from "./reviewStore.js";
+import { upsertReview, keepaliveFlushReview, writeDraft, currentUid, cloudReady } from "./reviewStore.js";
 import { planAutosave } from "./autosavePlan.js";
 import { onAuthChange } from "../../site-planner/lib/auth.js";
+import { registerFlush } from "../../../app/flushRegistry.js";
+import { createEditorLock } from "../../../shared/presence/editorLock.js";
 
 const DEBOUNCE_MS = 600;
 
@@ -35,8 +37,28 @@ export function docSaveState(status, signedIn, idle) {
   return "local"; // signed-out with content — saved on this device only
 }
 
+// Pure: may we push a cloud save right now (B455/NEW-7)? No while a conflict is unresolved
+// (the user must reload to merge the other session's change first — retrying just re-
+// conflicts), and no from a read-only background tab (it would clobber the active tab's
+// newer copy). The local mirror is unaffected — only the CLOUD push is gated. Unit-tested.
+export function canCloudSave(status, readOnly) {
+  return status !== "conflict" && !readOnly;
+}
+
 export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = true }) {
-  const [status, setStatus] = useState("local"); // local | saving | saved | unsaved
+  const [status, setStatus] = useState("local"); // local | saving | saved | unsaved | conflict
+  const statusRef = useRef(status); statusRef.current = status;
+  // B455/NEW-7 — single-active-editor lockout, mirrored from the Site Planner. A second tab
+  // on the SAME review goes read-only so it can't push over the active tab's newer copy.
+  const [readOnly, setReadOnly] = useState(false);
+  const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
+  const lockRef = useRef(null);
+  const lockIdRef = useRef(null);
+  useEffect(() => {
+    lockRef.current = createEditorLock();
+    lockRef.current.onChange((r) => setReadOnly(!!r.readOnly));
+    return () => { if (lockRef.current) lockRef.current.stop(); };
+  }, []);
 
   const snapRef = useRef(buildSnapshot); snapRef.current = buildSnapshot;
   const emptyRef = useRef(isEmpty); emptyRef.current = isEmpty;
@@ -68,7 +90,11 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
   const flushLocal = useCallback(() => {
     if (!enabledRef.current || emptyRef.current()) return null;
     const snap = snapRef.current();
-    if (snap) writeDraft(uidRef.current, snap);
+    if (snap) {
+      writeDraft(uidRef.current, snap);
+      // Keep the editor lock pointed at the review currently being edited (B455/NEW-7).
+      if (snap.id !== lockIdRef.current) { lockIdRef.current = snap.id; if (lockRef.current) lockRef.current.setProject(snap.id || null); }
+    }
     return snap;
   }, []);
 
@@ -80,11 +106,19 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
 
   const writeNow = useCallback(async () => {
     if (!enabledRef.current || emptyRef.current()) return;
-    const snap = flushLocal();
+    const snap = flushLocal();           // local mirror always runs (the guaranteed safety net)
     if (!snap) return;
     if (!readyRef.current) { setStatus("local"); return; }
+    // B455/NEW-7 — don't push over a conflict (must reload to merge first), or from a read-only
+    // background tab (would clobber the active tab's newer copy). The local mirror above ran.
+    if (!canCloudSave(statusRef.current, readOnlyRef.current)) { setStatus(statusRef.current === "conflict" ? "conflict" : "unsaved"); return; }
     setStatus("saving");
+    // Unconfirmed-save watchdog (B455/NEW-7): a stalled write goes red (loud) instead of
+    // spinning forever. Tied to the in-flight write, so it can't false-fire during editing.
+    let settled = false;
+    const wd = setTimeout(() => { if (!settled) setStatus("unsaved"); }, 6000);
     const { ok, conflict } = await upsertReview({ ...snap, updatedAt: Date.now() });
+    settled = true; clearTimeout(wd);
     if (ok) dirtyRef.current = false; // cloud has the latest; a later edit re-flags dirty (B44)
     // A conflict (B314) — this review was changed in another session — is its own state, not a
     // plain "unsaved": retrying won't help, the user must reload to merge in the latest first.
@@ -106,6 +140,9 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     if (plan.markDirty) dirtyRef.current = true;
     if (plan.mirror) flushLocal();            // local mirror is immediate
     if (!plan.scheduleSave) return;
+    // B455/NEW-7 — a conflict pauses cloud autosave until reload; a read-only background tab
+    // never pushes. The local mirror above already ran, so nothing is lost.
+    if (!canCloudSave(statusRef.current, readOnlyRef.current)) return;
     if (readyRef.current) setStatus("saving");
     const t = setTimeout(writeNow, DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -123,8 +160,15 @@ export function useReviewPersistence({ buildSnapshot, isEmpty, deps, enabled = t
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
-    return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); flush(); };
+    // B452 — a FORCED reload (chunk-recovery / ErrorBoundary) flushes through this registry
+    // before navigating: the synchronous local mirror PLUS a keepalive cloud push that
+    // survives the navigation, so the last edits aren't stranded in memory + the mirror.
+    const offFlush = registerFlush(() => {
+      const snap = flushLocal();
+      if (snap && readyRef.current && dirtyRef.current && canCloudSave(statusRef.current, readOnlyRef.current)) keepaliveFlushReview({ ...snap, updatedAt: Date.now() });
+    });
+    return () => { window.removeEventListener("beforeunload", flush); document.removeEventListener("visibilitychange", onVis); offFlush(); flush(); };
   }, [flushLocal]);
 
-  return { status, setStatus, saveNow: writeNow, suspendSave };
+  return { status, setStatus, saveNow: writeNow, suspendSave, readOnly };
 }

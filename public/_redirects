@@ -1,0 +1,21 @@
+# Cloudflare Pages routing rules — copied verbatim from public/ to dist/_redirects.
+# Format: https://developers.cloudflare.com/pages/configuration/redirects/
+#
+# Planyr uses HASH routing (#/…, see src/app/route.js), so every real navigation lands
+# on a file that already exists: "/" → index.html, "/sequence/" → its own index.html.
+# The app route lives in the URL hash, which is never sent to the server. That means we
+# deliberately add NO `/* /index.html 200` single-page-app catch-all here.
+#
+# WHY NO CATCH-ALL (B449): a `/* /index.html 200` rule answers EVERY unmatched path with
+# index.html — including a content-hashed build chunk that a newer deploy has deleted
+# (e.g. /assets/SitePlannerApp-<deadhash>.js). The browser then receives HTML (200,
+# text/html) where it expected JavaScript and dies with the confusing
+#   "Expected a JavaScript module script … but the server responded with a MIME type of
+#    text/html"  /  "Failed to fetch dynamically imported module"
+# crash, instead of a clean 404 the chunk-reload guard can recover from.
+#
+# Cloudflare serves real static files BEFORE consulting these rules, so the rule below
+# only ever matches a /assets/ path with NO file behind it (a stale/deleted chunk) — it
+# can never 404 a live asset. Force those to a real 404 so a stale-chunk load fails
+# cleanly and src/app/chunkReload.js + ErrorBoundary can recover or surface honestly.
+/assets/*  /404.html  404

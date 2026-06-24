@@ -4,8 +4,8 @@
  * querying. No migration of legacy localStorage sites — cloud is the home for a
  * logged-in user's data; localStorage remains the store when logged out.
  */
-import { supabase } from "./supabase.js";
-import { casUpsert, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
+import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -76,6 +76,27 @@ export async function cloudUpsert(uid, model) {
     return { ok: !error, error: error ? error.message : null };
   }
   return { ok: false, error: r.error || "cloud write failed" };
+}
+
+// Keepalive cloud push for a forced reload (B452): a guarded, fire-and-forget write that
+// survives the navigation, so the last edits don't sit only in memory + the local mirror
+// until the next load. Version-guarded (keepaliveCasPush) so it can never clobber a newer
+// row; skips a brand-new site (no synced version) — the local save + boot merge cover that.
+// Returns true if a request was dispatched.
+export function keepaliveCloudPush(uid, model) {
+  if (!supabase || !uid || !model || !model.id) return false;
+  const { url, anon } = supabaseRest();
+  const token = currentAccessToken();
+  const m = slimForCloud(model);
+  // No user_id in the PATCH body — a guarded UPDATE must not re-stamp the row's creator.
+  const row = {
+    id: m.id,
+    group_id: m.groupId || null, site: m.site || null, name: m.name || null, county: m.county || null,
+    team_id: m.teamId || null,
+    updated_at: new Date(m.updatedAt || Date.now()).toISOString(),
+    data: m,
+  };
+  return keepaliveCasPush({ url, anon, token, table: "sites", id: m.id, row, expected: siteVersions[m.id] });
 }
 
 // Pure: turn a DELETE … .select() result into a typed outcome (exported for unit tests).

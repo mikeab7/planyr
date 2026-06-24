@@ -18,10 +18,10 @@
  * restore the last edit even if the debounced cloud write hadn't landed yet —
  * exactly the local-cache + cloud-mirror shape the Site Planner uses.
  */
-import { supabase } from "../../site-planner/lib/supabase.js";
+import { supabase, supabaseRest, currentAccessToken } from "../../site-planner/lib/supabase.js";
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
-import { casUpsert, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -145,6 +145,28 @@ export async function upsertReview(record) {
   if (r.conflict) return { ok: false, conflict: true }; // another session advanced this review — caller prompts a reload
   if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, data); return { ok: true }; }
   return { ok: false, error: r.error || "save failed" };
+}
+
+// Synchronous best-effort cloud push for a forced reload (B452) — the doc-review mirror of
+// keepaliveFlushSite. A guarded keepalive write that survives the navigation; version-guarded
+// so it can never clobber a newer copy, and uses the always-present core columns (the library
+// index columns may be un-migrated) — the `data` jsonb carries every field regardless. The
+// synchronous localStorage mirror remains the guarantee; this just shortens the lost window.
+// Returns true if a request was dispatched.
+export function keepaliveFlushReview(record) {
+  if (!supabase || !record || !record.id) return false;
+  const { url, anon } = supabaseRest();
+  const token = currentAccessToken();
+  const data = { ...record, schemaVersion: REVIEW_SCHEMA };
+  const row = {
+    id: record.id,
+    title: record.title || null, kind: record.kind || null,
+    project: record.project || null, discipline: record.discipline || null,
+    team_id: record.teamId || null,
+    updated_at: new Date(record.updatedAt || Date.now()).toISOString(),
+    data,
+  };
+  return keepaliveCasPush({ url, anon, token, table: "doc_reviews", id: record.id, row, expected: reviewVersions[record.id] });
 }
 
 // The full serialized review (the `data` jsonb), or null. RLS scopes to the user.
