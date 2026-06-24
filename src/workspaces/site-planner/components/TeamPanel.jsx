@@ -51,7 +51,15 @@ export default function TeamPanel({ user, setMsg }) {
     setBusy(true); say();
     const r = await createTeam(name);
     setBusy(false);
-    if (!r.ok) { say("err", r.error || "Couldn't create the team."); return; }
+    if (!r.ok) {
+      const raw = r.error || "";
+      const msg = /row.level security|violates|rls/i.test(raw)
+        ? "Couldn't create the team — please try again or contact support."
+        : raw || "Couldn't create the team.";
+      console.error("[teams] create failed:", raw);
+      say("err", msg);
+      return;
+    }
     setName(""); say("ok", "Team created.");
     await loadTeams(); setSel(r.teamId);
   };
@@ -65,9 +73,9 @@ export default function TeamPanel({ user, setMsg }) {
     loadRoster(sel);
   };
 
-  const doSetRole = async (uid, nextRole) => { setBusy(true); await setRole(sel, uid, nextRole); setBusy(false); loadRoster(sel); };
-  const doRemove = async (uid) => { setBusy(true); await removeMember(sel, uid); setBusy(false); loadRoster(sel); };
-  const doCancel = async (id) => { setBusy(true); await cancelInvite(id); setBusy(false); loadRoster(sel); };
+  const doSetRole = async (uid, nextRole) => { setBusy(true); const r = await setRole(sel, uid, nextRole); setBusy(false); if (!r.ok) say("err", r.error || "Couldn't change the role."); else loadRoster(sel); };
+  const doRemove = async (uid) => { setBusy(true); const r = await removeMember(sel, uid); setBusy(false); if (!r.ok) say("err", r.error || "Couldn't remove the member."); else loadRoster(sel); };
+  const doCancel = async (id) => { setBusy(true); const r = await cancelInvite(id); setBusy(false); if (!r.ok) say("err", r.error || "Couldn't cancel the invite."); else loadRoster(sel); };
   const doLeave = async () => { setBusy(true); const r = await leaveTeam(sel); setBusy(false); if (r.ok) { say("ok", "You left the team."); await loadTeams(); } else say("err", r.error || "Couldn't leave."); };
 
   if (teams === null) return <div style={{ fontSize: 12.5, color: PAL.muted, padding: "8px 0" }}>Loading teams…</div>;
