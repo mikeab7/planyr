@@ -20,7 +20,6 @@ import { readProp } from "./propertySchema.js";
 /* ---- defaults ---- */
 const DEF_STROKE   = "#c2410c";   // annotation default (matches matrix PROPERTY_COLUMNS)
 const MEAS_STROKE  = "#0e7490";   // measure overlay stroke (teal)
-const SEL_STROKE   = "var(--accent)";
 
 // dimension has measureOutput="length" and shows an inline length label (like distance but with ticks)
 const MEASURE_KINDS = new Set(["distance", "polylength", "perimeter", "area", "count", "dimension"]);
@@ -67,12 +66,15 @@ function MeasLabel({ x, y, text }) {
   );
 }
 
-/* Reads the display properties for a markup — selected highlight overrides the stroke
- * but keeps stored width/style. Falls back to PROPERTY_COLUMNS defaults via readProp. */
+/* Reads the display properties for a markup. A selected markup is shown in its REAL color
+ * (WYSIWYG — so a color change in the panel takes effect instantly); selection is indicated by
+ * the host's vertex grips + delete affordance, not by recoloring the stroke. A faint width bump
+ * is the only selected cue (also covers freehand, which has no grips). Falls back to
+ * PROPERTY_COLUMNS defaults via readProp. */
 function props(m, selected) {
   const isMeas = MEASURE_KINDS.has(m.kind);
   return {
-    stroke:      selected ? SEL_STROKE   : (readProp(m, "stroke")  || (isMeas ? MEAS_STROKE : DEF_STROKE)),
+    stroke:      readProp(m, "stroke") || (isMeas ? MEAS_STROKE : DEF_STROKE),
     strokeWidth: (readProp(m, "strokeWidth") || 2) + (selected ? 1 : 0),
     dashArray:   ({ dashed: "8 5", dotted: "2 4" })[readProp(m, "strokeStyle")] || undefined,
     opacity:     readProp(m, "opacity") ?? 1,
