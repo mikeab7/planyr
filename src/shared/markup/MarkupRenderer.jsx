@@ -1,4 +1,4 @@
-/* Shared markup SVG RENDERER (B426 / NEW-2).
+/* Shared markup SVG RENDERER (B426 / NEW-2; B428 text/arrow completions).
  *
  * Renders ONE markup as pure SVG elements, given the host's viewport scale.
  * Pure presentational — no state, no event handlers. The host SVG must have the
@@ -13,7 +13,7 @@
  *
  * Import path: "../../shared/markup/MarkupRenderer.jsx" from either workspace.
  */
-import { measureLabel, measureValue } from "./measure.js";
+import { measureLabel } from "./measure.js";
 import { midOfPath, centroidOf } from "./geometry.js";
 import { readProp } from "./propertySchema.js";
 
@@ -35,6 +35,26 @@ function cloudPath(x, y, w, h, r = 9) {
   };
   return `M ${x} ${y}` + edge(x, y, x + w, y) + edge(x + w, y, x + w, y + h) +
          edge(x + w, y + h, x, y + h) + edge(x, y + h, x, y) + " Z";
+}
+
+/* Inline arrowhead triangle (no SVG defs/markers needed). `from` is the penultimate
+ * point, `to` is the tip. Size is in screen pixels (not scaled — arrowhead stays constant). */
+function Arrowhead({ from, to, color, size = 9 }) {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null;
+  const ux = dx / len, uy = dy / len;
+  const hw = size * 0.45;
+  const px = -uy * hw, py = ux * hw;
+  return (
+    <polygon
+      points={[
+        `${to.x},${to.y}`,
+        `${to.x - ux * size + px},${to.y - uy * size + py}`,
+        `${to.x - ux * size - px},${to.y - uy * size - py}`,
+      ].join(" ")}
+      fill={color} stroke="none" />
+  );
 }
 
 function MeasLabel({ x, y, text }) {
@@ -149,15 +169,33 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
   if (m.kind === "line") {
     const a = pts[0], b = pts[1]; if (!a) return null;
     const end = b || a;
-    return <line x1={a.x} y1={a.y} x2={end.x} y2={end.y}
-      stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} opacity={p.opacity} />;
+    const aStart = readProp(m, "arrowStart");
+    const aEnd   = readProp(m, "arrowEnd");
+    return (
+      <g opacity={p.opacity}>
+        <line x1={a.x} y1={a.y} x2={end.x} y2={end.y}
+          stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+        {aEnd   && b && <Arrowhead from={a} to={b} color={p.stroke} />}
+        {aStart && b && <Arrowhead from={b} to={a} color={p.stroke} />}
+      </g>
+    );
   }
 
   if (m.kind === "polyline") {
     if (pts.length < 2) return null;
     const dd = pts.map((q) => `${q.x},${q.y}`).join(" ");
-    return <polyline points={dd} fill="none"
-      stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} opacity={p.opacity} />;
+    const aStart = readProp(m, "arrowStart");
+    const aEnd   = readProp(m, "arrowEnd");
+    const first = pts[0], second = pts[1];
+    const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+    return (
+      <g opacity={p.opacity}>
+        <polyline points={dd} fill="none"
+          stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+        {aEnd   && prev && <Arrowhead from={prev} to={last}  color={p.stroke} />}
+        {aStart && second && <Arrowhead from={second} to={first} color={p.stroke} />}
+      </g>
+    );
   }
 
   if (m.kind === "polygon") {
@@ -171,17 +209,24 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
   if (m.kind === "text") {
     const q = pts[0]; if (!q) return null;
     const text = m.text || "";
-    const fs  = Math.max(6, (readProp(m, "fontSize") || 14) * scale / 16);
-    const fc  = readProp(m, "fontColor") || "#1a1a1a";
-    const fw  = readProp(m, "bold") ? 700 : 400;
-    const bgFill = p.fill !== "none" ? p.fill : "#fff";
+    const fs        = Math.max(6, (readProp(m, "fontSize") || 14) * scale / 16);
+    const fc        = readProp(m, "fontColor") || "#1a1a1a";
+    const fw        = readProp(m, "bold")      ? 700 : 400;
+    const fi        = readProp(m, "italic")    ? "italic" : "normal";
+    const fd        = readProp(m, "underline") ? "underline" : "none";
+    const alignVal  = readProp(m, "align")     || "left";
+    const anchor    = alignVal === "center" ? "middle" : alignVal === "right" ? "end" : "start";
+    const bgFill    = p.fill !== "none" ? p.fill : "#fff";
     const bgOpacity = p.fillOpacity > 0 ? p.fillOpacity : 1;
-    const textW = (text.length * fs * 0.58) + 8;
+    const textW     = (text.length * fs * 0.58) + 8;
+    const boxX      = anchor === "middle" ? q.x - textW / 2 : anchor === "end" ? q.x - textW + 2 : q.x - 2;
     return (
       <g opacity={p.opacity}>
-        <rect x={q.x - 2} y={q.y - fs - 2} width={textW} height={fs + 6}
+        <rect x={boxX} y={q.y - fs - 2} width={textW} height={fs + 6}
           fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1} rx={3} />
-        <text x={q.x + 2} y={q.y} fontSize={fs} fill={fc} fontWeight={fw} pointerEvents="none">{text}</text>
+        <text x={q.x + (anchor === "start" ? 2 : 0)} y={q.y}
+          fontSize={fs} fill={fc} fontWeight={fw} fontStyle={fi} textDecoration={fd}
+          textAnchor={anchor} pointerEvents="none">{text}</text>
       </g>
     );
   }

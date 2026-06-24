@@ -53,10 +53,11 @@ const TOOLS = [
   { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note to edit; Delete removes it." },
   { id: "pan",       label: "Pan",       hint: "Drag to move around the sheet. (Hold Space in any tool to pan; wheel or Ctrl+scroll to zoom toward the cursor.)" },
   { id: "calibrate", label: "Calibrate", hint: "Click two points a known distance apart, then enter the real length." },
-  { id: "distance",  label: "Distance",  hint: "Click two points to measure a distance." },
-  { id: "perimeter", label: "Perimeter", hint: "Click points around a shape; double-click / Enter to close." },
-  { id: "area",      label: "Area",      hint: "Click points around a region; double-click / Enter to close." },
-  { id: "count",     label: "Count",     hint: "Click each item (stall, dock door); Enter / double-click to finish." },
+  { id: "distance",   label: "Distance",  hint: "Click two points to measure a distance." },
+  { id: "polylength", label: "Length",    hint: "Click a path; double-click / Enter to finish. Measures the total run." },
+  { id: "perimeter",  label: "Perimeter", hint: "Click points around a shape; double-click / Enter to close." },
+  { id: "area",       label: "Area",      hint: "Click points around a region; double-click / Enter to close." },
+  { id: "count",      label: "Count",     hint: "Click each item (stall, dock door); Enter / double-click to finish." },
   { id: "line",      label: "Line",      hint: "Drag end-to-end. Arrow toggles in Properties." },
   { id: "polyline",  label: "Polyline",  hint: "Click points; double-click / Enter to finish an open path." },
   { id: "polygon",   label: "Polygon",   hint: "Click points; click the first dot or double-click to close." },
@@ -65,11 +66,11 @@ const TOOLS = [
   { id: "cloud",     label: "Cloud",     hint: "Revision cloud: drag a box; the scalloped outline traces it." },
   { id: "text",      label: "Text",      hint: "Click to place a text note." },
 ];
-const MEASURE = new Set(["distance", "perimeter", "area", "count"]);
+const MEASURE = new Set(["distance", "polylength", "perimeter", "area", "count"]);
 // Tools with two-point (click-click or drag) draw mode
 const TWOPOINT = new Set(["distance", "calibrate", "rect", "cloud", "line", "ellipse"]);
 // Tools with multi-point (click-click-dbl) draw mode
-const MULTIPOINT = new Set(["area", "perimeter", "count", "polygon", "polyline"]);
+const MULTIPOINT = new Set(["area", "perimeter", "count", "polygon", "polyline", "polylength"]);
 
 // Rail icons for the Markup tools + zoom controls (B330). 16×16, stroke = currentColor so a
 // button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
@@ -78,6 +79,7 @@ const MK_ICONS = {
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
   calibrate: <><path d="M2.3 10.5 L10.5 2.3 L13.7 5.5 L5.5 13.7 Z" /><path d="M4.9 7.7 l1.5 1.5 M7.3 5.3 l1.5 1.5" /></>,
   distance: <><path d="M3 12.6 L13 3.4" /><circle cx="3" cy="12.6" r="1.5" fill="currentColor" stroke="none" /><circle cx="13" cy="3.4" r="1.5" fill="currentColor" stroke="none" /></>,
+  polylength: <><path d="M3 13 L6.5 8 L10.5 11 L13.5 5" /><circle cx="3" cy="13" r="1.3" fill="currentColor" stroke="none" /><circle cx="13.5" cy="5" r="1.3" fill="currentColor" stroke="none" /></>,
   perimeter: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" strokeDasharray="2.4 1.6" />,
   area: <path d="M8 2.6 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" fill="currentColor" fillOpacity="0.3" />,
   count: <><circle cx="4.7" cy="5.2" r="1.7" fill="currentColor" stroke="none" /><circle cx="10.9" cy="6.1" r="1.7" fill="currentColor" stroke="none" /><circle cx="6.7" cy="11.2" r="1.7" fill="currentColor" stroke="none" /></>,
