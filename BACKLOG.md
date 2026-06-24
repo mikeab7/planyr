@@ -22,6 +22,22 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-24: owner-reported trio (screenshot + voice) on the parcel-MERGE banner — "NEW-1/NEW-2/NEW-3".
+     Highest real B# across both files was B441, so minted **B442 / B443 / B444**. Per STANDING RULE #1
+     all three were filed AND fixed + headless-verified (`ui-audit/verify-merge-banner.mjs`, 6/6) +
+     shipped the SAME session on branch `claude/gallant-euler-sk8kwd` — full [x] blocks live in BACKLOG-DONE.md.
+       • B442 (NEW-1) — merge/easement banner buttons were unclickable (canvas grab-cursor + pan bled
+         through) because the banner had no z-index over the SVG (`zIndex:1`). Fix = `zIndex:6` + a
+         defensive stopPropagation; same guard applied to the sibling easement banner. Deduped: NOT B271
+         (interrupted-gesture recovery), NOT B441 (MapFinder identify latency).
+       • B443 (NEW-2) — Shift-click multi-select "needed several tries": B420 makes a parcel interior
+         click-through, so a body Shift-click fell to `onBgDown` and started a marquee instead of a
+         merge-toggle. Fix = onBgDown ray-casts the parcel under a shift-press and toggles it; the
+         vertex-insert capture handler yields to a merge-pick on a neighbor.
+       • B444 (NEW-3) — the "4 parces selected" garble was a SYMPTOM of B442 (canvas painting over the
+         behind-z-index banner), not a flex bug; resolved by B442's z-index, hardened with nowrap + a span.
+     lint 0 errors · 1421 tests · build green. -->
+
 <!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" (status-marker palette + the precision-pin
      map marker + drop the saved-row element count). Highest B# was B422 when filed, but a concurrent
      `main` (#321, the Shared markup engine batch) took B423–B432 while this was in flight, so
