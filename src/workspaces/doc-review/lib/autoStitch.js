@@ -32,6 +32,25 @@ export function detectedEndpointsFor(drawingArea, side) {
   }
 }
 
+// Resolve a match-line target to a sheet within the group. A vector set names a real sheet code
+// ("SEE SHEET C-3") which we match by sheet NUMBER. A SCANNED set's OCR-recovered labels (B413)
+// instead reference by SEQUENCE — "MATCH LINE ~ SHEET 2" means the 2nd sheet of the set, whose own
+// code might be "C-3" — so when a bare-numeric target names no sheet code, fall back to the Nth
+// sheet in group/page order. The sequence fallback fires ONLY for a purely-numeric target that
+// matches no code AND is a valid 1-based index, so it can never hijack a real code like "C-2"
+// (normNum("C-2") = "C2" ≠ "2"); code lookup always wins first.
+function resolveTarget(rawTarget, byNum, sheets) {
+  const key = normNum(rawTarget);
+  if (!key) return null;
+  const byCode = byNum.get(key);
+  if (byCode) return byCode;
+  if (/^\d+$/.test(key)) {
+    const n = parseInt(key, 10);
+    if (n >= 1 && n <= sheets.length) return sheets[n - 1];
+  }
+  return null;
+}
+
 /* Build the undirected seam graph. A sheet that names another via a match-line target makes an
  * edge; if the named sheet doesn't independently name a side, we assume the opposite side.
  * Returns Map(id → [{ other, side, otherSide }]). */
@@ -49,7 +68,7 @@ export function buildAdjacency(sheets) {
   for (const a of sheets) {
     for (const ml of a.matchLines || []) {
       if (!ml.target) continue;
-      const b = byNum.get(normNum(ml.target));
+      const b = resolveTarget(ml.target, byNum, sheets);
       if (!b || b.id === a.id) continue;
       // For two sheets that share a seam, the geometry is fixed: B sits on the OPPOSITE edge of
       // the side A points to (A says "B is on my right" ⇒ B's left edge meets A's right edge).
@@ -61,7 +80,7 @@ export function buildAdjacency(sheets) {
       // they fit together — a sign one label was mis-read. Stitching anyway would overlap/mirror
       // the sheet; per "a wrong stitch is worse than an unstitched one," drop the edge and let the
       // sheet fall to the manual-Align safety net instead of auto-guessing.
-      const back = (b.matchLines || []).find((m) => normNum(m.target) === normNum(a.sheetNumber));
+      const back = (b.matchLines || []).find((m) => resolveTarget(m.target, byNum, sheets) === a);
       if (back && back.side && back.side !== geomSide) continue;
       add(a, b, ml.side, geomSide);
       add(b, a, geomSide, ml.side);

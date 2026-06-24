@@ -21,6 +21,7 @@ import { STATUSES, STATUS_META, statusOf } from "./lib/siteModel.js";
 import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { geocodeAddress } from "./lib/geocode.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
 import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
 import { listMyTeams, currentIdentity } from "./lib/teams.js";
@@ -222,48 +223,11 @@ function ringsAcres(rings) {
   } catch (_) { return null; }
 }
 
-/* Geocode a free-text address/place to { lat, lon, label }, biased to the current
- * map area so a bare local street address ("19630 Crossbranch") lands near where
- * you're looking instead of in another state. Tries Esri's World geocoder FIRST —
- * it's far better at exact US street addresses and is the same keyless ArcGIS
- * family the app already uses for imagery + parcels — then falls back to OSM
- * Nominatim (also biased to a box around the map). Returns null if neither
- * resolves. The old code only used Nominatim with no biasing, which routinely
- * returned nothing for house-number addresses, so the map never moved (B232). */
-async function geocodeAddress(q, center) {
-  const near = center ? `&location=${center.lng},${center.lat}` : "";
-  // 1) Esri World Geocoding Service — single, non-stored lookup (keyless).
-  try {
-    const u = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
-      `?f=json&singleLine=${encodeURIComponent(q)}&maxLocations=1&outFields=Match_addr&countryCode=USA${near}`;
-    const r = await fetch(u);
-    if (r.ok) {
-      const j = await r.json();
-      const c = j && j.candidates && j.candidates[0];
-      if (c && c.location && isFinite(c.location.y) && isFinite(c.location.x)) {
-        return { lat: c.location.y, lon: c.location.x, label: c.address || q };
-      }
-    }
-  } catch (_) { /* fall through to Nominatim */ }
-  // 2) Nominatim fallback — bias to a ~0.6° viewbox around the map centre.
-  try {
-    let vb = "";
-    if (center) { const d = 0.6; vb = `&viewbox=${center.lng - d},${center.lat + d},${center.lng + d},${center.lat - d}&bounded=0`; }
-    const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}${vb}`;
-    const r = await fetch(u);
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.length) return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name || q };
-    }
-  } catch (_) { /* both failed */ }
-  return null;
-}
-
 // Curated "key appraisal attributes" matchers for the search info card (B233) —
 // the headline facts beyond address/account that help identify a tract at a glance.
 const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
-export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSharedChange, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
@@ -274,6 +238,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   useEffect(() => { onOpenSiteRef.current = onOpenSite; }, [onOpenSite]);
   const onSetStatusRef = useRef(onSetStatus);
   useEffect(() => { onSetStatusRef.current = onSetStatus; }, [onSetStatus]);
+  const onRenameSiteRef = useRef(onRenameSite);
+  useEffect(() => { onRenameSiteRef.current = onRenameSite; }, [onRenameSite]);
   const hilitesRef = useRef({});     // key -> L.polygon for each selected parcel
   const layerUrlsRef = useRef({});   // county -> resolved queryable layer URL (auto-routing)
   const imageryRef = useRef(null);
@@ -309,6 +275,8 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return { complete: true, dead: true };
   });
   const [statusMenu, setStatusMenu] = useState(null); // {site, x, y} — right-click status picker
+  const [renaming, setRenaming] = useState(null);     // {id, name} — the site row being inline-renamed (B158)
+  const skipRenameBlurRef = useRef(false);            // Esc cancels without the trailing blur committing
   const [parcelInfo, setParcelInfo] = useState(null); // {status:'found'|'none'|'unavailable', label, addr, acct, acres, attrs, county, key, backup} — address-search result (B233)
   const [backupNotice, setBackupNotice] = useState(null); // {county} — set when a click was answered by the statewide backup because the county's own server was down (B244)
   // overlays / setOverlays are app-shared (lifted to App) so toggles reflect on both pages.
@@ -321,6 +289,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const toggleGroup = (st) => setGroupCollapsed((c) => { const n = { ...c, [st]: !c[st] }; try { localStorage.setItem("planarfit:sitesGroups:v1", JSON.stringify(n)); } catch (_) {} return n; });
   // Apply a status to a site (group), then refresh — closes the right-click menu.
   const setStatus = (siteId, st) => { onSetStatusRef.current && onSetStatusRef.current(siteId, st); setStatusMenu(null); };
+  // Commit an inline site rename (B158): trim, ignore an empty/unchanged name, persist via the
+  // group-rename flow threaded from SitePlannerApp. Cancel just clears the editor.
+  const commitRename = (id, raw, original) => {
+    const name = (raw || "").trim();
+    setRenaming(null);
+    if (name && name !== original) onRenameSiteRef.current && onRenameSiteRef.current(id, name);
+  };
+  const cancelRename = () => { skipRenameBlurRef.current = true; setRenaming(null); };
 
   // ── Team sharing (share a project with a team) ──────────────────────────────
   const [myUid, setMyUid] = useState(null);
@@ -954,7 +930,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     const st = statusOf(s); const t = statusToken(st);
     const showActions = hoverRow === s.id || isActive;
     return (
-      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / delete)" : "Open site (right-click for status / delete)"}
+      <div key={s.id} title={s.origin ? "Open site (double-click to fly here · right-click for status / rename / delete)" : "Open site (right-click for status / rename / delete)"}
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
@@ -973,7 +949,19 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
+          {renaming && renaming.id === s.id ? (
+            <input autoFocus defaultValue={renaming.name}
+              onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitRename(s.id, e.target.value, renaming.name);
+                else if (e.key === "Escape") cancelRename();
+              }}
+              onBlur={(e) => { if (skipRenameBlurRef.current) { skipRenameBlurRef.current = false; return; } commitRename(s.id, e.target.value, renaming.name); }}
+              style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, fontWeight: 600, color: PAL.ink, fontFamily: "inherit", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, outline: "none", background: "var(--surface-raised)" }} />
+          ) : (
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
+          )}
           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
         </div>
         {/* (B168) single-click ✕ delete removed — delete lives in the right-click menu;
@@ -1349,6 +1337,15 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
               );
             })()}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+            <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setRenaming({ id: s.id, name: s.site || s.name || "" }); }}
+              title="Rename this project"
+              style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                background: "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+              <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", lineHeight: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10z" /></svg>
+              </span>
+              <span style={{ flex: 1 }}>Rename…</span>
+            </button>
             <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setConfirmDel(s); }}
               title="Delete this project and all its plans"
               style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",

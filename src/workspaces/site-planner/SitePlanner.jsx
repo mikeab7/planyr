@@ -38,6 +38,7 @@ import {
 } from "./lib/arcgis.js";
 import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
 import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
@@ -2027,10 +2028,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
     if (tool === "text") { placeText(fp); return; }       // one click → text box
-    if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // drag-draw markup
+    if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // line/rect/ellipse: drag OR click-click
       const a = snapPt(fp);
+      // Click-to-start mode is armed (a prior single click without a drag): this press is the
+      // SECOND click → commit from the anchor to here (Bluebeam-style two-click placement).
+      if (mkRect && mkRect.pending && mkRect.kind === tool) {
+        const b = (tool === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : a;
+        commitMkRect(tool, mkRect.a, b);
+        setMkRect(null);
+        return;
+      }
+      // Otherwise begin a press-drag (also the first click of a click-click — resolved on pointer-up).
       drag.current = { mode: "mkDraw", kind: tool, a };
-      setMkRect({ kind: tool, a, b: a, shift: e.shiftKey });
+      setMkRect({ kind: tool, a, b: a, shift: e.shiftKey, pending: false });
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -2264,6 +2274,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     setMkPoly(null); setTool("select");
+  };
+  // Commit a two-point markup (line / rect / ellipse) from anchor `a` to `b`. Shared by BOTH
+  // placement gestures (Bluebeam parity): a press-drag-release, AND a click-to-start →
+  // click-to-finish. Returns true if a shape was actually committed (big enough).
+  const commitMkRect = (kind, a, b) => {
+    let mk = null;
+    const minFt = 3 / view.ppf; // a deliberate ~3px span, zoom-independent (B30)
+    if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
+    else {
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle };
+    }
+    if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
+    return !!mk;
   };
   const translateMarkup = (m, dx, dy) => {
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
@@ -2601,6 +2625,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const B = snapPt(fp), A = roadStart, curb = +settings.roadCurb || CURB;
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
+    // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
+    // and second click (no button held, so there's no drag.current to drive it).
+    if (mkRect && mkRect.pending) {
+      const b = (mkRect.kind === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : snapPt(fp);
+      setMkRect((m) => (m && m.pending ? { ...m, b } : m));
+    }
     const d = drag.current;
     if (!d) {
       // B226: when nothing is selected, preview the hovered building's feature-add
@@ -2713,6 +2743,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let rot = d.rot0 + (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) - d.a0) * 180 / Math.PI;
       rot = snapOn ? Math.round(rot / 15) * 15 : Math.round(rot);
       setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, rot: ((rot % 360) + 360) % 360 } : m));
+      return;
+    }
+    if (d.mode === "roadEnd") { // drag a road end: pivot on the fixed end → new angle + length, width kept
+      const F = d.fixed;
+      const P = e.shiftKey ? snapPt(snap45(F, fp)) : snapPt(fp); // Shift = 45° lock
+      const ang = Math.atan2(P.y - F.y, P.x - F.x);
+      setEls((arr) => arr.map((x) => {
+        if (x.id !== d.id) return x;
+        const len = Math.max(Math.hypot(P.x - F.x, P.y - F.y), x.h); // keep length ≥ cross (B61)
+        const ex = F.x + Math.cos(ang) * len, ey = F.y + Math.sin(ang) * len;
+        return { ...x, cx: (F.x + ex) / 2, cy: (F.y + ey) / 2, w: Math.round(len), rot: ang * 180 / Math.PI };
+      }));
       return;
     }
     if (d.mode === "callout") {
@@ -2871,13 +2913,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
-      let mk = null;
       const minFt = 3 / view.ppf; // a deliberate ~3px drag, regardless of zoom — feet-based mins silently dropped real markups when zoomed in (B30)
-      if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
-      else { const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-        if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle }; }
-      if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
-      setMkRect(null); drag.current = null; setPanning(false);
+      // A real press-drag (the pointer moved): commit now. A press WITHOUT a drag (a click): arm
+      // click-to-finish — the shape now follows the cursor and the next click commits it (Bluebeam
+      // supports both gestures; this is what made the line tool feel inconsistent with the polyline).
+      if (dist(a, b) >= minFt) { commitMkRect(kind, a, b); setMkRect(null); }
+      else { setMkRect({ kind, a, b: a, pending: true }); }
+      drag.current = null; setPanning(false);
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
@@ -4049,6 +4091,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "rotate", id, pivot, startPtr, start };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // A road is a two-point object (a fixed-width centerline). Its two ENDS, in feet — the midpoints
+  // of the short edges (the long axis is el.w, rotated by el.rot).
+  const roadEndsF = (el) => {
+    const h = rot2(el.w / 2, 0, el.rot);
+    return [{ x: el.cx - h.x, y: el.cy - h.y }, { x: el.cx + h.x, y: el.cy + h.y }];
+  };
+  // Drag one end of a road to a new point: the OTHER end stays put, so a single drag changes both
+  // the angle AND the length (like dragging a line endpoint) — no separate rotate needed (owner
+  // request). Width (el.h / travelW) is preserved.
+  const startRoadEnd = (e, id, which) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
+    const ends = roadEndsF(el);
+    const fixed = which === "a" ? ends[1] : ends[0]; // pivot on the opposite end
+    pushHistory();
+    drag.current = { mode: "roadEnd", id, fixed };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
   // place (without ungrouping, B261). Otherwise open its actions menu (dock/sidewalk/…).
   const onElDouble = (e, id) => {
@@ -4202,6 +4264,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [identifyMode, setIdentifyMode] = useState(false);
   const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
+  const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
+  const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const idLayerRef = useRef(null);
   const identifyTok = useRef(0);
   const parcelOutlineRef = useRef(null);       // the lit county parcel-outline layer (esri-leaflet) while identify mode is on
@@ -4300,6 +4364,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
       setIdentifyRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
     } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
+  };
+  // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
+  // hit into the site's feet frame, and run the SAME identify-and-add path (quickAddAt) the click
+  // flow uses. One pipeline (shared lib/geocode + the existing quickAddAt) — never a fork (B383).
+  const addByAddress = async () => {
+    const q = addrQuery.trim();
+    if (!q || addrBusy) return;
+    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring a parcel in from the map first." }); return; }
+    setAddParcelMenu(false);
+    setBasemapOn(true); setJurInfo(null);
+    setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
+    try {
+      const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
+      if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
+      const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
+      setAddrQuery("");
+      await quickAddAt(fp); // identifies the lot at the geocoded point and adds it (or reports no lot there)
+    } finally { setAddrBusy(false); }
   };
   // Light up the county parcel outlines on the basemap while identify mode is armed
   // (B383) — the SAME magenta featureLayer the map's Select-parcels tool uses. Turn the
@@ -5102,6 +5184,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sel?.kind !== "el") return null;
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
+    const cpx0 = f2p({ x: el.cx, y: el.cy });
+    // A ROAD is a two-point object: show a draggable END grip at each end (drag → change the road's
+    // angle AND length in one move, pivoting on the other end — owner request) plus the two WIDTH
+    // grips. No corners / rotate handle — the endpoints make a separate rotate unnecessary.
+    if (el.type === "road") {
+      const [A, B] = roadEndsF(el).map(f2p);
+      return (
+        <g>
+          {[[0, 1], [0, -1]].map(([nx, ny], i) => { // width grips on the long edges
+            const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
+            const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
+            return <rect key={`rw${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
+              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              style={{ cursor: resizeCursor(m.x - cpx0.x, m.y - cpx0.y) }}
+              onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />;
+          })}
+          <circle cx={A.x} cy={A.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "a")}>
+            <title>Drag to move this end (changes angle + length)</title>
+          </circle>
+          <circle cx={B.x} cy={B.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "b")}>
+            <title>Drag to move this end (changes angle + length)</title>
+          </circle>
+        </g>
+      );
+    }
     const corners = elCorners(el).map(f2p);
     const signs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const topMid = f2p({ x: el.cx + rot2(0, -el.h / 2, el.rot).x, y: el.cy + rot2(0, -el.h / 2, el.rot).y });
@@ -6234,12 +6343,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {mkRect && (() => {
                 const a = f2p(mkRect.a), b = f2p(mkRect.b), sw = mkStyle.weight;
                 const dp = { stroke: PAL.accent, strokeWidth: sw, strokeDasharray: "5 4", fill: "none", pointerEvents: "none" };
-                if (mkRect.kind === "mline") return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} />;
+                // In click-to-finish mode show the anchored start point so it's clear a click landed.
+                const anchor = mkRect.pending ? <circle cx={a.x} cy={a.y} r={3.5} fill={PAL.accent} pointerEvents="none" /> : null;
+                if (mkRect.kind === "mline") return <>{anchor}<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} /></>;
                 const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-                return mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
+                const shape = mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
+                return <>{anchor}{shape}</>;
               })()}
               {mkPoly && (() => {
-                const live = cursor ? (mkPoly.pts.length ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                // The rubber-band segment must match how the NEXT click commits (line ~2016): free
+                // angle by default, 45°-constrained ONLY while Shift is held. Snapping the preview to
+                // 45° unconditionally made the polyline look like it "only goes at specific angles"
+                // even though the placed point was free — fixed by gating on shiftHeld.
+                const live = cursor ? ((shiftHeld && mkPoly.pts.length) ? snapPt(snap45(mkPoly.pts[mkPoly.pts.length - 1], cursor)) : snapPt(cursor)) : null;
                 const all = live ? [...mkPoly.pts, live] : mkPoly.pts;
                 const s = all.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                 const lp = live ? f2p(live) : null, total = pathLen(all);
@@ -6251,7 +6367,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* easement draft (centerline / boundary click-draw) — live ghost strip */}
               {tool === "easement" && easeMode !== "parceledge" && easeDraft && (() => {
-                const live = cursor ? (easeDraft.pts.length ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
+                // Same fix as the markup polyline above — preview is free-angle unless Shift is held,
+                // matching how the easement click commits (line ~2026).
+                const live = cursor ? ((shiftHeld && easeDraft.pts.length) ? snapPt(snap45(easeDraft.pts[easeDraft.pts.length - 1], cursor)) : snapPt(cursor)) : null;
                 const all = live ? [...easeDraft.pts, live] : easeDraft.pts;
                 const tcol = easementType(easeType).color;
                 const ghost = easeMode === "centerline" && all.length >= 2 ? bufferPolyline(all, easeWidth)
@@ -7351,6 +7469,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const closed = selMarkup.kind === "rect" || selMarkup.kind === "ellipse" || selMarkup.kind === "polygon";
             return (
+              <div data-testid="property-panel">
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
                 <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} onChange={(e) => setSelMarkup({ stroke: e.target.value })} style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
@@ -7382,6 +7501,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>Delete</button>
                 </div>
               </Section>
+              </div>
             );
           })()}
           {/* selected callout — text styling */}
@@ -7390,6 +7510,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const swatch = { width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" };
             const seg = (on) => ({ ...chip, flex: 1, padding: "6px 0", textAlign: "center", background: on ? PAL.accent : "#fff", color: on ? "#fff" : PAL.ink, borderColor: on ? PAL.accent : "#ddd6c5" });
             return (
+              <div data-testid="property-panel">
               <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
                 <button style={{ ...chip, width: "100%", marginBottom: 9 }} onClick={() => beginEditCallout(selCallout.id)}>✎ Edit text</button>
                 {/* row 1: size · text color · fill */}
@@ -7416,6 +7537,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...chip, color: PAL.danger }} onClick={deleteSel}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
               </Section>
+              </div>
             );
           })()}
           {/* selected element */}
@@ -7873,6 +7995,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Identify needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
                     </div>
                   )}
+                  {/* Add by address (B384) — geocode a typed address, then identify-and-add the lot
+                      at that point through the SAME quickAddAt path. Needs a georeferenced frame. */}
+                  {origin ? (
+                    <div style={{ padding: "7px 10px" }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Type a street address — we'll find that lot in the county GIS and add it.</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          value={addrQuery}
+                          onChange={(e) => setAddrQuery(e.target.value)}
+                          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") addByAddress(); }}
+                          placeholder="123 Main St, Katy TX"
+                          style={{ flex: 1, minWidth: 0, padding: "6px 8px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.panelLine || "#e2dccb"}`, borderRadius: 6, outline: "none", color: PAL.ink, background: "var(--surface-raised)" }} />
+                        <button
+                          onClick={addByAddress} disabled={addrBusy || !addrQuery.trim()}
+                          title="Find this address and add its parcel"
+                          style={{ flex: "none", padding: "6px 11px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${PAL.accent}`, background: addrBusy || !addrQuery.trim() ? "var(--surface-raised)" : PAL.accent, color: addrBusy || !addrQuery.trim() ? PAL.muted : "#fff", cursor: addrBusy || !addrQuery.trim() ? "default" : "pointer" }}>
+                          {addrBusy ? "…" : "Find"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "7px 10px", opacity: 0.7 }}>
+                      <div style={{ fontWeight: 650, color: PAL.ink }}>📍 Add by address</div>
+                      <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Add-by-address needs a georeferenced plan. Bring a parcel in from the map to enable it.</div>
+                    </div>
+                  )}
                   {/* Draw a new boundary — always available (no GIS frame needed). */}
                   <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
                     <div style={{ fontWeight: 650 }}>✏️ Draw a new boundary</div>
@@ -7949,7 +8098,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 )}
                 {identifyRes && (
                   <div style={{ marginTop: identifyMode ? 8 : 0, background: "#faf6ee", border: "1px solid #ece4d4", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
-                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>Querying county GIS…</span>
+                    {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
                       : identifyRes.already ? <span style={{ color: PAL.muted }}>{identifyRes.addr || "That lot"} is already in this plan — selected it.</span>

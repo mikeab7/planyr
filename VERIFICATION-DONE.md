@@ -4,6 +4,11 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V132 — B158: right-click a site row to Rename / Delete (no inline ✕) ✅ VERIFIED (headless, logged-out — no signed-in gap)
+- **Added + checked** 2026-06-24 · **Cadence** once (feature acceptance) · headless **Chromium**, built app, `vite preview` :4173 — `ui-audit/verify-b158-rename.mjs`, **7/7**.
+- **Result ✅:** the YOUR SITES rows have **no inline ✕**; right-click opens the portalled menu carrying **Rename + Delete** (below the status quick-pick); **Rename** opens a pre-filled **inline input** (autofocus); **Enter** persists the new name to the row AND the localStorage store; **Esc** cancels (name unchanged); no uncaught page errors. Fixed a wiring gap (`onRenameSite` reached the planner but not MapFinder).
+- **No signed-in gap:** rename rides the same `renameSiteGroup` → `saveSite` path logged-out and logged-in (the cloud push is the already-proven `pushSiteToCloud`), and the logged-out path is fully exercised here — so nothing is owed signed-in. lint 0 · 1435 tests · build green.
+
 
 ### V131 — Site-plan overlay drag-and-drop affordance + panel dropzone (B445) ✅ (self-verified headless — fully done, logged-out planner, nothing pending)
 - **Harness:** `ui-audit/verify-overlay-dnd.mjs` (chromium, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Seeds one this-device site, opens the Overlay rail panel, then dispatches native `dragover`/`dragleave`/`drop` events carrying a real `DataTransfer` (with a 1×1 PNG `File`) at both the panel dropzone and the canvas wrapper. A true OS file-drag can't be fired headless, so the events are synthetic — but they exercise the exact React handlers a real drag hits (`e.dataTransfer.types` = `["Files"]`, `e.dataTransfer.files`, and `e.defaultPrevented` to prove `preventDefault` ran).

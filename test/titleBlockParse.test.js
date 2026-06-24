@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyDiscipline, findDates, latestDate, parseSheetNumber, parseRevision, readTitleBlockText } from "../src/shared/files/titleBlockParse.js";
+import { classifyDiscipline, findDates, latestDate, issueDate, parseSheetNumber, parseRevision, readTitleBlockText } from "../src/shared/files/titleBlockParse.js";
 
 describe("classifyDiscipline — plain-code doc-type detection, no LLM (B312)", () => {
   it("recognizes an ALTA survey by name (owner example)", () => {
@@ -59,6 +59,41 @@ describe("findDates / latestDate — 'search all dates and date itself' (owner)"
     // the latest-date pick. Same separator is required, so the dimension is ignored, the real date kept.
     expect(findDates("DEGREES AT 5-29/32")).toEqual([]);
     expect(latestDate("ISSUED 10/08/2024  BEVEL 5-29/32")).toBe("2024-10-08");
+  });
+});
+
+describe("issueDate — prefer the issue/revision date over a base date (B411b)", () => {
+  it("picks the date next to ISSUED/REV, not a newer unrelated date elsewhere", () => {
+    // The reported failure shape: a base "DATE" and an issue date, plus a stray later date in the
+    // notes. Pure-recency grabbed the stray; issueDate stays on the labeled revision date.
+    const text = "DATE: 04/07/2023   GENERAL NOTES SEE 11/30/2026 SPEC   REV 2  ISSUED FOR PERMIT  09/17/2025";
+    expect(latestDate(text)).toBe("2026-11-30");  // pure recency = wrong
+    expect(issueDate(text)).toBe("2025-09-17");   // labeled issue/rev date = right
+  });
+  it("prefers the issue date over an older bare base date", () => {
+    const text = "DATE 04/07/2023   ISSUED FOR CONSTRUCTION 09/17/2025";
+    expect(issueDate(text)).toBe("2025-09-17");
+  });
+  it("among several revision dates, the latest labeled one wins", () => {
+    const text = "REV 1 06/01/2024  REV 2 09/17/2025  REV 3 IFC 11/02/2025";
+    expect(issueDate(text)).toBe("2025-11-02");
+  });
+  it("falls back to the newest date when nothing is labeled (no regression)", () => {
+    const text = "DRAWN 01/15/2024  CHECKED 2024-03-02  plotted June 30, 2025";
+    expect(issueDate(text)).toBe(latestDate(text));
+    expect(issueDate(text)).toBe("2025-06-30");
+  });
+  it("a bare DATE label does NOT promote its date (that's the base date we avoid)", () => {
+    // Only a real issue/rev keyword promotes; "DATE" alone must not, or we'd re-pick the base date.
+    const text = "DATE 09/17/2025   PRINTED 11/30/2026";
+    expect(issueDate(text)).toBe("2026-11-30"); // no issue/rev label → newest wins
+  });
+  it("returns '' with no readable date", () => {
+    expect(issueDate("no dates, just REV nonsense")).toBe("");
+  });
+  it("readTitleBlockText.date now uses the issue/rev date", () => {
+    const text = "PROJECT  DATE: 04/07/2023   REV 2 ISSUED FOR PERMIT 09/17/2025  SHEET C-2";
+    expect(readTitleBlockText(text).date).toBe("2025-09-17");
   });
 });
 
