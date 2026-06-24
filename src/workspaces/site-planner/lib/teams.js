@@ -24,13 +24,32 @@ export async function currentIdentity() {
   } catch (_) { return { uid: null, email: null }; }
 }
 
+// A Supabase error meaning the RPC isn't deployed yet (DB not migrated to create_team).
+const isMissingFunction = (error) => {
+  const msg = String((error && error.message) || "").toLowerCase();
+  return (error && error.code === "PGRST202") || msg.includes("could not find the function") ||
+    (msg.includes("create_team") && msg.includes("does not exist"));
+};
+
 // Create a team and make the creator its first admin. Returns { ok, teamId, error }.
+// Preferred path: the create_team RPC (SECURITY DEFINER) does both inserts atomically and
+// bypasses RLS — required because a plain INSERT ... .select() on public.teams is blocked by
+// the "members read team" SELECT policy (the creator isn't a member yet). Falls back to the
+// legacy two-step insert only when the RPC isn't deployed, so an un-migrated DB still degrades.
 export async function createTeam(name) {
   if (!supabase) return { ok: false, error: "Cloud not configured." };
   const { uid } = await currentIdentity();
   if (!uid) return { ok: false, error: "Sign in to create a team." };
   const clean = (name == null ? "" : String(name)).trim();
   if (!clean) return { ok: false, error: "Give the team a name." };
+
+  const rpc = await supabase.rpc("create_team", { p_name: clean });
+  if (!rpc.error && rpc.data) return { ok: true, teamId: rpc.data };
+  if (rpc.error && !isMissingFunction(rpc.error)) {
+    return { ok: false, error: rpc.error.message || "Couldn't create the team." };
+  }
+
+  // Legacy fallback (RPC not yet in this DB): two-step insert.
   const { data, error } = await supabase.from("teams").insert({ name: clean, created_by: uid }).select("id").single();
   if (error || !data) return { ok: false, error: (error && error.message) || "Couldn't create the team." };
   const teamId = data.id;
