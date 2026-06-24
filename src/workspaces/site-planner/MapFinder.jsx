@@ -10,6 +10,7 @@ import {
   resolveLayerUrl,
   identifyParcelEager,
   outerRingsLngLat,
+  geoJsonToEsriFeature,
   lngLatRingToFeet,
   feetToLatLng,
   aerialPlacement,
@@ -666,6 +667,57 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     return `${county}:${oid}`;
   };
 
+  /* B441 — find the parcel outline already DRAWN under a click, with zero network.
+     The county display layers (makeParcelLayer) are esri-leaflet vector featureLayers,
+     so the lot under the cursor is already client-side geometry; we hit-test it to
+     paint an instant optimistic highlight before the (variable, often multi-second)
+     county identify even starts. Prefers a real county's outline over the statewide
+     TxGIO backup (mirrors identify's source priority), then the tighter parcel when
+     several overlap. Returns a hit shaped like an identify hit ({county, feature}) or
+     null when nothing's loaded under the point (→ fall back to await-identify). */
+  const pointInLngLatRing = (lng, lat, ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  const optimisticHitAt = (latlng) => {
+    let best = null; // { county, feature(esri), acres, real }
+    for (const [county, fl] of Object.entries(displaysRef.current)) {
+      if (!fl || typeof fl.eachFeature !== "function") continue;
+      const real = !STATEWIDE_KEYS.includes(county);
+      fl.eachFeature((layer) => {
+        // Cheap bbox reject first — only convert/test the 1-3 features that could contain it.
+        try { if (layer.getBounds && !layer.getBounds().contains(latlng)) return; } catch (_) { return; }
+        const esri = geoJsonToEsriFeature(layer.feature);
+        if (!esri) return;
+        const parts = outerRingsLngLat(esri); // [[lon,lat]…] per outer tract (multipart-safe)
+        if (!parts.length || !parts.some((p) => pointInLngLatRing(latlng.lng, latlng.lat, p))) return;
+        const acres = ringsAcres(parts) ?? Infinity;
+        if (!best || (!best.real && real) || (best.real === real && acres < best.acres))
+          best = { county, feature: esri, acres, real };
+      });
+    }
+    return best ? { county: best.county, feature: best.feature } : null;
+  };
+
+  // A click inside an ALREADY-highlighted parcel → its key (for an instant local
+  // toggle-off, no network). Tests the live highlight geometry via selectedRef.
+  const selectedHitAt = (latlng) => {
+    const rec = selectedRef.current.find((s) => (s.latlngsList || []).some((ll) => pointInPoly(latlng.lat, latlng.lng, ll)));
+    return rec ? rec.key : null;
+  };
+
+  // Undo an optimistic highlight + its provisional selection record (used when the
+  // authoritative identify disagrees, finds nothing, or errors). Visibly legible: the
+  // flashed highlight vanishes rather than stranding a mismatched outline (B441 rule).
+  const rollbackHit = (key) => {
+    if (hilitesRef.current[key]) { try { mapRef.current.removeLayer(hilitesRef.current[key]); } catch (_) {} delete hilitesRef.current[key]; }
+    setSelected((s) => s.filter((x) => x.key !== key));
+  };
+
   /* Highlight + add ONE identified parcel to the selection (idempotent — never
      toggles off). The SINGLE parcel-pipeline both click-to-select and
      address-search-select use, so they behave identically (B233). `at` is the
@@ -722,7 +774,33 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     // down), or a primary whose breaker is open, are skipped this click.
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     if (!candidates.length) { setErr("Parcel services are still loading — give it a second and click again."); return; }
-    setBusy(true); setErr(""); setBackupNotice(null);
+    setErr(""); setBackupNotice(null);
+
+    // Instant local toggle-off: a click inside an already-highlighted parcel deselects
+    // it with zero network round-trip — we already have its geometry (B441).
+    const selKey = selectedHitAt(latlng);
+    if (selKey && hilitesRef.current[selKey]) {
+      mapRef.current.removeLayer(hilitesRef.current[selKey]);
+      delete hilitesRef.current[selKey];
+      setSelected((s) => s.filter((x) => x.key !== selKey));
+      return;
+    }
+
+    // B441 — optimistic highlight: paint the outline under the cursor NOW, from the
+    // already-loaded county display layer, before the (variable, often multi-second)
+    // county identify even starts. That network wait was the lag the owner felt; the
+    // authoritative identify below confirms it (filling real attrs) or corrects it.
+    let optKey = null;
+    const opt = optimisticHitAt(latlng);
+    if (opt) {
+      const parts = outerRingsLngLat(opt.feature);
+      if (parts.length) {
+        const k = parcelKey(opt.county, parts, opt.feature.attributes || {});
+        if (!hilitesRef.current[k]) { addParcelHit(opt, latlng); optKey = k; }
+      }
+    }
+
+    setBusy(true);
     try {
       // Eager identify: take the first source that returns a lot (≈2-3s via the
       // statewide layer) instead of stalling on a hung county server's full 8s timeout.
@@ -731,6 +809,11 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       const res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)),
       });
+      // The authoritative answer always wins: drop the optimistic outline and rebuild
+      // from the identified geometry (full-res + real account/address attrs), so the
+      // IMPORTED parcel is never the simplified display outline. No flash — the
+      // remove+re-add happen in this one synchronous turn (B441).
+      if (optKey) rollbackHit(optKey);
       if (!res.hits.length) {
         // "Couldn't reach any parcel server" reads differently from "reached one, but
         // there's no parcel at this exact point" (B245).
@@ -756,6 +839,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         if (viaBackup) setBackupNotice({ county: backupCountyLabel(hit.feature.attributes || {}) });
       }
     } catch (e) {
+      if (optKey) rollbackHit(optKey);
       setErr(humanizeError(e));
     } finally {
       setBusy(false);
