@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V127 — B432: matrix ↔ schema conformance + per-tool rail assertions ✅ build + lint + 1390 tests green; ⏳ Section B (rail arm) needs sign-in + PDF open
+- **What changed.** `e2e/markup-tools.spec.js` Section A: pure-JS conformance loop — for every doc-workspace tool (non-mode), asserts `schemaForMarkup({kind})` keys match the matrix row's `properties[]`; runs without auth. Section B: per-tool `getByTestId("tool-<id>")` + `aria-pressed="true"` assertions; gracefully skips when tool rail not visible. Loop driver documented in CLAUDE.md before KEY DECISIONS.
+- **Why ⏳.** Section A runs logged-out (pure JS, no browser state needed) — already effectively verified by the conformance tests in vitest. Section B needs the B280 seeded account + a PDF open so the tool rail renders.
+- **Steps / Expect.** (A) `npx playwright test e2e/markup-tools.spec.js` → Section A passes (all tool rows whose schema keys match the matrix); Section B skips with "B280 fixture…" message (expected without the seeded account). (B) Once B280 is provisioned: sign-in + open a review with a PDF → re-run → Section B arms each tool button and verifies `aria-pressed="true"`. Cadence: once per engine change. Last checked: Section A only (logged-out).
+
 ### V126 — B431: vertex drag handles, Shift snap, ParcelDrawing inline calibrate ✅ build + lint + 1390 tests green; ⏳ signed-in round-trip
 - **What changed.** (1) DocReview: vertex grip circles render at each vertex of the selected markup; dragging a grip moves only that vertex. (2) Holding Shift while drawing with a two-point tool (Line, Rect, Ellipse, Dimension, Calibrate) snaps the endpoint to the nearest 45°. (3) ParcelDrawing's `window.prompt("Length of this line in feet…")` replaced with an inline `numEdit` box positioned at the scale-line's midpoint.
 - **Why ⏳.** Vertex handles + Shift snap need a loaded PDF; ParcelDrawing calibrate needs a parcel with an attached drawing — both require sign-in.

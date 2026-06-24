@@ -337,6 +337,35 @@ server/                   # placeholder README only — NOT built or deployed; b
     uncalibrated, never silently mis-scaled off a stray body scale string. Real plan sheets unchanged.
   - +10 unit tests (1153 green); headless **V104** (`ui-audit/verify-notes-sheet-labels.mjs`, 9/9).
 
+### Shared markup engine + Bluebeam-parity refinement loop (B423 umbrella — B424…B432)
+All tools in both workspaces (and the Stitcher) flow through one shared engine in
+`src/shared/markup/`. The matrix, the tests, and the loop driver are:
+
+- **`src/shared/markup/tools.matrix.js`** is the machine-checkable spec. One row per tool;
+  `TOOL_MATRIX`, `PROPERTY_COLUMNS`, `propsForTool`, `toolsForWorkspace`. **⛔ This file is NEVER
+  edited to make a failing test green** — a red test means the CODE is behind the spec; fix the
+  code.
+- **`e2e/markup-tools.spec.js`** is the loop's verifier (B278 harness, NEW-9). Two sections:
+  - **Section A — matrix ↔ propertySchema conformance (no auth, no browser):** for every tool row
+    in `toolsForWorkspace("doc")`, asserts `schemaForMarkup({kind: id}).map(s=>s.key).sort()`
+    equals `propsForTool(id).sort()`. If the property panel drifts from the matrix, CI catches it
+    here before any browser is opened.
+  - **Section B — per-tool rail arm (auth-gated):** clicks each tool's `data-testid="tool-<id>"`
+    button and asserts `aria-pressed="true"`. Gracefully skips when the tool rail is not visible
+    (no PDF open / B280 fixture not yet seeded). Grows one `test.describe` per matrix row as
+    draw+panel assertions are wired in.
+- **Loop driver (each session):** run `npm run lint && npm test && npm run build` + scan
+  `e2e/markup-tools.spec.js` for red or skipped-pending rows. A red row in Section A = property
+  schema drifted → update `propertySchema.js` to match the matrix. A red row in Section B = the
+  rail button or its `data-testid` is missing → fix the ToolRail registration. Add a new draw
+  or panel assertion when a tool gains verified behavior (B432 rule: assertions land with the code,
+  never before and never after).
+- **Sub-items shipped (B424–B431):** pure modules (`geometry.js`, `markupModel.js`, `measure.js`,
+  `hitTest.js`, `propertySchema.js`), `MarkupRenderer.jsx`, `PropertyPanel.jsx`, host wiring,
+  DocReview parity tools (Line/Polyline/Polygon/Ellipse/Arc/Dimension/Pen/Highlight/Eraser/
+  Snapshot), property-set completion, Count in Site Planner, vtx-drag handles, Shift snap,
+  ParcelDrawing inline calibrate. B432 (NEW-9) closes the umbrella.
+
 ## KEY DECISIONS (must persist)
 - **Theming: light / dark / system + the text-hierarchy rule (owner rule, 2026-06-21).** The app
   has three themes — **Light / Dark / System** — driven by `data-theme` on `<html>` + CSS tokens

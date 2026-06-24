@@ -1,5 +1,14 @@
 ## ✅ Done
 
+### B432 — Per-tool matrix assertions + loop driver in CLAUDE.md `[Doc Review / Markup]` (task) — NEW-9, closes the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. V127.**
+- **`e2e/markup-tools.spec.js` upgraded** with two sections:
+  - **Section A — matrix ↔ propertySchema conformance (no auth, no browser).** For every tool row in `toolsForWorkspace("doc")` (except `drawMode:"mode"` rows), asserts `schemaForMarkup({kind:id}).map(s=>s.key).sort()` equals `propsForTool(id).sort()`. Runs in the same Playwright process via pure-JS imports; if propertySchema drifts from the matrix the loop flags it before any browser opens. Imports: `TOOL_MATRIX`, `propsForTool` from `tools.matrix.js`; `schemaForMarkup` from `propertySchema.js`.
+  - **Section B — per-tool rail arm (auth-gated, B280 account).** A `test.describe("per-tool rail arm")` block generates one test per doc-workspace non-mode tool row. Each test clicks `getByTestId("tool-<id>")` and asserts `aria-pressed="true"`. Gracefully skips (with a precise explanatory message) when the tool rail isn't visible (no PDF open / B280 fixture not seeded yet). The rail is already wired with the correct `data-testid` and `aria-pressed` attributes (ToolRail B330).
+  - The old "pending wiring" stub loop is replaced — the loop is now real (Section A fires immediately; Section B fires as soon as the B280 seeded account can open a PDF).
+- **Loop driver section added to CLAUDE.md** (before `## KEY DECISIONS`): documents the matrix rule (⛔ never edit to pass a test), how both sections work, what a red row means + how to fix it, and how to grow assertions as each tool ships.
+- **B423 umbrella is now complete** (B424–B432 all done). The engine is live, the spec is machine-checkable, and the loop is encoded.
+
 ### B431 — Unified interaction model + edit handles `[Doc Review / Markup + Site Planner]` (feature) — NEW-8, part of the B423 umbrella  *(2026-06-24)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in round-trip → V126.**
 - **ParcelDrawing `window.prompt` → inline `numEdit`** (the explicit plan blocker). `calibrateFrom` in `ParcelDrawing.jsx` now sets `calBox` state `{pts, px, sx, sy, val, err}` instead of calling `window.prompt`. A positioned inline div renders at the line's midpoint: `Length (ft)` label, input (Enter = commit, Esc = cancel), "Set" button, error message on invalid. `onDown` while calBox is open cancels it. Matches the DocReview inline calibrate (B304) in UX.

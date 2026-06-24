@@ -53,7 +53,7 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - `[x]` **B429 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
 - `[x]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 285836b). (see BACKLOG-DONE.md)
 - `[x]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
-- `[ ]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.**
+- `[x]` **B432 (NEW-9) — per-tool matrix assertions extending the B278 suite, landed as each tool row lands; encode the loop driver into CLAUDE.md.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
 - **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[ ]` **B280 (seeded test account) = OWNER action, seed file delivered** (`e2e/seed/`) — the one remaining gate before the auth-gated loop runs in CI.
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
