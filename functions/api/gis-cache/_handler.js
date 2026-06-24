@@ -14,6 +14,10 @@ import { parseUpstream, cacheKey, freshness } from "../../../src/shared/gis/gisP
 
 const ALLOWED_HOST_RE = /(^|\.)planyr\.io$|(^|\.)planyr\.pages\.dev$/i;
 
+// Some government ArcGIS hosts reject a request with no / a datacenter User-Agent. Send a
+// browser-like UA on every server-side upstream fetch so they serve us like a normal client.
+const UPSTREAM_HEADERS = { "user-agent": "Mozilla/5.0 (compatible; PlanyrGISCache/1.0; +https://planyr.io)" };
+
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 // Manual 302 (not Response.redirect) so the shape is identical across Node/Workers and testable.
@@ -55,10 +59,12 @@ export async function handleGisCache({
       try { out.folderId = await folderIdFor(); out.folderOk = true; }
       catch (e) { out.folderOk = false; out.folderErr = String((e && e.message) || e); }
     }
-    try {
-      const r = await fetchImpl(upstream.url, { headers: { "user-agent": "Mozilla/5.0 (Planyr GIS cache)" } });
-      out.upstreamStatus = r.status; out.upstreamOk = r.ok; out.upstreamType = r.headers.get("content-type");
-    } catch (e) { out.upstreamErr = String((e && e.message) || e); }
+    // With a browser UA (what the fix uses):
+    try { const r = await fetchImpl(upstream.url, { headers: UPSTREAM_HEADERS }); out.uaStatus = r.status; out.uaOk = r.ok; out.uaType = r.headers.get("content-type"); }
+    catch (e) { out.uaErr = String((e && e.message) || e); }
+    // With Cloudflare's default UA (the old behavior):
+    try { const r = await fetchImpl(upstream.url); out.defStatus = r.status; out.defOk = r.ok; }
+    catch (e) { out.defErr = String((e && e.message) || e); }
     return json(out);
   }
 
@@ -83,7 +89,7 @@ export async function handleGisCache({
 
     // Cache miss → fetch the agency once, serve it now, store it in the background.
     let res;
-    try { res = await fetchImpl(upstream.url); } catch (_) { return redirectTo(upstream.url); }
+    try { res = await fetchImpl(upstream.url, { headers: UPSTREAM_HEADERS }); } catch (_) { return redirectTo(upstream.url); }
     if (!res || !res.ok) return redirectTo(upstream.url);
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
@@ -105,7 +111,7 @@ export async function store(client, folderId, name, bytes, contentType) {
 
 export async function refresh(client, folderId, upstreamUrl, name, oldId, fetchImpl = fetch) {
   try {
-    const res = await fetchImpl(upstreamUrl);
+    const res = await fetchImpl(upstreamUrl, { headers: UPSTREAM_HEADERS });
     if (!res || !res.ok) return; // agency still down → keep the copy we already serve
     const buf = new Uint8Array(await res.arrayBuffer());
     const ct = res.headers.get("content-type") || "image/png";
