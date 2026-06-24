@@ -46,6 +46,22 @@ export async function handleGisCache({
   if (!upstream) return json({ error: "Unsupported GIS request." }, 400);
   const key = `${cacheKey(upstream.url)}.bin`;
 
+  // TEMP read-only diagnostic (B439 bring-up): why does prod fail open? Reports whether the Drive
+  // client wired, whether the cache folder resolves, and what the agency returns to a server-side
+  // fetch — without serving/redirecting. Remove once the cache is confirmed live.
+  if (sp.get("diag") === "1") {
+    const out = { diag: true, upstream: upstream.url, hasClient: !!client };
+    if (client) {
+      try { out.folderId = await folderIdFor(); out.folderOk = true; }
+      catch (e) { out.folderOk = false; out.folderErr = String((e && e.message) || e); }
+    }
+    try {
+      const r = await fetchImpl(upstream.url, { headers: { "user-agent": "Mozilla/5.0 (Planyr GIS cache)" } });
+      out.upstreamStatus = r.status; out.upstreamOk = r.ok; out.upstreamType = r.headers.get("content-type");
+    } catch (e) { out.upstreamErr = String((e && e.message) || e); }
+    return json(out);
+  }
+
   try {
     if (!client) return metaMode ? json({ cached: false }) : redirectTo(upstream.url); // no creds → live-only
     const folderId = await folderIdFor();
