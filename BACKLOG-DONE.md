@@ -1,5 +1,12 @@
 ## ✅ Done
 
+### B158 — Right-click a site row to Rename / Delete (no inline ✕) `[Site Planner / UI]` (feature)  *(arrived as "NEW-1"; minted B158)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1435 tests · build green · headless V132 (`ui-audit/verify-b158-rename.mjs`, 7/7).**
+- **Most of this had already shipped under B168/B433:** the inline ✕ was removed and right-click already opened a portalled cursor-positioned menu (status picker + "Delete project…"), dismissing on click-outside / Esc. The one missing piece was **Rename** — added here.
+- **Rename added to the right-click menu** (`MapFinder.jsx`): a "Rename…" item above Delete sets the row into an **inline-edit** state — the name becomes an `<input>` (autofocus, pre-filled), commit on **Enter**/blur, cancel on **Esc** (via a `skipNextBlurRef` so the trailing blur doesn't re-commit a cancelled edit). No dialog — honoring the owner's inline-editors-only rule. Same pattern as the B441 breadcrumb rename.
+- **Wiring fix:** `onRenameSite` (→ `renameSite` → `renameSiteGroup`) was already threaded to the *planner* (`SitePlanner`) but NOT to `MapFinder`; added it to the MapFinder props so the map's YOUR SITES list can rename. Reuses the existing group-rename + cloud-push flow (renames every plan in the group, pushes each).
+- **Verified headless (logged-out):** menu carries both Rename + Delete; no inline ✕ on the row; Rename opens a pre-filled inline input; Enter persists to the row + the store; Esc cancels (name unchanged); no page errors. The status quick-pick (B433) is preserved — Rename/Delete sit below the status list, not replacing it.
+
 ### B441 — Rename / delete projects from the breadcrumb switcher (right-click + kebab) `[Header-Nav / Site Planner]` (feature)  *(owner-dropped 2026-06-24; originally mislabeled B439 in BACKLOG.md — collision with B439 GIS caching; renumbered to B441, the real next free ID)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1418 tests · build green. Headless: breadcrumb dropdown + "New project" button confirmed visible.**
 - **Per-row ⋯ kebab + right-click → portal context menu** (z-index 5000/4999 above the AnchoredMenu at 4001/4000) with **Rename** (inline `<input>` autoFocus, Enter/blur commits, Esc cancels via `skipNextBlurRef` so blur doesn't double-commit) and **Delete** (two-step inline confirm: "Delete 'Name'?" → [Cancel] [Delete]; error surfaces inline on failure).

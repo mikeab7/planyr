@@ -4,6 +4,11 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V132 — B158: right-click a site row to Rename / Delete (no inline ✕) ✅ VERIFIED (headless, logged-out — no signed-in gap)
+- **Added + checked** 2026-06-24 · **Cadence** once (feature acceptance) · headless **Chromium**, built app, `vite preview` :4173 — `ui-audit/verify-b158-rename.mjs`, **7/7**.
+- **Result ✅:** the YOUR SITES rows have **no inline ✕**; right-click opens the portalled menu carrying **Rename + Delete** (below the status quick-pick); **Rename** opens a pre-filled **inline input** (autofocus); **Enter** persists the new name to the row AND the localStorage store; **Esc** cancels (name unchanged); no uncaught page errors. Fixed a wiring gap (`onRenameSite` reached the planner but not MapFinder).
+- **No signed-in gap:** rename rides the same `renameSiteGroup` → `saveSite` path logged-out and logged-in (the cloud push is the already-proven `pushSiteToCloud`), and the logged-out path is fully exercised here — so nothing is owed signed-in. lint 0 · 1435 tests · build green.
+
 
 ### V123 — Precision-pin map markers + corrected status palette (B433/B434/B435) ✅ (self-verified headless — fully done, logged-out map finder, nothing pending)
 - **Harness:** `ui-audit/verify-precision-pin.mjs` (chromium-1228, `--ignore-certificate-errors`, logged-out against the built `dist/` on `:4173`). Seeds one site per status (top-level `status`, the logged-out path), then inspects every `.leaflet-marker-icon` SVG + Leaflet anchor margins; also clicks the **Dead** chip to filter the hidden Dead pin into view. No auth needed (the map finder is the logged-out landing), so fully covered.
