@@ -112,3 +112,12 @@ jobs:
               await github.rest.issues.update({ owner, repo, issue_number: iss.number, state: "closed" });
               core.info(`Closed issue #${iss.number}`);
             }
+      # The suite runs under `set +e` (so the report uploads + the @claude issue opens even on
+      # failure), which means the steps above always succeed. Without this gate the JOB would
+      # report green on a red suite — exactly the masking that hid a 21-failure run. Fail last,
+      # after the issue bookkeeping, so the run status is honest.
+      - name: Reflect the e2e result in the job status
+        if: steps.e2e.outputs.code != '0'
+        run: |
+          echo "e2e suite exited with code ${{ steps.e2e.outputs.code }} — failing the job."
+          exit 1
