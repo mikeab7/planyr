@@ -34,7 +34,7 @@ export function cloudBadgeView(state) {
       return { variant: "cloud-pause", color: "var(--warn-text)", pulse: false, loud: false, actionable: true,
         title: "Saved on this device", tip: "Saved on this device — the cloud is unreachable. Your work will sync automatically when you reconnect." };
     case "error":
-      return { variant: "cloud-slash", color: "var(--status-dead)", pulse: false, loud: true, actionable: true,
+      return { variant: "cloud-slash", color: "var(--danger)", pulse: false, loud: true, actionable: true,
         title: "Sync problem", tip: "Your last change couldn't be saved to the cloud. It's safe on this device and will retry." };
     case "local":
       return { variant: "device", color: "var(--chrome-muted)", pulse: false, loud: false, actionable: false,
@@ -99,7 +99,7 @@ function Badge({ state, onRetry, detail }) {
           background: "transparent", color: v.color, cursor: canPop ? "pointer" : "default",
           // The loud failure state gets a hairline ring in its own color so it pops out of the
           // quiet chrome at a glance — the rest carry no border.
-          border: v.loud ? "1px solid var(--status-dead)" : "1px solid transparent",
+          border: v.loud ? "1px solid var(--danger)" : "1px solid transparent",
           padding: 0, animation: v.pulse ? "pf-pulse 1.1s ease-in-out infinite" : "none",
         }}
       >
@@ -148,7 +148,7 @@ export class CloudBadgeBoundary extends Component {
         <span role="img" aria-label="Cloud sync: status unavailable"
           title="Sync status couldn't be read — your latest work is saved on this device."
           style={{ display: "grid", placeItems: "center", width: 26, height: 24, borderRadius: 7,
-            color: "var(--status-dead)", border: "1px solid var(--status-dead)" }}>
+            color: "var(--danger)", border: "1px solid var(--danger)" }}>
           <CloudGlyph variant="cloud-slash" />
         </span>
       );
