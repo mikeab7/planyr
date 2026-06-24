@@ -60,8 +60,9 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 <!-- B423 umbrella (all sub-items B424–B432 done), B437 (callout), B441 (rename/delete breadcrumb —
      originally mislabeled B439 in the filing comment above; B439 was already taken by GIS caching,
      so renumbered to B441, the real next free ID), B440 (schedule bridge), and the stale in-place
-     B439-GIS + B436 entries have all shipped and moved to BACKLOG-DONE.md. Next free B# = B443
-     (B442 = polyline preview 45°-snap bug, fixed + in BACKLOG-DONE.md). -->
+     B439-GIS + B436 entries have all shipped and moved to BACKLOG-DONE.md. Next free B# = B444
+     (B442 = polyline preview 45°-snap; B443 = tool-gesture parity + road endpoints — both fixed +
+     in BACKLOG-DONE.md). -->
 
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new

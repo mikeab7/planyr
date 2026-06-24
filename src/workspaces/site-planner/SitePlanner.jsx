@@ -2002,10 +2002,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (tool === "callout") { placeCallout(fp); return; } // click tip, then box
     if (tool === "text") { placeText(fp); return; }       // one click → text box
-    if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // drag-draw markup
+    if (tool === "mline" || tool === "mrect" || tool === "mellipse") { // line/rect/ellipse: drag OR click-click
       const a = snapPt(fp);
+      // Click-to-start mode is armed (a prior single click without a drag): this press is the
+      // SECOND click → commit from the anchor to here (Bluebeam-style two-click placement).
+      if (mkRect && mkRect.pending && mkRect.kind === tool) {
+        const b = (tool === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : a;
+        commitMkRect(tool, mkRect.a, b);
+        setMkRect(null);
+        return;
+      }
+      // Otherwise begin a press-drag (also the first click of a click-click — resolved on pointer-up).
       drag.current = { mode: "mkDraw", kind: tool, a };
-      setMkRect({ kind: tool, a, b: a, shift: e.shiftKey });
+      setMkRect({ kind: tool, a, b: a, shift: e.shiftKey, pending: false });
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -2239,6 +2248,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     }
     setMkPoly(null); setTool("select");
+  };
+  // Commit a two-point markup (line / rect / ellipse) from anchor `a` to `b`. Shared by BOTH
+  // placement gestures (Bluebeam parity): a press-drag-release, AND a click-to-start →
+  // click-to-finish. Returns true if a shape was actually committed (big enough).
+  const commitMkRect = (kind, a, b) => {
+    let mk = null;
+    const minFt = 3 / view.ppf; // a deliberate ~3px span, zoom-independent (B30)
+    if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
+    else {
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle };
+    }
+    if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
+    return !!mk;
   };
   const translateMarkup = (m, dx, dy) => {
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
@@ -2570,6 +2593,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const B = snapPt(fp), A = roadStart, curb = +settings.roadCurb || CURB;
       setDraftRoad({ ax: A.x, ay: A.y, bx: B.x, by: B.y, cross: +roadWidth + 2 * curb });
     }
+    // Click-to-finish for line/rect/ellipse: the anchored shape tracks the cursor between the first
+    // and second click (no button held, so there's no drag.current to drive it).
+    if (mkRect && mkRect.pending) {
+      const b = (mkRect.kind === "mline" && e.shiftKey) ? snapPt(snap45(mkRect.a, fp)) : snapPt(fp);
+      setMkRect((m) => (m && m.pending ? { ...m, b } : m));
+    }
     const d = drag.current;
     if (!d) {
       // B226: when nothing is selected, preview the hovered building's feature-add
@@ -2682,6 +2711,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let rot = d.rot0 + (Math.atan2(fp.y - d.pivot.y, fp.x - d.pivot.x) - d.a0) * 180 / Math.PI;
       rot = snapOn ? Math.round(rot / 15) * 15 : Math.round(rot);
       setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, rot: ((rot % 360) + 360) % 360 } : m));
+      return;
+    }
+    if (d.mode === "roadEnd") { // drag a road end: pivot on the fixed end → new angle + length, width kept
+      const F = d.fixed;
+      const P = e.shiftKey ? snapPt(snap45(F, fp)) : snapPt(fp); // Shift = 45° lock
+      const ang = Math.atan2(P.y - F.y, P.x - F.x);
+      setEls((arr) => arr.map((x) => {
+        if (x.id !== d.id) return x;
+        const len = Math.max(Math.hypot(P.x - F.x, P.y - F.y), x.h); // keep length ≥ cross (B61)
+        const ex = F.x + Math.cos(ang) * len, ey = F.y + Math.sin(ang) * len;
+        return { ...x, cx: (F.x + ex) / 2, cy: (F.y + ey) / 2, w: Math.round(len), rot: ang * 180 / Math.PI };
+      }));
       return;
     }
     if (d.mode === "callout") {
@@ -2840,13 +2881,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d && d.mode === "groupMove") { drag.current = null; try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {} return; }
     if (d && d.mode === "mkDraw" && mkRect) {
       const { a, b, kind } = mkRect;
-      let mk = null;
       const minFt = 3 / view.ppf; // a deliberate ~3px drag, regardless of zoom — feet-based mins silently dropped real markups when zoomed in (B30)
-      if (kind === "mline") { if (dist(a, b) >= minFt) mk = { id: uid(), kind: "line", a, b, ...mkStyle }; }
-      else { const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-        if (w >= minFt && h >= minFt) mk = { id: uid(), kind: kind === "mrect" ? "rect" : "ellipse", cx, cy, w, h, rot: 0, ...mkStyle }; }
-      if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
-      setMkRect(null); drag.current = null; setPanning(false);
+      // A real press-drag (the pointer moved): commit now. A press WITHOUT a drag (a click): arm
+      // click-to-finish — the shape now follows the cursor and the next click commits it (Bluebeam
+      // supports both gestures; this is what made the line tool feel inconsistent with the polyline).
+      if (dist(a, b) >= minFt) { commitMkRect(kind, a, b); setMkRect(null); }
+      else { setMkRect({ kind, a, b: a, pending: true }); }
+      drag.current = null; setPanning(false);
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
@@ -4018,6 +4059,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     drag.current = { mode: "rotate", id, pivot, startPtr, start };
     svgRef.current.setPointerCapture(e.pointerId);
   };
+  // A road is a two-point object (a fixed-width centerline). Its two ENDS, in feet — the midpoints
+  // of the short edges (the long axis is el.w, rotated by el.rot).
+  const roadEndsF = (el) => {
+    const h = rot2(el.w / 2, 0, el.rot);
+    return [{ x: el.cx - h.x, y: el.cy - h.y }, { x: el.cx + h.x, y: el.cy + h.y }];
+  };
+  // Drag one end of a road to a new point: the OTHER end stays put, so a single drag changes both
+  // the angle AND the length (like dragging a line endpoint) — no separate rotate needed (owner
+  // request). Width (el.h / travelW) is preserved.
+  const startRoadEnd = (e, id, which) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
+    const ends = roadEndsF(el);
+    const fixed = which === "a" ? ends[1] : ends[0]; // pivot on the opposite end
+    pushHistory();
+    drag.current = { mode: "roadEnd", id, fixed };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
   // Double-click an element: if it's in a group, "drill in" to edit just that member in
   // place (without ungrouping, B261). Otherwise open its actions menu (dock/sidewalk/…).
   const onElDouble = (e, id) => {
@@ -5091,6 +5152,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (sel?.kind !== "el") return null;
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
+    const cpx0 = f2p({ x: el.cx, y: el.cy });
+    // A ROAD is a two-point object: show a draggable END grip at each end (drag → change the road's
+    // angle AND length in one move, pivoting on the other end — owner request) plus the two WIDTH
+    // grips. No corners / rotate handle — the endpoints make a separate rotate unnecessary.
+    if (el.type === "road") {
+      const [A, B] = roadEndsF(el).map(f2p);
+      return (
+        <g>
+          {[[0, 1], [0, -1]].map(([nx, ny], i) => { // width grips on the long edges
+            const o = rot2(nx * el.w / 2, ny * el.h / 2, el.rot);
+            const m = f2p({ x: el.cx + o.x, y: el.cy + o.y });
+            return <rect key={`rw${i}`} x={m.x - 4.5} y={m.y - 4.5} width={9} height={9} rx={2}
+              fill={PAL.accent} stroke={PAL.paper} strokeWidth={1.5}
+              style={{ cursor: resizeCursor(m.x - cpx0.x, m.y - cpx0.y) }}
+              onPointerDown={(e) => startEdgeResize(e, el.id, nx, ny)} />;
+          })}
+          <circle cx={A.x} cy={A.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "a")}>
+            <title>Drag to move this end (changes angle + length)</title>
+          </circle>
+          <circle cx={B.x} cy={B.y} r={6} fill={PAL.paper} stroke={PAL.accent} strokeWidth={1.75}
+            style={{ cursor: "grab" }} onPointerDown={(e) => startRoadEnd(e, el.id, "b")}>
+            <title>Drag to move this end (changes angle + length)</title>
+          </circle>
+        </g>
+      );
+    }
     const corners = elCorners(el).map(f2p);
     const signs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const topMid = f2p({ x: el.cx + rot2(0, -el.h / 2, el.rot).x, y: el.cy + rot2(0, -el.h / 2, el.rot).y });
@@ -6213,9 +6301,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {mkRect && (() => {
                 const a = f2p(mkRect.a), b = f2p(mkRect.b), sw = mkStyle.weight;
                 const dp = { stroke: PAL.accent, strokeWidth: sw, strokeDasharray: "5 4", fill: "none", pointerEvents: "none" };
-                if (mkRect.kind === "mline") return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} />;
+                // In click-to-finish mode show the anchored start point so it's clear a click landed.
+                const anchor = mkRect.pending ? <circle cx={a.x} cy={a.y} r={3.5} fill={PAL.accent} pointerEvents="none" /> : null;
+                if (mkRect.kind === "mline") return <>{anchor}<line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...dp} /></>;
                 const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-                return mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
+                const shape = mkRect.kind === "mellipse" ? <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} {...dp} /> : <rect x={x} y={y} width={w} height={h} {...dp} />;
+                return <>{anchor}{shape}</>;
               })()}
               {mkPoly && (() => {
                 // The rubber-band segment must match how the NEXT click commits (line ~2016): free
