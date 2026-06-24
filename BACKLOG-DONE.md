@@ -1,5 +1,43 @@
 ## ✅ Done
 
+### B280 — Seeded test account + fixture data for automated testing `[Infra / Test data]` (task) — OWNER ACTION  *(arrived as "NEW-3" 2026-06-20; built 2026-06-23, owner-completed 2026-06-24)*
+`[x]` **DONE — owner completed the one manual step 2026-06-24.** The `e2e@planyr.test` Supabase user, the `seed.sql` fixture (a known 500×400 ft lot = 200,000 sf ≈ 4.59 ac so measure assertions have a fixed value), and the three CI secrets (`E2E_EMAIL` / `E2E_PASSWORD` / `E2E_BASE_URL`) are all live in planyr-production + the GitHub repo. The auth-gated e2e suite (B278 / the B432 markup loop) now runs in CI on the schedule + on demand; the B281 auto-`@claude` issue loop is armed.
+- **Built + delivered (2026-06-23):** `e2e/seed/seed.sql` + `e2e/seed/README.md` (copy-paste-ready, handed over via the file tool). Dedicated test user, deterministic seed, RLS-respecting — never the owner's real login.
+- **Contract:** the seed values ARE the contract B278's assertions reference by exact value; co-located with the suite. Creds live only as CI secrets, never committed.
+
+### B432 — Per-tool matrix assertions + loop driver in CLAUDE.md `[Doc Review / Markup]` (task) — NEW-9, closes the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. V127.**
+- **`e2e/markup-tools.spec.js` upgraded** with two sections:
+  - **Section A — matrix ↔ propertySchema conformance (no auth, no browser).** For every tool row in `toolsForWorkspace("doc")` (except `drawMode:"mode"` rows), asserts `schemaForMarkup({kind:id}).map(s=>s.key).sort()` equals `propsForTool(id).sort()`. Runs in the same Playwright process via pure-JS imports; if propertySchema drifts from the matrix the loop flags it before any browser opens. Imports: `TOOL_MATRIX`, `propsForTool` from `tools.matrix.js`; `schemaForMarkup` from `propertySchema.js`.
+  - **Section B — per-tool rail arm (auth-gated, B280 account).** A `test.describe("per-tool rail arm")` block generates one test per doc-workspace non-mode tool row. Each test clicks `getByTestId("tool-<id>")` and asserts `aria-pressed="true"`. Gracefully skips (with a precise explanatory message) when the tool rail isn't visible (no PDF open / B280 fixture not seeded yet). The rail is already wired with the correct `data-testid` and `aria-pressed` attributes (ToolRail B330).
+  - The old "pending wiring" stub loop is replaced — the loop is now real (Section A fires immediately; Section B fires as soon as the B280 seeded account can open a PDF).
+- **Loop driver section added to CLAUDE.md** (before `## KEY DECISIONS`): documents the matrix rule (⛔ never edit to pass a test), how both sections work, what a red row means + how to fix it, and how to grow assertions as each tool ships.
+- **B423 umbrella is now complete** (B424–B432 all done). The engine is live, the spec is machine-checkable, and the loop is encoded.
+
+### B431 — Unified interaction model + edit handles `[Doc Review / Markup + Site Planner]` (feature) — NEW-8, part of the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in round-trip → V126.**
+- **ParcelDrawing `window.prompt` → inline `numEdit`** (the explicit plan blocker). `calibrateFrom` in `ParcelDrawing.jsx` now sets `calBox` state `{pts, px, sx, sy, val, err}` instead of calling `window.prompt`. A positioned inline div renders at the line's midpoint: `Length (ft)` label, input (Enter = commit, Esc = cancel), "Set" button, error message on invalid. `onDown` while calBox is open cancels it. Matches the DocReview inline calibrate (B304) in UX.
+- **`shouldPan` already reused** — `viewportTransform.js`'s `shouldPan` rule was already imported and used in DocReview (B329); no new wiring needed.
+- **Vertex drag handles in DocReview (B431).** When a markup is selected in the Select tool, small white circles with accent outline render at each vertex (skipped for pen/highlight which have too many pts). Clicking within 8 screen-px of a grip starts a single-vertex drag (`vtxDragRef`) instead of a full-markup move. `onMove` translates only the grabbed vertex; `onUp` commits via `pushHistory` + `setMarkups`. The `vtxPreview` state drives a live preview during the drag, and passes into the MarkupRenderer call the same way `dragPreview` does.
+- **Shift snap (45°) during TWOPOINT drawing.** In `onMove`, when `draft && TWOPOINT.has(tool) && e.shiftKey`, the cursor is snapped to the nearest 45° interval from the first point before `setCursor`. In `onDown` for the second-point commit, the same snap is applied before `commit`. So Shift held = perfectly horizontal/vertical/diagonal line constraints for Line, Rect, Ellipse, Dimension, and Calibrate tools.
+- **Reuse mode + set-as-default already done** (B428 `propStyle` sticky defaults — DocReview stays on the same tool after commit, doesn't revert to Pan).
+- **Dedup:** convert-segment-to-arc and rotate/resize handles are deferred (roadmap — complex, low daily use); the high-value pieces (vtx handles, Shift snap, inline calibrate) ship this session per the standing rule.
+
+### B429 — New tools: Arc, Dimension, Pen, Highlight, Eraser, Snapshot `[Doc Review / Markup]` (feature) — NEW-6, part of the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in draw round-trip → V125.**
+- **6 new tools** added to DocReview tool rail and wired end-to-end:
+  - **Arc** (`multiPoint`): click start → click end → click a point on the curve; auto-commits on 3rd `onDown`. Renders as a quadratic Bézier (`Q ctrl`) where ctrl = 2·p3 − (p1+p2)/2. Live preview during first two points.
+  - **Dimension** (`twoPoint`): drag end-to-end; renders line + two perpendicular witness ticks (±7 px) + a centred calibrated length label. Added to `MEASURE_KINDS` in MarkupRenderer so it gets the label from `measureLabel`.
+  - **Pen** (`freehand`): pointer-capture press-drag; accumulates pts on `onMove`, commits on `onUp` (min 2 pts). Renders as a stroked open polyline.
+  - **Highlight** (`freehand`): identical gesture to Pen. `TOOL_DEFAULTS` forces `stroke:#fbbf24`, `strokeWidth:12`, `opacity:0.35` (clamped to ≤0.5 in renderer so it stays translucent even if the user overrides).
+  - **Eraser** (`region`): drag a rubber-band box; `eraseInBox` removes any `pen`/`highlight` markup whose pts intersect the box — never touches other kinds. Hit-test treated as rect-interior so a partly-drawn eraser box shows a live rectangle.
+  - **Snapshot** (`region`): drag a box; commits a `snapshot` markup. Renders as a dashed rect + a camera emoji at the centroid.
+- **Arrow** = arrowhead toggle on Line (already in `arrowStart`/`arrowEnd` property column via B428 matrix — no standalone rail button needed per locked owner decision).
+- **Classification sets** (`TWOPOINT`/`MULTIPOINT`/`FREEHAND`/`REGION`) extended to include all new tools; pointer handlers dispatched through them uniformly.
+- **`TOOL_DEFAULTS`** map provides per-tool style overrides between `propStyle` (user sticky) and column defaults; currently used for Highlight.
+- **`MarkupRenderer.jsx`** extended: arc (quadratic bezier, optional arrowheads), dimension (line + ticks + label), pen (stroked polyline), highlight (wide translucent path), snapshot (dashed rect + emoji).
+- **`verify-b429.mjs`** headless smoke: Review tab loads, no JS crash. Tool buttons not visible logged-out (tool rail only shows when a PDF is loaded) → ⏳ V125.
+
 ### B430 — Count as a first-class measure in the Site Planner `[Site Planner / Measures]` (feature) — NEW-7, part of the B423 umbrella  *(2026-06-24; commit 285836b)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 285836b). lint 0 · 1390 tests · build green · 15/15 headless checks.**
 - `["count", "Count"]` added to `MEASURE_MODES`; appears in the Measure ▾ dropdown alongside Length/Polylength/Area.

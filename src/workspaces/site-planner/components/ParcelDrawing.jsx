@@ -30,6 +30,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   const [moving, setMoving] = useState(null);      // { id, pts } live drag of an existing markup
   const [view, setView] = useState({ scale: 1, ox: 0, oy: 0 }); // backdrop placement (screen px)
   const [textEdit, setTextEdit] = useState(null);  // { id } while editing a text markup
+  const [calBox, setCalBox] = useState(null);       // inline scale entry { pts, px, sx, sy, val, err }
   const drag = useRef(null);
   const firstSave = useRef(true);
   const iw = drawing.intrinsic?.w || 1000, ih = drawing.intrinsic?.h || 1000;
@@ -56,15 +57,21 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   const addMark = (m) => setMarks((cur) => [...cur, m]);
   const delSel = () => { if (sel) { setMarks((cur) => cur.filter((m) => m.id !== sel)); setSel(null); } };
 
-  // Finish a freshly-drawn Scale line: ask its real length, store/replace the calibration.
+  // Finish a freshly-drawn Scale line: open an inline entry box at the midpoint (no window.prompt).
   const calibrateFrom = (line) => {
     const [a, b] = line.pts;
     const px = Math.hypot((b.x - a.x) * iw, (b.y - a.y) * ih);
     if (px < 1) return;
-    const ans = window.prompt("Length of this line in feet (sets the drawing scale):", "100");
-    const feet = parseFloat(ans);
-    if (!feet || feet <= 0) return;
-    setMarks((cur) => [...cur.filter((m) => m.type !== "calib"), { id: uid(), type: "calib", pts: [a, b], feet, ftPerPx: feet / px, color }]);
+    const sx = view.ox + ((a.x + b.x) / 2) * Wd;
+    const sy = view.oy + ((a.y + b.y) / 2) * Hd;
+    setCalBox({ pts: [a, b], px, sx, sy, val: "", err: "" });
+  };
+  const commitCal = () => {
+    if (!calBox) return;
+    const feet = parseFloat(calBox.val);
+    if (!feet || feet <= 0) { setCalBox((c) => c ? { ...c, err: "Enter a positive length in feet." } : c); return; }
+    setMarks((cur) => [...cur.filter((m) => m.type !== "calib"), { id: uid(), type: "calib", pts: calBox.pts, feet, ftPerPx: feet / calBox.px, color }]);
+    setCalBox(null);
   };
 
   const onWheel = (e) => {
@@ -85,6 +92,7 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
   };
   const onDown = (e) => {
     if (e.button !== 0) return;
+    if (calBox) { setCalBox(null); return; }
     const n = toNorm(e.clientX, e.clientY);
     wrapRef.current?.setPointerCapture?.(e.pointerId);
     if (tool === "select") { drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy }; setSel(null); return; }
@@ -205,6 +213,25 @@ export default function ParcelDrawing({ drawing, onSave, onClose, loading = fals
                   style={{ position: "absolute", left, top, fontSize: Math.max(11, 0.022 * Hd), color: m.color, fontWeight: 700, cursor: tool === "select" ? "move" : "crosshair", whiteSpace: "nowrap", textShadow: "0 1px 2px rgba(255,255,255,0.8)", outline: m.id === sel ? `1px dashed ${m.color}` : "none", padding: "1px 2px" }}>{m.text || "…"}</div>
               );
             })}
+            {/* Inline scale-entry box — replaces window.prompt for the Scale / Calib tool */}
+            {calBox && (
+              <div onPointerDown={(e) => e.stopPropagation()}
+                style={{ position: "absolute", left: calBox.sx, top: calBox.sy, transform: "translate(-50%, -135%)", zIndex: 6, width: 210, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Length (ft)</span>
+                  <input autoFocus value={calBox.val}
+                    onChange={(e) => setCalBox((c) => c ? { ...c, val: e.target.value, err: "" } : c)}
+                    onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); commitCal(); } else if (e.key === "Escape") { e.preventDefault(); setCalBox(null); setDraft(null); } }}
+                    placeholder="100"
+                    style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontFamily: "inherit", padding: "3px 6px", border: `1px solid ${calBox.err ? "#dc2626" : PAL.line}`, borderRadius: 5, outline: "none" }} />
+                  <button onClick={commitCal} onMouseDown={(e) => e.preventDefault()}
+                    style={{ padding: "3px 9px", fontSize: 11.5, fontWeight: 700, borderRadius: 5, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${PAL.accent}`, background: PAL.accent, color: "#fff" }}>Set</button>
+                </div>
+                <div style={{ fontSize: 10.5, marginTop: 4, color: calBox.err ? "#dc2626" : PAL.muted, lineHeight: 1.35 }}>
+                  {calBox.err || "Feet. Enter to set · Esc to cancel."}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#cbd5e1", fontSize: 13, textAlign: "center", padding: 24 }}>

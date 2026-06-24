@@ -65,12 +65,22 @@ const TOOLS = [
   { id: "ellipse",   label: "Ellipse",   hint: "Drag a bounding box. Hold Shift for a circle." },
   { id: "cloud",     label: "Cloud",     hint: "Revision cloud: drag a box; the scalloped outline traces it." },
   { id: "text",      label: "Text",      hint: "Click to place a text note." },
+  { id: "arc",       label: "Arc",       hint: "Click start, click end, then click a point on the curve to set the bend." },
+  { id: "dimension", label: "Dimension", hint: "Drag end-to-end; the calibrated length labels the line with witness ticks." },
+  { id: "pen",       label: "Pen",       hint: "Press and draw a freehand path." },
+  { id: "highlight", label: "Highlight", hint: "Press and sweep a translucent highlighter over the drawing." },
+  { id: "eraser",    label: "Eraser",    hint: "Drag a box to erase Pen / Highlight strokes only — never the engineer's drawing." },
+  { id: "snapshot",  label: "Snapshot",  hint: "Drag a region to mark a capture area." },
 ];
 const MEASURE = new Set(["distance", "polylength", "perimeter", "area", "count"]);
 // Tools with two-point (click-click or drag) draw mode
-const TWOPOINT = new Set(["distance", "calibrate", "rect", "cloud", "line", "ellipse"]);
-// Tools with multi-point (click-click-dbl) draw mode
-const MULTIPOINT = new Set(["area", "perimeter", "count", "polygon", "polyline", "polylength"]);
+const TWOPOINT = new Set(["distance", "calibrate", "rect", "cloud", "line", "ellipse", "dimension"]);
+// Tools with multi-point (click-click-dbl) draw mode; arc auto-commits at exactly 3 pts (handled in onDown)
+const MULTIPOINT = new Set(["area", "perimeter", "count", "polygon", "polyline", "polylength", "arc"]);
+// Freehand tools: pointer-down → move → up records a continuous stroke
+const FREEHAND = new Set(["pen", "highlight"]);
+// Region tools: drag-to-select a rectangular area
+const REGION = new Set(["eraser", "snapshot"]);
 
 // Rail icons for the Markup tools + zoom controls (B330). 16×16, stroke = currentColor so a
 // button's text colour drives them; select/pan/rect/text mirror the Site Planner's icon set.
@@ -90,6 +100,12 @@ const MK_ICONS = {
   ellipse: <ellipse cx="8" cy="8" rx="5.5" ry="4" />,
   cloud: <path d="M5.2 11.6 a2.3 2.3 0 0 1-.5-4.5 a2.7 2.7 0 0 1 5.1-1 a2.2 2.2 0 0 1 2.6 3.2 a2.1 2.1 0 0 1-1.5 2.9 a2.3 2.3 0 0 1-2.2.9 a2.4 2.4 0 0 1-3-.4 Z" />,
   text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
+  arc:       <path d="M2.5 13 Q 8 1 13.5 13" />,
+  dimension: <><path d="M3 8 L13 8" /><path d="M3 5.5 L3 10.5 M13 5.5 L13 10.5" /></>,
+  pen:       <path d="M4 13 L4.5 10 L11.5 3 L13.5 4.5 L6.5 12.5 Z M11.5 3 L13.5 4.5" />,
+  highlight: <><rect x="5.5" y="2.5" width="5" height="7.5" rx="1" /><path d="M6 10 L8 14 L10 10" /></>,
+  eraser:    <><path d="M5 12.5 L9.5 4.5 L13.5 6.5 L9 14.5 Z" /><path d="M2 14.5 L9 14.5" /></>,
+  snapshot:  <><rect x="2" y="4.5" width="12" height="9" rx="1.5" /><circle cx="8" cy="9.5" r="2.5" /><path d="M5.5 4.5 L6.5 3 H9.5 L10.5 4.5" /></>,
   zoomIn: <path d="M8 3.4 V12.6 M3.4 8 H12.6" strokeWidth="1.7" />,
   zoomOut: <path d="M3.4 8 H12.6" strokeWidth="1.7" />,
   fitW: <><path d="M2.6 8 H13.4" /><path d="M2.6 8 l2.3 -2.3 M2.6 8 l2.3 2.3 M13.4 8 l-2.3 -2.3 M13.4 8 l-2.3 2.3" /></>,
@@ -181,6 +197,7 @@ export default function DocReview({
   const [spaceHeld, setSpaceHeld] = useState(false); // hold-Space = temporary pan in any tool (B289/B329)
   const [panning, setPanning] = useState(false);    // a pan drag is in progress (grab/grabbing cursor)
   const [dragPreview, setDragPreview] = useState(null); // live { id, pts } while dragging a markup (B293)
+  const [vtxPreview, setVtxPreview] = useState(null);  // live { id, pts } during vertex-grip drag (B431)
   const [editing, setEditing] = useState(null);     // inline text editor { id|null, page, pt, text } (B293)
   const [calInput, setCalInput] = useState(null);   // inline Calibrate entry { pts:[pageUnits], x, y (screen px), value } (B304 — no window.prompt)
   const [ctxMenu, setCtxMenu] = useState(null);     // right-click Arrange menu { x, y (client px), id } | null (B421)
@@ -193,6 +210,7 @@ export default function DocReview({
   const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
   const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence → suppress the tap on lift (B331)
   const dragRef = useRef(null);       // active markup move { id, start, orig, moved } (B293)
+  const vtxDragRef = useRef(null);    // active vertex drag { id, idx, start, origPts } (B431)
   const editDoneRef = useRef(false);  // guard so a commit + the unmount blur don't double-fire (B293)
 
   // --- cloud persistence (single-sheet review) ---
@@ -676,17 +694,37 @@ export default function DocReview({
     pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
   };
 
+  // Per-tool style defaults that override PROPERTY_COLUMNS defaults but yield to the user's
+  // last-set sticky style (propStyle). Highlight is yellow + wide + translucent by default.
+  const TOOL_DEFAULTS = { highlight: { stroke: "#fbbf24", strokeWidth: 12, opacity: 0.35 } };
+
   const commit = (mk) => {
     // Stamp the new markup with the current sticky style for its tool kind. The user's overrides
-    // (propStyle) take precedence over column defaults; explicit fields inside mk win over both.
+    // (propStyle) take precedence over tool defaults, which take precedence over column defaults;
+    // explicit fields inside mk win over all.
     const style = {};
+    const toolDefs = TOOL_DEFAULTS[mk.kind] || {};
     propsForTool(mk.kind).forEach((key) => {
-      const v = propStyle[key] !== undefined ? propStyle[key] : columnMeta(key)?.default;
+      const v = propStyle[key] !== undefined ? propStyle[key]
+        : toolDefs[key] !== undefined ? toolDefs[key]
+        : columnMeta(key)?.default;
       if (v !== undefined) style[key] = v;
     });
     pushHistory();
     setMarkups((a) => [...a, { id: uid(), page, ...style, ...mk }]);
     setDraft(null);
+  };
+
+  // Erase pen/highlight markups whose points overlap the given box (two corner pts).
+  const eraseInBox = ([a, b]) => {
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x, b.x), y1 = Math.max(a.y, b.y);
+    pushHistory();
+    setMarkups((arr) => arr.filter((m) => {
+      if (m.page !== page) return true;
+      if (m.kind !== "pen" && m.kind !== "highlight") return true;
+      return !(m.pts || []).some((q) => q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1);
+    }));
   };
 
   const panMode = () => tool === "pan" || spaceHeld;
@@ -728,6 +766,21 @@ export default function DocReview({
     }
     if (calInput) return; // an inline Calibrate entry is open — finish it (Enter/Esc) before drawing again (B304)
     const p = toPage(e);
+    // Vertex grip hit check — when select tool + markup selected, a click within 8 screen-px
+    // of any vertex starts a single-vertex drag instead of a full-markup move. (B431)
+    if (tool === "select" && sel) {
+      const selM = pageMarks.find((mm) => mm.id === sel);
+      if (selM?.pts?.length && selM.kind !== "pen" && selM.kind !== "highlight") {
+        for (let vi = 0; vi < selM.pts.length; vi++) {
+          const q = selM.pts[vi];
+          if (Math.hypot((p.x - q.x) * view.scale, (p.y - q.y) * view.scale) <= 8) {
+            vtxDragRef.current = { id: sel, idx: vi, start: p, origPts: selM.pts.map((r) => ({ ...r })) };
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+            return;
+          }
+        }
+      }
+    }
     // Select only "grabs" a markup when the click lands on one; an empty-canvas Select drag
     // pans instead (Bluebeam). hitTest is cheap + math-based, so probe it up front for the rule.
     const hitId = tool === "select" ? hitTest(p) : null;
@@ -751,14 +804,38 @@ export default function DocReview({
       return;
     }
     if (tool === "text") return; // text opens on pointer-UP (below) so the click's own focus change can't blur+discard the fresh editor (B293)
+    if (FREEHAND.has(tool)) {
+      setDraft({ kind: tool, pts: [p] });
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
+    if (REGION.has(tool)) {
+      setDraft({ kind: tool, pts: [p] });
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     if (TWOPOINT.has(tool)) {
       if (!draft) setDraft({ kind: tool, pts: [p] });
       else {
-        const pts = [draft.pts[0], p];
+        // Shift = snap second point to the nearest 45° from the first (B431)
+        let end = p;
+        if (e.shiftKey && draft.pts.length >= 1) {
+          const o = draft.pts[0], dx = p.x - o.x, dy = p.y - o.y;
+          const ang = Math.atan2(dy, dx), snapped = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+          const len = Math.hypot(dx, dy);
+          end = { x: o.x + Math.cos(snapped) * len, y: o.y + Math.sin(snapped) * len };
+        }
+        const pts = [draft.pts[0], end];
         if (tool === "calibrate") finishCalibrate(pts);
         else commit({ kind: tool, pts });
         setDraft(null);
       }
+      return;
+    }
+    // Arc auto-commits when the 3rd point (the bulge/curve point) is placed
+    if (tool === "arc" && draft?.kind === "arc" && draft?.pts?.length >= 2) {
+      commit({ kind: "arc", pts: [...draft.pts, p] });
+      setDraft(null);
       return;
     }
     if (MULTIPOINT.has(tool)) {
@@ -789,13 +866,32 @@ export default function DocReview({
       return;
     }
     if (!view) return;
-    const p = toPage(e);
+    const rawP = toPage(e);
+    // Vertex drag: translate only the grabbed vertex, keep all others fixed (B431)
+    if (vtxDragRef.current) {
+      const dx = rawP.x - vtxDragRef.current.start.x, dy = rawP.y - vtxDragRef.current.start.y;
+      setVtxPreview({ id: vtxDragRef.current.id, pts: vtxDragRef.current.origPts.map((q, i) => i === vtxDragRef.current.idx ? { x: q.x + dx, y: q.y + dy } : { ...q }) });
+      return;
+    }
+    // Freehand: append every move point to grow the live path
+    if (FREEHAND.has(tool) && draft?.kind === tool) {
+      setDraft((d) => d ? { ...d, pts: [...d.pts, rawP] } : d);
+      return;
+    }
     if (dragRef.current) { // moving a markup: translate its page-unit points live (B293)
-      const dx = p.x - dragRef.current.start.x, dy = p.y - dragRef.current.start.y;
-      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(p); return; }
+      const dx = rawP.x - dragRef.current.start.x, dy = rawP.y - dragRef.current.start.y;
+      if (!dragRef.current.moved && Math.hypot(dx * view.scale, dy * view.scale) < 3) { setCursor(rawP); return; }
       dragRef.current.moved = true;
       setDragPreview({ id: dragRef.current.id, pts: dragRef.current.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) });
       return;
+    }
+    // Shift = snap cursor to 45° from draft start point during TWOPOINT drawing (B431)
+    let p = rawP;
+    if (draft && TWOPOINT.has(tool) && e.shiftKey && draft.pts.length >= 1) {
+      const o = draft.pts[0], dx = rawP.x - o.x, dy = rawP.y - o.y;
+      const ang = Math.atan2(dy, dx), snapped = Math.round(ang / (Math.PI / 4)) * (Math.PI / 4);
+      const len = Math.hypot(dx, dy);
+      p = { x: o.x + Math.cos(snapped) * len, y: o.y + Math.sin(snapped) * len };
     }
     setCursor(p);
   };
@@ -809,6 +905,12 @@ export default function DocReview({
       if (touchPinchedRef.current) { touchPinchedRef.current = false; panRef.current = null; dragRef.current = null; setPanning(false); return; } // pinch ended — no stray tap
     }
     if (panRef.current) { panRef.current = null; setPanning(false); try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {} return; }
+    if (vtxDragRef.current) { // commit a single-vertex drag (B431)
+      const d = vtxDragRef.current; vtxDragRef.current = null;
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (vtxPreview) { pushHistory(); setMarkups((a) => a.map((m) => m.id === d.id ? { ...m, pts: vtxPreview.pts } : m)); setVtxPreview(null); }
+      return;
+    }
     if (dragRef.current) {
       const d = dragRef.current; dragRef.current = null;
       try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -818,6 +920,19 @@ export default function DocReview({
         setMarkups((a) => a.map((m) => (m.id === d.id ? { ...m, pts: d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy })) } : m)));
       }
       setDragPreview(null);
+      return;
+    }
+    // Freehand commit: release ends the stroke
+    if (FREEHAND.has(tool) && draft) {
+      if (draft.pts.length >= 2) commit({ kind: tool, pts: draft.pts });
+      else setDraft(null);
+      return;
+    }
+    // Region commit: release ends the drag-box (eraser deletes; snapshot creates a markup)
+    if (REGION.has(tool) && draft) {
+      const pts = [draft.pts[0], toPage(e)];
+      if (tool === "eraser") { eraseInBox(pts); setDraft(null); }
+      else commit({ kind: tool, pts }); // snapshot
       return;
     }
     // Text places on release: opening the inline editor here (not on pointer-down) means the
@@ -832,7 +947,7 @@ export default function DocReview({
     if (e && e.pointerType === "touch" && e.pointerId != null) pointersRef.current.delete(e.pointerId);
     reseedPinch();
     if (pointersRef.current.size === 0) touchPinchedRef.current = false;
-    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null);
+    panRef.current = null; setPanning(false); dragRef.current = null; setDragPreview(null); vtxDragRef.current = null; setVtxPreview(null);
   };
 
   const finishDraft = () => {
@@ -842,6 +957,10 @@ export default function DocReview({
     if (MEASURE.has(kind) || kind === "count") {
       if (canCommitMeasure(kind, pts.length)) commit({ kind, pts });
       else setDraft(null);
+    } else if (kind === "arc" && pts.length >= 3) {
+      commit({ kind, pts });
+    } else if (FREEHAND.has(kind) && pts.length >= 2) {
+      commit({ kind, pts });
     } else if (kind === "polyline" && pts.length >= 2) {
       commit({ kind, pts });
     } else if (kind === "polygon" && pts.length >= 3) {
@@ -929,6 +1048,10 @@ export default function DocReview({
         const q = pts[0]; if (!q) continue;
         const w = ((m.text || "").length * 6.5 + 6) / Z, h = 16 / Z;
         if (p.x >= q.x - 2 / Z && p.x <= q.x - 2 / Z + w && p.y >= q.y - 12 / Z && p.y <= q.y - 12 / Z + h) { d = 0; interior = true; }
+      } else if (m.kind === "snapshot") {
+        const a = pts[0], b = pts[1]; if (!a || !b) continue;
+        const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+        if (p.x >= x0 - tol && p.x <= x1 + tol && p.y >= y0 - tol && p.y <= y1 + tol) { d = 0; interior = true; }
       } else if (m.kind === "area" || m.kind === "polygon") {
         // Filled interior is grabbable (B374); edge+vertex fallback for thin/degenerate shapes.
         if (pts.length >= 3 && pointInPoly(p, pts)) { d = 0; interior = true; }
@@ -1143,8 +1266,40 @@ export default function DocReview({
         const rx = Math.abs(cur.x - a.x) / 2, ry = Math.abs(cur.y - a.y) / 2;
         return <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />;
       }
-      // line / distance / calibrate — a simple segment preview
+      // line / distance / calibrate / dimension — a simple segment preview
       return <g><line x1={a.x} y1={a.y} x2={cur.x} y2={cur.y} stroke={col} strokeWidth={2} strokeDasharray="5 4" /><circle cx={a.x} cy={a.y} r={3} fill={col} /></g>;
+    }
+
+    // Arc draft: 1 pt = dot, 2 pts = straight segment + live bezier preview as cursor moves
+    if (draft.kind === "arc") {
+      if (pts.length === 1) return <circle cx={pts[0].x} cy={pts[0].y} r={3.5} fill={col} />;
+      const [a, b] = pts;
+      if (!cur) return <g><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={col} strokeWidth={2} strokeDasharray="5 4" /><circle cx={a.x} cy={a.y} r={3.5} fill={col} /><circle cx={b.x} cy={b.y} r={3.5} fill={col} /></g>;
+      const ctrl = { x: 2 * cur.x - (a.x + b.x) / 2, y: 2 * cur.y - (a.y + b.y) / 2 };
+      return (
+        <g>
+          <path d={`M ${a.x} ${a.y} Q ${ctrl.x} ${ctrl.y} ${b.x} ${b.y}`} fill="none" stroke={col} strokeWidth={2} strokeDasharray="5 4" />
+          <circle cx={a.x} cy={a.y} r={3.5} fill={col} />
+          <circle cx={b.x} cy={b.y} r={3.5} fill={col} />
+        </g>
+      );
+    }
+
+    // Freehand draft (pen / highlight): grow the live path on every pointer-move
+    if (FREEHAND.has(draft.kind) && pts.length >= 1) {
+      const isHL = draft.kind === "highlight";
+      const sw = isHL ? 10 : 2;
+      const op = isHL ? 0.4 : 1;
+      const d = "M " + pts.map((q) => `${q.x},${q.y}`).join(" L ");
+      return <path d={d} fill="none" stroke={isHL ? "#fbbf24" : col} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" opacity={op} />;
+    }
+
+    // Region draft (eraser / snapshot): rubber-band rectangle
+    if (REGION.has(draft.kind) && pts.length >= 1 && cur) {
+      const a = pts[0];
+      const x = Math.min(a.x, cur.x), y = Math.min(a.y, cur.y);
+      const w = Math.abs(cur.x - a.x), h = Math.abs(cur.y - a.y);
+      return <rect x={x} y={y} width={w} height={h} fill={col + "18"} stroke={col} strokeWidth={1.5} strokeDasharray="5 4" />;
     }
 
     // Multi-point drafts (polygon, polyline, area, perimeter, count)
@@ -1175,7 +1330,7 @@ export default function DocReview({
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
+    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
@@ -1373,10 +1528,20 @@ export default function DocReview({
               <svg data-testid="markup-overlay" width={pageBase.w * view.scale} height={pageBase.h * view.scale} style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
                 {pageMarks.map((m) => (
                   <MarkupRenderer key={m.id}
-                    markup={dragPreview && dragPreview.id === m.id ? { ...m, pts: dragPreview.pts } : m}
+                    markup={vtxPreview?.id === m.id ? { ...m, pts: vtxPreview.pts } : dragPreview?.id === m.id ? { ...m, pts: dragPreview.pts } : m}
                     view={view} selected={m.id === sel} ftPerUnit={ftPerUnit} />
                 ))}
                 {drawDraft()}
+                {/* Vertex grip handles — small circles at each vertex of the selected markup (B431) */}
+                {sel && !draft && (() => {
+                  const selM = pageMarks.find((mm) => mm.id === sel);
+                  if (!selM?.pts?.length || selM.kind === "pen" || selM.kind === "highlight") return null;
+                  const src = vtxPreview?.id === sel ? vtxPreview.pts : selM.pts;
+                  return src.map((q, i) => (
+                    <circle key={i} cx={q.x * view.scale} cy={q.y * view.scale} r={5}
+                      fill="#fff" stroke="var(--accent)" strokeWidth={1.5} />
+                  ));
+                })()}
               </svg>
               {/* On-canvas delete affordance (B375): a clear × on the selected markup so removing it
                   doesn't depend on knowing the Delete key. Lives OUTSIDE the pointerEvents:none overlay

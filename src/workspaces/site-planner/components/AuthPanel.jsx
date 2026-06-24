@@ -190,7 +190,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, onCl
       {mode !== "reset" && (
         <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
       )}
-      <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || !email || (mode !== "reset" && pw.length < 6)}
+      <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || !email || (mode !== "reset" && pw.length < 6)}
         onClick={submit}>{busy ? "…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
       <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
         {mode === "reset"
