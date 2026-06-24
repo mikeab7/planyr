@@ -60,6 +60,24 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V122 — Live PK is single-column `id`; docs corrected + degrade-branch upserts repointed (B280 follow-up) ✅ seed ran clean on planyr-production (fixture row present), docs+code fix lint/test/build-green; ⏳ one signed-in cloud-save round-trip on a version-less DB to exercise the new fallback
+- **What changed.** A Cowork session with live-DB access confirmed (via `pg_constraint`) that
+  `public.sites` AND `public.doc_reviews` have **`PRIMARY KEY (id)`** on planyr-production — NOT the
+  `(user_id, id)` the docs claimed. That drift had already been migrated in by `db/team_sharing.sql`
+  (PK `(user_id,id)→(id)` so one row per project survives a teammate edit); `user_id` stays the
+  owner column + RLS predicate. Fixed three things: (1) the two `CLAUDE.md` "Table schema" blocks
+  now say `primary key (id)` with a note; (2) the **degrade-branch** plain-upserts in `cloudSync.js`
+  (`sites`) and `reviewStore.js` (`doc_reviews`) were keyed on `onConflict:"user_id,id"` alone —
+  which 42P10s on the live single-column PK — now they try `"id"` first and fall back to
+  `"user_id,id"` only for a genuinely pre-migration DB, mirroring `upsertFileFacts`' existing pattern;
+  (3) the B280 seed (`e2e/seed/seed.sql`) was already made constraint-independent.
+- **Why ⏳.** The degrade branch only fires when the `version` column is absent; on production the
+  column exists, so the fixed path is dormant there (the primary `casUpsert` already keys on `id`).
+  The seed itself is ✅ confirmed live. The owed check is one signed-in save against a DB lacking the
+  `version` column, to watch the new id-first fallback succeed — low priority (latent-path hardening).
+- **Steps / Expect.** Sign in → edit a site → Save shows "Saved" (cloud write ok). On a version-less
+  DB the network call upserts with `onConflict=id` and does not 42P10. Cadence: once. Last checked: —.
+
 ### V120 — Paste-at-cursor + the "Review" rename (B417/B418/B419) ✅ rename + tokens + paste-math headless-verified; ⏳ one live copy→paste click-through
 - **Added** 2026-06-23 · **Cadence** once (acceptance) · **Branch** `claude/gifted-shannon-ycachr` · headless harness `ui-audit/verify-b417-b419.mjs` **11/11**, lint 0 · 1282 unit tests · build green.
 - **✅ Verified headless this session (logged-out):** the module **tab now reads "Review"** (no stale "Library"/"Markup" tab); the renamed accent tokens resolve at runtime (`--accent-review` → #EF9F27, `--accent-review-text` → #8A5410) and the old `--accent-markup*` names are gone (no orphans); the Review module mounts and its active tab uses the review accent text color; the Site Planner's Ctrl+V wiring is live and the empty-clipboard fallback no-ops without crashing. The paste **placement math** (`centerOn`/`bboxCenter`, the shared helper both canvases call) is unit-tested (`test/pasteGeom.test.js`, 9 cases).
