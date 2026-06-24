@@ -22,6 +22,8 @@ import { countyAtPoint } from "./lib/jurisdiction.js";
 import { apprRows, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
+import { shareProject, makeProjectPrivate } from "./lib/sharing.js";
+import { listMyTeams, currentIdentity } from "./lib/teams.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -261,7 +263,7 @@ async function geocodeAddress(q, center) {
 // the headline facts beyond address/account that help identify a tract at a glance.
 const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 
-export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onUseParcels, onSkip }) {
+export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
@@ -319,6 +321,32 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const toggleGroup = (st) => setGroupCollapsed((c) => { const n = { ...c, [st]: !c[st] }; try { localStorage.setItem("planarfit:sitesGroups:v1", JSON.stringify(n)); } catch (_) {} return n; });
   // Apply a status to a site (group), then refresh — closes the right-click menu.
   const setStatus = (siteId, st) => { onSetStatusRef.current && onSetStatusRef.current(siteId, st); setStatusMenu(null); };
+
+  // ── Team sharing (share a project with a team) ──────────────────────────────
+  const [myUid, setMyUid] = useState(null);
+  const [myTeams, setMyTeams] = useState([]);
+  const [shareBusy, setShareBusy] = useState(false);
+  const teamName = (id) => { const t = myTeams.find((x) => x.id === id); return t ? t.name : "a team"; };
+  const refreshTeams = async () => {
+    const { uid } = await currentIdentity();
+    setMyUid(uid);
+    if (!uid) { setMyTeams([]); return; }
+    try { setMyTeams(await listMyTeams()); } catch (_) { /* keep prior list on transient error */ }
+  };
+  useEffect(() => { let live = true; (async () => { const { uid } = await currentIdentity(); if (!live) return; setMyUid(uid); if (uid) { try { const t = await listMyTeams(); if (live) setMyTeams(t); } catch (_) {} } })(); return () => { live = false; }; }, []);
+  // Open the per-project menu and refresh the team list so newly-created teams appear.
+  const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
+  // Share a project (site group) with a team, or make it private again (teamId=null).
+  const doShare = async (site, teamId) => {
+    const gid = site.groupId || site.id;
+    setShareBusy(true);
+    const r = teamId ? await shareProject(gid, teamId) : await makeProjectPrivate(gid);
+    setShareBusy(false);
+    setStatusMenu(null);
+    if (!r || !r.ok) { setErr((r && r.error) || "Couldn't update sharing."); return; }
+    if (teamId && r.sites === 0) { setErr("This project isn't in the cloud yet — open it once to sync, then share."); return; }
+    onSharedChange && onSharedChange();
+  };
   // Pipeline counts by status across all sites (for the chips / counts strip).
   const statusCounts = STATUSES.reduce((m, st) => { m[st] = 0; return m; }, {});
   sites.forEach((s) => { statusCounts[statusOf(s)] = (statusCounts[statusOf(s)] || 0) + 1; });
@@ -930,14 +958,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
         onClick={() => onOpenSite && onOpenSite(s.id)}
         onDoubleClick={() => flyToSite(s)}
         onMouseEnter={() => setHoverRow(s.id)} onMouseLeave={() => setHoverRow((r) => (r === s.id ? null : r))}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", cursor: "pointer", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
         <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
-          onClick={(e) => { e.stopPropagation(); setStatusMenu({ site: s, x: e.clientX, y: e.clientY }); }}
+          onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
           style={{ width: 16, height: 16, flex: "none", display: "grid", placeItems: "center", borderRadius: 99, cursor: "pointer", padding: 0,
             border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1, fontFamily: "inherit" }}>
           {t.glyph}
         </button>
+        {s.teamId && (
+          <span title={`Shared with ${teamName(s.teamId)}`} aria-label="Shared with team"
+            style={{ flex: "none", color: PAL.accent, display: "grid", placeItems: "center", lineHeight: 0 }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+          </span>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.struck ? "line-through" : "none" }}>{s.site || s.name || "Untitled site"}</div>
           <div style={{ fontSize: 10.5, color: PAL.muted, fontFamily: "ui-monospace, Menlo, monospace" }}>{STATUS_META[st]?.label || st} · {siteAcres(s) > 0 ? `${siteAcres(s).toFixed(1)} ac` : "no boundary"}</div>
@@ -1260,7 +1294,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           <div onClick={(e) => e.stopPropagation()}
             style={{ position: "fixed", left: Math.min(statusMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 188),
               top: Math.min(statusMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 288),
-              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", overflow: "hidden", padding: "4px 0" }}>
+              width: 180, background: "var(--surface-raised)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 14px 40px rgba(0,0,0,0.28)", maxHeight: "min(80vh, 520px)", overflowY: "auto", padding: "4px 0" }}>
             <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "6px 12px 4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{statusMenu.site.site || statusMenu.site.name || "Site"}</div>
             {STATUSES.map((st) => {
               const t = statusToken(st); const cur = statusOf(statusMenu.site) === st;
@@ -1275,6 +1309,45 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 </button>
               );
             })}
+            {/* Share with team (owner only; needs at least one team) */}
+            {myTeams.length > 0 && (() => {
+              const s = statusMenu.site;
+              const owned = !s.ownerId || s.ownerId === myUid;
+              if (!owned) return (
+                <>
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+                  <div style={{ fontSize: 11, color: PAL.muted, padding: "6px 12px" }}>Shared by a teammate</div>
+                </>
+              );
+              return (
+                <>
+                  <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
+                  <div style={{ fontSize: 10, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, padding: "4px 12px 2px" }}>Share with team</div>
+                  {myTeams.map((tm) => {
+                    const on = s.teamId === tm.id;
+                    return (
+                      <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                          background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
+                        <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
+                          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="6" r="2.4" /><circle cx="11" cy="6.6" r="1.9" /><path d="M1.6 13c0-2.1 1.7-3.4 3.9-3.4S9.4 10.9 9.4 13z" /><path d="M9.7 9.8c1.9.1 3.3 1.2 3.3 3.2h-2.2c0-1.2-.4-2.3-1.1-3.2z" /></svg>
+                        </span>
+                        <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tm.name}</span>
+                        {on && <span style={{ color: PAL.accent, fontWeight: 800 }}>✓</span>}
+                      </button>
+                    );
+                  })}
+                  {s.teamId && (
+                    <button disabled={shareBusy} onClick={() => doShare(s, null)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                        background: "transparent", color: PAL.muted, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
+                      <span style={{ width: 15, flex: "none" }} />
+                      <span style={{ flex: 1 }}>Make private</span>
+                    </button>
+                  )}
+                </>
+              );
+            })()}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "4px 0" }} />
             <button onClick={() => { const s = statusMenu.site; setStatusMenu(null); setConfirmDel(s); }}
               title="Delete this project and all its plans"
