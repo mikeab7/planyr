@@ -22,6 +22,34 @@ import {
 
 export { JURISDICTION_LAYERS };
 
+/* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
+ * (B439)? Default ON; an explicit VITE_GIS_PROXY=0/false/off is the kill switch. Safe to leave
+ * on everywhere: the proxy fails open (302 → agency) and the client also one-shot falls back to
+ * the direct agency URL if the proxy isn't serving (e.g. not deployed), so a layer always renders
+ * — caching is a pure enhancement on top. */
+function gisProxyEnabled() {
+  try {
+    const v = import.meta.env && import.meta.env.VITE_GIS_PROXY;
+    return v !== "0" && v !== "false" && v !== "off";
+  } catch (_) { return true; }
+}
+
+/* Best-effort "as of Xm ago" age for a proxied raster layer: read the image's current proxy
+ * export URL, ask the proxy's ?meta=1 sidecar how old the cached copy is, and surface it through
+ * the same onStatus {ts, stale} channel the panel already renders. Never throws; if the proxy
+ * isn't serving or internals are unavailable, the layer just shows no age (no regression). */
+function reportCacheAge(lyr, k, onStatus) {
+  try {
+    const u = lyr && lyr._currentImage && lyr._currentImage._url;
+    if (!u || u.indexOf("/api/gis-cache/") === -1) return;
+    const metaUrl = u + (u.indexOf("?") === -1 ? "?" : "&") + "meta=1";
+    fetch(metaUrl)
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((m) => { if (m && m.cached && typeof m.ts === "number") onStatus && onStatus(k, "loaded", null, { ts: m.ts, stale: !!m.stale }); })
+      .catch(() => {});
+  } catch (_) { /* age is optional */ }
+}
+
 export const STATEWIDE = {
   fema: {
     label: "FEMA flood zones",
@@ -372,32 +400,51 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           if (!ok && !unreachable) return fail(k, cfg, `${cfg.label}: ${error}`);
           if (!map || !map._loaded) { refs[k] = null; return; } // map torn down mid-probe — don't addTo a dead map (B55)
           let lyr;
-          if (cfg.kind === "esriImage") {
-            lyr = EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane));
-          } else if (cfg.kind === "esriFeature") {
+          if (cfg.kind === "esriFeature") {
             lyr = EL.featureLayer(featureLayerOptions(cfg, st.opacity, pane));
             lyr.setOpacity = (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
-          } else {
-            lyr = EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane));
-          }
-          if (cfg.kind === "esriFeature") {
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.
             attachFeatureRetry(lyr, k, cfg, onStatus);
+            if (lyr.setOpacity) lyr.setOpacity(st.opacity);
+            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
           } else {
-            // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a
-            // CORS-blocked metadata fetch while the f=image export still renders via a
-            // CORS-exempt <img>. Surface a quiet per-layer status, but DON'T drop the layer
-            // or fire the alarming toast; the 'load' event flips it back to "loaded" if the
-            // image lands. (esri's own requesterror text wrongly fingers "CORS"/"could not
-            // parse JSON" even when the real cause is the agency host being down — so we say
-            // something plain + honest; this message only persists for a genuinely-down one.)
-            lyr.on("requesterror", () => onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`));
-            lyr.on("load", () => onStatus && onStatus(k, "loaded"));
+            // Raster export-image layer (FEMA/wetlands/utilities). Route it through the B439
+            // cache proxy by default; build a direct-to-agency layer as the fallback.
+            const useProxy = gisProxyEnabled();
+            const buildRaster = (proxy) => (cfg.kind === "esriImage"
+              ? EL.imageMapLayer(imageLayerOptions(cfg, st.opacity, pane, { proxy }))
+              : EL.dynamicMapLayer(dynamicLayerOptions(cfg, st.opacity, pane, { proxy })));
+            const wireRaster = (l, proxy) => {
+              let fellBack = false;
+              // 'load' = the export <img> landed → loaded; ask the proxy how old the copy is.
+              l.on("load", () => { onStatus && onStatus(k, "loaded"); if (proxy) reportCacheAge(l, k, onStatus); });
+              // A requesterror on an image/dynamic layer is often a NON-fatal hiccup — e.g. a
+              // CORS-blocked metadata fetch while the f=image export still renders via a
+              // CORS-exempt <img>. If we're on the proxy and it isn't serving here (e.g. not
+              // deployed), fall back ONCE to the direct agency URL — harmless (= prior behavior),
+              // and the cache simply doesn't apply in that environment. Otherwise surface a quiet
+              // per-layer status without dropping the layer (esri's own text wrongly fingers
+              // "CORS"/"could not parse JSON" even when the host is just down — so we stay plain).
+              l.on("requesterror", () => {
+                if (proxy && !fellBack && refs[k] === l) {
+                  fellBack = true;
+                  try { map.removeLayer(l); } catch (_) {}
+                  const direct = buildRaster(false);
+                  wireRaster(direct, false);
+                  if (direct.setOpacity) direct.setOpacity(st.opacity);
+                  direct.addTo(map); refs[k] = direct; onStatus && onStatus(k, "loaded");
+                  return;
+                }
+                onStatus && onStatus(k, "failed", `${cfg.label}: the map service is not responding — it may be temporarily unavailable (screening only).`);
+              });
+            };
+            lyr = buildRaster(useProxy);
+            wireRaster(lyr, useProxy);
+            if (lyr.setOpacity) lyr.setOpacity(st.opacity);
+            lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
           }
-          if (lyr.setOpacity) lyr.setOpacity(st.opacity);
-          lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
         }).catch((e) => { if (refs[k] === "pending") fail(k, cfg, `${cfg.label}: ${(e && e.message) || "probe failed"}`); }); // don't leak an unhandled rejection (B55)
       }
     } else if (!st.on && cur) {
