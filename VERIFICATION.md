@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V125 — B429: Arc, Dimension, Pen, Highlight, Eraser, Snapshot tools in DocReview ✅ build + lint + 1390 tests green; ⏳ signed-in draw round-trip
+- **What changed.** Six new tools added to DocReview tool rail and drawing engine: Arc (3-point quadratic Bézier), Dimension (line + witness ticks + calibrated label), Pen (freehand stroke), Highlight (wide translucent freehand), Eraser (drag-box removes Pen/Highlight only), Snapshot (dashed region + camera emoji). `TOOL_DEFAULTS` stamps Highlight with yellow + high opacity. `eraseInBox` prunes freehand markups by point intersection. All render via `MarkupRenderer.jsx`.
+- **Why ⏳.** Tool rail only renders when a PDF is open; logged-out smoke confirms no JS crash but cannot exercise drawing. Arrow = arrowhead toggle on Line (property panel, already testable in V124).
+- **Steps / Expect.** Sign in → Review → drop PDF → arm **Arc** → click 2 pts → click a 3rd pt on the curve → arc commits automatically. Arm **Dimension** → drag end-to-end → line with witness ticks + length label appears. Arm **Pen** → press-drag a freehand path → releases and commits a stroke. Arm **Highlight** → sweep across text → wide translucent yellow stroke. Arm **Eraser** → drag box over a Pen stroke → stroke removed, other markups untouched. Arm **Snapshot** → drag a box → dashed rect with camera icon commits. Cadence: once. Last checked: —.
+
 ### V124 — B428: arrowheads, text props (italic/underline/align), polylength tool ✅ build + lint clean; ⏳ one signed-in draw round-trip
 - **What changed.** `MarkupRenderer.jsx` now renders inline arrowhead triangles on `line`/`polyline` when `arrowStart`/`arrowEnd` properties are set. Text rendering wired for `italic`, `underline`, `align` (left/center/right). Polylength tool added to DocReview tool rail (zig-zag icon, multi-click path, measures total run length).
 - **Why ⏳.** Tool rail only renders when a PDF is loaded; logged-out smoke confirms no JS crash but cannot exercise drawing.

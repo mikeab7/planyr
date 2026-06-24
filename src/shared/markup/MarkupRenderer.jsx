@@ -22,7 +22,8 @@ const DEF_STROKE   = "#c2410c";   // annotation default (matches matrix PROPERTY
 const MEAS_STROKE  = "#0e7490";   // measure overlay stroke (teal)
 const SEL_STROKE   = "var(--accent)";
 
-const MEASURE_KINDS = new Set(["distance", "polylength", "perimeter", "area", "count"]);
+// dimension has measureOutput="length" and shows an inline length label (like distance but with ticks)
+const MEASURE_KINDS = new Set(["distance", "polylength", "perimeter", "area", "count", "dimension"]);
 
 /* Scalloped "cloud" path — shared with DocReview's cloudPath (same algorithm, module-local). */
 function cloudPath(x, y, w, h, r = 9) {
@@ -204,6 +205,73 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
     return <polygon points={dd}
       fill={p.fill} fillOpacity={p.fillOpacity}
       stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} opacity={p.opacity} />;
+  }
+
+  if (m.kind === "arc") {
+    const a = pts[0], b = pts[1], c = pts[2]; if (!a || !b) return null;
+    // Three-point arc: quadratic bezier through the control point c (or straight fallback)
+    if (!c) return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} opacity={p.opacity} />;
+    const ctrl = { x: 2 * c.x - (a.x + b.x) / 2, y: 2 * c.y - (a.y + b.y) / 2 };
+    const aStart = readProp(m, "arrowStart"), aEnd = readProp(m, "arrowEnd");
+    return (
+      <g opacity={p.opacity}>
+        <path d={`M ${a.x} ${a.y} Q ${ctrl.x} ${ctrl.y} ${b.x} ${b.y}`}
+          fill="none" stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+        {aEnd   && <Arrowhead from={ctrl} to={b} color={p.stroke} />}
+        {aStart && <Arrowhead from={ctrl} to={a} color={p.stroke} />}
+      </g>
+    );
+  }
+
+  if (m.kind === "dimension") {
+    const a = pts[0], b = pts[1]; if (!a || !b) return null;
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    if (len < 1) return null;
+    const ux = dx / len, uy = dy / len; // unit vector along dimension line
+    const tick = 7;                      // witness tick half-length (screen px already scaled)
+    const fs = Math.max(6, (readProp(m, "fontSize") || 11) * scale / 16);
+    const fc = readProp(m, "fontColor") || p.stroke;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return (
+      <g opacity={p.opacity}>
+        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+        <line x1={a.x - uy * tick} y1={a.y + ux * tick} x2={a.x + uy * tick} y2={a.y - ux * tick} stroke={p.stroke} strokeWidth={p.strokeWidth} />
+        <line x1={b.x - uy * tick} y1={b.y + ux * tick} x2={b.x + uy * tick} y2={b.y - ux * tick} stroke={p.stroke} strokeWidth={p.strokeWidth} />
+        {lbl && (
+          <text x={mid.x - uy * (fs + 3)} y={mid.y + ux * (fs + 3)} fontSize={fs} fontWeight="700" fill={fc}
+            textAnchor="middle" pointerEvents="none"
+            style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 3 }}>{lbl}</text>
+        )}
+      </g>
+    );
+  }
+
+  if (m.kind === "pen" || m.kind === "highlight") {
+    if (pts.length < 2) return null;
+    const d = "M " + pts.map((q) => `${q.x},${q.y}`).join(" L ");
+    const isHL = m.kind === "highlight";
+    const sw = isHL ? Math.max(8, (readProp(m, "strokeWidth") || 12)) : p.strokeWidth;
+    const op = isHL ? Math.min(0.5, p.opacity || 0.35) : p.opacity;
+    return <path d={d} fill="none" stroke={p.stroke} strokeWidth={sw}
+      strokeLinecap="round" strokeLinejoin="round" opacity={op} />;
+  }
+
+  if (m.kind === "snapshot") {
+    const a = pts[0], b = pts[1]; if (!a || !b) return null;
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+    const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+    const camSize = Math.min(20, h * 0.4, w * 0.4);
+    return (
+      <g opacity={p.opacity}>
+        <rect x={x} y={y} width={w} height={h}
+          fill={p.fill !== "none" ? p.fill : "none"} fillOpacity={p.fillOpacity}
+          stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray || "6 3"} />
+        {camSize >= 8 && (
+          <text x={x + w / 2} y={y + h / 2 + camSize * 0.35} fontSize={camSize}
+            textAnchor="middle" fill={p.stroke} opacity={0.45} pointerEvents="none">📷</text>
+        )}
+      </g>
+    );
   }
 
   if (m.kind === "text") {

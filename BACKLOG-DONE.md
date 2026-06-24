@@ -1,5 +1,20 @@
 ## ✅ Done
 
+### B429 — New tools: Arc, Dimension, Pen, Highlight, Eraser, Snapshot `[Doc Review / Markup]` (feature) — NEW-6, part of the B423 umbrella  *(2026-06-24)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`). lint 0 · 1390 tests · build green. ⏳ signed-in draw round-trip → V125.**
+- **6 new tools** added to DocReview tool rail and wired end-to-end:
+  - **Arc** (`multiPoint`): click start → click end → click a point on the curve; auto-commits on 3rd `onDown`. Renders as a quadratic Bézier (`Q ctrl`) where ctrl = 2·p3 − (p1+p2)/2. Live preview during first two points.
+  - **Dimension** (`twoPoint`): drag end-to-end; renders line + two perpendicular witness ticks (±7 px) + a centred calibrated length label. Added to `MEASURE_KINDS` in MarkupRenderer so it gets the label from `measureLabel`.
+  - **Pen** (`freehand`): pointer-capture press-drag; accumulates pts on `onMove`, commits on `onUp` (min 2 pts). Renders as a stroked open polyline.
+  - **Highlight** (`freehand`): identical gesture to Pen. `TOOL_DEFAULTS` forces `stroke:#fbbf24`, `strokeWidth:12`, `opacity:0.35` (clamped to ≤0.5 in renderer so it stays translucent even if the user overrides).
+  - **Eraser** (`region`): drag a rubber-band box; `eraseInBox` removes any `pen`/`highlight` markup whose pts intersect the box — never touches other kinds. Hit-test treated as rect-interior so a partly-drawn eraser box shows a live rectangle.
+  - **Snapshot** (`region`): drag a box; commits a `snapshot` markup. Renders as a dashed rect + a camera emoji at the centroid.
+- **Arrow** = arrowhead toggle on Line (already in `arrowStart`/`arrowEnd` property column via B428 matrix — no standalone rail button needed per locked owner decision).
+- **Classification sets** (`TWOPOINT`/`MULTIPOINT`/`FREEHAND`/`REGION`) extended to include all new tools; pointer handlers dispatched through them uniformly.
+- **`TOOL_DEFAULTS`** map provides per-tool style overrides between `propStyle` (user sticky) and column defaults; currently used for Highlight.
+- **`MarkupRenderer.jsx`** extended: arc (quadratic bezier, optional arrowheads), dimension (line + ticks + label), pen (stroked polyline), highlight (wide translucent path), snapshot (dashed rect + emoji).
+- **`verify-b429.mjs`** headless smoke: Review tab loads, no JS crash. Tool buttons not visible logged-out (tool rail only shows when a PDF is loaded) → ⏳ V125.
+
 ### B430 — Count as a first-class measure in the Site Planner `[Site Planner / Measures]` (feature) — NEW-7, part of the B423 umbrella  *(2026-06-24; commit 285836b)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 285836b). lint 0 · 1390 tests · build green · 15/15 headless checks.**
 - `["count", "Count"]` added to `MEASURE_MODES`; appears in the Measure ▾ dropdown alongside Length/Polylength/Area.
