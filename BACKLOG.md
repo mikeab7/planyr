@@ -44,38 +44,15 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      Deduped: B433 is the residual of B365 (not a re-file); B434 replaces B161's shape (progress kept).
      lint 0 errors · 1335 tests · build green. -->
 
-<!-- 2026-06-24: owner-dropped pair "NEW-1/NEW-2" (rename/delete projects from the breadcrumb switcher +
-     extend the Schedule iframe bridge for it). Highest B# across both files was B438, so minted
-     **B439** (NEW-1) + **B440** (NEW-2). Grounded against the code before filing — all anchors confirmed:
-     `src/shared/ui/ProjectBreadcrumb.jsx` exists with a controlled/uncontrolled split; `renameSiteGroup`
-     lives at `site-planner/lib/storage.js:463` (rewrites `site` on every plan in the group via
-     `loadPlansOfGroup`); `src/shared/projects/projects.js` exists; `Scheduler.jsx` posts
-     `planar:nav-select`/`nav-dashboard`/`nav-new` and the embedded `public/sequence/index.html` handles
-     them + emits `planar:nav-state`. NET-NEW (no `deleteSiteGroup`, no `nav-rename`/`nav-delete` yet).
-     Deduped: distinct from **B158** (Open) — that replaces the inline ✕ on the YOUR SITES *sidebar list
-     rows*; these act on the *breadcrumb project switcher dropdown* (a different component) and a "project"
-     here is a Site-group, not a single site row. B440 depends on B439. -->
-
-### B439 — Rename / delete projects from the breadcrumb switcher (right-click + kebab) `[Header-Nav / Site Planner]` (feature)  *(owner-dropped 2026-06-24 as "NEW-1"; minted **B439** = highest B# across both files (B438) + 1)*
-`[ ]` Add per-row **Rename** and **Delete** to the project switcher dropdown in `src/shared/ui/ProjectBreadcrumb.jsx`, working in both **uncontrolled** mode (Site Planner + Markup, backed by the Site store) and as the **prop surface** B440 plugs the Schedule bridge into.
-- **WHAT:** Right-clicking a project row — **and** a hover-revealed kebab `⋯` on the row (right-click is invisible and dead on touch, so both open the *same* menu) — opens a small menu: **Rename**, **Delete**. Rename edits the row label **in place** (Enter commits, Esc cancels, blur commits; trim; reject empty/whitespace-only → keep the prior name). Delete shows a **confirm step** before acting (destructive).
-- **HOW:**
-  - New optional props `onRenameProject(id, newName)` and `onDeleteProject(id)`. Mirror the existing controlled/uncontrolled split: when the props are omitted (uncontrolled = Site/Markup), the component calls the store directly and `refresh()`s — exactly how it already falls back to `listProjects()` when `projects` is omitted.
-  - Store wiring in `site-planner/lib/storage.js` surfaced through `src/shared/projects/projects.js`: expose `renameProject(id, name)` as a thin wrapper over the existing `renameSiteGroup(groupId, site)`. Add a new `deleteSiteGroup(groupId)` — loop `loadPlansOfGroup(groupId)`, remove each from the local store and `cloudDelete` each in the cloud cache. The active store is localStorage-primary, cloud is the fire-and-forget mirror.
-  - The context menu must be a **second portal layer** at document root (project rule — z-index stacking traps) nested above the existing `AnchoredMenu`. **Critical gotcha:** a click inside the context menu must **not** register as an outside-click that closes the parent dropdown — exclude the context-menu node from the parent's outside-click handler.
-- **Edge cases / gotchas:**
-  - **Silent failure = crash-severity (standing rule).** RLS DELETE can match zero rows and still return success — `deleteSiteGroup` must verify the deleted row count and surface a real error on a zero-match, never a false "deleted." Same for a rename that fails to persist.
-  - **Deleting the current/active project:** after a successful delete of the project that's currently open, route to the all-projects view (`onDashboard`) — the open project no longer exists.
-  - **Rename must update both surfaces:** the active project name renders in the crumb itself *and* in its row (the known B191 duplication). Refresh both.
-  - **Multi-tab:** the uncontrolled list already refreshes on the `planarfit:sites` storage event, so another tab's rename/delete propagates for free — keep that.
-
-### B440 — Extend the Schedule iframe bridge for rename / delete `[Scheduler / Header-Nav]` (feature) — depends on B439  *(owner-dropped 2026-06-24 as "NEW-2"; minted **B440**)*
-`[ ]` Make rename/delete work in the **Schedule** module's picker, which is the postMessage bridge (B203), **not** the Site store.
-- **WHAT:** The B439 menu actions, when the breadcrumb is in **controlled (Schedule)** mode, drive the embedded scheduler's own `hs-v1` record instead of the Site store.
-- **HOW:**
-  - `src/workspaces/scheduler/Scheduler.jsx`: pass `onRenameProject={(id, name) => post({ type: "planar:nav-rename", id, name })}` and `onDeleteProject={(id) => post({ type: "planar:nav-delete", id })}`, alongside the existing `nav-select`/`nav-dashboard`/`nav-new` commands.
-  - `public/sequence/index.html` (the embedded app): handle `planar:nav-rename` / `planar:nav-delete` on its own project record, then re-emit `planar:nav-state` so the breadcrumb updates. **Verify first:** the `Scheduler.jsx` header comment claims `nav-state` already re-emits "on every project add/rename/delete/switch," which implies the sequence app already has internal rename/delete to reuse — if so this is just command plumbing; if not, the in-app rename/delete on the `hs-v1` record is the bulk of this item. **Flag the correction if the code contradicts the comment.**
-  - Apply the same "deleting the active project routes home" behavior — here that's the scheduler's Dashboard (reports) section.
+<!-- 2026-06-24: B439 (rename/delete from the breadcrumb switcher) + B440 (the Schedule iframe-bridge
+     half) were filed AND built + verified the SAME session per STANDING RULE #1 — full [x] blocks live
+     in BACKLOG-DONE.md (branch `claude/beautiful-archimedes-0qjr3w`). Site (uncontrolled) path proven
+     headless 7/7 (`ui-audit/verify-b439-b440-project-manage.mjs`) + 4 store unit tests; the Schedule
+     (controlled/bridge) path is symmetric command-plumbing reusing the embedded app's existing
+     renameProject/deleteProject — it can't boot headless in the offline sandbox (CDN + its own backend
+     blocked), so it's logged for a signed-in live check in VERIFICATION.md. The brief's "verify first"
+     was confirmed: the embedded scheduler ALREADY had internal renameProject/deleteProject, so B440 was
+     just plumbing (+ a skipConfirm flag so the breadcrumb's inline confirm doesn't double-prompt). -->
 
 ### B423 — Shared markup/measure tool engine + Bluebeam-parity refinement loop `[Site Planner + Doc Review / Markup]` (umbrella)  *(owner-dropped 2026-06-23 as the "Shared Markup/Measure Tool Engine" brief; first minted B421 but RENUMBERED to **B423** on merge-in of main — the concurrent PR #320 had already taken B421 (Arrange) + B422 (Layers); B423 = highest real B# across both files (B422) + 1; plan — `/root/.claude/plans/planyr-shared-tidy-avalanche.md`)*
 One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (and the Stitcher) consume, bringing every tool to Bluebeam-equivalent behavior, plus a committed machine-checkable tool×property matrix + an automated tester so future tool work converges on its own. The brief's "NEW-#" are scratch labels; real filed IDs are B424+. Owner decisions locked: tools RIGHT / properties LEFT in both; Arrow = an arrowhead toggle on Line; verifier = the full cloud rig (B278/B280/B281) built first. Sub-items, in dependency order:
