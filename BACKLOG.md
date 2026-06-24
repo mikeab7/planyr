@@ -49,6 +49,17 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
   2. **Owner's on-device localStorage / IndexedDB scan** (`planarfit:sites:cloud:<uid>`, `planarfit:sites:history:v1`) on the machine where the buildings were drawn — the autosave mirror or the local version-history ring may still hold them. NOTE: B456 fixed the "0 buildings" label that made the history rows *look* empty, so re-check Version History in the app first.
 - **Close as recovered or unrecoverable once those run.** No action for Michael beyond the on-device scan (step 2); Cowork drives step 1.
 
+<!-- 2026-06-24: owner-reported (screenshot) — the Site-plan overlay panel "does not allow anything to
+     actually be dropped in, should work like enterprise software". Highest real B# across both files was
+     B444, so minted **B445**. Per STANDING RULE #1 filed AND fixed + headless-verified
+     (V131, `ui-audit/verify-overlay-dnd.mjs`, 7/7) + shipped the SAME session on branch
+     `claude/hopeful-turing-1x24sg` — full [x] block lives in BACKLOG-DONE.md.
+       • B445 — the canvas already had a working onDrop→addOverlayFile, but no drag affordance + the left
+         panel (where the cursor goes) wasn't a drop target + the browser default swallowed off-target
+         drops. Fix = panel is now a dashed-border dropzone w/ hover highlight, a full-canvas "drop to
+         place" hint during a drag, and a window-level guard against the browser opening the dropped PDF.
+         Reused `addOverlayFile` + the Doc-Review FileBrowser dropzone pattern; theme tokens only.
+     lint 0 errors · 1425 tests · build green. -->
 <!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" — the Document Review open/switch state &
      feedback bugs (drop gives no signal · switching files loses state · backdrop vanishes mid-upload).
      Highest real B# across both files was B445, so minted **B446 / B447 / B448**. Per STANDING RULE #1

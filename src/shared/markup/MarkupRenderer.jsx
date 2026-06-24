@@ -276,6 +276,41 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
     );
   }
 
+  if (m.kind === "callout") {
+    const tip = pts[0], box = pts[1];
+    if (!tip) return null;
+    const anchor = box || tip;
+    const text = m.text || "";
+    const fs        = Math.max(6, (readProp(m, "fontSize") || 14) * scale / 16);
+    const fc        = readProp(m, "fontColor") || "#1a1a1a";
+    const fw        = readProp(m, "bold")      ? 700 : 400;
+    const fi        = readProp(m, "italic")    ? "italic" : "normal";
+    const fd        = readProp(m, "underline") ? "underline" : "none";
+    const bgFill    = p.fill !== "none" ? p.fill : "#fff";
+    const bgOpacity = p.fillOpacity > 0 ? p.fillOpacity : 1;
+    const pad = 4;
+    const textW = Math.max(60, text.length * fs * 0.58 + pad * 2 + 4);
+    const textH = fs + pad * 2;
+    const leaderX = anchor.x;
+    const leaderY = anchor.y + textH / 2;
+    return (
+      <g opacity={p.opacity}>
+        {box && (
+          <>
+            <line x1={leaderX} y1={leaderY} x2={tip.x} y2={tip.y}
+              stroke={p.stroke} strokeWidth={p.strokeWidth} strokeDasharray={p.dashArray} />
+            <Arrowhead from={{ x: leaderX, y: leaderY }} to={tip} color={p.stroke} />
+          </>
+        )}
+        <rect x={anchor.x} y={anchor.y} width={textW} height={textH}
+          fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1} rx={3} />
+        <text x={anchor.x + pad + 2} y={anchor.y + fs + pad / 2}
+          fontSize={fs} fill={fc} fontWeight={fw} fontStyle={fi} textDecoration={fd}
+          pointerEvents="none">{text}</text>
+      </g>
+    );
+  }
+
   if (m.kind === "text") {
     const q = pts[0]; if (!q) return null;
     const text = m.text || "";

@@ -224,11 +224,6 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
-  // Per-row rename/delete in the switcher (B439) — optional; passed straight through to the
-  // breadcrumb. Controlled callers (Schedule) wire them to their bridge; omitting them lets the
-  // uncontrolled breadcrumb fall back to the site store.
-  onRenameProject,
-  onDeleteProject,
   saveState,
   // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
   // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
@@ -241,6 +236,11 @@ export default function AppHeader({
   homeLabel,
   // Cross-project mode (Work Item A) — the breadcrumb reads "All projects" when on.
   cross = false,
+  // Rename / delete project actions (B439/B440). When omitted the breadcrumb uses the
+  // uncontrolled Site-store path. When provided (Schedule bridge) the breadcrumb
+  // posts the command to the embedded app instead.
+  onRenameProject,
+  onDeleteProject,
   // Whether a real account is signed in. The same-project-in-another-tab warning
   // (B313) only applies to signed-in accounts: a logged-out, device-only session
   // starts fresh and should never see the cross-tab conflict banner — it protects

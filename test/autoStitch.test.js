@@ -23,6 +23,46 @@ describe("buildAdjacency — seam graph from match-line targets", () => {
     expect(adj.get("a")).toMatchObject([{ side: "right", otherSide: "left" }]);
     expect(adj.get("b")).toMatchObject([{ side: "left", otherSide: "right" }]);
   });
+
+  // B413 — a SCANNED set's OCR-recovered labels reference by SEQUENCE ("MATCH LINE ~ SHEET 2"),
+  // not by sheet code. "SHEET 2" must resolve to the 2nd group member even though its code is "C-3".
+  it("resolves a bare-numeric (sequence) target to the Nth group member", () => {
+    // C-2 (bottom edge) → "SHEET 2" = the 2nd sheet = C-3; C-3 → "SHEET 1" = C-2.
+    const a = sheet("a", "C-2", [{ target: "2", side: "bottom" }]);
+    const b = sheet("b", "C-3", [{ target: "1", side: "top" }]);
+    const adj = buildAdjacency([a, b]);
+    expect(adj.get("a")).toMatchObject([{ other: b, side: "bottom", otherSide: "top" }]);
+    expect(adj.get("b")).toMatchObject([{ other: a, side: "top", otherSide: "bottom" }]);
+  });
+
+  it("sequence fallback never fires when the target matches a real sheet code", () => {
+    // Code lookup wins: "C-2" resolves to the sheet numbered C-2, NOT the 2nd member by index.
+    const a = sheet("a", "C-2", [{ target: "C-3", side: "right" }]);
+    const b = sheet("b", "C-3", [{ target: "C-2", side: "left" }]);
+    const c = sheet("c", "C-4", []);
+    const adj = buildAdjacency([a, b, c]);
+    // a links to b (code C-3), the actual 2nd member — coincidentally — but via CODE, and c is untouched.
+    expect(adj.get("a")).toMatchObject([{ other: b, side: "right", otherSide: "left" }]);
+    expect(adj.get("c")).toEqual([]);
+  });
+
+  it("ignores a sequence target that is out of range (no phantom edge)", () => {
+    const a = sheet("a", "C-2", [{ target: "9", side: "right" }]); // only 2 sheets → index 9 invalid
+    const b = sheet("b", "C-3", []);
+    const adj = buildAdjacency([a, b]);
+    expect(adj.get("a")).toEqual([]);
+    expect(adj.get("b")).toEqual([]);
+  });
+
+  it("auto-places a scanned L-pair from sequence-referenced labels", () => {
+    // C-2 over C-3 (C-2's bottom seam → SHEET 2). Codes are non-sequential vs. index on purpose.
+    const a = sheet("a", "C-2", [{ target: "2", side: "bottom" }]);
+    const b = sheet("b", "C-3", [{ target: "1", side: "top" }]);
+    const { ok, placed, unplaced } = autoPlaceGroup([a, b]);
+    expect(ok).toBe(true);
+    expect(placed).toEqual(expect.arrayContaining(["a", "b"]));
+    expect(unplaced).toEqual([]);
+  });
 });
 
 describe("autoPlaceGroup — place sheets from their seams via solveM (B337)", () => {
