@@ -27,7 +27,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Sign-in now happens ONCE in the setup project (storageState reuse), so the test phase is
+  // safe to parallelize — the per-tool specs only read the seeded account + arm tools client-
+  // side (no server writes to race). This is the bulk of the 31 min → ~few min speed-up.
+  workers: process.env.CI ? 4 : undefined,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   timeout: 30_000,
   expect: { timeout: 10_000 },
@@ -39,11 +42,22 @@ export default defineConfig({
   },
   projects: [
     {
+      // Signs in once and writes e2e/.auth/user.json; the main project depends on it.
+      name: "setup",
+      testMatch: /auth\.setup\.js/,
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"] },
+      },
+    },
+    {
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: { args: ["--no-sandbox", "--ignore-certificate-errors"] },
       },
+      // setup runs first (one sign-in). A skipped setup (no seeded account) doesn't block this.
+      dependencies: ["setup"],
     },
   ],
   // Local-only: build once and serve the static preview. Skipped when BASE_URL targets a deploy.

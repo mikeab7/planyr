@@ -12,12 +12,8 @@
  * emits one test per matrix row and upgrades to a live assertion automatically once B280's
  * fixture account can open a PDF. */
 import { test, expect } from "@playwright/test";
-import { signIn, openModule, hasAccount } from "./helpers.js";
-import {
-  TOOL_MATRIX,
-  toolsForWorkspace,
-  propsForTool,
-} from "../src/shared/markup/tools.matrix.js";
+import { openModule, hasAccount, STORAGE_STATE } from "./helpers.js";
+import { toolsForWorkspace, propsForTool } from "../src/shared/markup/tools.matrix.js";
 import { schemaForMarkup } from "../src/shared/markup/propertySchema.js";
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -44,9 +40,15 @@ test.describe("matrix ↔ propertySchema conformance (no auth needed)", () => {
 test.describe("markup tools (signed in)", () => {
   test.skip(!hasAccount, "set E2E_EMAIL / E2E_PASSWORD (B280 seeded account) to run");
 
+  // Reuse the session captured once by auth.setup.js instead of re-signing-in per test — the
+  // single biggest cost in this suite. Each test loads an already-authenticated page.
+  test.use({ storageState: hasAccount ? STORAGE_STATE : undefined });
+
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await signIn(page);
+    // The restored session should land us signed in — the module tabs only render in the
+    // authed shell. This replaces the full interactive sign-in.
+    await expect(page.getByTestId("module-tab-site-planner")).toBeVisible({ timeout: 20_000 });
   });
 
   test("the Review workspace mounts", async ({ page }) => {
