@@ -157,27 +157,63 @@ const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
 const valid = (y, m, d) => y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
 const y4 = (y) => (y < 100 ? (y > 70 ? 1900 + y : 2000 + y) : y);
 
-/* Every date we can find on the sheet, as ISO strings. Drawings carry several (drawn, checked,
- * each revision); the latest is the issue/revision date — exactly the owner's "search all dates
- * and date itself". Handles 06/30/2025, 2025-06-30, 6.30.25, and "June 30, 2025". */
-export function findDates(text) {
+/* Every date we can find on the sheet, with its character offset, as { iso, index }. Drawings carry
+ * several (drawn, checked, each revision); the issue/revision date is the one we want. Handles
+ * 06/30/2025, 2025-06-30, 6.30.25, and "June 30, 2025". */
+function findDatesPos(text) {
   const s = (text || "").toString();
   const out = [];
   let m;
   // Same-separator (\2 backreference) so a mixed-punctuation dimension can't masquerade as a date —
   // e.g. "5-29/32" (5 and 29/32") used to parse as 2032-05-29 and poison "latest date". (B360)
   const num = /\b(\d{1,2})([\/.\-])(\d{1,2})\2(\d{2,4})\b/g;             // MM/DD/YYYY or MM.DD.YY
-  while ((m = num.exec(s))) { const mo = +m[1], d = +m[3], y = y4(+m[4]); if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
+  while ((m = num.exec(s))) { const mo = +m[1], d = +m[3], y = y4(+m[4]); if (valid(y, mo, d)) out.push({ iso: iso(y, mo, d), index: m.index }); }
   const ymd = /\b(\d{4})([\/.\-])(\d{1,2})\2(\d{1,2})\b/g;              // YYYY-MM-DD
-  while ((m = ymd.exec(s))) { const y = +m[1], mo = +m[3], d = +m[4]; if (valid(y, mo, d)) out.push(iso(y, mo, d)); }
+  while ((m = ymd.exec(s))) { const y = +m[1], mo = +m[3], d = +m[4]; if (valid(y, mo, d)) out.push({ iso: iso(y, mo, d), index: m.index }); }
   const txt = /\b([a-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})\b/gi;          // June 30, 2025
-  while ((m = txt.exec(s))) { const mo = MONTHS[m[1].slice(0, 3).toLowerCase()], d = +m[2], y = +m[3]; if (mo && valid(y, mo, d)) out.push(iso(y, mo, d)); }
+  while ((m = txt.exec(s))) { const mo = MONTHS[m[1].slice(0, 3).toLowerCase()], d = +m[2], y = +m[3]; if (mo && valid(y, mo, d)) out.push({ iso: iso(y, mo, d), index: m.index }); }
   const dtxt = /\b(\d{1,2})\s+([a-z]{3,9})\.?\s+(\d{4})\b/gi;           // 30 June 2025
-  while ((m = dtxt.exec(s))) { const d = +m[1], mo = MONTHS[m[2].slice(0, 3).toLowerCase()], y = +m[3]; if (mo && valid(y, mo, d)) out.push(iso(y, mo, d)); }
-  return [...new Set(out)];
+  while ((m = dtxt.exec(s))) { const d = +m[1], mo = MONTHS[m[2].slice(0, 3).toLowerCase()], y = +m[3]; if (mo && valid(y, mo, d)) out.push({ iso: iso(y, mo, d), index: m.index }); }
+  return out;
 }
 
-// The newest date on the sheet (the issue/revision date), ISO, or "" if none readable.
+/* Every date we can find on the sheet, as unique ISO strings (first-seen order). */
+export function findDates(text) {
+  return [...new Set(findDatesPos(text).map((d) => d.iso))];
+}
+
+// Issue/revision keywords whose NEARBY date is the current issue/revision date. Deliberately
+// EXCLUDES a bare "DATE" — in a title block "DATE: 04/07/2023" is usually the base/start date, the
+// very one the owner was wrongly getting (B411b); only an issue/rev label promotes a date.
+const ISSUE_LABEL = /\b(?:IFC|IFP|IFB|IFA|ISSUE[D]?|RE-?ISSUE[D]?|REVISION|REV)\b/gi;
+// A title block / rev row reads label-then-date ("ISSUED FOR PERMIT: 09/17/2025"), so the date
+// FOLLOWS the label — a generous forward window. A small backward tolerance still catches a tight
+// columnar "09/17/2025 IFC" pair, while staying short enough that an unrelated notes date sitting
+// before the label isn't wrongly promoted (B411b — a stray "SEE 11/30/2026 … REV" must not count).
+const LABEL_FWD = 64, LABEL_BACK = 12;
+
+/* The document's issue/revision date (ISO), or "" if none readable. Prefers a date that follows an
+ * issue/revision label (IFC / ISSUED FOR … / REV) over a bare base date elsewhere on the sheet — so
+ * "DATE 04/07/2023 … REV 2 ISSUED FOR PERMIT 09/17/2025" reads 2025-09-17, not the older base date
+ * (B411b). Deliberately ignores a bare "DATE" label (that's usually the base/start date). Among
+ * label-adjacent dates the LATEST wins (revisions climb). With no labeled date it falls back to the
+ * newest date anywhere on the sheet (the prior behavior — no regression on single-date sheets). */
+export function issueDate(text) {
+  const dated = findDatesPos(text);
+  if (!dated.length) return "";
+  const s = (text || "").toString();
+  const labels = [];
+  let m; const re = new RegExp(ISSUE_LABEL.source, "gi");
+  while ((m = re.exec(s))) labels.push(m.index);
+  if (labels.length) {
+    const near = dated.filter((d) => labels.some((k) => { const off = d.index - k; return off >= -LABEL_BACK && off <= LABEL_FWD; }));
+    if (near.length) return near.map((d) => d.iso).sort().at(-1);
+  }
+  return dated.map((d) => d.iso).sort().at(-1);
+}
+
+// The newest date on the sheet, ISO, or "" if none readable. (Kept for callers that want pure
+// recency; the filing read uses issueDate, which prefers an issue/rev-labeled date — B411b.)
 export function latestDate(text) {
   const all = findDates(text);
   if (!all.length) return "";
@@ -233,7 +269,7 @@ export function readTitleBlockText(text) {
   const { discipline, item } = hasText ? classifyDiscipline(text, sheetNumber) : { discipline: "Other", item: "Document" };
   return {
     hasText,
-    date: hasText ? latestDate(text) : "",
+    date: hasText ? issueDate(text) : "",
     discipline, item,
     sheetNumber,
     revision: hasText ? parseRevision(text) : "",
