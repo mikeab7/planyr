@@ -33,6 +33,32 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
          place" hint during a drag, and a window-level guard against the browser opening the dropped PDF.
          Reused `addOverlayFile` + the Doc-Review FileBrowser dropzone pattern; theme tokens only.
      lint 0 errors · 1425 tests · build green. -->
+<!-- 2026-06-24: owner-dropped trio "NEW-1/NEW-2/NEW-3" — the Document Review open/switch state &
+     feedback bugs (drop gives no signal · switching files loses state · backdrop vanishes mid-upload).
+     Highest real B# across both files was B445, so minted **B446 / B447 / B448**. Per STANDING RULE #1
+     all three were filed AND fixed + verified the SAME session on branch `claude/vibrant-pascal-wkg50i`
+     — full [x] blocks live in BACKLOG-DONE.md.
+       • B446 (NEW-1) — a GAP in B294 (drop-over-open) + the docIntent/B405 open paths, NOT a duplicate:
+         B294 wired the drop handler but the "Opening…" text only rendered in the empty state, so the
+         drop-over-open and Files-panel/openReview paths showed no loading signal. Added a canvas-level
+         "Opening <name>…" overlay (data-testid="opening-overlay") driven by `busy`, set on EVERY entry
+         path (openFile / openReview / loadSingleReview). openErr/err now fire on every no-op/null/invalid
+         branch (null drop, non-PDF reject, loadReview→null) so an open is never silent. Headless V131
+         (`ui-audit/verify-open-feedback.mjs`, 6/6, logged out).
+       • B447 (NEW-2) — a GAP in B52 (load-supersede token) + the resume effect: B52 stops a late load
+         landing on the wrong review, but a switch never FLUSHED the outgoing review's pending write, and
+         openReview didn't reconcile with the local mirror — so the cancelled debounce left the last edit
+         only in localStorage and a switch-back loaded the stale cloud copy (the "forgets which file"
+         clobber). Fix: openReview `await saveNow()` (flush outgoing) THEN `reconcile(loadReview, readDraft)`
+         (incoming picks up its newer local mirror), exactly like resume. The lazy-mount resume effect was
+         confirmed to already stand down for an in-workspace switch (booted-once + projectId + bootDocIntent
+         guards). Auth-only (two saved cloud reviews) → signed-in live check logged V131.
+       • B448 (NEW-3) — net-new safety net under B447: a session byte cache (pure `lib/sessionBytes.js`,
+         5 unit tests) keyed by srcId holds the dropped File, so a switch/reload BEFORE the Drive/Supabase
+         upload resolves (source still keyless) re-opens the backdrop from memory instead of the re-drop
+         banner / a blank canvas. `fetchSourceBytes` checks the cache before classifySource/Drive/Supabase.
+         Logged-out render-from-cache verified V131; the keyless-mid-upload path's signed-in confirm logged.
+     lint 0 errors · 1434 tests · build green. -->
 
 <!-- 2026-06-24: owner-reported trio (screenshot + voice) on the parcel-MERGE banner — "NEW-1/NEW-2/NEW-3".
      Highest real B# across both files was B441, so minted **B442 / B443 / B444**. Per STANDING RULE #1
@@ -96,13 +122,15 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - **Prereq harness (Phase 0):** `[x]` **B278 (Playwright e2e — built, smoke green) + B281 (CI auto-`@claude` loop — built) DONE this session** (see BACKLOG-DONE.md). `[x]` **B280 (seeded test account) — DONE by owner 2026-06-24** (account + seed.sql + the 3 CI secrets `E2E_EMAIL`/`E2E_PASSWORD`/`E2E_BASE_URL` are live); the auth-gated loop now runs in CI. (see BACKLOG-DONE.md)
 
 <!-- B438 (browser-side GIS imagery cache: service worker + IndexedDB) was SUPERSEDED mid-session by
-     B439 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
+     B445 (server-side, Drive-backed cache) on the owner's call "I don't want it to live in the browser"
      — a per-browser cache doesn't follow you between computers + isn't the professional home for
      outage resilience. The SW/IndexedDB code was retired (gis-sw.js → self-unregistering tombstone;
-     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B439 (shipped) blocks live in
-     BACKLOG-DONE.md. -->
+     gisImageCache.js/gisSwRules.js deleted). Both B438 (superseded) + B445 (shipped) blocks live in
+     BACKLOG-DONE.md. (Renumbered B439→B445 on 2026-06-24: a concurrent session had also minted B439
+     for the breadcrumb rename/delete feature — see BACKLOG-DONE.md B439/B440 — so this GIS item took
+     the next free B# to clear the collision.) -->
 
-### B439 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24)*
+### B445 — GIS layer imagery caching, server-side (Drive-backed, cross-device) `[Site Planner / GIS]` (feature) — roadmap Track-1 #1; SHIPPED  *(2026-06-24; renumbered from B439 to clear a collision)*
 `[x]` Government layer *pictures* (FEMA flood, wetlands, utilities) keep painting when the agency server is down, follow the user between devices, and are stored off the user's machine — replacing the browser-side B438. The map points raster (export-image) layers at a same-origin Cloudflare Function `/api/gis-cache/*` that fetches the agency server-side (no CORS wall), keeps a durable copy in the existing Google Drive, refreshes in the background (stale-while-revalidate), and FAILS OPEN (302 → agency) on any miss-and-failure / missing creds / error. Client also one-shot falls back to the direct agency URL if the proxy isn't serving, so a layer always renders (caching is pure enhancement). Default ON; `VITE_GIS_PROXY=0` is the kill switch. Pure core `src/shared/gis/gisProxyCore.js` (svc-URL encode/parse + cache key + freshness, 15 tests) + testable handler `functions/api/gis-cache/_handler.js` (SWR/fail-open, 12 tests, in-memory Drive). Age badge via the proxy's `?meta=1` sidecar → existing onStatus `{ts,stale}` channel. Reuses the live Drive creds (`GOOGLE_*`, server-side only) — no Supabase, no new secret. DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, PRs #328 + #329); see BACKLOG-DONE.md. **Bring-up fix (#329):** the gov host (`hazards.fema.gov`) 403s a bare server-side User-Agent → every request fail-opened (nothing cached); fixed by sending a browser UA on upstream fetches (root cause isolated live via a temporary `?diag=1` probe; the datacenter-IP-block fear was disproven). **✅ VERIFIED LIVE on planyr.io:** real FEMA export → 200 image/png and `?meta=1` → `cached:true` with a ts (fetch → Drive store → serve → age, end-to-end). Only an in-app visual glance remains (V129).
 
 - `[x]` **B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)

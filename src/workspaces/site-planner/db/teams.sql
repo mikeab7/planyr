@@ -98,6 +98,7 @@ alter table public.team_members enable row level security;
 drop policy if exists "members read roster"  on public.team_members;
 drop policy if exists "admins add members"    on public.team_members;
 drop policy if exists "self add via claim"    on public.team_members;
+drop policy if exists "self join via invite"  on public.team_members;
 drop policy if exists "admins update roles"   on public.team_members;
 drop policy if exists "admins remove members" on public.team_members;
 drop policy if exists "self leave"            on public.team_members;
@@ -105,10 +106,23 @@ create policy "members read roster" on public.team_members
   for select to authenticated using (public.is_team_member(team_id));
 create policy "admins add members" on public.team_members
   for insert to authenticated with check (public.is_team_admin(team_id));
--- backstop so a user can insert THEIR OWN membership when claiming an invite (claim_team_invites
--- runs SECURITY DEFINER and is the normal path; this keeps a direct self-insert narrow to self).
-create policy "self add via claim" on public.team_members
-  for insert to authenticated with check (user_id = (select auth.uid()));
+-- A user may insert THEIR OWN membership only into a team that has an UNCLAIMED invite for their
+-- verified email AT THE SAME ROLE they're inserting — never an arbitrary team or an escalated role.
+-- (The normal join path is claim_team_invites / handle_new_user, which run SECURITY DEFINER and
+-- bypass RLS; this policy is the narrow client-side backstop. The "invitee reads own" SELECT policy
+-- on team_invites makes the EXISTS visible to the invitee.) Replaces the old "self add via claim",
+-- which checked only user_id = auth.uid() and so allowed self-join to any team at any role.
+create policy "self join via invite" on public.team_members
+  for insert to authenticated with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1 from public.team_invites i
+      where i.team_id = team_members.team_id
+        and lower(i.email) = lower((select auth.email()))
+        and i.claimed_at is null
+        and i.role = team_members.role
+    )
+  );
 create policy "admins update roles" on public.team_members
   for update to authenticated using (public.is_team_admin(team_id)) with check (public.is_team_admin(team_id));
 create policy "admins remove members" on public.team_members

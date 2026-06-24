@@ -20,7 +20,7 @@ installClientErrorTelemetry();
 installChunkReloadGuard();
 
 // County/agency map IMAGERY is now cached server-side (durable copy in Google Drive, served via
-// /api/gis-cache/*, B439) instead of in the browser — cross-device, survives a server outage, and
+// /api/gis-cache/*, B445) instead of in the browser — cross-device, survives a server outage, and
 // off the user's machine. This retires the old browser-side service-worker cache (B438) so a
 // returning visitor stops using it. Fail-safe, after load.
 retireGisSw();

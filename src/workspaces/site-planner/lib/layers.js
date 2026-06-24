@@ -23,7 +23,7 @@ import {
 export { JURISDICTION_LAYERS };
 
 /* Should raster (export-image) layers go through the same-origin Drive-backed cache proxy
- * (B439)? Default ON; an explicit VITE_GIS_PROXY=0/false/off is the kill switch. Safe to leave
+ * (B445)? Default ON; an explicit VITE_GIS_PROXY=0/false/off is the kill switch. Safe to leave
  * on everywhere: the proxy fails open (302 → agency) and the client also one-shot falls back to
  * the direct agency URL if the proxy isn't serving (e.g. not deployed), so a layer always renders
  * — caching is a pure enhancement on top. */
@@ -410,7 +410,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             if (lyr.setOpacity) lyr.setOpacity(st.opacity);
             lyr.addTo(map); refs[k] = lyr; onStatus && onStatus(k, "loaded");
           } else {
-            // Raster export-image layer (FEMA/wetlands/utilities). Route it through the B439
+            // Raster export-image layer (FEMA/wetlands/utilities). Route it through the B445
             // cache proxy by default; build a direct-to-agency layer as the fallback.
             const useProxy = gisProxyEnabled();
             const buildRaster = (proxy) => (cfg.kind === "esriImage"
