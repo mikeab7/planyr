@@ -171,6 +171,21 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.list_team_members(uuid) to authenticated;
 
+-- 9a) Teams the caller belongs to (SECURITY DEFINER) -------------------------
+-- Server-side join so listing doesn't depend on PostgREST's embedded-join relationship
+-- cache (which can transiently 404 right after the tables change, hiding a just-created team).
+create or replace function public.list_my_teams()
+returns table (id uuid, name text, role text, created_by uuid, created_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select t.id, t.name, m.role, t.created_by, t.created_at
+  from public.team_members m
+  join public.teams t on t.id = m.team_id
+  where m.user_id = auth.uid()
+  order by t.created_at desc;
+$$;
+revoke all on function public.list_my_teams() from public;
+grant execute on function public.list_my_teams() to authenticated;
+
 -- 9b) Atomic team creation (SECURITY DEFINER) --------------------------------
 -- Create a team AND the creator's admin membership in one transaction. Runs as
 -- the function owner (RLS bypassed inside), returning the new id directly. This
