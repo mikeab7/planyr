@@ -62,7 +62,8 @@ was never clicked" quietly ships broken.
 ## 🔲 Needs verification
 <!-- V128 (B438 browser-side GIS imagery service worker) was SUPERSEDED by V129/B439 — the
      browser SW was retired in favour of the server-side Drive-backed cache. No production check
-     needed (B438 never shipped to main; gis-sw.js is now a self-unregistering tombstone). -->
+     needed for the SW itself — B438 HAD shipped (PR #326), so gis-sw.js is now a
+     self-unregistering tombstone that removes the deployed worker on next navigation. -->
 ### V129 — B439: GIS imagery cache, server-side (Drive-backed) ✅ build + lint + 1417 tests + 27 dedicated unit tests (`gisProxyCore` 15 / `gisCacheHandler` 12); ⏳ live signed-in confirm
 - **What changed.** Raster (export-image) layers now route through a same-origin Cloudflare Function `/api/gis-cache/*` that fetches the agency server-side, keeps a durable copy in Google Drive, serves it instantly (survives outage), refreshes in the background (SWR), and **fails open** (302 → agency). Client one-shot falls back to the direct agency URL if the proxy isn't serving, so a layer always renders. Age via the proxy `?meta=1` sidecar → existing onStatus `{ts,stale}` panel badge. Browser SW (B438) retired. Default on; `VITE_GIS_PROXY=0` kill switch.
 - **Verified (sandbox/Node).** Pure core `gisProxyCore.test.js` (15) + handler `gisCacheHandler.test.js` (12, in-memory Drive + fake fetch + clock): cache miss→fetch+serve+store, hit-fresh→serve-without-refetch, hit-stale→serve+background-refresh, fail-open 302 (no creds / agency error / unreachable), meta age, origin/host guards. The route imports cleanly in Node. Full suite 1417 · lint 0 · build green.
