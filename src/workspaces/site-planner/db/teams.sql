@@ -24,6 +24,10 @@ create table if not exists public.teams (
   created_by  uuid not null default auth.uid() references auth.users(id),
   created_at  timestamptz not null default now()
 );
+-- If the table already existed (hand-created in the dashboard) and is missing columns,
+-- add them so the INSERT policy and createTeam() can reference created_by.
+alter table if exists public.teams add column if not exists created_by uuid not null default auth.uid() references auth.users(id);
+alter table if exists public.teams add column if not exists created_at timestamptz not null default now();
 
 -- 2) Membership --------------------------------------------------------------
 create table if not exists public.team_members (
