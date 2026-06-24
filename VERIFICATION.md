@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V124 — B428: arrowheads, text props (italic/underline/align), polylength tool ✅ build + lint clean; ⏳ one signed-in draw round-trip
+- **What changed.** `MarkupRenderer.jsx` now renders inline arrowhead triangles on `line`/`polyline` when `arrowStart`/`arrowEnd` properties are set. Text rendering wired for `italic`, `underline`, `align` (left/center/right). Polylength tool added to DocReview tool rail (zig-zag icon, multi-click path, measures total run length).
+- **Why ⏳.** Tool rail only renders when a PDF is loaded; logged-out smoke confirms no JS crash but cannot exercise drawing.
+- **Steps / Expect.** Sign in → Review → drop PDF → arm Polylength → click 3+ points → double-click → teal polyline with total length label. Select a line → set Arrow End in property panel → arrowhead appears at end. Arm Text → click → type → toggle Italic + Underline + change Align → text re-renders with those styles. Cadence: once. Last checked: —.
+
 ### V123 — B426/B427: shared MarkupRenderer + PropertyPanel + 4 new DocReview tools (Line/Polyline/Polygon/Ellipse) ✅ build + 1390 tests + lint clean; logged-out smoke clean (no JS crash); ⏳ one signed-in draw+property round-trip
 - **What changed.** `src/shared/markup/MarkupRenderer.jsx` (pure SVG renderer, 12 kinds) and `src/shared/markup/PropertyPanel.jsx` (inline property editor driven by the matrix) created. DocReview.jsx wired to use both: SVG layer now `<MarkupRenderer>` instead of inline `draw()`, property panel appears at bottom of left panel when a markup is selected. Four new drawing tools added to DocReview: Line (two-point drag), Polyline (multi-click, open), Polygon (multi-click, snap-to-close), Ellipse (two-point bounding box). `propStyle` sticky defaults for per-tool style inheritance.
 - **Why ⏳.** The tool rail only renders when a PDF is loaded; logged-out headless smoke can only confirm no JS crash, not that tools draw. The formal per-tool E2E assertions (B432/NEW-9) cover this in CI once the auth-gated suite is wired.

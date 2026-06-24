@@ -28,7 +28,7 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 - `[x]` **B425 (NEW-2) — the shared engine's PURE layer. DONE this session.** (see BACKLOG-DONE.md)
 - `[x]` **B426 (NEW-2 cont./NEW-3) — shared `MarkupRenderer.jsx` + `PropertyPanel.jsx` + host wiring; DocReview gains left property panel.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 5842a78). (see BACKLOG-DONE.md)
 - `[x]` **B427 (NEW-4) — Document Review parity tools: Line, Polyline, Polygon, Ellipse.** DONE same commit as B426. (see BACKLOG-DONE.md)
-- `[ ]` **B428 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).**
+- `[x]` **B428 (NEW-5) — property-set completion to the matrix in both (stroke/width/style/opacity, fill+fill-opacity, full text controls, set-as-default, Reuse mode, keep inline Calibrate).** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`, commit 192c63a). (see BACKLOG-DONE.md)
 - `[ ]` **B429 (NEW-6) — new tools: Arc, Dimension, Pen, Highlight, Eraser (pen/highlight only), Snapshot; Arrow = arrowhead toggle on Line.**
 - `[ ]` **B430 (NEW-7) — Count as a first-class measure in the Site Planner.**
 - `[ ]` **B431 (NEW-8) — unified interaction model + edit handles (reuse `shouldPan`; convert ParcelDrawing's residual `window.prompt` calibrate to inline `numEdit`).**

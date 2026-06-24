@@ -1,5 +1,12 @@
 ## ✅ Done
 
+### B428 — Property-set completion (arrows, text props, polylength) `[Shared / Doc Review]` (feature) — NEW-5, part of the B423 umbrella  *(2026-06-24; commit 192c63a)*
+`[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 192c63a). lint 0 · build green.**
+- **Arrowhead rendering** in `MarkupRenderer.jsx`: inline `Arrowhead` triangle component computes direction vectors (no SVG `<defs>/<marker>` injection needed). `line` + `polyline` kinds check `readProp(m, "arrowStart"/"arrowEnd")` and render a filled polygon at start/end.
+- **Text property completion**: italic (`fontStyle`), underline (`textDecoration`), alignment (left/center/right via `textAnchor`); background rect X position adjusted per alignment so the box tracks the text. `fontColor` + `fontSize` were already wired; `bold` was already wired.
+- **Polylength tool** added to DocReview: icon (zig-zag with endpoint dots), added to `TOOLS`, `MEASURE`, and `MULTIPOINT` sets. No new logic needed — existing `finishDraft`/`onDbl` flow handles multi-point via the MEASURE set check, and `canCommitMeasure("polylength", n)` already requires n≥2.
+- **Dedup:** `measure.js` already had `polylength` support (`measureLabel` returns running total). `MarkupRenderer` already rendered `polylength` via the distance/polylength branch.
+
 ### B427 — Document Review parity tools: Line, Polyline, Polygon, Ellipse `[Doc Review / Markup]` (feature) — NEW-4, part of the B423 umbrella  *(2026-06-24; same commit as B426)*
 `[x]` **Built + shipped (branch `claude/determined-shannon-p7unj4`, commit 5842a78). 1390 tests · lint 0 · build green.**
 - DocReview TOOLS expanded from 10 → 14 tools. New: `line` (two-point drag), `polyline` (multi-point, open), `polygon` (multi-point, snap-to-close), `ellipse` (two-point bounding box). Rail icons added for all four.
