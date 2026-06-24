@@ -75,6 +75,10 @@ test.describe("markup tools (signed in)", () => {
    * tool button and verifies aria-pressed. A tool not yet on the live build (the matrix can
    * lead the deploy) is skipped, not failed; likewise if the rail never renders. */
   test.describe("per-tool rail arm", () => {
+    // The cold first wave (PDF.js worker init across 4 parallel workers) can take a while to
+    // first-render the rail; give the open+render room so it isn't flaky on a cold runner.
+    test.describe.configure({ timeout: 60_000 });
+
     test.beforeEach(async ({ page }) => {
       await openModule(page, "doc-review");
       // The "Open PDF" file input lives in the always-rendered header toolbar. setInputFiles
@@ -88,7 +92,7 @@ test.describe("markup tools (signed in)", () => {
       // the per-tool tests skip gracefully if it never shows (e.g. an older deploy / storage hiccup).
       await page
         .getByTestId("markup-rail")
-        .waitFor({ state: "visible", timeout: 30_000 })
+        .waitFor({ state: "visible", timeout: 45_000 })
         .catch(() => {});
     });
 

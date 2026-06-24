@@ -58,6 +58,11 @@ One shared markup/measure engine in `src/shared/markup/` that BOTH workspaces (a
 
 - `[x]` **B436 — e2e: open a PDF in the per-tool rail-arm specs so Section B actually executes.** DONE 2026-06-24 (branch `claude/determined-shannon-p7unj4`). (see BACKLOG-DONE.md)
 
+### B437 — Callout tool missing from the Document Review rail (matrix↔rail drift) `[Doc Review / Markup]` (bug/feature)  *(found 2026-06-24 by the B432 loop)*
+`[ ]` **The shared tool matrix lists `callout` as a `doc` tool (and the B427 parity plan included it), but `DocReview.jsx`'s `TOOLS` rail array omits it** — so it has no `tool-callout` rail button and can't be drawn in Review. The B432/B436 per-tool e2e loop caught this: callout is the one tool that *skips* (its rail button is absent) instead of arming. Per the loop rule, the fix is in the CODE, not the matrix: wire callout into Review.
+- **Scope (real feature wiring, not a 1-liner):** add `callout` to the `TOOLS` rail; implement its `point`-mode placement (it's a text box + a leader line to a target — distinct from plain `text`, which Review already has). Reuse the shared `MarkupRenderer` callout rendering (already built for the Site Planner) + the inline text editor pattern (`openEditor`). Confirm the leader anchor + box-move interactions.
+- **Until then:** the loop stays green (callout skips gracefully via the deploy-tolerance guard) — honest, but the gap is real. Distinct from the Site Planner, which already has callout.
+
 <!-- 2026-06-23: owner-dropped pair "NEW-1/NEW-2" (Markup z-order + named markup Layers). Highest B#
      across both files was B420, so minted **B421** (NEW-1) + **B422** (NEW-2). Deduped: both net-new
      (NOT B397 Scheduler-Gantt z-order, NOT the CSS stacking-context fixes, NOT B33/B374 markup
