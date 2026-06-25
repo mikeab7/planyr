@@ -4,6 +4,11 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V137 — B461/B462: overlay right-click menu + "Align to base edge" ✅ VERIFIED (headless, logged-out — no signed-in gap)
+- **Added + checked** 2026-06-25 · **Cadence** once (feature acceptance) · headless **Chromium**, `npm run dev` :5173, seeded site (parcel rotated 30° + a dropped PNG overlay) — `ui-audit/verify-b461-b462-overlay-menu.mjs`, **13/13**.
+- **Result ✅:** right-clicking the overlay opens an 8-item menu (Copy / Duplicate / Paste / Bring to front / Send to back / Lock / Align to base edge… / Delete); Paste + z-order correctly disabled for a lone overlay; **Duplicate** adds a second overlay (1→2); **Lock** flips the row chip to 🔒; **Align to base edge** snaps the overlay's rotation 0 → 30° (parcel-edge angle, via the building→parcel `snapParallel`); **Delete** removes it (2→1) with no "delete didn't take" warning (count-verified); no uncaught page errors.
+- **No signed-in gap:** the menu + transform ops mutate the in-memory `sheetOverlays` model on the same save path logged-out and logged-in; the shared-source ref-count on Delete is a Storage-cleanup guard that only matters with a cloud `storageKey`, which the logged-out path exercises structurally. lint 0 · 1517 tests · build green.
+
 ### V136 — B463: rotation slider → shared numeric stepper ✅ VERIFIED (headless, logged-out — no signed-in gap)
 - **Added + checked** 2026-06-25 · **Cadence** once (feature acceptance) · headless **Chromium**, `npm run dev` :5173, real `RotationStepper` in `ui-audit/rotation-stepper-harness.html` — `ui-audit/verify-b463-rotation-stepper.mjs`, **12/12**.
 - **Result ✅:** renders a numeric input + ▲▼ spinners and **zero `<input type=range>`** (slider retired); typing **370 → 10**, **−5 → 355** (wrap on commit); **45.25** keeps hundredth-degree precision; **▲ nudges +1°** with no drift (45.25 → 46.25); garbage **"abc" flags aria-invalid and does NOT clamp to 0**; **empty on blur reverts** to the last committed value (never 0); a **locked** instance disables the input AND both spinners; no uncaught page errors.
