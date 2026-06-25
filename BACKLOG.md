@@ -42,13 +42,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
        • B455 (NEW-7) conflict loud+blocking · Web Locks single-active-editor read-only lockout · 6s save watchdog.
        • B456 (NEW-8) Version History real building counts + content summary + distinguishable timestamps. -->
 
-### B457 — Recover lost buildings on 8 South / Plan 1 (one-time) `[Persistence]` (task) — DATA-LOSS  *(owner-dropped 2026-06-24 as "NEW-9"; owner + Cowork action, not a code task)*
-`[ ]` **Tracked, not code.** The cloud row went road-only (1 element / 0 buildings @ 21:17 UTC) and the 3:35 PM-local snapshot restored empty. The free Supabase tier has **no PITR**, so the overwritten prior cloud state is **not** server-recoverable. The code fixes (B452/B453/B455) prevent a recurrence; this item is the one-time recovery attempt.
-- **Remaining shots (owner + Cowork — unreachable by Claude Code):**
-  1. **Account-wide `data->'els'` building sweep** across the user's rows (Cowork, signed in) — in case a fuller copy survived under another plan/row.
-  2. **Owner's on-device localStorage / IndexedDB scan** (`planarfit:sites:cloud:<uid>`, `planarfit:sites:history:v1`) on the machine where the buildings were drawn — the autosave mirror or the local version-history ring may still hold them. NOTE: B456 fixed the "0 buildings" label that made the history rows *look* empty, so re-check Version History in the app first.
-- **Close as recovered or unrecoverable once those run.** No action for Michael beyond the on-device scan (step 2); Cowork drives step 1.
-
 <!-- 2026-06-24: owner-reported (screenshot) — the Site-plan overlay panel "does not allow anything to
      actually be dropped in, should work like enterprise software". Highest real B# across both files was
      B444, so minted **B445**. Per STANDING RULE #1 filed AND fixed + headless-verified
