@@ -114,12 +114,28 @@ export async function pullCloud(uid) {
   try { existing = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
   const { map, toPush } = mergePulledSites(existing, models, uid);
   try { localStorage.setItem(cloudKey(uid), JSON.stringify(map)); } catch (_) {}
+  pruneMigratedLegacy(map); // B473 — free the ~MB of dead logged-out duplicates now safely in the cloud
   // Heal the split: re-push anything the cloud is missing / older on, so a push that didn't
   // land doesn't strand work on this device (fire-and-forget; the next autosave would too).
   for (const id of toPush) cloudUpsert(uid, map[id]).catch(() => {});
   return { ok: true, count: models.length };
 }
 export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cloudKey(uid)); } catch (_) {} }
+// B473 — the logged-out store (planarfit:sites:v1) is dead weight once signed in: every id there that
+// is ALSO in the signed-in cloud cache is a pure duplicate crowding the ~5MB localStorage cap (the very
+// pressure that made writeSites fail → new-site data loss). Drop ONLY ids confirmed present in the cloud
+// map; an un-migrated legacy site (not in the cloud) is KEPT untouched. Runs after a SUCCESSFUL pullCloud
+// (the cloud copy is authoritative). Never throws.
+function pruneMigratedLegacy(cloudMap) {
+  try {
+    const raw = localStorage.getItem(SITES_KEY);
+    if (!raw || !cloudMap) return;
+    const legacy = JSON.parse(raw) || {};
+    let dropped = 0;
+    for (const id of Object.keys(legacy)) { if (cloudMap[id]) { delete legacy[id]; dropped++; } }
+    if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
+  } catch (_) {}
+}
 
 // Read the on-device (logged-out / "legacy") store DIRECTLY, regardless of who's
 // signed in. Read-only. Used to surface "you have sites saved on this device that
@@ -275,6 +291,15 @@ export async function pushSiteToCloud(id) {
   if (!m) return { ok: false, error: "missing" };
   return cloudUpsert(activeUser, m);
 }
+// B473 — push a LIVE in-memory model to the cloud, NOT by id. Used when the on-device write FAILED
+// (full localStorage): pushSiteToCloud→loadSite would re-read the failed store and ship a stale,
+// pre-edit copy — losing the very edit in the cloud too. The cloud has no ~5MB cap, so pushing the
+// live payload keeps the work safe in the account and a reload restores it. No-op logged out.
+export async function pushModelToCloud(model) {
+  if (!activeUser) return { ok: true, skipped: true };
+  if (!model || !model.id) return { ok: false, error: "missing" };
+  return cloudUpsert(activeUser, createSiteModel(model));
+}
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.
@@ -322,8 +347,12 @@ export function saveAutosave(state) {
 const HISTORY_KEY = "planarfit:sites:history:v1";
 const HISTORY_PER_SITE = 15;
 const isDataUrl = (s) => typeof s === "string" && s.startsWith("data:");
-// Drop big inline image rasters from a snapshot (keep placement + every bit of geometry).
-function slimForHistory(m) {
+// Drop big inline image rasters from a record (keep placement + every bit of geometry); the rasters
+// re-hydrate from cloud/Storage on load (strippedForCloud). Shared by the version ring AND the
+// over-quota retry in writeSites (B473) — both must shed the SAME three raster homes (underlay /
+// sheetOverlays / parcelDrawings) or a raster-bloated record fails to persist outright instead of
+// degrading to "geometry survives on-device, rasters re-fetch".
+function stripDataUrls(m) {
   let s = m;
   if (s.underlay && isDataUrl(s.underlay.src)) s = { ...s, underlay: { ...s.underlay, src: null, strippedForCloud: true } };
   if (Array.isArray(s.sheetOverlays) && s.sheetOverlays.some((o) => o && isDataUrl(o.src)))
@@ -333,10 +362,24 @@ function slimForHistory(m) {
   return s;
 }
 const historyAll = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch (_) { return {}; } };
+// B473 — bound the version ring by BYTES, not just HISTORY_PER_SITE, so it can't creep back to ~MB
+// and crowd the ~5MB localStorage cap (the pressure that made saves fail). Thins uniformly (newest
+// kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
+// only when actually over budget.
+const HISTORY_BYTE_BUDGET = 700 * 1024;
+function capHistoryBytes(h) {
+  let keep = HISTORY_PER_SITE, out = h;
+  while (keep > 1 && JSON.stringify(out).length > HISTORY_BYTE_BUDGET) {
+    keep = Math.floor(keep / 2);
+    out = {}; for (const [id, list] of Object.entries(h)) out[id] = (list || []).slice(0, keep);
+  }
+  return out;
+}
 function writeHistoryAll(h) {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); return true; }
-  catch (_) { // over quota — keep only the newest few per site and retry
-    try { const t = {}; for (const [id, list] of Object.entries(h)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); return true; }
+  const capped = capHistoryBytes(h);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(capped)); return true; }
+  catch (_) { // still over quota — keep only the newest few per site and retry
+    try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); return true; }
     catch (_2) { return false; }
   }
 }
@@ -360,7 +403,7 @@ export function snapshotVersion(model, { force = false } = {}) {
   const list = all[m.id] || [];
   const sig = sigOf(m);
   if (!force && list[0] && list[0].sig === sig) return false; // same shape as the newest snapshot → skip churn
-  list.unshift({ at: m.updatedAt || Date.now(), sig, buildings: mainBuildingCount(m), name: m.name || null, site: m.site || null, model: slimForHistory(m) });
+  list.unshift({ at: m.updatedAt || Date.now(), sig, buildings: mainBuildingCount(m), name: m.name || null, site: m.site || null, model: stripDataUrls(m) });
   all[m.id] = list.slice(0, HISTORY_PER_SITE);
   return writeHistoryAll(all); // false only on a hard quota failure even after slimming
 }
@@ -464,11 +507,11 @@ function writeSites(obj) {
     // Over quota — usually a pasted screenshot dataURL. Drop those and retry so
     // the (much smaller) geometry of every site still persists.
     try {
+      // B473 — shed inline rasters from EVERY site (underlay + sheetOverlays + parcelDrawings, via the
+      // shared stripDataUrls), not just the underlay, so a raster-bloated store still persists ALL
+      // geometry on-device; the rasters re-hydrate from cloud/Storage on load.
       const slim = {};
-      for (const [id, s] of Object.entries(obj)) {
-        const u = s.underlay;
-        slim[id] = u && String(u.src || "").startsWith("data:") ? { ...s, underlay: null } : s;
-      }
+      for (const [id, s] of Object.entries(obj)) slim[id] = stripDataUrls(s);
       localStorage.setItem(sitesKey(), JSON.stringify(slim));
       return true;
     } catch (_2) { return false; }
