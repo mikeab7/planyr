@@ -6,6 +6,7 @@
  */
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { contentCount } from "./siteModel.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -13,8 +14,39 @@ import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } 
 // switch. Module-scope = naturally per-tab. Until the `version` column is migrated in,
 // every write degrades to a plain upsert (today's behaviour) and this stays empty.
 const siteVersions = {};
-export function clearSiteVersions() { for (const k of Object.keys(siteVersions)) delete siteVersions[k]; }
+// B459 — the CAS above guards the version NUMBER only, NEVER the content. So a tab holding a
+// stale/thin model at a MATCHING version would still silently overwrite a fuller cloud row (the
+// 8 South 5-building loss: a road-only model clobbered 5 saved buildings while the version matched).
+// Alongside the version we therefore remember the CONTENT we last synced — item count + tombstone
+// count — so a write can ALSO reject a "thinning clobber": a push that would drop ≥2 items the cloud
+// still has, with no delete-tombstone to explain the drop, is treated as a stale-tab clobber and
+// blocked LOUD (reload then union-merges the fuller cloud back). Legit incremental undo (≤1 unexplained
+// drop per push) and any tombstoned delete pass through untouched.
+const siteContent = {};   // id -> contentCount last synced
+const siteTombs = {};     // id -> deletedIds length last synced
+const arr = (x) => (Array.isArray(x) ? x : []);
+export function clearSiteVersions() {
+  for (const m of [siteVersions, siteContent, siteTombs]) for (const k of Object.keys(m)) delete m[k];
+}
 export const _siteVersions = siteVersions; // test seam (read/seed in unit tests)
+export const _siteContent = siteContent;   // test seam (B459)
+export const _siteTombs = siteTombs;       // test seam (B459)
+
+// Pure (exported for unit tests): would pushing `m` thin the cloud row below the last-synced
+// content by more than a real delete explains? baseCount/baseTombs are the last-synced counts
+// for this id (null baseCount = no baseline yet → never block a first sync).
+export function wouldThinClobber(m, baseCount, baseTombs) {
+  if (baseCount == null) return false;
+  const deliberate = Math.max(0, arr(m && m.deletedIds).length - (baseTombs || 0)); // items a delete accounts for
+  const lost = (baseCount - deliberate) - contentCount(m);                          // items vanished with no delete
+  return lost >= 2;                                                                 // ≥2 unexplained = stale-tab clobber
+}
+// Record the content we just synced for `id`, so the next push's thin-clobber guard has a baseline.
+function rememberContent(model) {
+  if (!model || model.id == null) return;
+  siteContent[model.id] = contentCount(model);
+  siteTombs[model.id] = arr(model.deletedIds).length;
+}
 
 // Don't push a huge embedded screenshot dataURL into a DB row — keep the underlay
 // placement but drop the inline image (map-sourced underlays use a URL, not a
@@ -40,6 +72,10 @@ function slimForCloud(model) {
 export async function cloudUpsert(uid, model) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
   const m = slimForCloud(model);
+  // B459 — refuse to silently overwrite a fuller cloud row with a stale/thin model (the CAS below
+  // only checks the version number). Block LOUD as a conflict; the cloud is left intact, so a reload
+  // union-merges the fuller copy back instead of losing it.
+  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) return { ok: false, conflict: true, thinned: true };
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
   // a shared row never re-stamps the original owner (team feature). team_id rides along (null =
   // private); when set, RLS lets the project's team read/edit it.
@@ -60,7 +96,7 @@ export async function cloudUpsert(uid, model) {
     const { team_id, ...noTeam } = row;
     r = await casUpsert(supabase, "sites", { uid, id: m.id, row: noTeam, expected: siteVersions[m.id] });
   }
-  if (r.ok) { siteVersions[m.id] = r.version; return { ok: true }; }
+  if (r.ok) { siteVersions[m.id] = r.version; rememberContent(m); return { ok: true }; }
   if (r.conflict) return { ok: false, conflict: true };
   if (r.degrade) {
     // The `version` column isn't migrated in yet → fall back to a plain upsert (today's
@@ -73,6 +109,7 @@ export async function cloudUpsert(uid, model) {
     let { error } = await supabase.from("sites").upsert(noTeam, { onConflict: "id" });
     if (error && /on conflict|no unique|constraint|exclusion/i.test(error.message || "")) // pre-PK-change DB: target is (user_id,id)
       ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
+    if (!error) rememberContent(m); // B459 — keep the content baseline current even on the version-less degrade path
     return { ok: !error, error: error ? error.message : null };
   }
   return { ok: false, error: r.error || "cloud write failed" };
@@ -88,6 +125,8 @@ export function keepaliveCloudPush(uid, model) {
   const { url, anon } = supabaseRest();
   const token = currentAccessToken();
   const m = slimForCloud(model);
+  // B459 — a forced-reload keepalive must NOT clobber a fuller cloud row with a thin model either.
+  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) return false;
   // No user_id in the PATCH body — a guarded UPDATE must not re-stamp the row's creator.
   const row = {
     id: m.id,
@@ -149,7 +188,10 @@ export async function cloudList(uid) {
   // transient/offline error, showing a scary "no sites" state (B54).
   if (error) throw new Error(error.message || "cloud list failed");
   const rows = data || [];
-  for (const r of rows) if (r && r.data && r.data.id != null && r.version != null) siteVersions[r.data.id] = r.version;
+  for (const r of rows) if (r && r.data && r.data.id != null) {
+    if (r.version != null) siteVersions[r.data.id] = r.version;
+    rememberContent(r.data); // B459 — baseline the cloud's content so a later thin push is caught
+  }
   return rows.map((r) => {
     const m = r && r.data;
     if (!m) return null;
