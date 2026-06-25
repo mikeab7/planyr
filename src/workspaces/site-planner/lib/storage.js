@@ -538,7 +538,12 @@ export function loadSite(id) {
   lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
   return m;
 }
-export function saveSite(partial) {
+// `skipHistory` writes the local mirror WITHOUT taking a version-history snapshot. Used by the
+// immediate per-edit local write (B458): the device mirror must be current within ~50ms so a reload
+// can never lose the edit, but snapshotting on every drag frame would spam the ring — the debounced
+// settle-tick save (no flag) is the single, natural history-snapshot point. (doc-review already
+// splits immediate-mirror from debounced-cloud this way; this brings the Site Planner to parity.)
+export function saveSite(partial, { skipHistory = false } = {}) {
   if (!partial || !partial.id) return false;
   const sites = readSites();
   const existing = sites[partial.id];
@@ -555,7 +560,7 @@ export function saveSite(partial) {
   if (existing && (existing.updatedAt || 0) > (lastSeenAt[partial.id] || 0)) {
     merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
   }
-  if (existing) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126)
+  if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
   const model = { ...createSiteModel(merged), updatedAt: Date.now() };
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;

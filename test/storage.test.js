@@ -199,6 +199,51 @@ describe("version history — every save backs up the prior version (B126)", () 
   });
 });
 
+// B458 — the autosave splits into an IMMEDIATE per-edit local-mirror write (so a reload within the
+// 400ms cloud-push debounce can't lose the edit) + a debounced cloud push. The immediate write keeps
+// DEFAULT history (it owns the thinning safety net + makes the snapshot reload-safe); the debounced
+// settle re-write passes { skipHistory: true } so it can't double-snapshot. These assert the flag.
+describe("saveSite skipHistory option (B458)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("persists content but takes NO snapshot when skipHistory is set", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b")] });                       // fat (no prior → no snapshot)
+    saveSite({ id: "s", els: [bld("a")] }, { skipHistory: true });          // thinned, but skipHistory
+    expect(loadSite("s").els.length).toBe(1);                              // content WAS persisted
+    expect(listVersions("s").length).toBe(0);                             // the fat version was NOT captured
+  });
+
+  it("default save (no flag) still snapshots the prior version", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b")] });                       // fat
+    saveSite({ id: "s", els: [bld("a")] });                                // thinned, history ON
+    const v = listVersions("s");
+    expect(v.length).toBe(1);
+    expect(v[0].buildings).toBe(2);                                        // the fat version is restorable
+  });
+
+  it("immediate-then-settle (the B458 shape) backs up the prior version exactly once per shape", () => {
+    // Mimic the autosave: each edit = an immediate DEFAULT save, then a skipHistory settle re-write.
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });             // immediate: 3 (no prior)
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] }, { skipHistory: true }); // settle
+    saveSite({ id: "s", els: [bld("a")] });                                // immediate: thinned to 1 → snapshots the 3
+    saveSite({ id: "s", els: [bld("a")] }, { skipHistory: true });          // settle (no double-snapshot)
+    const v = listVersions("s");
+    expect(v.length).toBe(1);                                             // exactly one snapshot, not two
+    expect(v[0].buildings).toBe(3);                                       // the fat (3-building) version is restorable
+    expect(getVersion("s", v[0].at).els.map((e) => e.id).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
 // B456 (NEW-8) — the version-history list read "0 buildings" on every row (it used
 // mainBuildingCount, which excludes attached additions) and rows were indistinguishable.
 // Now each row gets a real content summary + a true building count, computed from the
