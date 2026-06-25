@@ -1399,6 +1399,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // them, and drop their record on leave (but only un-located blank-planner
   // sites — a map-sourced site keeps its record even if you clear it).
   const isBlankSite = (s) => !(s?.parcels?.length) && !(s?.els?.length) && !(s?.measures?.length) && !(s?.callouts?.length) && !(s?.markups?.length) && !s?.underlay && !(s?.sheetOverlays?.length);
+  // B473 — count of drawn items in a record, for the save-verify read-back (silent-loss guard).
+  const drawnCount = (s) => (s ? ((s.parcels?.length || 0) + (s.els?.length || 0) + (s.measures?.length || 0) + (s.callouts?.length || 0) + (s.markups?.length || 0) + (s.sheetOverlays?.length || 0)) : 0);
   // Site/plan metadata (name etc.) lives in component state declared below; mirror
   // it into a ref so the (earlier-defined) save effects can include it without a
   // forward reference. The first real save then writes a fully-formed record —
@@ -1411,6 +1413,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // B473 — a verified-on-device-write failure (the write didn't read back). This is the silent
+  // data-loss class the owner hit; it gets its OWN loud, accurately-worded banner (distinct from a
+  // cloud-only failure, where the work IS safe on the device). Plus a transient "Saved ✓" confirmation
+  // for the explicit Save-now action so a save is provable, not just believed.
+  const [localSaveFailed, setLocalSaveFailed] = useState(false);
+  const [saveNowMsg, setSaveNowMsg] = useState("");
   // True when a cloud write was REJECTED because another session advanced this project since
   // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
   // didn't reach the cloud, retries on next edit): a conflict won't clear by retrying — the
@@ -1464,7 +1472,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // AND makes the rollback snapshot reload-safe too. Runs even when the cloud push is gated by a
     // conflict/read-only tab — a local save is always safe and is the whole recovery net. Coalesced to
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
-    const writeMirror = () => { saveSite(payload); lastLocalWrite.current = Date.now(); };
+    const writeMirror = () => {
+      const ok = saveSite(payload);
+      lastLocalWrite.current = Date.now();
+      // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
+      // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
+      // record is missing or has FEWER drawn items than we just wrote, go LOUD + record it; otherwise
+      // clear any prior alarm. (Sole-tab save is a plain replace, so got==want normally; a cross-tab
+      // union only ever adds, so got>=want — no false alarm.)
+      const want = parcels.length + els.length + measures.length + callouts.length + markups.length + sheetOverlays.length;
+      const back = loadSite(siteId);
+      const got = drawnCount(back);
+      if (!ok || got < want) {
+        setLocalSaveFailed(true);
+        reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok });
+      } else setLocalSaveFailed(false);
+    };
     let microT = null;
     if (Date.now() - lastLocalWrite.current >= 50) writeMirror();
     else microT = setTimeout(writeMirror, 50);
@@ -4602,6 +4625,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     flashWarn("You're now editing here — your changes are saving to the cloud.", 6000);
   };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
+  // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
+  // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
+  // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
+  const saveNow = () => {
+    closeHdrMenus();
+    if (!siteId) return;
+    flushSite();
+    const back = loadSite(siteId);
+    const want = drawnCount(liveRef.current);
+    const got = drawnCount(back);
+    if (!back || got < want) {
+      setLocalSaveFailed(true);
+      reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+      return;
+    }
+    setLocalSaveFailed(false);
+    if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) cloudPushWithWatchdog(siteId);
+    setSaveNowMsg(`Saved ✓ ${got} item${got === 1 ? "" : "s"} on this device${isCloudActive() ? " + cloud" : ""}`);
+    setTimeout(() => setSaveNowMsg(""), 4500);
+  };
   // Version history (automatic local backups, B126): open the dialog with this plan's
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
   // version — and the thinner state it replaces is itself snapshotted, so a restore is
@@ -6025,7 +6068,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button style={{ ...chip, flex: 1 }} onClick={handleNewPlan} title="New layout on the same parcel">＋ New plan</button>
             <button style={{ ...chip, flex: 1 }} onClick={handleDuplicate} title="Clone this plan to iterate on">⧉ Duplicate</button>
           </div>
-          <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
+          <button style={{ ...menuItem(false), marginTop: 6, display: "flex", alignItems: "center", gap: 8 }} onClick={saveNow}
+            title="Save this plan now and confirm it actually persisted (device + cloud)" data-testid="save-now">
+            <span aria-hidden style={{ flex: "none" }}>💾</span><span>Save now</span>
+          </button>
+          <button style={{ ...menuItem(false), marginTop: 2, display: "flex", alignItems: "center", gap: 8 }} onClick={openVersionHistory}
             title="Restore an earlier automatically-saved version of this plan">
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
@@ -6186,6 +6233,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+      {/* B473 — a verified ON-DEVICE write failure is the silent data-loss class; this is its own LOUD,
+          accurate alarm (red = genuine error). Unlike the cloud-only banner, here the work is NOT safe
+          yet, so the wording + the Save-now action reflect that. */}
+      {localSaveFailed && (
+        <div role="alert" data-testid="local-save-failed" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: 720, display: "flex", alignItems: "center", gap: 12, background: "#7c1d1d", color: "#fff", border: "1px solid #f87171", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
+          <span style={{ flex: 1 }}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
+          <button onClick={saveNow} title="Try saving again now" style={{ flex: "none", cursor: "pointer", background: "#f87171", color: "#3a0a0a", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Save now</button>
+        </div>
+      )}
+      {/* B473 — provable confirmation for an explicit Save now (a save you can SEE, not just trust). */}
+      {saveNowMsg && (
+        <div role="status" data-testid="save-now-msg" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, display: "flex", alignItems: "center", gap: 10, background: "#14532d", color: "#fff", border: "1px solid #4ade80", borderRadius: 10, padding: "8px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span>{saveNowMsg}</span>
         </div>
       )}
 
