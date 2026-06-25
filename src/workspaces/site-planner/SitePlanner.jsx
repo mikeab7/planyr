@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -1418,6 +1418,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // cloud-only failure, where the work IS safe on the device). Plus a transient "Saved ✓" confirmation
   // for the explicit Save-now action so a save is provable, not just believed.
   const [localSaveFailed, setLocalSaveFailed] = useState(false);
+  // B473 — device storage is full but the work IS safe in the cloud account (the autosave / Save-now
+  // pushed the LIVE payload up when the on-device write failed). Drives an AMBER "saved to your account,
+  // free up space" banner instead of the red "at risk" one — honest about exactly where the work lives.
+  const [savedToCloudOnly, setSavedToCloudOnly] = useState(false);
   const [saveNowMsg, setSaveNowMsg] = useState("");
   // True when a cloud write was REJECTED because another session advanced this project since
   // we loaded it (B314 optimistic concurrency). Distinct from cloudSaveFailed (a write that
@@ -1486,7 +1490,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!ok || got < want) {
         setLocalSaveFailed(true);
         reportClientEvent("save-verify-failed", "on-device write did not persist", { id: siteId, want, got, ok: !!ok });
-      } else setLocalSaveFailed(false);
+      } else { setLocalSaveFailed(false); setSavedToCloudOnly(false); } // device can hold it again → clear both
     };
     let microT = null;
     if (Date.now() - lastLocalWrite.current >= 50) writeMirror();
@@ -1494,9 +1498,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const t = setTimeout(() => {
       // Settle tick = the cloud push. skipHistory so this re-write can't double-snapshot what the
       // immediate write already captured; the mirror is already current from writeMirror above.
-      const ok = saveSite(payload, { skipHistory: true });
-      if (!ok) { setSaveStatus("unsaved"); return; }
-      if (fresh) onSiteSaved?.();
+      const okSave = saveSite(payload, { skipHistory: true });
+      if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
       // B455/NEW-7 — DON'T push over a conflict, or from a read-only background tab: the
@@ -1509,8 +1512,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // active conflict). The immediate local mirror above still saved it; record WHY it didn't
           // sync so a silent "edits aren't reaching the cloud" stretch is diagnosable after the fact.
           reportClientEvent("save-suppressed", "cloud push skipped", { id: siteId, reason: readOnlyRef.current ? "read-only" : "conflict" });
-        } else cloudPushWithWatchdog(siteId);
-      } else { setSaveStatus("saved"); setCloudSaveFailed(false); }
+        } else if (okSave) {
+          cloudPushWithWatchdog(siteId); // device mirror is current → push by id as before
+        } else {
+          // B473 — THE CURE. The on-device write FAILED (full localStorage). Do NOT abort the save: the
+          // cloud has no ~5MB cap, so push the LIVE payload straight up. The work is then safe in the
+          // account and a reload restores it even though this device couldn't hold it. (Pushing by id via
+          // cloudPushWithWatchdog→loadSite would re-read the FAILED store and ship the stale, pre-edit
+          // copy — losing the very edit in the cloud too.)
+          setSaveStatus("saving");
+          pushModelToCloud(payload).then((r) => {
+            if (r && r.ok) {
+              setSaveStatus("saved"); setCloudSaveFailed(false); setSavedToCloudOnly(true);
+              reportClientEvent("save-local-failed-cloud-ok", "device storage full; saved to cloud instead", { id: siteId });
+            } else {
+              setSaveStatus("unsaved"); setCloudSaveFailed(true);
+              reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" });
+            }
+          });
+        }
+      } else if (okSave) { setSaveStatus("saved"); setCloudSaveFailed(false); }
+      else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
@@ -4635,15 +4657,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const back = loadSite(siteId);
     const want = drawnCount(liveRef.current);
     const got = drawnCount(back);
-    if (!back || got < want) {
-      setLocalSaveFailed(true);
-      reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    if (back && got >= want) {
+      // Device write is good → clear any alarm, push to cloud as usual, show provable confirmation.
+      setLocalSaveFailed(false); setSavedToCloudOnly(false);
+      if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) cloudPushWithWatchdog(siteId);
+      setSaveNowMsg(`Saved ✓ ${got} item${got === 1 ? "" : "s"} on this device${isCloudActive() ? " + cloud" : ""}`);
+      setTimeout(() => setSaveNowMsg(""), 4500);
       return;
     }
-    setLocalSaveFailed(false);
-    if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) cloudPushWithWatchdog(siteId);
-    setSaveNowMsg(`Saved ✓ ${got} item${got === 1 ? "" : "s"} on this device${isCloudActive() ? " + cloud" : ""}`);
-    setTimeout(() => setSaveNowMsg(""), 4500);
+    // B473 — the on-device write FAILED (storage full). Don't give up: push the LIVE payload to the
+    // cloud (no ~5MB cap). If it lands, the work is safe in the account even though this device can't
+    // hold it — say so honestly (amber, not red). If the cloud is unreachable too, go loud.
+    reportClientEvent("save-verify-failed", "Save now: on-device write did not persist", { id: siteId, want, got });
+    if (isCloudActive() && !readOnlyRef.current && !conflictRef.current) {
+      setSaveNowMsg("Saving to your account…");
+      pushModelToCloud({ id: siteId, ...metaRef.current, ...liveRef.current }).then((r) => {
+        setSaveNowMsg("");
+        if (r && r.ok) { setLocalSaveFailed(false); setSavedToCloudOnly(true); }
+        else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportClientEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
+      });
+    } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
   // Version history (automatic local backups, B126): open the dialog with this plan's
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
@@ -6235,10 +6268,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
-      {/* B473 — a verified ON-DEVICE write failure is the silent data-loss class; this is its own LOUD,
-          accurate alarm (red = genuine error). Unlike the cloud-only banner, here the work is NOT safe
-          yet, so the wording + the Save-now action reflect that. */}
-      {localSaveFailed && (
+      {/* B473 — device-write health. AMBER = the device storage is full but the work IS saved to the
+          cloud account (safe + reloads fine; only action is freeing space for an offline copy). RED =
+          the work is NOT safe anywhere yet (device write failed AND the cloud hasn't confirmed). */}
+      {savedToCloudOnly ? (
+        <div role="status" data-testid="saved-cloud-only" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: 740, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>✔ <b>Saved to your account</b> — your work is safe in the cloud and will reload fine. This <b>device's storage is full</b>, so there's no offline copy; free up space (or Export) to keep one.</span>
+          <button onClick={saveNow} title="Try saving on this device again" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>Retry device save</button>
+        </div>
+      ) : localSaveFailed && (
         <div role="alert" data-testid="local-save-failed" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6002, maxWidth: 720, display: "flex", alignItems: "center", gap: 12, background: "#7c1d1d", color: "#fff", border: "1px solid #f87171", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 700, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.4)" }}>
           <span style={{ flex: 1 }}>⛔ Your last change <b>could not be saved on this device</b> — your browser storage may be full or blocked. Use <b>Save now</b> (or Export) to keep your work, then free up space.</span>
           <button onClick={saveNow} title="Try saving again now" style={{ flex: "none", cursor: "pointer", background: "#f87171", color: "#3a0a0a", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Save now</button>
