@@ -72,6 +72,26 @@ describe("parseUpstream — the esri-appended path round-trips", () => {
   });
 });
 
+// B469/NEW-6 — the Fort Bend FLOODZONE host (arcgisweb.fortbendcountytx.gov) sends no CORS headers,
+// so probeService routes its ?f=json health probe through this same-origin proxy. Lock the full
+// round-trip: the client builds a proxy probe URL, and the server (parseUpstream) reconstructs the
+// real ?f=json request for an ALLOWED host (so a CORS-blocked county service can still be probed).
+describe("Fort Bend FLOODZONE probe round-trips through the proxy (B469/NEW-6)", () => {
+  const FB = "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer";
+  it("allows the Fort Bend host (already in the open-proxy allowlist)", () => {
+    expect(ALLOWED_GIS_HOST_RE.test("arcgisweb.fortbendcountytx.gov")).toBe(true);
+  });
+  it("a proxied ?f=json probe is same-origin and decodes back to the real service request", () => {
+    const probe = `${proxyServiceUrl(FB)}?f=json`;             // exactly what probeService requests on a CORS failure
+    expect(probe.startsWith("/api/gis-cache/svc/")).toBe(true); // same-origin → no CORS wall
+    const seg = proxyServiceUrl(FB).split("/").pop();
+    const r = parseUpstream(["svc", seg], "?f=json");
+    expect(r).not.toBeNull();
+    expect(r.url).toBe(`${FB}?f=json`);
+    expect(r.host).toBe("arcgisweb.fortbendcountytx.gov");
+  });
+});
+
 describe("cacheKey", () => {
   it("is stable and Drive-filename-safe for the same URL", () => {
     const k = cacheKey(`${FEMA}/export?bbox=1,2,3,4`);

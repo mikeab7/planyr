@@ -67,6 +67,7 @@ function makeLocks() {
         } else { resolveOuter(); }
         return outer;
       };
+      if (options.steal) { held.delete(name); return grant(); } // preempt the current holder (B466/NEW-3)
       if (options.ifAvailable && held.has(name)) {
         return Promise.resolve(callback(null)); // held elsewhere → null lock
       }
@@ -75,6 +76,18 @@ function makeLocks() {
       }
       return grant();
     },
+  };
+}
+
+// A shared in-memory BroadcastChannel bus: every channel() shares one peer list, and a
+// postMessage is delivered to every OTHER channel's onmessage (synchronously) — enough to
+// exercise the takeover yield protocol without a real browser.
+function makeBus() {
+  const peers = [];
+  return () => {
+    const ch = { onmessage: null, postMessage(data) { for (const p of peers) if (p !== ch && p.onmessage) p.onmessage({ data }); }, close() {} };
+    peers.push(ch);
+    return ch;
   };
 }
 
@@ -117,5 +130,43 @@ describe("createEditorLock — orchestration against a Web Locks mock (B455)", (
     const a = createEditorLock({ locks: null });
     a.setProject("p1");
     expect(a.role()).toEqual({ active: true, readOnly: false });
+  });
+});
+
+// B466/NEW-3 — "Take over editing here": a read-only tab can become the active editor.
+describe("createEditorLock.takeOver — steal the lock + hand off the prior holder (B466)", () => {
+  const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+
+  it("a read-only tab that takes over becomes the active editor (the steal guarantee)", async () => {
+    const locks = makeLocks();
+    const a = createEditorLock({ locks, channel: null });
+    const b = createEditorLock({ locks, channel: null });
+    a.setProject("p1"); await tick();
+    b.setProject("p1"); await tick();
+    expect(b.readOnly()).toBe(true);
+    expect(b.takeOver()).toBe(true);
+    await tick();
+    expect(b.active()).toBe(true); // b stole the lock → now the active editor
+  });
+
+  it("broadcasting a takeover makes the prior holder step down to read-only (the bus hand-off)", async () => {
+    const locks = makeLocks();
+    const bus = makeBus();
+    const a = createEditorLock({ locks, channel: bus() });
+    const b = createEditorLock({ locks, channel: bus() });
+    a.setProject("p1"); await tick();
+    b.setProject("p1"); await tick();
+    expect(a.active()).toBe(true);
+    expect(b.readOnly()).toBe(true);
+    b.takeOver(); await tick();
+    expect(b.active()).toBe(true);    // b is now the active editor…
+    expect(a.readOnly()).toBe(true);  // …and a stepped down via the yield broadcast
+  });
+
+  it("take-over is a no-op-but-active when Web Locks is unavailable (already the sole editor)", () => {
+    const a = createEditorLock({ locks: null, channel: null });
+    a.setProject("p1");
+    expect(a.takeOver()).toBe(false); // nothing to steal — degraded open
+    expect(a.active()).toBe(true);
   });
 });

@@ -19,6 +19,7 @@ import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
 import {
   isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
 } from "./layerRequest.js";
+import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 
 export { JURISDICTION_LAYERS };
 
@@ -292,31 +293,42 @@ export async function fetchWithRetry(url, opts = {}, tries = 3) {
  * so re-probing is cheap and stopped services self-heal on the next probe. */
 const PROBE_TTL = 40000;
 const _probeCache = new Map(); // url -> { ok, error, ts }
+// One ?f=json read of a service root → a typed health result. Pulled out of probeService so the
+// SAME parse can run against the direct URL or the proxy URL (B469/NEW-6). Never throws.
+async function probeOnce(probeUrl) {
+  try {
+    const r = await fetchWithRetry(probeUrl, {}, 3);
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    const j = await r.json().catch(() => ({}));
+    return j && j.error
+      ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
+      // Capture the service's own data extent (fullExtent, or `extent` on a FeatureServer/layer)
+      // straight from the health probe — the coverage engine (NEW-1/B283) reprojects it to test
+      // whether this layer's data reaches the view. No extra request: it's in this same response.
+      : { ok: true, error: null, fullExtent: (j && (j.fullExtent || j.extent)) || null };
+  } catch (e) {
+    // The fetch threw — we couldn't even reach the service to health-check it (CORS, network, or
+    // timeout). Flag `unreachable` so a caller can still optimistically add an image layer: its
+    // f=image export renders via a CORS-exempt <img>, which loads even when a cross-origin fetch
+    // is refused. A truly-down service surfaces via the layer's own requesterror instead.
+    return { ok: false, unreachable: true, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
+  }
+}
 export async function probeService(url) {
   const key = trimUrl(url);
   const hit = _probeCache.get(key);
   if (hit && Date.now() - hit.ts < PROBE_TTL) return hit;
-  let result;
-  try {
-    const r = await fetchWithRetry(`${key}?f=json`, {}, 3);
-    if (!r.ok) result = { ok: false, error: `HTTP ${r.status}` };
-    else {
-      const j = await r.json().catch(() => ({}));
-      result = j && j.error
-        ? { ok: false, error: j.error.message || `service error ${j.error.code || ""}`.trim() }
-        // Capture the service's own data extent (fullExtent, or `extent` on a
-        // FeatureServer/layer) straight from the health probe — the coverage engine
-        // (NEW-1/B283) reprojects it to test whether this layer's data reaches the view.
-        // No extra request: it's already in this same ?f=json response.
-        : { ok: true, error: null, fullExtent: (j && (j.fullExtent || j.extent)) || null };
-    }
-  } catch (e) {
-    // The fetch threw — we couldn't even reach the service to health-check it (CORS,
-    // network, or timeout). Flag `unreachable` so a caller can still optimistically add
-    // an image layer: its f=image export renders via a CORS-exempt <img>, which loads
-    // even when a cross-origin fetch is refused. A truly-down service surfaces via the
-    // layer's own requesterror instead.
-    result = { ok: false, unreachable: true, error: /failed to fetch|networkerror|load failed/i.test(String(e?.message)) ? "network / CORS error" : (e?.message || "request failed") };
+  let result = await probeOnce(`${key}?f=json`);
+  // B469/NEW-6 — a county/agency host that omits CORS headers (e.g. Fort Bend FLOODZONE,
+  // arcgisweb.fortbendcountytx.gov) makes the DIRECT probe throw, so the layer's health + coverage
+  // extent could never be read. Retry through the same-origin B445 cache proxy, which fetches the
+  // service server-side (no CORS wall) and returns the JSON same-origin. Direct-FIRST so the many
+  // CORS-clean hosts take no extra hop and never depend on the proxy being deployed; the proxy
+  // retry fires ONLY on an actual unreachable/CORS failure (so dev, where the proxy 404s, safely
+  // keeps the direct unreachable result and the layer is still added optimistically).
+  if (gisProxyEnabled() && !result.ok && result.unreachable) {
+    const viaProxy = await probeOnce(`${proxyServiceUrl(key)}?f=json`);
+    if (viaProxy.ok) result = viaProxy;
   }
   result.ts = Date.now();
   _probeCache.set(key, result);

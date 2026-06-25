@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 
 // A plain building element (what users mostly lose); `bld("a")` etc.
@@ -263,6 +263,47 @@ describe("saveSite skipHistory option (B458)", () => {
     expect(v.length).toBe(1);                                             // exactly one snapshot, not two
     expect(v[0].buildings).toBe(3);                                       // the fat (3-building) version is restorable
     expect(getVersion("s", v[0].at).els.map((e) => e.id).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+// B467/NEW-4 — Restore must VERIFY the pre-restore backup persisted before overwriting current work.
+// snapshotVersion now reports whether it wrote (so a quota failure is visible to the caller), and
+// `force` bypasses the shape-dedup so a same-shape-but-different-content current state is still backed
+// up; backupNow drives both so Restore can confirm "your current version is backed up" is true.
+describe("snapshotVersion return + backupNow (B467/NEW-4)", () => {
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+
+  it("returns true on write, false when deduped, and force bypasses the dedup", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b")] });
+    const cur = loadSite("s");
+    expect(snapshotVersion(cur)).toBe(true);                  // first snapshot of this shape → written
+    expect(snapshotVersion(cur)).toBe(false);                 // same shape again → deduped → no write
+    expect(snapshotVersion(cur, { force: true })).toBe(true); // force ignores the dedup → a backup is written
+  });
+
+  it("backupNow writes a verified backup of the current state when there's real content", () => {
+    saveSite({ id: "s", els: [bld("a"), bld("b"), bld("c")] });
+    const before = listVersions("s").length;
+    expect(backupNow("s")).toBe(true);
+    const after = listVersions("s");
+    expect(after.length).toBeGreaterThan(before);
+    expect(after[0].buildings).toBe(3); // the current 3-building state is the freshest restorable backup
+  });
+
+  it("backupNow is a safe true (don't block a restore) when there's nothing at risk", () => {
+    expect(backupNow("missing")).toBe(true); // no record → a restore can't lose anything
+    saveSite({ id: "e", els: [] });          // an empty record
+    expect(backupNow("e")).toBe(true);       // nothing to protect → never block the restore
   });
 });
 

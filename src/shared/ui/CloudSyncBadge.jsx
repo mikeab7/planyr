@@ -9,12 +9,13 @@
  * falls back to the loud error glyph, not to nothing.
  *
  * States (each visually distinct, not text-dependent):
- *   synced  → quiet green cloud + check    (the resting default — low emphasis)
- *   saving  → amber cloud + up-arrow, pulsing (in-flight, transient)
- *   offline → amber cloud + pause          (saved on this device, will sync when back)
- *   error   → LOUD red cloud + slash + ring (a write FAILED / conflict) — click for detail + retry
- *   local   → muted "device" glyph         (signed out — saved on this device only)
- *   null/—  → nothing                       (no project/doc loaded; NOT an error)
+ *   synced   → quiet green cloud + check    (the resting default — low emphasis)
+ *   saving   → amber cloud + up-arrow, pulsing (in-flight, transient)
+ *   offline  → amber cloud + pause          (saved on this device, will sync when back)
+ *   readonly → amber cloud + lock           (another tab is the active editor — NOT syncing here; B465/NEW-2)
+ *   error    → LOUD red cloud + slash + ring (a write FAILED / conflict) — click for detail + retry
+ *   local    → muted "device" glyph         (signed out — saved on this device only)
+ *   null/—   → nothing                       (no project/doc loaded; NOT an error)
  *
  * Colors are theme tokens (B341) so the glyph stays legible when the chrome flips
  * light/dark; hierarchy comes from color + weight + the pulse, never from fading.
@@ -33,6 +34,12 @@ export function cloudBadgeView(state) {
     case "offline":
       return { variant: "cloud-pause", color: "var(--warn-text)", pulse: false, loud: false, actionable: true,
         title: "Saved on this device", tip: "Saved on this device — the cloud is unreachable. Your work will sync automatically when you reconnect." };
+    case "readonly":
+      // B465/NEW-2 — NOT green. Another tab of this browser is the active editor, so this tab is
+      // read-only and is NOT saving to the cloud. Amber + a lock glyph + an actionable popover that
+      // explains why and what to do. (The banner in the workspace carries the loud Take-over action.)
+      return { variant: "cloud-lock", color: "var(--warn-text)", pulse: false, loud: false, actionable: true,
+        title: "Read-only — not saving", tip: "This plan is open in another tab, which is the active editor. Your changes here are kept on this device but won't sync to the cloud until you take over editing here (use the banner) or close the other tab." };
     case "error":
       return { variant: "cloud-slash", color: "var(--danger)", pulse: false, loud: true, actionable: true,
         title: "Sync problem", tip: "Your last change couldn't be saved to the cloud. It's safe on this device and will retry." };
@@ -62,6 +69,7 @@ function CloudGlyph({ variant, size = 15 }) {
           {variant === "cloud-check" && <path d="M9.4 12.6l1.9 1.9 3.4-3.6" strokeWidth="1.8" />}
           {variant === "cloud-up"    && <path d="M12 15.5v-4.2M10.1 12.7L12 10.7l1.9 2" strokeWidth="1.8" />}
           {variant === "cloud-pause" && <path d="M10.6 11.4v3.4M13.4 11.4v3.4" strokeWidth="1.8" />}
+          {variant === "cloud-lock"  && <path d="M9.9 12.6h4.2v3.1H9.9zM10.8 12.6v-1.1a1.2 1.2 0 0 1 2.4 0v1.1" strokeWidth="1.5" />}
           {variant === "cloud-slash" && <path d="M5.2 5.2l13.6 13.6" strokeWidth="2" />}
         </>
       )}

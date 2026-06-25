@@ -68,6 +68,17 @@ export function extractStack(error, context = {}) {
 
 export const errorSignature = (source, message) => `${source || "error"}|${message || ""}`.slice(0, 300);
 
+/* A stable per-page-load id (B468/NEW-5). Stamped into every event so multi-tab contention is
+ * reconstructable from telemetry — two tabs fighting over one project show up as two distinct
+ * tab ids in the rows. Kept short; embedded in the message text so NO DB-schema change (and no
+ * owner SQL step) is needed. */
+export const TAB_ID = (() => {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID().slice(0, 8);
+  } catch { /* ignore */ }
+  try { return "t" + Date.now().toString(36).slice(-6); } catch { return "t000000"; }
+})();
+
 /* Pure shape of the row we write. Separated from the I/O so it's unit-testable. */
 export function buildErrorRow(error, context = {}, meta = {}) {
   return {
@@ -130,6 +141,32 @@ export function reportClientError(error, context = {}) {
   } catch { /* telemetry must never throw into the app */ }
 }
 
+/* Record a structured NON-error telemetry EVENT (B468/NEW-5). The 8 South lockout incident
+ * required live DevTools spelunking to discover because nothing about it was traceable after
+ * the fact. These events fix that: a notable state transition we want diagnosable from the
+ * client_errors table (or pfTelemetry.recent()) without a live session — a tab entering/leaving
+ * read-only, an edit attempted while locked, a save suppressed because the lock isn't held, a
+ * cloud write rejected (conflict/RLS), a delete that affected zero rows. Same sink + dedup +
+ * ring buffer as reportClientError, tagged source="event:<kind>" and stamped with TAB_ID so
+ * multi-tab contention is reconstructable. Fire-and-forget; NEVER throws into the app. */
+export function reportClientEvent(kind, message, extra) {
+  try {
+    const k = String(kind || "event");
+    let detail = "";
+    if (extra && typeof extra === "object") { try { detail = " " + JSON.stringify(extra); } catch { /* unserializable */ } }
+    const msg = `[tab ${TAB_ID}] ${message == null ? "" : String(message)}${detail}`;
+    const row = buildErrorRow(null, { source: "event:" + k, module: _module });
+    row.message = truncate(msg, MSG_MAX);
+    if (!row.message) return;
+    const decision = decideReport(errorSignature(row.source, row.message), Date.now(), _state);
+    _state = decision.state;
+    if (!decision.report) return;
+    _recent.push(row);
+    if (_recent.length > RECENT_MAX) _recent.shift();
+    sink(row);
+  } catch { /* telemetry must never throw into the app */ }
+}
+
 /* The one network write: insert into public.client_errors via the existing anon client.
  * No-op when cloud isn't configured. Fire-and-forget; swallows all errors (including a
  * missing-table / RLS rejection) so a telemetry failure is itself invisible. */
@@ -152,5 +189,5 @@ export function installClientErrorTelemetry(win = typeof window !== "undefined" 
   win.addEventListener("vite:preloadError", (e) => reportClientError((e && e.payload) || e, { source: "vite:preloadError" }));
   // Diagnostic handle (mirrors window.pfSupabase): inspect recent captures live without
   // a DB round-trip. Safe to ship.
-  try { win.pfTelemetry = { reportClientError, recent: () => _recent.slice(), state: () => ({ sent: _state.sent, total: _state.total }) }; } catch { /* ignore */ }
+  try { win.pfTelemetry = { reportClientError, reportClientEvent, tab: TAB_ID, recent: () => _recent.slice(), state: () => ({ sent: _state.sent, total: _state.total }) }; } catch { /* ignore */ }
 }

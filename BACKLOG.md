@@ -22,6 +22,28 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-25: owner-dropped read-only-lockout cluster "NEW-1…NEW-7" (one chat; SUPERSEDES the earlier
+     NEW-1/2/3 block in the same chat — filed from THIS block only, no double-enter). Highest real B#
+     across both files was B463, so minted **B464–B470**. Per STANDING RULE #1 all seven were filed AND
+     fixed the SAME session on branch `claude/exciting-wright-yb6ruz` — full [x] blocks live in
+     BACKLOG-DONE.md. lint 0 · 1528 tests (+11) · build green · headless V (`ui-audit/verify-readonly-takeover.mjs`, 7/7).
+     AUDITED-FIRST per the brief, and FLAGGED a contradiction: on current main (post-B458/B455) a read-only
+     tab's LOCAL mirror + version snapshots run UNCONDITIONALLY (only the CLOUD push is gated), so the
+     report's "snapshots froze / nothing persisted anywhere" is NOT reproducible on current main — it
+     predates B458 (shipped earlier 2026-06-25, the immediate-mirror fix). The green-indicator-while-
+     read-only (NEW-2) WAS reproducible in code and is fixed.
+       • B464 (NEW-1) read-only tab no longer silently non-syncing — LOUD actionable banner; EXTENDS B455/B458.
+       • B465 (NEW-2) headerSaveState gained a "readonly" badge state (amber lock) — never green while not saving.
+       • B466 (NEW-3) editorLock.takeOver() (Web Locks steal + cross-tab bus yield) + "Take over editing here" force-push.
+       • B467 (NEW-4) Restore verifies the pre-restore backup persisted + is lock-gated (a read-only tab can't Restore).
+       • B468 (NEW-5) reportClientEvent → public.client_errors: readonly enter/leave/takeover, save-suppressed,
+         cloud-conflict, cloud-write-failed, delete-zero-rows (tab-id stamped); EXTENDS B279, no schema change.
+       • B469 (NEW-6) probeService direct-first → proxy-on-CORS-failure through the existing B445 proxy (Fort Bend).
+       • B470 (NEW-7) pdf.worker Trusted Types warning — triaged benign (no enforced CSP in the repo), no code change.
+     Deduped/folded, not duplicated: B464/B466 EXTEND B455 (lockout) + B458 (immediate mirror); B468 EXTENDS
+     B279; B469 reuses B445; NONE is a re-file of B313/B314/B459. Three live checks (signed-in indicator
+     read-only state, telemetry rows, Fort-Bend-parcel no-CORS) are logged in VERIFICATION.md for Cowork. -->
+
 <!-- 2026-06-25: owner-dropped trio "NEW-1/NEW-2/NEW-3" (overlay right-click menu + "align to base" +
      replace the rotation slider with a numeric stepper). Highest real B# across both files was B460, so
      minted **B461 / B462 / B463**. Deduped: B463 is NOT B428 (property-set completion — that added

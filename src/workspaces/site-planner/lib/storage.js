@@ -347,18 +347,34 @@ const sigOf = (m) => [m.els, m.markups, m.measures, m.callouts, m.parcels, m.she
   .map((a) => (a && a.length) || 0).join("/");
 const mainBuildingCount = (m) =>
   (Array.isArray(m.els) ? m.els : []).filter((e) => e && e.type === "building" && !e.attachedTo && !e.dogEar).length;
-// Snapshot a version (the record about to be overwritten) into the ring buffer.
-export function snapshotVersion(model) {
-  if (!model || !model.id) return;
+// Snapshot a version (the record about to be overwritten) into the ring buffer. Returns TRUE iff a
+// snapshot was actually written to localStorage — so a caller (Restore, B467/NEW-4) can VERIFY the
+// backup persisted instead of assuming it. `force` bypasses the same-shape dedup: a Restore can
+// replace a state that shares its shape (collection counts) with the newest snapshot but differs in
+// content, so the pre-restore backup must be taken even when sigOf matches.
+export function snapshotVersion(model, { force = false } = {}) {
+  if (!model || !model.id) return false;
   const m = createSiteModel(model);
-  if (!contentCount(m) && !m.underlay) return; // never snapshot an empty record
+  if (!contentCount(m) && !m.underlay) return false; // never snapshot an empty record
   const all = historyAll();
   const list = all[m.id] || [];
   const sig = sigOf(m);
-  if (list[0] && list[0].sig === sig) return; // same shape as the newest snapshot → skip churn
+  if (!force && list[0] && list[0].sig === sig) return false; // same shape as the newest snapshot → skip churn
   list.unshift({ at: m.updatedAt || Date.now(), sig, buildings: mainBuildingCount(m), name: m.name || null, site: m.site || null, model: slimForHistory(m) });
   all[m.id] = list.slice(0, HISTORY_PER_SITE);
-  writeHistoryAll(all);
+  return writeHistoryAll(all); // false only on a hard quota failure even after slimming
+}
+// B467/NEW-4 — force a backup of a site's CURRENT stored state and report whether it's safe to
+// proceed with a Restore. Returns TRUE when there's nothing at risk (no record, or an empty one) OR
+// when a backup snapshot actually persisted; FALSE only when real content exists AND the snapshot
+// could NOT be written. Restore calls this BEFORE replacing the canvas so the dialog's "your current
+// version is backed up too, so a restore can be undone" promise is verified, never silently broken.
+export function backupNow(id) {
+  if (!id) return false;
+  const cur = loadSite(id);
+  if (!cur) return true;                                  // nothing stored to overwrite
+  if (!contentCount(cur) && !cur.underlay) return true;   // current state is empty → nothing to protect
+  return snapshotVersion(cur, { force: true }) === true;  // real content → require a persisted backup
 }
 // Human content summary of a snapshot for the version-history list (B456/NEW-8). Computed
 // from the stored full model so it's correct even for OLD snapshots, and counts REAL
