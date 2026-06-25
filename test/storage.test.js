@@ -25,14 +25,36 @@ describe("mergePulledSites — pullCloud must never drop local-only work (B124)"
     expect(toPush).not.toContain("b");
   });
 
-  it("newer-wins: cloud-newer overlays local; local-newer is kept AND re-pushed", () => {
-    const existing = { a: rec("a", 100), b: rec("b", 999) };
-    const cloud = [rec("a", 500), rec("b", 100)];
+  it("re-pushes a row whose merge is FULLER than the cloud; an identical row is not pushed (B460)", () => {
+    // a: cloud newer, SAME content → cloud scalars win, no push. b: local has a building the cloud
+    // lacks → the union is fuller → re-push to heal the cloud.
+    const existing = { a: site("a", 100, [bld("x")]), b: site("b", 999, [bld("p"), bld("q")]) };
+    const cloud = [site("a", 500, [bld("x")]), site("b", 100, [bld("p")])];
     const { map, toPush } = mergePulledSites(existing, cloud);
-    expect(map.a.updatedAt).toBe(500); // cloud newer wins
-    expect(map.b.updatedAt).toBe(999); // local newer kept
-    expect(toPush).toContain("b");
-    expect(toPush).not.toContain("a");
+    expect(map.a.updatedAt).toBe(500);                          // cloud newer wins (scalars)
+    expect(map.b.els.map((e) => e.id).sort()).toEqual(["p", "q"]); // union kept the local-only building
+    expect(toPush).toContain("b");                              // merged is fuller → heal
+    expect(toPush).not.toContain("a");                          // identical content → no push
+  });
+
+  it("does NOT re-push a row that's merely NEWER with identical content (B460 — no spurious version churn)", () => {
+    // B458 advances the local updatedAt on every edit while the cloud push lags, so a reload would
+    // otherwise re-push identical content, bump `version`, and trip a spurious "changed in another
+    // session" conflict in any OTHER open tab. Same content (newer timestamp) must NOT re-push.
+    const existing = { a: site("a", 999, [bld("x"), bld("y")]) };
+    const cloud = [site("a", 100, [bld("x"), bld("y")])];
+    expect(mergePulledSites(existing, cloud).toPush).not.toContain("a");
+  });
+
+  it("STILL re-pushes when a tombstoned delete made the merge differ from the cloud (delete heals)", () => {
+    // The delete-propagation path the old updatedAt rule covered must survive B460: local deleted b
+    // (tombstone) while the cloud still has a+b → the merge differs from the cloud → re-push so the
+    // delete reaches the cloud (B459 allows it — the tombstone explains the drop).
+    const existing = { s: site("s", 200, [bld("a")], { deletedIds: ["b"] }) };
+    const cloud = [site("s", 100, [bld("a"), bld("b")])];
+    const { map, toPush } = mergePulledSites(existing, cloud);
+    expect(map.s.els.map((e) => e.id)).toEqual(["a"]); // tombstone kept b out
+    expect(toPush).toContain("s");                      // the delete must propagate to the cloud
   });
 
   it("a tie goes to the cloud and needs no push", () => {
