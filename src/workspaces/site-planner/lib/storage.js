@@ -52,15 +52,33 @@ export function clearRecentlyDeleted(id) { if (id == null) recentlyDeleted.clear
 // across this merge instead of being resurrected. Collections not yet wired to record a tombstone
 // keep the old recoverable "a delete can reappear once" trade-off; never silent data loss, and
 // the local version history makes any surprise recoverable meanwhile — see BACKLOG B126/B276.)
+// B460 — a stable content signature: the drawn collections (each sorted by id) + tombstones, as JSON.
+// Two models with the SAME drawn work hash-equal even if their updatedAt differs, so the boot re-push
+// (toPush) can fire on a real content change but NOT on a no-op re-open whose only difference is a
+// fresher timestamp. Both sides are createSiteModel-normalized, so identical content → identical JSON.
+const sigArr = (x) => (Array.isArray(x) ? x : []);
+const sigById = (a, b) => String(a && a.id).localeCompare(String(b && b.id));
+function contentSig(m) {
+  return JSON.stringify([
+    sigArr(m && m.els).slice().sort(sigById),
+    sigArr(m && m.markups).slice().sort(sigById),
+    sigArr(m && m.measures).slice().sort(sigById),
+    sigArr(m && m.callouts).slice().sort(sigById),
+    sigArr(m && m.parcels).slice().sort(sigById),
+    sigArr(m && m.sheetOverlays).slice().sort(sigById),
+    sigArr(m && m.parcelDrawings).slice().sort(sigById),
+    sigArr(m && m.deletedIds).slice().sort(),
+  ]);
+}
 export function mergePulledSites(existing, cloudModels, selfUid) {
   const map = {};
   for (const rec of Object.values(existing || {})) { const n = createSiteModel(rec); if (n.id) map[n.id] = n; }
   const cloudAt = {};
-  const cloudCount = {};
+  const cloudSig = {};
   for (const m of (cloudModels || [])) {
     const n = createSiteModel(m); if (!n.id) continue;
     cloudAt[n.id] = n.updatedAt || 0;
-    cloudCount[n.id] = contentCount(n);
+    cloudSig[n.id] = contentSig(n);
     const local = map[n.id];
     map[n.id] = local ? mergeSiteContent(local, n) : n; // content-union — never drop drawn work
   }
@@ -69,11 +87,14 @@ export function mergePulledSites(existing, cloudModels, selfUid) {
   // conflict on the real owner's edits. A row with no ownerId (legacy local-only) or no selfUid
   // (older callers / tests) is treated as ours, preserving the prior heal behavior.
   const mine = (m) => !selfUid || !m.ownerId || m.ownerId === selfUid;
+  // B460 — re-push ONLY when the merge actually changed the cloud's CONTENT (an add/move/delete the
+  // cloud lacks), or the row is cloud-absent. The old rule also re-pushed on a merely-newer updatedAt
+  // — which B458's immediate mirror write makes routine (every edit advances the local timestamp while
+  // the cloud push lags), so every reload re-pushed identical content, bumped `version`, and tripped a
+  // SPURIOUS "changed in another session" conflict in any OTHER open tab. map[id] is the union (⊇ cloud),
+  // so this can never push a thinner row; an identical re-open now pushes nothing (no version churn).
   const toPush = Object.keys(map).filter((id) =>
-    mine(map[id]) && (
-      !(id in cloudAt) ||
-      (map[id].updatedAt || 0) > cloudAt[id] ||
-      contentCount(map[id]) > (cloudCount[id] || 0)));
+    mine(map[id]) && (!(id in cloudAt) || contentSig(map[id]) !== cloudSig[id]));
   return { map, toPush };
 }
 
