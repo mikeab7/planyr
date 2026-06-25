@@ -38,6 +38,44 @@ export function splitParkingPieces(h, sd, ai) {
   return pieces;
 }
 
+// EXPLODE a parking field of total depth `h` into its individual constituent
+// bands — every STALL ROW and every DRIVE AISLE as its OWN piece (B472 / NEW-1).
+// This is the fine-grained inverse of the parking generator (the one level below
+// splitParkingPieces, which stops at whole modules): a double-loaded module
+// (two stall rows sharing one aisle) explodes into THREE pieces (row, aisle, row);
+// a single-loaded bay (one row + its aisle) into TWO — never collapsing the aisle
+// into a row, never a forced 2-element module result. Rows pair into double-loaded
+// modules exactly as the field was built (parkDepthForRows), so aisles = ⌈rows/2⌉.
+// The piece depths always sum to `h`, so exploding preserves the field's pavement
+// and stall count exactly (aisles carry no stalls). Each piece is
+// `{ kind: "row" | "aisle", depth }`, in near→far depth order. Returns fewer than 2
+// pieces ONLY for a degenerate/empty field, so callers can no-op + surface it loudly.
+export function explodeParkingBands(h, sd, ai) {
+  if (!(sd > 0) || !(h > 0)) return [];                       // degenerate config → nothing to explode
+  const mod = 2 * sd + ai;                                    // a double-loaded module: row | aisle | row
+  if (!(mod > 0)) return [];
+  const pieces = [];
+  let used = 0;
+  while (h - used >= mod - 1e-6) {                            // tile every full double-loaded module
+    pieces.push({ kind: "row", depth: sd });
+    pieces.push({ kind: "aisle", depth: ai });
+    pieces.push({ kind: "row", depth: sd });
+    used += mod;
+  }
+  // A trailing single-loaded bay (one more row + its drive aisle) for the remainder —
+  // but ONLY when there's room for a whole extra row beyond what's already placed, so a
+  // bare one-row band (depth ≈ sd, nothing to separate) correctly explodes to NOTHING.
+  let rem = h - used;
+  if (rem >= sd - 1e-6) {
+    pieces.push({ kind: "row", depth: sd });
+    rem -= sd;
+    if (rem > 1e-6) pieces.push({ kind: "aisle", depth: rem });   // the leftover IS the bay's drive aisle
+  } else if (rem > 1e-6 && pieces.length) {
+    pieces[pieces.length - 1].depth += rem;                  // a sub-row remainder folds into the last band (keep total depth)
+  }
+  return pieces.length >= 2 ? pieces : [];                    // <2 ⇒ nothing meaningful to separate → caller no-ops
+}
+
 /* ----------------------- curb adjacency (B130) -------------------- */
 // Paved element types whose presence against an edge means "pavement meets
 // pavement" — a drive-aisle opening, or continuous paving / an internal seam
