@@ -71,8 +71,21 @@ describe("cloudBadgeView — presentation truth-table", () => {
     expect(v.loud).toBe(false);
   });
 
+  it("'readonly' is NOT green — amber + a lock, actionable, distinct from synced (B465/NEW-2)", () => {
+    const v = cloudBadgeView("readonly");
+    expect(v).not.toBeNull();
+    expect(v.variant).toBe("cloud-lock");
+    expect(v.color).toBe("var(--warn-text)");   // amber attention color, never the green save-badge
+    expect(v.actionable).toBe(true);
+    // The core NEW-2 guardrail: "read-only — your edits aren't syncing" must NEVER look like synced.
+    const ok = cloudBadgeView("synced");
+    expect(v.variant).not.toBe(ok.variant);
+    expect(v.color).not.toBe(ok.color);
+    expect(/read-only/i.test(v.title)).toBe(true);
+  });
+
   it("every state carries a human tip (hover affordance) and a title", () => {
-    for (const s of ["synced", "saving", "offline", "error", "local"]) {
+    for (const s of ["synced", "saving", "offline", "readonly", "error", "local"]) {
       const v = cloudBadgeView(s);
       expect(typeof v.tip).toBe("string");
       expect(v.tip.length).toBeGreaterThan(0);

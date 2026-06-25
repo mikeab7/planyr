@@ -5,6 +5,8 @@ import {
   errorSignature,
   extractMessage,
   extractStack,
+  reportClientEvent,
+  TAB_ID,
   DUP_MS,
   RATE_WINDOW_MS,
   RATE_MAX,
@@ -148,5 +150,22 @@ describe("errorSignature (B279)", () => {
     expect(errorSignature("react", "Cannot read x")).toBe("react|Cannot read x");
     expect(errorSignature(undefined, undefined)).toBe("error|");
     expect(errorSignature("s", "m".repeat(1000)).length).toBe(300);
+  });
+});
+
+// B468/NEW-5 — structured NON-error events (read-only enter/leave, save suppressed, cloud
+// conflict, zero-row delete) so a silent lockout is diagnosable from telemetry after the fact.
+describe("reportClientEvent — structured events, fail-safe (B468/NEW-5)", () => {
+  it("exposes a stable, short, non-empty tab id (so multi-tab contention is reconstructable)", () => {
+    expect(typeof TAB_ID).toBe("string");
+    expect(TAB_ID.length).toBeGreaterThan(0);
+  });
+
+  it("NEVER throws into the app, whatever it's handed (telemetry must be invisible on failure)", () => {
+    const circular = {}; circular.self = circular; // unserializable extra → the JSON.stringify must be guarded
+    expect(() => reportClientEvent("readonly-enter", "went read-only", { id: "s1" })).not.toThrow();
+    expect(() => reportClientEvent("save-suppressed", "cloud push skipped", circular)).not.toThrow();
+    expect(() => reportClientEvent(null, null)).not.toThrow();
+    expect(() => reportClientEvent("delete-zero-rows")).not.toThrow();
   });
 });
