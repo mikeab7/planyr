@@ -4,6 +4,11 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V136 — B463: rotation slider → shared numeric stepper ✅ VERIFIED (headless, logged-out — no signed-in gap)
+- **Added + checked** 2026-06-25 · **Cadence** once (feature acceptance) · headless **Chromium**, `npm run dev` :5173, real `RotationStepper` in `ui-audit/rotation-stepper-harness.html` — `ui-audit/verify-b463-rotation-stepper.mjs`, **12/12**.
+- **Result ✅:** renders a numeric input + ▲▼ spinners and **zero `<input type=range>`** (slider retired); typing **370 → 10**, **−5 → 355** (wrap on commit); **45.25** keeps hundredth-degree precision; **▲ nudges +1°** with no drift (45.25 → 46.25); garbage **"abc" flags aria-invalid and does NOT clamp to 0**; **empty on blur reverts** to the last committed value (never 0); a **locked** instance disables the input AND both spinners; no uncaught page errors.
+- **No signed-in gap:** the rotation control is pure client UI editing persisted model fields (`o.rotation` / `selMarkup.rot` / `selEl.rot`) on the same save path logged-out and logged-in, fully exercised here. lint 0 · 1517 tests · build green.
+
 ### V132 — B158: right-click a site row to Rename / Delete (no inline ✕) ✅ VERIFIED (headless, logged-out — no signed-in gap)
 - **Added + checked** 2026-06-24 · **Cadence** once (feature acceptance) · headless **Chromium**, built app, `vite preview` :4173 — `ui-audit/verify-b158-rename.mjs`, **7/7**.
 - **Result ✅:** the YOUR SITES rows have **no inline ✕**; right-click opens the portalled menu carrying **Rename + Delete** (below the status quick-pick); **Rename** opens a pre-filled **inline input** (autofocus); **Enter** persists the new name to the row AND the localStorage store; **Esc** cancels (name unchanged); no uncaught page errors. Fixed a wiring gap (`onRenameSite` reached the planner but not MapFinder).

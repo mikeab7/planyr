@@ -24,6 +24,7 @@ import SiteAnalysis from "./components/SiteAnalysis.jsx";
 import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
+import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
@@ -5702,7 +5703,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }), root));
   };
   const rotateSelTo = (newRot) => { if (selEl) rotateAssemblyTo(selEl, newRot); };
-  const bumpRot = (d) => { if (selEl && !selEl.points) rotateSelTo((((Math.round(selEl.rot) + d) % 360) + 360) % 360); };
   // Resize the selected element from a numeric field, keeping its centre fixed and
   // carrying every bonded feature with it (same re-fit as dragging a grip).
   const resizeSelEl = (patch) => {
@@ -7413,8 +7413,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <input type="range" min={0.1} max={1} step={0.05} value={o.opacity} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { opacity: +e.target.value }, false)} />
                           </label>
                           <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
-                            <input type="range" min={0} max={360} step={1} value={o.rotation} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { rotation: +e.target.value }, false)} />
-                            <span style={{ width: 32, textAlign: "right", fontFamily: "ui-monospace, monospace" }}>{Math.round(o.rotation)}°</span>
+                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it"
+                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
+                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
                           <label style={ovRow}><span style={{ width: 48 }}>Width</span>
                             <input style={numInput} value={Math.round(wFt)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
@@ -7552,7 +7553,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.w)} min={1} onCommit={(n) => setSelMarkupGeom({ w: n })} />
                     <NumInput style={{ ...numInput, width: 56 }} value={Math.round(selMarkup.h)} min={1} onCommit={(n) => setSelMarkupGeom({ h: n })} />
                   </span></Field>
-                  <Field label="Rotation°"><NumInput style={numInput} value={Math.round(selMarkup.rot || 0)} onCommit={(n) => setSelMarkupGeom({ rot: ((n % 360) + 360) % 360 })} /></Field>
+                  <Field label="Rotation°"><RotationStepper value={selMarkup.rot || 0} disabled={!!selMarkup.locked} disabledReason="Unlock this markup to rotate it"
+                    onCommit={(deg) => setSelMarkupGeom({ rot: deg })}
+                    onStep={(d) => setSelMarkupGeom({ rot: normalizeDeg((selMarkup.rot || 0) + d) })} /></Field>
                 </>}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {MK_BOX_KINDS.includes(selMarkup.kind)
@@ -7661,13 +7664,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   )}
                   {!isDockZone(selEl) && (
                   <Field label="Rotation (°)">
-                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                      <NumInput style={{ ...numInput, width: 46 }} value={Math.round(selEl.rot)} onCommit={(n) => rotateSelTo(((n % 360) + 360) % 360)} />
-                      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <button style={spinBtn} onClick={() => bumpRot(1)} title="Rotate +1°">▲</button>
-                        <button style={spinBtn} onClick={() => bumpRot(-1)} title="Rotate −1°">▼</button>
-                      </span>
-                    </span>
+                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
+                      onCommit={(deg) => rotateSelTo(deg)}
+                      onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
                   </Field>
                   )}
                   {selEl.type === "building" && (
