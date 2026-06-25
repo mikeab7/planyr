@@ -22,6 +22,38 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- 2026-06-25: owner-dropped trio "NEW-1/NEW-2/NEW-3" (overlay right-click menu + "align to base" +
+     replace the rotation slider with a numeric stepper). Highest real B# across both files was B460, so
+     minted **B461 / B462 / B463**. Deduped: B463 is NOT B428 (property-set completion — that added
+     stroke/fill/text controls, never a rotation control); it REUSES the B431 element NumInput+spinner
+     pattern as the shared widget. B461 EXTENDS the B421 Arrange context menu (does not duplicate it) +
+     reuses the B158/B127 right-click-menu+portal pattern. B462 reuses the existing align primitive
+     (`overlayAlign.solveSimilarityLSQ` + the SitePlanner building→parcel `alignToParcelEdge`), not a
+     second one. Distinct from B422 (named markup Layers, parked).
+       • **B463 (NEW-3) — SHIPPED this session** per STANDING RULE #1; full [x] block lives in
+         BACKLOG-DONE.md (branch `claude/wizardly-mccarthy-oi8xl7`). The one rotation SLIDER in the app
+         (the Site Planner overlay "Rotate") is retired for a shared numeric stepper; the markup +
+         element rotation NumInputs now use the same widget. lint 0 · 1517 tests (+11) · build green ·
+         headless V (`ui-audit/verify-b463-rotation-stepper.mjs`, 12/12).
+       • **B461 (NEW-1) + B462 (NEW-2) — `[?]` BLOCKED on an owner scoping decision (asked 2026-06-25).**
+         The flagged assumption ("'overlay' = Document Review's overlay & version-compare surface") is
+         WRONG against the code: Document Review has **no overlay-object and no version-compare surface
+         yet** (it's an unbuilt Track-2 backend-tranche roadmap item). The only thing matching NEW-1's
+         description (an overlay with a transform layer + a source-file reference + lock + 2-point align)
+         is the **Site Planner's site-plan overlays** (`sheetOverlays`); the Stitcher's placed sheets are
+         the nearest Doc-Review analogue (affine `M`, no menu/lock). Doc-Review *markups* already have a
+         right-click menu (B421 Arrange + Edit + Delete) but no Copy/Duplicate/Lock and no source-file
+         "overlay" concept. So which surface NEW-1/NEW-2 target is a genuine either/or only the owner can
+         settle — see the question. NOT a stall: NEW-3 shipped, both items filed; will build the moment
+         the surface is confirmed. -->
+
+### B461 — Right-click context menu for overlay objects (Copy / Duplicate / Delete / z-order / Lock / Align to base) `[Doc Review / overlay]` (feature) — SCOPING-GATED  *(owner-dropped 2026-06-25 as "NEW-1"; minted **B461**)*
+`[?]` **BLOCKED on the owner scoping decision below — do NOT build until the surface is confirmed.** A standard right-click menu on a selected overlay object: **Copy, Duplicate, Delete, Bring to front / Send to back (z-order), Lock / Unlock, Align to base…** (the menu surface NEW-2/B462 hangs off). Design rules from the brief: Copy/Duplicate act on the overlay's transform layer + its source-file *reference* (Duplicate copies the transform, never re-imports the source); **Delete must verify the object actually went away (count check) — a no-op delete is crash-severity per the silent-failure rule**; Copy/paste + save failures must surface visibly; Lock makes the overlay non-movable AND non-alignable (align refuses a locked overlay with a visible reason); floating menu at the cursor (portal), must NOT be eaten by the canvas pointer layer nor trigger a marquee; multi-select acts on the whole selection for Delete/z-order/Lock (Align stays single-target); every destructive op is undoable; deleting the overlay ≠ deleting the underlying source file.
+- **Why blocked:** the "overlay objects" surface this describes does not exist in Document Review (see the batch note). Need the owner to pick the target surface (the asked question). If the answer is "the Site Planner overlays", this is largely additive to `sheetOverlays` (which already has Lock + Delete + opacity); if it's "a net-new Doc-Review version-compare surface", that surface must be built first (a larger Track-2 feature).
+
+### B462 — "Align to base" gesture for overlays, reusing the Site Planner building→parcel align `[Doc Review / overlay]` (feature) — SCOPING-GATED, depends on B461  *(owner-dropped 2026-06-25 as "NEW-2"; minted **B462**)*
+`[?]` **BLOCKED on the same scoping decision; the menu entry lives inside B461's menu, so B461's surface lands first.** Snap/align an overlaid sheet onto the base drawing the same way Site Planner aligns a building to a parcel boundary: right-click overlay → Align to base → pick matching reference features — a **two-point** pick (drawing point → base point, ×2 ⇒ translation + rotation + uniform scale) and/or an **edge-snap** (overlay edge → base line ⇒ translation + rotation only). **Reuse the existing primitive — do NOT write a second one:** `overlayAlign.solveSimilarityLSQ`/`applySimilarityToOverlay` (already powers the overlay "Align to map" 2-point flow) + the SitePlanner `alignToParcelEdge`/`snapParallel` building→parcel math; if too coupled to lift, extract the transform math into a shared util both workspaces call (fits the markup-engine unification). The transform is stored on the overlay's editable layer in **real-world feet (EPSG:2278)** so it survives zoom/pan/reload; the base stays immutable; one undo step; refuse a locked overlay; reject a degenerate (coincident-point) transform with a visible message, never apply NaN; re-aligning replaces the prior transform; align targets the active overlay only.
+
 <!-- 2026-06-24: owner-dropped data-loss + deploy-hygiene batch "NEW-1…NEW-9" (one chat, tied to the
      8 South / Plan 1 building-loss that happened DURING a stale-chunk deploy crash). Highest real B#
      across both files was B448, so minted **B449–B457**. Per STANDING RULE #1 the eight CODE items
