@@ -1435,6 +1435,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the leave/unmount persist, the beforeunload/visibility flush, and flushSite) so the
   // unmounting planner can't immediately re-write the row we just deleted.
   const deletedSelfRef = useRef(false);
+  // B458 — coalesce the immediate per-edit mirror write so a fast drag doesn't thrash writeSites.
+  const lastLocalWrite = useRef(0);
   useEffect(() => {
     if (!siteId || deletedSelfRef.current) return;
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
@@ -1443,8 +1445,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (isBlankSite({ parcels, els, measures, callouts, markups, underlay, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
+    const payload = { id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds };
+    // B458 — write the on-device mirror IMMEDIATELY, decoupled from the debounced cloud push: a reload
+    // within the 400ms debounce must still find this edit on the device so boot's union-merge can
+    // restore it (the prior structural cause of the 8 South building-loss — the mirror + history were
+    // BOTH debounced, so a reload-in-400ms lost the edit everywhere). This is a DEFAULT save (history
+    // on): snapshotVersion backs up the prior version before overwriting (the B126 thinning safety net)
+    // AND makes the rollback snapshot reload-safe too. Runs even when the cloud push is gated by a
+    // conflict/read-only tab — a local save is always safe and is the whole recovery net. Coalesced to
+    // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
+    const writeMirror = () => { saveSite(payload); lastLocalWrite.current = Date.now(); };
+    let microT = null;
+    if (Date.now() - lastLocalWrite.current >= 50) writeMirror();
+    else microT = setTimeout(writeMirror, 50);
     const t = setTimeout(() => {
-      const ok = saveSite({ id: siteId, ...metaRef.current, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds });
+      // Settle tick = the cloud push. skipHistory so this re-write can't double-snapshot what the
+      // immediate write already captured; the mirror is already current from writeMirror above.
+      const ok = saveSite(payload, { skipHistory: true });
       if (!ok) { setSaveStatus("unsaved"); return; }
       if (fresh) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
@@ -1457,7 +1474,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         else cloudPushWithWatchdog(siteId);
       } else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
   }, [siteId, parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays, deletedIds]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
