@@ -34,7 +34,7 @@ const roVisible = (page) => page.locator('[data-testid="readonly-banner"]').isVi
 const settle = (page) => page.waitForTimeout(1500);
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox", "--ignore-certificate-errors"] });
-const context = await browser.newContext({ viewport: { width: 1280, height: 850 } });
+const context = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true });
 await context.addInitScript(seed); // both tabs of this context share Web Locks AND this seed
 const pageErrors = [];
 

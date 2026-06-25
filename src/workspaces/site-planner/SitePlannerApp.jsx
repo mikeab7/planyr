@@ -9,6 +9,7 @@ import { claimInvites } from "./lib/teams.js";
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 import { nextConceptName } from "./lib/conceptName.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -168,6 +169,14 @@ export default function App({
       setCloudError("");
       if (event === "SIGNED_OUT") { setActiveSiteId(null); setMode("map"); }
       refreshSites();
+    }
+    // B471 — log the auth transition so a "saving stopped after my session changed" report is
+    // diagnosable from telemetry (the cloud-save path is gated on being signed in; a silent token
+    // lapse is exactly the kind of cause we couldn't see before). Only fires on a REAL change (the
+    // same-user re-emit returned early above).
+    if ((prevUid.current || null) !== uid) {
+      reportClientEvent(uid ? "auth-signed-in" : "auth-signed-out",
+        uid ? "session active" : "session ended (signed out or token lapsed)", { event });
     }
     prevUid.current = uid;
   };
