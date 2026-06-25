@@ -7,7 +7,7 @@ import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
@@ -1044,6 +1044,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
+  const [splitNote, setSplitNote] = useState(null); // transient "couldn't explode that field" notice (B472) — loud, never a silent no-op
   const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
   const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
@@ -1081,6 +1082,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (msg && ms > 0) warnTimerRef.current = setTimeout(() => { warnTimerRef.current = null; setOverlapWarn(""); }, ms);
   }, []);
   useEffect(() => () => { if (warnTimerRef.current) clearTimeout(warnTimerRef.current); }, []);
+  // Auto-dismiss the transient "couldn't explode that field" notice (B472).
+  useEffect(() => { if (!splitNote) return; const t = setTimeout(() => setSplitNote(null), 4500); return () => clearTimeout(t); }, [splitNote]);
   // Block the browser's default file-drop (navigate to / open the dropped PDF) anywhere in
   // the window (NEW-1). Without this, releasing a file a few pixels off the real dropzone
   // makes the browser open the PDF in a new tab — which reads as the file vanishing. Our own
@@ -5333,24 +5336,41 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // for trailer-tire/dolly abuse. The property lives globally on any band; only
   // trailer parking surfaces the control for now.
   const setCurbW = (el, wv) => { pushHistory(); setEls((a) => a.map((x) => x.id === el.id ? { ...x, curbW: wv } : x)); };
-  // Split a striped parking field into independent DOUBLE-LOADED module elements
-  // (each two stall rows sharing one drive aisle), plus a trailing single-loaded
-  // row only for a remainder that can't pair — never one row + a full aisle each
-  // (B130). Preserves position / rotation / total depth so each piece can be
-  // edited or dragged, and the field's stall count is unchanged.
+  // Pieces a rectangular parking field would EXPLODE into — each individual stall
+  // row + drive aisle (B472). Pure (lib/parking.js); reused by the gate + the action
+  // so the control only ever appears when it will produce real, separate elements.
+  const explodePiecesOf = (el) => {
+    if (!el || el.points || el.type !== "parking") return [];
+    const cfg = cfgOf(el);
+    return explodeParkingBands(el.h, cfg.stallDepth || settings.stallDepth, cfg.aisle ?? settings.aisle);
+  };
+  // EXPLODE a striped parking field into its individual constituent elements — every
+  // STALL ROW (its own `parking` band) and every DRIVE AISLE (a plain `paving` lane)
+  // as a separate, independently selectable/editable piece (B472). A double-loaded
+  // module → 3 elements (row, aisle, row); an N-row field → all rows + the ⌈N/2⌉
+  // aisles between them. Destructive but cleanly UNDOABLE (pushHistory → Ctrl+Z
+  // restores the parent — never vaporizes geometry). Child centres are derived from
+  // the parent edges (rotated local offsets; depths sum to el.h) so there is NO
+  // coordinate drift, and the field's pavement + stall count are preserved. Surfaces
+  // a LOUD notice on a degenerate/empty field instead of a silent no-op.
   const splitParkingRows = (el) => {
     if (!el || el.points || el.type !== "parking") return;
-    const cfg = cfgOf(el);
-    const sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
-    const pieces = splitParkingPieces(el.h, sd, ai);  // module depths, summing to el.h
-    if (pieces.length < 2) return;                    // ≤ one module: nothing to split
+    const pieces = explodePiecesOf(el);
+    if (pieces.length < 2) {                           // degenerate/empty field — say so, don't no-op silently
+      setSplitNote("That parking field has nothing to explode — it has no full stall row + aisle to separate.");
+      return;
+    }
     pushHistory();
     let y = -el.h / 2;                                 // walk down the local depth axis
     const newEls = [];
-    for (const ph of pieces) {
-      const off = rot2(0, y + ph / 2, el.rot);        // piece centre in local depth
-      newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: ph, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
-      y += ph;
+    for (const p of pieces) {
+      const off = rot2(0, y + p.depth / 2, el.rot);    // piece centre in local depth
+      if (p.kind === "aisle") {                        // a drive aisle → a plain paving lane
+        newEls.push({ id: uid(), type: "paving", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      } else {                                         // a stall row → a one-row parking band (inherits the field's striping cfg)
+        newEls.push({ id: uid(), type: "parking", cx: el.cx + off.x, cy: el.cy + off.y, w: el.w, h: p.depth, rot: el.rot, ...(el.cfg ? { cfg: el.cfg } : {}), ...(el.attachedTo ? { attachedTo: el.attachedTo } : {}) });
+      }
+      y += p.depth;
     }
     setEls((a) => [...a.filter((x) => x.id !== el.id), ...newEls]);
     setSel({ kind: "el", id: newEls[0].id });
@@ -6166,6 +6186,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
           <button onClick={() => setCloudSaveFailed(false)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
+        </div>
+      )}
+
+      {/* B472 — transient "couldn't explode that field" notice (the loud surface for a degenerate split, never a silent no-op) */}
+      {splitNote && (
+        <div role="alert" data-testid="split-note" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>{splitNote}</span>
+          <button onClick={() => setSplitNote(null)} title="Dismiss" style={{ flex: "none", cursor: "pointer", background: "rgba(255,255,255,0.18)", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>✕</button>
         </div>
       )}
 
@@ -7929,8 +7957,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, 1)}>＋ Row</button>
                           <button style={{ ...chip, flex: 1 }} onClick={() => growParking(selEl, -1)}>－ Row</button>
                         </div>
-                        {parkRowsForDepth(selEl.h, cfgOf(selEl).stallDepth || settings.stallDepth, cfgOf(selEl).aisle ?? settings.aisle) >= 3 &&
-                          <button style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
+                        {explodePiecesOf(selEl).length >= 2 &&
+                          <button data-testid="split-parking" title="Explode this field into its individual stall rows + drive aisles" style={{ ...chip, width: "100%", marginTop: 6 }} onClick={() => splitParkingRows(selEl)}>Split rows/aisles</button>}
                         <label style={{ display: "flex", gap: 8, fontSize: 11.5, color: PAL.muted, marginTop: 7, cursor: "pointer" }}>
                           <input type="checkbox" checked={!(selEl.cfg && selEl.cfg.flipDepth)} onChange={(e) => { pushHistory(); setEls((a) => a.map((x) => x.id === selEl.id ? { ...x, cfg: { ...(x.cfg || {}), flipDepth: !e.target.checked } } : x)); }} /> Drive aisle on the far side
                         </label>
@@ -8929,7 +8957,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </>
                     );
                   })()}
-                  {t.type === "parking" && !t.points && parkRowsForDepth(t.h, cfgOf(t).stallDepth || settings.stallDepth, cfgOf(t).aisle ?? settings.aisle) >= 3 && (
+                  {t.type === "parking" && !t.points && explodePiecesOf(t).length >= 2 && (
                     <>
                       <div style={hdr(true)}>Parking</div>
                       <button style={menuItem(false)} onClick={() => { splitParkingRows(t); setTypeMenu(null); }}>Split rows/aisles</button>

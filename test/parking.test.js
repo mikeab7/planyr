@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "../src/workspaces/site-planner/lib/parking.js";
+import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, explodeParkingBands, edgeAbutsPaving } from "../src/workspaces/site-planner/lib/parking.js";
 
 const SD = 18, AI = 24, MOD = 2 * SD + AI; // 60' double-loaded module (18 + 24 + 18)
 
@@ -47,6 +47,59 @@ describe("splitParkingPieces — split into double-loaded modules, not single ro
   });
   it("guards a degenerate (zero) module without looping", () => {
     expect(splitParkingPieces(100, 0, 0)).toEqual([]);
+  });
+});
+
+describe("explodeParkingBands — explode a field into individual rows + aisles (B472)", () => {
+  const kinds = (h) => explodeParkingBands(h, SD, AI).map((p) => p.kind);
+  const sum = (h) => explodeParkingBands(h, SD, AI).reduce((a, p) => a + p.depth, 0);
+
+  it("explodes ONE double-loaded module into THREE elements (row, aisle, row) — not a 2-element module", () => {
+    expect(kinds(60)).toEqual(["row", "aisle", "row"]);             // n=2 → 3 pieces
+    const pieces = explodeParkingBands(60, SD, AI);
+    expect(pieces).toEqual([
+      { kind: "row", depth: SD }, { kind: "aisle", depth: AI }, { kind: "row", depth: SD },
+    ]);
+  });
+
+  it("explodes a single-loaded bay (1 row + 1 aisle) into TWO elements", () => {
+    expect(kinds(42)).toEqual(["row", "aisle"]);                    // n=1 → 2 pieces
+  });
+
+  it("explodes an 8-row field into all individual rows plus the aisles between them (12 elements)", () => {
+    const pieces = explodeParkingBands(parkDepthForRows(8, SD, AI), SD, AI); // h=240, n=8
+    expect(pieces).toHaveLength(12);
+    expect(pieces.filter((p) => p.kind === "row")).toHaveLength(8); // every stall row
+    expect(pieces.filter((p) => p.kind === "aisle")).toHaveLength(4); // one aisle per pair (⌈8/2⌉)
+  });
+
+  it("scales the element count correctly for N rows (rows = n, aisles = ⌈n/2⌉)", () => {
+    for (let n = 1; n <= 10; n++) {
+      const pieces = explodeParkingBands(parkDepthForRows(n, SD, AI), SD, AI);
+      expect(pieces.filter((p) => p.kind === "row")).toHaveLength(n);
+      expect(pieces.filter((p) => p.kind === "aisle")).toHaveLength(Math.ceil(n / 2));
+    }
+  });
+
+  it("preserves total depth exactly (no pavement gained or lost on explode)", () => {
+    for (const h of [42, 60, 102, 120, 162, 180, 240, 137.5])
+      expect(sum(h)).toBeCloseTo(h, 6);
+  });
+
+  it("folds a sub-row free-draw remainder into the last piece rather than dropping depth", () => {
+    expect(sum(130)).toBeCloseTo(130, 6);                          // 120 (n=4) + 10' folded
+    expect(explodeParkingBands(130, SD, AI)).toHaveLength(6);      // still 4 rows + 2 aisles
+  });
+
+  it("guards a degenerate (zero) config without looping, returning < 2 pieces so the caller no-ops", () => {
+    expect(explodeParkingBands(100, 0, 0)).toEqual([]);
+    expect(explodeParkingBands(0, SD, AI)).toEqual([]);
+    expect(explodeParkingBands(-50, SD, AI)).toEqual([]);
+  });
+
+  it("no-ops on a BARE single stall row (already an explode result) — never a row + a zero-depth aisle", () => {
+    expect(explodeParkingBands(SD, SD, AI)).toEqual([]);          // depth == one stall row: nothing to separate
+    expect(explodeParkingBands(SD - 2, SD, AI)).toEqual([]);      // a sub-row sliver: nothing to separate
   });
 });
 

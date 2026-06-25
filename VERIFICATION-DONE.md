@@ -4,6 +4,11 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V138 — B472: parking-field "Split rows/aisles" now EXPLODES into individual rows + aisles ✅ VERIFIED (headless, logged-out — no signed-in gap)
+- **Added + checked** 2026-06-25 · **Cadence** once (regression/feature acceptance) · headless **Chromium**, built app, `vite preview` :4173, seeded a single rectangular parking field (no parcel) — `ui-audit/verify-b472-explode-parking.mjs`, **9/9**.
+- **Result ✅:** a **double-loaded module (60′, 2 rows)** explodes into **3 elements** — 2 stall rows (`parking`) + 1 drive aisle (`paving`) — depths summing to exactly 60′ (no coordinate drift); the control is now offered on a **2-row** field (was gated ≥3 rows); the auto-selected exploded row **no longer re-offers** the control (no zero-depth aisle / infinite re-split). A **6-row field (180′)** explodes into **9 elements** (6 rows + 3 aisles). No uncaught page errors.
+- **No signed-in gap:** the explode mutates the in-memory `els` model on the same persistence path logged-out and logged-in (a destructive-but-undoable `pushHistory` + `setEls`), fully exercised here. lint 0 · 1560 tests · build green.
+
 ### V137 — B461/B462: overlay right-click menu + "Align to base edge" ✅ VERIFIED (headless, logged-out — no signed-in gap)
 - **Added + checked** 2026-06-25 · **Cadence** once (feature acceptance) · headless **Chromium**, `npm run dev` :5173, seeded site (parcel rotated 30° + a dropped PNG overlay) — `ui-audit/verify-b461-b462-overlay-menu.mjs`, **13/13**.
 - **Result ✅:** right-clicking the overlay opens an 8-item menu (Copy / Duplicate / Paste / Bring to front / Send to back / Lock / Align to base edge… / Delete); Paste + z-order correctly disabled for a lone overlay; **Duplicate** adds a second overlay (1→2); **Lock** flips the row chip to 🔒; **Align to base edge** snaps the overlay's rotation 0 → 30° (parcel-edge angle, via the building→parcel `snapParallel`); **Delete** removes it (2→1) with no "delete didn't take" warning (count-verified); no uncaught page errors.
