@@ -930,6 +930,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  const overlayClip = useRef(null);                     // copied site-plan overlay (B461 Copy/Paste — shares the source ref, not a re-import)
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (NEW-1). Two independent hover flags:
   // the left "Site-plan overlay" panel dropzone, and a full-canvas "drop to place" hint.
@@ -1042,6 +1043,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
+  const [ovMenu, setOvMenu] = useState(null);     // {id, x, y} site-plan overlay right-click menu (B461)
+  const [ovAlignBase, setOvAlignBase] = useState(null); // overlay id armed for "Align to base edge" — next parcel-edge click sets its rotation (B462)
   const [parcelMenu, setParcelMenu] = useState(null); // {x,y} right-click parcel menu (merge)
   // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
   // element, measure, markup poly/line, easement). `selVtx` = the active control point (the
@@ -1780,10 +1783,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // don't hijack keys while typing in a field
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (sel?.kind === "el") { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (sel?.kind === "el") { e.preventDefault(); cutSel(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (clip.current) { e.preventDefault(); pasteClip(); } else if (overlayClip.current) { e.preventDefault(); pasteOverlay(); } return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
@@ -1807,7 +1810,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (e.key === "Enter" && tool === "select" && combineSel.length >= 2) { e.preventDefault(); mergeParcels(); return; }
       // Enter finishes / auto-closes ANY in-progress multi-point drawing (one shared path with double-click).
       if (e.key === "Enter" && finishActiveDrawing()) { e.preventDefault(); return; }
-      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
+      if (e.key === "Escape") { setDraftPoly(null); setDraftRect(null); setDraftElPoly(null); setRoadStart(null); setDraftRoad(null); setMeasDraft([]); setCalib(null); setSplitPath([]); setCombineSel([]); setCalloutDraft(null); cancelEditCallout(); setMkRect(null); setMkPoly(null); setEaseDraft(null); setEaseEdges(null); setEaseMenu(false); setMarquee(null); setMulti([]); setDrillId(null); setPrintMode(false); setPrintFrame(null); setIdentifyMode(false); setIdentifyRes(null); setAttachFor(null); setAlignFor(null); setPobMode(null); setOvCalib(null); setTraceMode(false); setTracePts([]); setRouteMode(null); setXsecMode(false); setXsecPts([]); setOverlapWarn(""); setSel(null); setTypeMenu(null); setParcelMenu(null); setSelVtx(null); setVtxMenu(null); setInsHint(null); setToolMenu(false); setMeasureMenu(false); setOvMenu(null); setOvAlignBase(null); spaceRef.current = false; setSpacePan(false); abortGesture(); setTool("select"); }
       if (e.key.startsWith("Arrow") && (multi.length > 1 || sel?.kind === "el")) { e.preventDefault(); nudgeSel(e.key, e.shiftKey ? 10 : 1); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && removeLastVertex()) { e.preventDefault(); return; } // undo the last placed vertex mid-draw
       if ((e.key === "Delete" || e.key === "Backspace") && selVtxRef.current) { e.preventDefault(); deleteVtx(selVtxRef.current.layer, selVtxRef.current.id, selVtxRef.current.index); return; } // B230: a selected control point → delete just that vertex (not the whole shape)
@@ -1817,7 +1820,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels]); // eslint-disable-line
+  }, [sel, tool, splitPath, els, markups, settings, measDraft, measureMode, combineSel, mkPoly, multi, traceMode, tracePts, editCallout, draftPoly, draftElPoly, easeDraft, easeEdges, easeMode, easeWidth, parcels, selOverlay, sheetOverlays]); // eslint-disable-line
 
   // B230 — track the Shift modifier (for the candidate-insertion dot) independent of the big
   // keyboard handler, so one of its early-return branches can't drop it; window blur resets it.
@@ -2025,6 +2028,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (attachFor) { setAttachFor(null); return; }     // clicked empty space → cancel attach
     if (alignFor) { alignToParcelEdge(fp, null); return; } // align: pick the nearest parcel edge to the click
+    if (ovAlignBase) { alignOverlayToParcelEdge(fp, null); return; } // B462: align the overlay to the nearest parcel edge
     if (identifyMode) { beginIdentifyPress(e); return; } // B383 identify→add: click adds the lot, drag pans (resolved in onUp)
     if (pobMode) { anchorEncumbrance(snapPt(fp)); return; } // metes-and-bounds: drop the POB here
     if (ovCalib) { onOvCalibClick(fp); return; } // overlay trace/align: capture a calibration point
@@ -3201,6 +3205,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const startMoveSheetOverlay = (e, id) => {
+    if (ovAlignBase && e.button === 0) { e.stopPropagation(); alignOverlayToParcelEdge(p2f(e.clientX, e.clientY), null); return; } // B462: click resolves the align
     if (tool !== "select" || e.button !== 0) return;
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o || o.locked) return;
@@ -3244,14 +3249,98 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSheetOverlays((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)));
   };
   const removeOverlay = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o) { flashWarn("Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
     pushHistory();
     const doc = overlayDocs.current.get(id);
     if (doc) { try { doc.destroy(); } catch (_) {} overlayDocs.current.delete(id); }
-    const o = sheetOverlays.find((x) => x.id === id);
-    if (o && o.storageKey) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
-    setSheetOverlays((arr) => arr.filter((o) => o.id !== id));
+    // Ref-count the shared source: a Duplicate/Paste (B461) copies the storageKey, so only drop the
+    // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
+    const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
+    if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
+    setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
+    setOvMenu((m) => (m && m.id === id ? null : m));
+    // Verify the removal actually took — a silent no-op delete is crash-severity (B461).
+    setTimeout(() => { if (stateRef.current.sheetOverlays.some((x) => x.id === id)) flashWarn("⚠ Delete didn't take — that drawing is still on the map. Try again or reload.", 8000); }, 0);
+  };
+  /* ------------ site-plan overlay context-menu ops (B461) — Copy / Duplicate / Paste / z-order /
+     Lock / Align to base. The overlay is an editable layer over the immutable basemap; these ops
+     touch only the overlay's transform layer + its reference to the source file, never the source
+     bytes (Duplicate/Paste share the same `src` + `storageKey`, they don't re-import). */
+  const OV_OFFSET = () => 24 / view.ppf; // a constant ~24px visual nudge for a copy, in feet (zoom-independent)
+  const overlayCenter = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 });
+  const copyOverlay = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o) { flashWarn("Couldn't copy — that drawing is no longer in the list.", 4000); return; }
+    overlayClip.current = { ...o }; // snapshot shares src + storageKey (the source ref), not a re-import
+    flashWarn(`Copied “${o.name}”. Paste with ${navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl+"}V.`, 3500);
+  };
+  // Place a copy of `o` (new id, new transform-layer slot) on top. Shares the source ref; starts unlocked.
+  const placeOverlayCopy = (o, x, y) => {
+    const nid = uid();
+    pushHistory();
+    setSheetOverlays((arr) => [...arr, { ...o, id: nid, x, y, locked: false }]);
+    setSel(null); setSelOverlay(nid); setLeftPanel("overlay");
+    return nid;
+  };
+  const duplicateOverlay = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o) { flashWarn("Couldn't duplicate — that drawing is no longer in the list.", 4000); return; }
+    const off = OV_OFFSET();
+    placeOverlayCopy(o, o.x + off, o.y + off);
+    flashWarn(`Duplicated “${o.name}”.`, 3000);
+  };
+  const pasteOverlay = () => {
+    const o = overlayClip.current;
+    if (!o) { flashWarn("Nothing to paste — copy a drawing first.", 3500); return; } // B461 edge case: empty clipboard
+    const c = lastPtrFt.current; // live cursor in feet → paste lands centered there (B417 pattern)
+    const off = OV_OFFSET();
+    const x = c ? c.x - (o.imgW * o.ftPerPx) / 2 : o.x + off;
+    const y = c ? c.y - (o.imgH * o.ftPerPx) / 2 : o.y + off;
+    placeOverlayCopy(o, x, y);
+    flashWarn(`Pasted “${o.name}”.`, 3000);
+  };
+  // Draw order = array order (later paints on top), so front = end, back = start. No-op at the ends.
+  const reorderOverlay = (id, mode) => {
+    const idx = sheetOverlays.findIndex((o) => o.id === id);
+    if (idx < 0) return;
+    if ((mode === "front" && idx === sheetOverlays.length - 1) || (mode === "back" && idx === 0)) return;
+    pushHistory();
+    const next = sheetOverlays.slice();
+    const [item] = next.splice(idx, 1);
+    if (mode === "front") next.push(item); else next.unshift(item);
+    setSheetOverlays(next);
+  };
+  // B462 — "Align to base edge": snap the overlay's rotation parallel to the nearest parcel boundary
+  // edge to the click, REUSING the building→parcel `snapParallel`/`segDist` primitive (same math the
+  // Site Planner already ships for aligning a building to a parcel). Edge-snap = rotation only; the
+  // 2-point translate+rotate+scale path is the overlay's existing "Align to map".
+  const alignOverlayToParcelEdge = (fp, onlyParcel) => {
+    const id = ovAlignBase;
+    setOvAlignBase(null);
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o) return;
+    if (o.locked) { flashWarn("That drawing is locked — unlock it to align.", 4000); return; } // refuse a locked overlay, with a reason
+    const list = onlyParcel ? [onlyParcel] : parcels;
+    let best = null;
+    list.forEach((pc) => (pc.points || []).forEach((a, i) => {
+      const b = pc.points[(i + 1) % pc.points.length];
+      const d = segDist(fp, a, b);
+      if (!best || d < best.d) best = { d, a, b };
+    }));
+    if (!best) { flashWarn("No parcel boundary to align to — draw or load a parcel first.", 5000); return; }
+    const dx = best.b.x - best.a.x, dy = best.b.y - best.a.y;
+    if (Math.hypot(dx, dy) < 1e-6) { flashWarn("That edge is too short to read a direction — pick another.", 4000); return; } // degenerate guard — never apply a NaN rotation
+    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+    patchOverlay(o.id, { rotation: snapParallel(o.rotation || 0, ang) }); // pushHistory inside → one undo step
+    flashWarn(`Aligned “${o.name}” parallel to the parcel edge.`, 4000);
+  };
+  const onOverlayContext = (e, id) => {
+    e.preventDefault(); e.stopPropagation(); // don't let the canvas pan/marquee or the native menu eat it (B461)
+    setSel(null); setSelOverlay(id);
+    setOvMenu({ id, x: e.clientX, y: e.clientY });
   };
   // Re-rasterize a different page (only while the source doc is still in memory).
   const setOverlayPage = async (id, page) => {
@@ -3952,6 +4041,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = parcels.find((x) => x.id === id);
     const fp = p2f(e.clientX, e.clientY);
     if (alignFor) { e.stopPropagation(); alignToParcelEdge(fp, pc); return; } // align: this click picks a parcel edge (works regardless of the select toggle)
+    if (ovAlignBase) { e.stopPropagation(); alignOverlayToParcelEdge(fp, pc); return; } // B462: align the overlay to THIS parcel's nearest edge
     // B311: "Select parcels" OFF → parcels are click-through for pure browse/measure. Don't
     // stop propagation: let the press fall through to the background pan (no select, no move),
     // exactly as if the click had landed on empty canvas.
@@ -6130,9 +6220,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const isSel = selOverlay === o.id;
                 return (
                   <g key={o.id} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
-                    style={{ cursor: tool === "select" && !o.locked ? "move" : "default" }}
+                    style={{ cursor: ovAlignBase === o.id ? "crosshair" : (tool === "select" && !o.locked ? "move" : "default") }}
                     pointerEvents={o.locked ? "none" : "auto"}
-                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}>
+                    onPointerDown={(e) => startMoveSheetOverlay(e, o.id)}
+                    onContextMenu={(e) => onOverlayContext(e, o.id)}>
                     {o.src ? (
                       // data-overlay-image marks the printable raster so buildExportSvg can include/exclude it per the "Print overlay" toggle (B131)
                       <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
@@ -7402,7 +7493,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={o.name} onClick={() => setSelOverlay(on ? null : o.id)}>{o.name}</button>
+                        <button style={{ ...chip, flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
                         <button style={{ ...chip, color: o.visible === false ? PAL.muted : PAL.ink, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "5px 7px" }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
                         <button style={chip} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? "🔒" : "🔓"}</button>
                         <button style={{ ...chip, color: PAL.accent }} title="Remove" onClick={() => removeOverlay(o.id)}>✕</button>
@@ -7413,7 +7504,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <input type="range" min={0.1} max={1} step={0.05} value={o.opacity} style={{ flex: 1 }} onChange={(e) => patchOverlay(o.id, { opacity: +e.target.value }, false)} />
                           </label>
                           <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
-                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it"
+                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
@@ -8802,6 +8893,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </>
               );
             })()}
+          </div>
+        </>
+        );
+      })()}
+
+      {/* Site-plan overlay right-click menu (B461). Mirrors the element typeMenu: a portalled,
+          viewport-clamped floating menu at the cursor. Opens from the canvas overlay (unlocked) or
+          its Overlay-panel row (works even when locked, which is pointer-inert on the map). */}
+      {ovMenu && (() => {
+        const MW = 220, GAP = 8, vw = window.innerWidth, vh = window.innerHeight;
+        const left = Math.max(GAP, Math.min(ovMenu.x + 6, vw - MW - GAP));
+        const spaceBelow = vh - ovMenu.y - GAP, spaceAbove = ovMenu.y - GAP;
+        const openUp = spaceBelow < spaceAbove;
+        const maxH = Math.max(160, openUp ? spaceAbove : spaceBelow);
+        const vEdge = openUp ? { bottom: vh - ovMenu.y + 6 } : { top: ovMenu.y + 6 };
+        const o = sheetOverlays.find((x) => x.id === ovMenu.id);
+        if (!o) return null;
+        const idx = sheetOverlays.findIndex((x) => x.id === ovMenu.id);
+        const atFront = idx === sheetOverlays.length - 1, atBack = idx === 0;
+        const locked = !!o.locked, hasParcel = parcels.length > 0;
+        const MOD = (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+";
+        const hdr = (top) => ({ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", padding: top ? "8px 8px 6px" : "4px 8px 6px", ...(top ? { borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 } : {}) });
+        const item = ({ text, hint, on, dis, danger, title }) => (
+          <button title={title} disabled={!!dis}
+            style={{ ...menuItem(false), ...(danger ? { color: PAL.danger } : {}), opacity: dis ? 0.45 : 1, cursor: dis ? "default" : "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
+            onClick={dis ? undefined : on}>
+            <span>{text}</span>{hint && <span style={{ fontSize: 11, color: PAL.muted, fontWeight: 400 }}>{hint}</span>}
+          </button>
+        );
+        return (
+        <>
+          <div onClick={() => setOvMenu(null)} onContextMenu={(e) => { e.preventDefault(); setOvMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 1998 }} />
+          <div className="menu" style={{ ...menuPanel, position: "fixed", left, ...vEdge, zIndex: 1999, width: MW, maxHeight: maxH, overflowY: "auto" }}>
+            <div style={hdr(false)}>Edit</div>
+            {item({ text: "Copy", hint: `${MOD}C`, on: () => { copyOverlay(ovMenu.id); setOvMenu(null); } })}
+            {item({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateOverlay(ovMenu.id); setOvMenu(null); } })}
+            {item({ text: "Paste", hint: `${MOD}V`, dis: !overlayClip.current, title: overlayClip.current ? "" : "Copy a drawing first", on: () => { pasteOverlay(); setOvMenu(null); } })}
+            <div style={hdr(true)}>Arrange</div>
+            {item({ text: "Bring to front", dis: atFront, on: () => { reorderOverlay(ovMenu.id, "front"); setOvMenu(null); } })}
+            {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
+            <div style={hdr(true)}>Place</div>
+            {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
+            {item({ text: "Align to base edge…", dis: locked || !hasParcel, title: locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
+            <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
+            {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); setOvMenu(null); } })}
           </div>
         </>
         );
