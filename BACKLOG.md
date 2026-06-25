@@ -22,6 +22,24 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+### B471 — Revision compare (current vs. previous version), state-of-the-art `[Doc Review / compare]` (feature) — umbrella, IN PROGRESS  *(owner-dropped 2026-06-25 "plan that … like Procore but state of the art"; planned + approved; minted **B471** = highest real B# across both files (B470) + 1 — renumbered from a provisional B464 that a concurrent `main` took for the read-only-lockout cluster while this was in flight; plan: `/root/.claude/plans/for-document-review-if-luminous-lampson.md`)*
+`[ ]` Compare two revisions of the same drawing and **see exactly what changed** — color-wash overlay
+(removed one color / added another / unchanged dimmed), an auto **change-list** that finds/counts/jumps
+to every change, smart **text/dimension diff** on vector PDFs, and **flattened compare-PDF export**.
+Owner decisions: pick versions from BOTH the filed library (it already tracks revisions) AND ad-hoc;
+color-wash is the core view (swipe/fade/side-by-side deferred); all three "beat-Procore" layers in scope.
+- `[x]` **Phase-1 CORE engines — DONE this session (branch `claude/wizardly-mccarthy-oi8xl7`), 24 unit tests, lint 0, build green, lazy chunks intact.** All PURE + Node-tested; reuse-not-rewrite (registration is `overlayAlign.solveSimilarityLSQ` + `matchLineFit`). Code tagged **B471**:
+  - `src/shared/files/rasterDiff.js` — 2-D dilation (tolerance), per-pixel classify (removed/added/unchanged), connected-components → navigable change regions. 10 tests incl. the 1px-jitter-must-not-flag guard.
+  - `src/shared/files/rasterRegister.js` — coarse-offset (profile cross-corr, reuses `slideRefine`) + ink-bbox similarity (`solveSimilarityLSQ`) + ink-agreement confidence gate + manual 2-point fallback (`manualRegister`). 8 tests incl. honest low-confidence → manual.
+  - `src/shared/files/rasterCompare.js` — pure register→resample→diff pipeline (`compareBinaries`). 6 tests incl. "a shift registers away to ~zero changes; a real addition still surfaces."
+  - `src/workspaces/doc-review/lib/compareRegister.js` — browser glue (PDF render + binarize via existing `renderPageToImageData`/`binarizeImageData`), re-exports the pure core.
+- `[ ]` **Phase 1 UI (NEXT):** `CompareView.jsx` (a `mode:"compare"` in DocReview) — color-wash canvas over rev A + change-list panel (click → recenter via `centerOn`) + manual-align mode; ad-hoc "Compare ▸" entry; `kind:'compare'` persistence (additive, no migration). Reuses `renderBudget`/`viewportTransform`/`MarkupRenderer`.
+- `[ ]` **Phase 2:** library entry (FileBrowser "Compare revisions") + multi-sheet pairing (`comparePairing.js` via `sheetGroups`).
+- `[ ]` **Phase 3:** semantic text/dimension diff (`semanticDiff.js`, vector PDFs, reuses `extractPageItems`).
+- `[ ]` **Phase 4:** flattened compare-PDF export.
+- `[ ]` **Phase 5 (optional):** swipe / fade+blink / side-by-side views.
+- Verification ahead: `ui-audit/verify-compare.mjs` (headless, seed two PDFs via `make-sample-pdf.mjs`).
+
 <!-- 2026-06-25: owner-dropped read-only-lockout cluster "NEW-1…NEW-7" (one chat; SUPERSEDES the earlier
      NEW-1/2/3 block in the same chat — filed from THIS block only, no double-enter). Highest real B#
      across both files was B463, so minted **B464–B470**. Per STANDING RULE #1 all seven were filed AND
