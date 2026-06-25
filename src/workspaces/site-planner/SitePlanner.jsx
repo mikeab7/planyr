@@ -4580,17 +4580,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
-  // B466/NEW-3 — take over editing in THIS (read-only) tab: steal the editor lock from the other
-  // tab, then flush the in-memory work to the device mirror AND force a cloud push so the edits that
-  // were piling up un-synced reach the cloud right away. The thin-clobber + CAS guards (B459/B314)
-  // still protect the cloud: if the other tab had newer work, the push surfaces a loud blocking
-  // conflict and a reload union-merges — never a silent overwrite. (The immediate local mirror, B458,
-  // means the in-memory work was never truly stranded; this gets it to the cloud + ends the lockout.)
+  // B466/B471 — ONE "Take over editing here" that resumes saving no matter WHY it stalled:
+  //   • Same browser, another TAB holds the editor lock → steal the Web Lock (instant, in place) and
+  //     push the pent-up work. The thin-clobber + CAS guards (B459/B314) still protect the cloud.
+  //   • Another SESSION / DEVICE advanced the cloud (a version conflict) → Web Locks can't reach
+  //     another computer, so the safe, proven take-over is to RECONCILE with the cloud: flush this
+  //     tab's work to the device mirror (B458 already did, belt-and-suspenders) then reload, whose
+  //     boot UNION-merges (this device's edits ∪ the other session's — nothing lost, B453) and
+  //     resumes saving at the fresh version. (A brief reload is the price of a guaranteed-safe merge;
+  //     it's exactly what fixes it by hand.)
   const takeOverEditing = () => {
-    if (editorLockRef.current) editorLockRef.current.takeOver();
-    setReadOnly(false); // optimistic; the lock's onChange confirms the hand-off
-    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId });
+    if (editorLockRef.current) editorLockRef.current.takeOver(); // same-browser steal (no-op cross-device)
+    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId, conflict: conflictRef.current });
     flushSite();
+    if (conflictRef.current) { window.location.reload(); return; } // cross-session/device → reconcile via boot union-merge
+    setReadOnly(false); // optimistic; the lock's onChange confirms the hand-off
     if (isCloudActive() && siteId) cloudPushWithWatchdog(siteId);
     flashWarn("You're now editing here — your changes are saving to the cloud.", 6000);
   };
@@ -6141,8 +6145,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           stay on this device and union-merge in on reload. */}
       {cloudConflict && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 680, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>⟳ This project was <b>changed in another session</b>. Saving is paused so nothing gets overwritten — your edits are safe on this device. <b>Reload</b> to merge in the latest, then saving resumes.</span>
-          <button onClick={() => window.location.reload()} title="Reload to get the latest version, then your change merges in" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
+          <span style={{ flex: 1 }}>⚠ Your changes <b>aren't reaching the cloud</b> — this plan was changed in <b>another session</b> (another tab, or another computer). Your edits are safe on this device. <b>Take over editing here</b> to pull in the latest and resume saving — nothing is lost.</span>
+          <button onClick={takeOverEditing} data-testid="conflict-takeover-btn" title="Pull in the latest from the other session and make this the active editor (your work merges in — nothing is lost)" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
