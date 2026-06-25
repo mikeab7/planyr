@@ -2,9 +2,10 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, keepaliveFlushSite, listVersions, getVersion } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
+import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
 import { parkDepthForRows, parkRowsForDepth, splitParkingPieces, edgeAbutsPaving } from "./lib/parking.js";
 import { loadAndDownscaleImage } from "./lib/image.js";
@@ -1421,6 +1422,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [readOnly, setReadOnly] = useState(false);
   const conflictRef = useRef(false); conflictRef.current = cloudConflict;
   const readOnlyRef = useRef(false); readOnlyRef.current = readOnly;
+  const siteIdRef = useRef(siteId); siteIdRef.current = siteId; // current id for the lock telemetry closure
+  const prevReadOnlyRef = useRef(false); // so a read-only enter/leave fires telemetry exactly once per transition
   // Push to the cloud with an unconfirmed-save WATCHDOG (B455/NEW-7): if the write doesn't
   // resolve within ~6s it's silently stalled, so we go LOUD (the B125 banner + Retry) rather
   // than leave the badge spinning forever. Tied to the actual in-flight push (not the debounce),
@@ -1474,8 +1477,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // local save above still ran (work preserved), and reload union-merges it. Pushing
       // here is exactly the stale-tab clobber we're preventing.
       if (isCloudActive()) {
-        if (conflictRef.current || readOnlyRef.current) setSaveStatus("unsaved");
-        else cloudPushWithWatchdog(siteId);
+        if (conflictRef.current || readOnlyRef.current) {
+          setSaveStatus("unsaved");
+          // B468/NEW-5 — an edit happened but its cloud push was suppressed (read-only tab or an
+          // active conflict). The immediate local mirror above still saved it; record WHY it didn't
+          // sync so a silent "edits aren't reaching the cloud" stretch is diagnosable after the fact.
+          reportClientEvent("save-suppressed", "cloud push skipped", { id: siteId, reason: readOnlyRef.current ? "read-only" : "conflict" });
+        } else cloudPushWithWatchdog(siteId);
       } else { setSaveStatus("saved"); setCloudSaveFailed(false); }
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
@@ -1520,7 +1528,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // anyone out unexpectedly; the lock hands off automatically when the active tab closes.
   const editorLockRef = useRef(null);
   if (!editorLockRef.current) editorLockRef.current = createEditorLock();
-  useEffect(() => { editorLockRef.current.onChange((r) => setReadOnly(!!r.readOnly)); }, []);
+  useEffect(() => {
+    editorLockRef.current.onChange((r) => {
+      const ro = !!r.readOnly;
+      setReadOnly(ro);
+      // B468/NEW-5 — record the read-only enter/leave transition so a multi-tab lockout is
+      // diagnosable from telemetry after the fact (the 8 South incident needed live DevTools).
+      if (ro !== prevReadOnlyRef.current) {
+        prevReadOnlyRef.current = ro;
+        reportClientEvent(ro ? "readonly-enter" : "readonly-leave",
+          ro ? "tab went read-only (another tab holds the editor lock)" : "tab became the active editor",
+          { id: siteIdRef.current });
+      }
+    });
+  }, []);
   useEffect(() => { editorLockRef.current.setProject(siteId || null); }, [siteId]);
   useEffect(() => () => { editorLockRef.current && editorLockRef.current.stop(); }, []);
   // B127 — cross-tab live convergence. busyRef tracks whether we're mid-interaction so a
@@ -4559,6 +4580,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
   const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  // B466/NEW-3 — take over editing in THIS (read-only) tab: steal the editor lock from the other
+  // tab, then flush the in-memory work to the device mirror AND force a cloud push so the edits that
+  // were piling up un-synced reach the cloud right away. The thin-clobber + CAS guards (B459/B314)
+  // still protect the cloud: if the other tab had newer work, the push surfaces a loud blocking
+  // conflict and a reload union-merges — never a silent overwrite. (The immediate local mirror, B458,
+  // means the in-memory work was never truly stranded; this gets it to the cloud + ends the lockout.)
+  const takeOverEditing = () => {
+    if (editorLockRef.current) editorLockRef.current.takeOver();
+    setReadOnly(false); // optimistic; the lock's onChange confirms the hand-off
+    reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId });
+    flushSite();
+    if (isCloudActive() && siteId) cloudPushWithWatchdog(siteId);
+    flashWarn("You're now editing here — your changes are saving to the cloud.", 6000);
+  };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
   // Version history (automatic local backups, B126): open the dialog with this plan's
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
@@ -4566,8 +4601,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
   const openVersionHistory = () => { setVersionList(listVersions(siteId)); setVersionsOpen(true); closeHdrMenus(); };
   const restoreVersion = (at) => {
+    // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
+    // able to overwrite the canvas; block it loudly with the way out.
+    if (readOnly) { flashWarn("This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
     const v = getVersion(siteId, at);
     if (!v) return;
+    // B467/NEW-4 — VERIFY the dialog's "your current version is backed up too, so a restore can be
+    // undone" promise BEFORE destroying the current canvas. Flush the live state to the mirror, then
+    // force a backup snapshot and confirm it actually persisted; if it couldn't (device storage full),
+    // CANCEL rather than overwrite current work with no real undo.
+    flushSite();
+    if (!backupNow(siteId)) {
+      reportClientEvent("restore-backup-failed", "pre-restore backup could not be written — restore blocked", { id: siteId, at });
+      flashWarn("Couldn't back up your current version, so the restore was cancelled — your current work is safe. (Your device's storage may be full.)", 11000);
+      return;
+    }
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
@@ -6040,6 +6088,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const headerSaveState = (() => {
     const cloudActive = isCloudActive();
     const connOk = cloud?.state === "connected";
+    // B465/NEW-2 — read-only must NEVER read as green "synced". When another tab holds the editor
+    // lock this tab isn't writing to the cloud, even though read queries (the connection) succeed —
+    // so the connection being fine is NOT the same as "your edits are saving". Surfaced as its own
+    // amber "Read-only — not saving" badge state, ahead of the synced/offline resting states.
+    if (cloudActive && readOnly && !cloudConflict) return "readonly";
     if (saveStatus === "saving") return "saving";
     if (cloudSaveFailed || cloudConflict) return "error";
     if (cloudActive && !connOk) return "offline";
@@ -6092,12 +6145,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button onClick={() => window.location.reload()} title="Reload to get the latest version, then your change merges in" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Reload</button>
         </div>
       )}
-      {/* B455/NEW-7 — single-active-editor read-only banner. This plan is being edited in
-          another tab of this browser; this tab is read-only so it can't save over the active
-          one. Closes automatically (lock handoff) when the other tab is closed. */}
+      {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
+          ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
+          its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does
+          NOT clear it while the other tab is open (the lock is still held), which is the trap the owner
+          hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
+          instead. Closes automatically (lock hand-off) when the other tab is closed. */}
       {readOnly && !cloudConflict && (
-        <div role="status" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 680, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
-          <span style={{ flex: 1 }}>👁 This plan is <b>being edited in another tab</b>. This tab is <b>read-only</b> for now so your work in the other tab can't be overwritten — switch to that tab, or close it to edit here.</span>
+        <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 740, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
+          <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
+          <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
       {cloudSaveFailed && (

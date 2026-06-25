@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resampleBinary, compareBinaries } from "../src/shared/files/rasterCompare.js";
 
-/* B464 — the end-to-end PURE compare pipeline (register → resample → diff). The headline guarantee:
+/* B471 — the end-to-end PURE compare pipeline (register → resample → diff). The headline guarantee:
  * a revision that merely SHIFTED shows ~no changes (registration cancels it), while a real ADDED
  * feature still surfaces as a change region. */
 

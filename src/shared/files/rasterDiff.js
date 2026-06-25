@@ -1,4 +1,4 @@
-/* PURE raster DIFF engine for revision compare (B464 / Document Review "compare versions").
+/* PURE raster DIFF engine for revision compare (B471 / Document Review "compare versions").
  *
  * Given two ALREADY-REGISTERED binary rasters of the same sheet (rev A = old, rev B = new; 1 = ink,
  * 0 = background, identical W×H), classify every pixel as unchanged / removed / added and cluster the

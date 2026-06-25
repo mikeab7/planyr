@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { dilate2D, classifyDiff, clusterChanges, diffRasters, DIFF_BG, DIFF_SAME, DIFF_REMOVED, DIFF_ADDED } from "../src/shared/files/rasterDiff.js";
 
-/* B464 — the pure pixel-diff engine behind "compare versions". Built on tiny hand-drawn binaries so
+/* B471 — the pure pixel-diff engine behind "compare versions". Built on tiny hand-drawn binaries so
  * the hard rules are pinned: tolerance absorbs 1px jitter (no false halo), real adds/removes are
  * caught, and changed pixels cluster into navigable regions. */
 

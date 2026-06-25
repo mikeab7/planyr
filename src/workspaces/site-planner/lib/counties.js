@@ -154,6 +154,11 @@ export const JURISDICTION_LAYERS = {
       // source (covers Fort Bend + Harris + everywhere), available regardless of which
       // county is in view. The old Fort-Bend-only layer was removed here to avoid a dupe.
       fb_contours: {
+        // B469/NEW-6 — explicit dynamic (server-rendered export-image) layer. Its host
+        // (arcgisweb.fortbendcountytx.gov) sends no CORS headers, so its ?f=json health probe is
+        // routed through the same-origin B445 cache proxy (see probeService); the f=image export
+        // already proxies and renders via a CORS-exempt <img>.
+        kind: "dynamic",
         label: "1-ft contours (drainage)",
         url: "https://arcgisweb.fortbendcountytx.gov/arcgis/rest/services/FLOODZONE/Contours_1Foot/MapServer",
         layers: null,

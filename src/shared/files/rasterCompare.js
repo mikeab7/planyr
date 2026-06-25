@@ -1,4 +1,4 @@
-/* PURE revision-compare core (B464): register rev B onto rev A, resample B into A's grid, diff.
+/* PURE revision-compare core (B471): register rev B onto rev A, resample B into A's grid, diff.
  * Imports only the other pure engines (rasterRegister, rasterDiff) — no canvas/DOM/pdf.js — so the
  * whole register→resample→diff pipeline is unit-testable in Node. The browser glue (PDF render +
  * binarize) lives in doc-review/lib/compareRegister.js and calls `compareBinaries` here.

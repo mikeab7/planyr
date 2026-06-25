@@ -1,4 +1,4 @@
-/* Revision-compare BROWSER glue (B464). The pure register→resample→diff core lives in
+/* Revision-compare BROWSER glue (B471). The pure register→resample→diff core lives in
  * `shared/files/rasterCompare.js` (Node-testable); this module adds the browser-only steps —
  * PDF rasterization + ImageData binarization — and re-exports the pure core for callers.
  *

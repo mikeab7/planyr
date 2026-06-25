@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { coarseOffset, inkBBox, registerRasters, manualRegister } from "../src/shared/files/rasterRegister.js";
 
-/* B464 — pure registration that lines rev B up onto rev A before diffing. Synthetic binaries pin the
+/* B471 — pure registration that lines rev B up onto rev A before diffing. Synthetic binaries pin the
  * contract: translation + uniform scale auto-align with HIGH confidence; orthogonal/garbage content
  * reports LOW confidence (honest — punts to manual); manual 2-point recovers full rotation+scale. */
 

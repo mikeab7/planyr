@@ -1,4 +1,4 @@
-/* PURE raster REGISTRATION for revision compare (B464). Aligns rev B (new) onto rev A (old, the
+/* PURE raster REGISTRATION for revision compare (B471). Aligns rev B (new) onto rev A (old, the
  * reference) so the diff engine sees two rasters in ONE coordinate frame. No canvas/DOM/React —
  * operates on Uint8Array binaries (1 = ink), so it is Node-unit-testable.
  *

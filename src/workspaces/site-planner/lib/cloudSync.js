@@ -7,6 +7,7 @@
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { contentCount } from "./siteModel.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -75,7 +76,10 @@ export async function cloudUpsert(uid, model) {
   // B459 — refuse to silently overwrite a fuller cloud row with a stale/thin model (the CAS below
   // only checks the version number). Block LOUD as a conflict; the cloud is left intact, so a reload
   // union-merges the fuller copy back instead of losing it.
-  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) return { ok: false, conflict: true, thinned: true };
+  if (wouldThinClobber(m, siteContent[m.id], siteTombs[m.id])) {
+    reportClientEvent("cloud-conflict", "thin-clobber blocked (sites)", { id: m.id, reason: "thinned", have: contentCount(m), base: siteContent[m.id] });
+    return { ok: false, conflict: true, thinned: true };
+  }
   // Row carries NO user_id — casUpsert stamps the creator only on INSERT, so a teammate editing
   // a shared row never re-stamps the original owner (team feature). team_id rides along (null =
   // private); when set, RLS lets the project's team read/edit it.
@@ -97,7 +101,10 @@ export async function cloudUpsert(uid, model) {
     r = await casUpsert(supabase, "sites", { uid, id: m.id, row: noTeam, expected: siteVersions[m.id] });
   }
   if (r.ok) { siteVersions[m.id] = r.version; rememberContent(m); return { ok: true }; }
-  if (r.conflict) return { ok: false, conflict: true };
+  if (r.conflict) {
+    reportClientEvent("cloud-conflict", "stale write rejected (sites CAS)", { id: m.id, reason: "cas-409", expected: siteVersions[m.id] });
+    return { ok: false, conflict: true };
+  }
   if (r.degrade) {
     // The `version` column isn't migrated in yet → fall back to a plain upsert (today's
     // last-write-wins). Target the live single-column PK "id" (post db/team_sharing.sql);
@@ -112,6 +119,7 @@ export async function cloudUpsert(uid, model) {
     if (!error) rememberContent(m); // B459 — keep the content baseline current even on the version-less degrade path
     return { ok: !error, error: error ? error.message : null };
   }
+  reportClientEvent("cloud-write-failed", (r.error || "cloud write failed") + " (sites)", { id: m.id });
   return { ok: false, error: r.error || "cloud write failed" };
 }
 
@@ -164,8 +172,14 @@ export async function cloudDelete(uid, id) {
   // success on both (B372).
   try {
     const { data, error } = await supabase.from("sites").delete().eq("id", id).select("id");
-    return interpretDelete(data, error);
+    const out = interpretDelete(data, error);
+    // B468/NEW-5 — a delete that errored, or matched ZERO rows (RLS/ownership mismatch → the row
+    // survives and reappears on reload), is exactly the kind of silent failure we want traceable.
+    if (out.ok === false) reportClientEvent("cloud-write-failed", "delete failed (sites)", { id, error: out.error });
+    else if (!out.skipped && out.removed === 0) reportClientEvent("delete-zero-rows", "delete matched no rows (sites)", { id });
+    return out;
   } catch (e) {
+    reportClientEvent("cloud-write-failed", "delete threw (sites)", { id, error: (e && e.message) || "" });
     return { ok: false, error: (e && e.message) || "delete threw" };
   }
 }

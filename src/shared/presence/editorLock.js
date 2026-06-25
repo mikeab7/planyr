@@ -39,6 +39,18 @@ export function createEditorLock(opts = {}) {
     : (typeof navigator !== "undefined" && navigator.locks ? navigator.locks : null);
   const prefix = opts.prefix || "planyr-editor";
   const name = (p) => `${prefix}:${p}`;
+  const id = opts.id || ((typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID().slice(0, 8) : "e" + Date.now().toString(36));
+  // Cross-tab takeover bus (B466/NEW-3). When THIS tab takes over editing it broadcasts a "yield"
+  // so the tab currently holding the lock steps down to read-only cooperatively and immediately;
+  // the Web Locks `steal` in takeOver() is the hard guarantee it works even if that tab is gone or
+  // on an older build. Injectable (opts.channel) + degrades to null where BroadcastChannel is
+  // unavailable (unit tests / older runtimes) — takeover then relies on `steal` alone.
+  let bc = null;
+  try {
+    if (opts.channel !== undefined) bc = opts.channel;                         // injected (incl. null to disable)
+    else if (opts.locks === undefined && typeof BroadcastChannel !== "undefined") // production only — don't spawn a real bus under an injected-locks unit test
+      bc = new BroadcastChannel(opts.channelName || "planyr-editor-takeover-v1");
+  } catch { bc = null; }
 
   let project = null;
   let granted = false;
@@ -82,6 +94,20 @@ export function createEditorLock(opts = {}) {
     }
   }
 
+  // Another tab is taking over THIS project → if we currently hold the lock, step down to
+  // read-only at once (so the user sees the truth immediately) and re-queue as a waiter, so we
+  // become active again if that tab later closes. (B466/NEW-3.)
+  if (bc) bc.onmessage = (e) => {
+    const msg = e && e.data;
+    if (!msg || msg.from === id || msg.type !== "yield") return;
+    if (project == null || String(msg.project) !== String(project) || !granted) return;
+    token += 1;
+    const my = token;
+    drop();
+    decided = true; granted = false; emit();
+    requestLock(project, my, true);
+  };
+
   return {
     setProject(p) {
       const next = p != null ? p : null;
@@ -97,7 +123,38 @@ export function createEditorLock(opts = {}) {
     role,
     active: () => role().active,
     readOnly: () => role().readOnly,
-    stop() { stopped = true; token += 1; drop(); project = null; emit(); },
+    // B466/NEW-3 — take over editing in THIS tab. Tells the current holder (another tab) to step
+    // down via the bus, then STEALS the Web Lock so this tab becomes the active editor regardless
+    // of whether that tab cooperated (it may be gone, or on an older build that doesn't listen).
+    // Degrades open where Web Locks is unavailable (already active → no-op). The caller is expected
+    // to flush + push the in-memory work right after, so nothing is stranded. Returns true if a
+    // takeover was attempted (locks available + a project is loaded).
+    takeOver() {
+      if (!locks || project == null) { emit(); return false; }
+      token += 1;
+      const my = token;
+      drop();
+      // Steal FIRST (secure the lock so this tab is unambiguously the editor), THEN broadcast the
+      // yield. Ordering this way means the prior holder's re-request (triggered by our yield) queues
+      // BEHIND our steal instead of racing it, so it lands read-only rather than re-grabbing the lock.
+      let req;
+      try {
+        req = locks.request(name(project), { steal: true }, (lock) => {
+          if (stopped || my !== token) return;
+          decided = true; granted = true; emit();
+          return new Promise((res) => { release = res; });
+        });
+      } catch {
+        decided = true; granted = true; emit(); // steal unsupported → fail open (the bus yield still hands off)
+      }
+      if (req && typeof req.catch === "function") {
+        req.catch(() => { if (my === token && !granted) { decided = true; granted = true; emit(); } });
+      }
+      try { if (bc) bc.postMessage({ type: "yield", project, from: id }); } catch { /* bus optional */ }
+      return true;
+    },
+    stop() { stopped = true; token += 1; drop(); project = null; try { bc && bc.close && bc.close(); } catch { /* ignore */ } bc = null; emit(); },
     _name: name, // test seam
+    _id: id,     // test seam
   };
 }
