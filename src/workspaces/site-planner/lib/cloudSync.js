@@ -146,6 +146,21 @@ export function keepaliveCloudPush(uid, model) {
   return keepaliveCasPush({ url, anon, token, table: "sites", id: m.id, row, expected: siteVersions[m.id] });
 }
 
+// B480 — reconcile ONE site from the cloud for "Take over editing here": fetch its current row + version
+// and refresh the per-tab optimistic-version token (`siteVersions[id]`) so the caller's next push lands at
+// the right version instead of a stale-version conflict, then return the cloud's stored model so the caller
+// can UNION it into the live canvas (nothing lost from either side). Deliberately a single-row fetch —
+// unlike pullCloud it has NO toPush side effect, so it can't race the caller's own push and re-trigger the
+// very conflict take-over is resolving. Returns the stored model, or null on any failure (offline / absent).
+export async function fetchSiteForReconcile(uid, id) {
+  if (!supabase || !uid || !id) return null;
+  let r = await supabase.from("sites").select("data, version").eq("id", id).maybeSingle();
+  if (r.error && isMissingVersionColumn(r.error)) r = await supabase.from("sites").select("data").eq("id", id).maybeSingle();
+  if (r.error || !r.data || !r.data.data) return null;
+  if (r.data.version != null) siteVersions[id] = r.data.version; // refresh the CAS token → the next push isn't a false stale-version conflict
+  return r.data.data;
+}
+
 // Pure: turn a DELETE … .select() result into a typed outcome (exported for unit tests).
 //   { ok:false, error }    → the delete errored (network / permission) — the caller surfaces it
 //                            LOUDLY because the row may survive server-side and reappear on reload.

@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -301,6 +301,14 @@ export async function pushModelToCloud(model) {
   if (!activeUser) return { ok: true, skipped: true };
   if (!model || !model.id) return { ok: false, error: "missing" };
   return cloudUpsert(activeUser, createSiteModel(model));
+}
+// B480 — refresh THIS site's cloud version token + fetch the latest copy so "Take over editing here" can
+// reconcile a conflict IN PLACE (union the other session's content, then push at the fresh version) instead
+// of reloading (which bounced to the map + re-entered the version race → the take-over loop). No-op (null)
+// when logged out. Returns the cloud's stored model, or null.
+export async function reconcileSiteFromCloud(id) {
+  if (!activeUser || !id) return null;
+  return fetchSiteForReconcile(activeUser, id);
 }
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
