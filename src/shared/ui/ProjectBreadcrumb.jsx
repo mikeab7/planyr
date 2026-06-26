@@ -127,6 +127,7 @@ export default function ProjectBreadcrumb({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [internalProjects, setInternalProjects] = useState([]);
+  const [warming, setWarming] = useState(false); // B475/NEW-2 — a cloud project-cache warm is in flight (cold signed-in tab)
   // Single data-entry guard (B380): drop any falsy entry before it reaches a `p.id` /
   // `p.name` read below — so a controlled caller (e.g. the Schedule module bridging its
   // embedded app's project list) that hasn't fully resolved its data can never trip a
@@ -147,25 +148,30 @@ export default function ProjectBreadcrumb({
   const canManage = canRename || canDelete;
 
   const refresh = () => { if (!controlled) setInternalProjects(listProjects()); };
-  // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when
-  // another tab changes the site store (same store the Site Planner finder watches).
-  // Controlled mode skips this entirely — the workspace pushes updates via the prop.
+  // B475 — warm the signed-in on-device project cache (empty on a cold tab that went straight to Markup,
+  // since it only fills after a Site-Planner cloud pull), then re-read. `warming` drives a "Loading
+  // projects…" line so the dropdown never shows a misleading "No projects yet" mid-pull. No-ops fast when
+  // logged out or already warm. NEW-2 fix: the on-MOUNT attempt usually no-ops on a cold tab because auth
+  // hasn't resolved yet (isCloudActive() false) and it never retried — so we ALSO warm on OPEN, by which
+  // point auth has settled, which is exactly when the user clicks the switcher and saw it empty.
+  const warmThenRefresh = () => {
+    if (controlled) return;
+    setWarming(true);
+    warmProjectsIfEmpty().then((warmed) => { if (warmed) refresh(); }).finally(() => setWarming(false));
+  };
+  // Keep the (uncontrolled) list fresh: on mount, whenever the dropdown opens, and when another tab
+  // changes the site store. Controlled mode skips this entirely — the workspace pushes updates via the prop.
   useEffect(() => {
     if (controlled) return;
     refresh();
-    // B475 — cold device / fresh tab: the on-device project cache can be empty even when the
-    // user HAS cloud projects (it only fills after a Site-Planner cloud pull). Warm it once so
-    // the switcher matches the Markup Library instead of looking empty, then re-read. No-ops
-    // when logged out or already warm; the storage event below also re-refreshes once it lands.
-    let alive = true;
-    warmProjectsIfEmpty().then((warmed) => { if (warmed && alive) refresh(); });
+    warmThenRefresh();
     const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refresh(); };
     window.addEventListener("storage", onStorage);
-    return () => { alive = false; window.removeEventListener("storage", onStorage); };
+    return () => { window.removeEventListener("storage", onStorage); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlled]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) { refresh(); setQ(""); } else { setMenuFor(null); setEditingId(null); } }, [open]);
+  useEffect(() => { if (open) { refresh(); warmThenRefresh(); setQ(""); } else { setMenuFor(null); setEditingId(null); } }, [open]);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   // Surface (don't block) an at-risk save when leaving the current project (B193).
@@ -326,7 +332,7 @@ export default function ProjectBreadcrumb({
         <div style={{ maxHeight: 280, overflowY: "auto", margin: "0 -2px", padding: "0 2px" }}>
           {filtered.length === 0 ? (
             <div style={{ padding: "10px 9px", fontSize: 12, color: "var(--text-tertiary)" }}>
-              {q ? "No matching projects." : "No projects yet — start one below."}
+              {q ? "No matching projects." : (warming ? "Loading projects…" : "No projects yet — start one below.")}
             </div>
           ) : (
             filtered.map((p) => {

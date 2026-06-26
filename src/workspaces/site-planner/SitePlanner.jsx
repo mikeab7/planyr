@@ -3542,26 +3542,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     const missing = sheetOverlays.filter((o) => (o.idbKey || o.storageKey) && !o.src && !overlayFetching.current.has(o.id));
     if (!missing.length) return;
-    let cancelled = false;
     missing.forEach((o) => overlayFetching.current.add(o.id));
+    // B480-followup (NEW-1) — apply each result via a functional patch-by-id guarded on `!x.src`, and do NOT
+    // discard it on a mid-flight effect re-run. The old `cancelled` guard stranded a SLOW idbGet (a large
+    // ~10 MB raster) whenever any other setState re-ran this `[sheetOverlays]` effect before the read
+    // resolved — the result was dropped AND never re-fetched, leaving the overlay stuck on the "re-add"
+    // placeholder even though its bytes sit in IndexedDB. The patch is safe across re-runs (it only fills an
+    // overlay that's still present and still src-less), so no `cancelled` flag is needed.
     (async () => {
       for (const o of missing) {
         try {
           let cached = null;
           if (o.idbKey && idbAvailable()) cached = await idbGet(o.idbKey); // B474 — local IndexedDB cache first (fast, offline)
-          if (cached) { if (!cancelled) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: cached } : x))); continue; }
+          if (cached) { setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: cached } : x))); continue; }
           if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
             const bytes = await downloadOverlayBytes(o.storageKey);
             const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
-            if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
+            if (r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
           } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
             const src = await downloadOverlayDataUrl(o.storageKey);
-            if (!cancelled && src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src } : x)));
+            if (src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id && !x.src ? { ...x, src } : x)));
           }
         } finally { overlayFetching.current.delete(o.id); }
       }
     })();
-    return () => { cancelled = true; };
   }, [sheetOverlays]); // eslint-disable-line
 
   /* ------------ county parcel lookup ------------ */
@@ -6509,7 +6513,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <image data-overlay-image="1" href={o.src} x={tl.x} y={tl.y} width={w} height={h} opacity={o.opacity} preserveAspectRatio="none" />
                     ) : (<g data-export="skip">
                       <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
-                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{o.storageKey ? "Loading drawing from cloud…" : `Re-add “${o.name}” — image not synced to this device`}</text>
+                      <text x={cx} y={cy} textAnchor="middle" fontSize={13} fill={PAL.accent}>{(o.idbKey || o.storageKey) ? "Loading drawing…" : `Re-add “${o.name}” — image not on this device`}</text>
                     </g>)}
                     {isSel && tool === "select" && (
                       <rect data-export="skip" x={tl.x} y={tl.y} width={w} height={h} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="6 4" pointerEvents="none" />
