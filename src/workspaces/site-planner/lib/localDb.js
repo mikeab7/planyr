@@ -18,18 +18,47 @@ let dbPromise = null;
 function openDb() {
   if (!idb) return Promise.resolve(null);
   if (dbPromise) return dbPromise;
+  // SELF-HEAL (B474 review): null `dbPromise` on EVERY non-success path before resolving null, so one
+  // transient open failure (a momentary onblocked from another tab, a thrown open) can't POISON IndexedDB
+  // for the whole session — the next idbGet/idbPut just reopens. Pre-fix, a cached null promise made every
+  // later op silently no-op while idbAvailable() still said true → a raster whose src had been dropped
+  // (idbKey set) was then unrecoverable. (#1)
   dbPromise = new Promise((resolve) => {
     let req;
-    try { req = idb.open(DB_NAME, DB_VERSION); } catch (_) { resolve(null); return; }
+    try { req = idb.open(DB_NAME, DB_VERSION); } catch (_) { dbPromise = null; resolve(null); return; }
     req.onupgradeneeded = () => { try { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); } catch (_) {} };
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => resolve(null);
-    req.onblocked = () => resolve(null);
+    req.onsuccess = () => {
+      const db = req.result || null;
+      if (db) {
+        // A future schema bump in another tab, or indexedDB.deleteDatabase("planyr"), must not hang
+        // forever on this pinned connection — close + drop the cache so the next call reopens fresh. (#3)
+        db.onversionchange = () => { try { db.close(); } catch (_) {} dbPromise = null; };
+        // The browser force-closed us (storage eviction / "clear site data" / disk error): drop the
+        // cached handle so the NEXT op reopens instead of failing every transaction for the session. (#3)
+        db.onclose = () => { dbPromise = null; };
+      } else { dbPromise = null; }
+      resolve(db);
+    };
+    req.onerror = () => { dbPromise = null; resolve(null); };
+    req.onblocked = () => { dbPromise = null; resolve(null); };
   });
   return dbPromise;
 }
 
 export const idbAvailable = () => !!idb;
+
+// Ask the browser to keep this origin's IndexedDB DURABLE rather than best-effort (which can be evicted
+// under disk pressure / long inactivity). One-shot, idempotent; resolves false + no-ops when unsupported
+// (node tests, old browsers). Chromium grants this heuristically for engaged/installed sites. Matters
+// because IndexedDB is now the durable home for the version-history ring and (today) the only on-device
+// home for the aerial underlay raster. Never throws. (B474 review #9)
+export async function idbPersist() {
+  try {
+    if (typeof navigator === "undefined" || !navigator.storage || !navigator.storage.persist) return false;
+    if (navigator.storage.persisted) { try { if (await navigator.storage.persisted()) return true; } catch (_) {} }
+    return await navigator.storage.persist();
+  } catch (_) { return false; }
+}
 
 // Read one key. Resolves the stored value, or null on miss / any failure. Never throws.
 export async function idbGet(key) {
@@ -71,5 +100,27 @@ export async function idbDelete(key) {
     tx.onerror = () => resolve(false);
     tx.onabort = () => resolve(false);
     try { tx.objectStore(STORE).delete(key); } catch (_) { resolve(false); }
+  });
+}
+
+// Remove every key with the given prefix (one cursor pass). Used to evict all of a deleted site's
+// cached rasters (`raster:<siteId>:*`) so IndexedDB doesn't accumulate orphans forever. Resolves
+// true/false; never throws. (B474 review — idbDelete was dead code; deletes leaked their rasters. #13/#24)
+export async function idbDeleteByPrefix(prefix) {
+  const db = await openDb();
+  if (!db || !prefix) return false;
+  return new Promise((resolve) => {
+    let tx;
+    try { tx = db.transaction(STORE, "readwrite"); } catch (_) { resolve(false); return; }
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+    tx.onabort = () => resolve(false);
+    try {
+      // Half-open string range [prefix, prefix+￿): catches every key that begins with `prefix`.
+      const range = IDBKeyRange.bound(prefix, prefix + "￿", false, true);
+      const cur = tx.objectStore(STORE).openCursor(range);
+      cur.onsuccess = () => { const c = cur.result; if (c) { try { c.delete(); } catch (_) {} c.continue(); } };
+      cur.onerror = () => {}; // tx.onerror/onabort settles the promise
+    } catch (_) { try { tx.abort(); } catch (_2) {} resolve(false); }
   });
 }

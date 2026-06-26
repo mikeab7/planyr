@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { overlayKey, BUCKET, fileKind } from "../src/workspaces/site-planner/lib/overlayStorage.js";
+import { overlayKey, siteUnderlayKey, uploadUnderlayDataUrl, BUCKET, fileKind } from "../src/workspaces/site-planner/lib/overlayStorage.js";
 
 describe("overlay storage — key format (B72, RLS contract)", () => {
   it("puts the uid FIRST (the Storage RLS keys on the first folder)", () => {
@@ -16,6 +16,19 @@ describe("overlay storage — key format (B72, RLS contract)", () => {
   });
   it("reuses the existing private bucket", () => {
     expect(BUCKET).toBe("doc-review-files");
+  });
+});
+
+describe("underlay storage — key format + safe null paths (B474 review #5)", () => {
+  it("siteUnderlayKey puts the uid FIRST (RLS) and carries the ext", () => {
+    expect(siteUnderlayKey("uid-9", "siteB").split("/")[0]).toBe("uid-9");
+    expect(siteUnderlayKey("uid-9", "siteB")).toBe("uid-9/site-underlay/siteB/underlay.png");
+    expect(siteUnderlayKey("u", null, "jpg")).toBe("u/site-underlay/unfiled/underlay.jpg");
+  });
+  it("uploadUnderlayDataUrl returns null for non-image / non-data-URL input (caller keeps it inline)", async () => {
+    expect(await uploadUnderlayDataUrl("s", null)).toBe(null);
+    expect(await uploadUnderlayDataUrl("s", "https://example.com/x.png")).toBe(null);
+    expect(await uploadUnderlayDataUrl("s", "data:application/pdf;base64,AAAA")).toBe(null); // not an image
   });
 });
 

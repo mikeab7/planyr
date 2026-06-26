@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
-import { idbGet, idbPut, idbAvailable } from "./lib/localDb.js";
+import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -12,7 +12,7 @@ import { parkDepthForRows, parkRowsForDepth, explodeParkingBands, edgeAbutsPavin
 import { loadAndDownscaleImage } from "./lib/image.js";
 import { openOverlayFile, rasterizePage, isPdfFile, rasterizeStoredPdf } from "./lib/overlayPdf.js";
 import ParcelDrawing from "./components/ParcelDrawing.jsx";
-import { uploadOverlayFile, uploadParcelDrawingFile, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, uploadParcelDrawingFile, uploadUnderlayDataUrl, downloadOverlayBytes, downloadOverlayDataUrl, deleteOverlayObject } from "./lib/overlayStorage.js";
 import { COMMON_SCALES, ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale } from "./lib/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout } from "./lib/overlayAlign.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -916,6 +916,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [underlay, setUnderlay] = useState(() => restored?.underlay || null);    // {src,imgW,imgH,x,y,ftPerPx,opacity,locked}
   const [showAerial, setShowAerial] = useState(true);   // aerial underlay shows whenever one exists
   const [underlayErr, setUnderlayErr] = useState(false);
+  const [underlayLost, setUnderlayLost] = useState(false); // B474 review (#16) — saved aerial couldn't be recovered from idb OR cloud → honest re-drop prompt (not a silent blank)
   const [underlayLoading, setUnderlayLoading] = useState(() => {
     const u = restored?.underlay;
     return !!(u && u.src && !String(u.src).startsWith("data:")); // show spinner until the remote aerial loads
@@ -970,14 +971,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount, file) => {
     const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
+    // B474 review (#2): the record carries `idbKey` only AFTER idbPut CONFIRMS — until then src stays inline
+    // (dropIdbBackedSrc keys off idbKey), so a failed/slow stash can never strip the only on-device copy.
     const idbKey = siteId ? `raster:${siteId}:drawing:${id}` : undefined;
-    if (idbKey && idbAvailable() && raster.src) idbPut(idbKey, raster.src);
     const rec = { id, parcelId,
       name, kind, page: raster.page || 1, pageCount: pageCount || 1,
-      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src, idbKey,
+      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
       markups: [], createdAt: Date.now(), updatedAt: Date.now() };
     persistDrawings([...parcelDrawings, rec]);
     setOpenDrawingId(rec.id);
+    if (idbKey && idbAvailable() && raster.src) idbPut(idbKey, raster.src).then((ok) => { if (ok) persistDrawings(parcelDrawingsRef.current.map((d) => (d.id === id ? { ...d, idbKey } : d))); });
     if (file) uploadDrawingSource(rec.id, file);
     return rec;
   };
@@ -1029,9 +1032,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // was dropped to keep the record off the ~5MB localStorage cap). Mirrors the drawing/overlay rehydrate
   // above; the underlay is the one raster that previously had NO recovery path (it needed a re-drop).
   useEffect(() => {
-    if (!underlay || underlay.src || !underlay.idbKey || !idbAvailable()) return;
+    if (!underlay || underlay.src || (!underlay.idbKey && !underlay.storageKey)) return;
     let live = true;
-    idbGet(underlay.idbKey).then((src) => { if (live && src) setUnderlay((u) => (u && !u.src ? { ...u, src } : u)); });
+    (async () => {
+      let src = null;
+      try {
+        if (underlay.idbKey && idbAvailable()) src = await idbGet(underlay.idbKey);   // B474 — local IndexedDB cache first (fast, offline)
+        if (!src && underlay.storageKey) src = await downloadOverlayDataUrl(underlay.storageKey); // B474 review (#5) — cloud Storage fallback (cross-device / post-eviction)
+      } catch (_) { /* fall through to the lost flag */ }
+      if (!live) return;
+      if (src) { setUnderlay((u) => (u && !u.src ? { ...u, src } : u)); setUnderlayLost(false); }
+      else setUnderlayLost(true); // B474 review (#16) — neither home had it → surface an honest re-drop prompt instead of an invisible <image>
+    })();
     return () => { live = false; };
   }, [underlay]);
   const updateDrawingMarks = (id, markups) =>
@@ -1039,6 +1051,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deleteDrawing = (id) => {
     const gone = parcelDrawings.find((d) => d.id === id);
     if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
+    if (gone && gone.idbKey) idbDelete(gone.idbKey); // B474 review (#13) — evict the cached raster from IndexedDB too, no orphan
     persistDrawings(parcelDrawings.filter((d) => d.id !== id));
     if (openDrawingId === id) setOpenDrawingId(null);
   };
@@ -1543,8 +1556,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               setSaveStatus("saved"); setCloudSaveFailed(false); setSavedToCloudOnly(true);
               reportClientEvent("save-local-failed-cloud-ok", "device storage full; saved to cloud instead", { id: siteId });
             } else {
-              setSaveStatus("unsaved"); setCloudSaveFailed(true);
-              reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" });
+              // B474 review (#17/#18): the latest edit reached NEITHER device nor cloud — clear any stale
+              // amber "saved to your account" so it can't keep falsely claiming safety. And if the cloud
+              // push hit a CONFLICT (not a dead cloud), route to the blocking conflict UI ("reload/take
+              // over to merge") rather than the "will retry on your next edit" banner, which can never
+              // clear while the conflict gates every future push.
+              setSaveStatus("unsaved"); setSavedToCloudOnly(false);
+              if (r && r.conflict) { setCloudConflict(true); reportClientEvent("save-suppressed", "device full AND cloud push hit a conflict — routed to conflict UI", { id: siteId }); }
+              else { setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
             }
           });
         }
@@ -3200,17 +3219,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const { src, w, h } = await loadAndDownscaleImage(file);
       pushHistory();
-      // B474 — stash the heavy underlay raster in IndexedDB (gigabytes) so the saved record stays small
-      // (off the ~5MB localStorage cap) and the image survives a reload instead of needing a re-drop.
-      const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
-      if (idbKey && idbAvailable()) idbPut(idbKey, src);
       // Start at ~600 ft across the image width; the user calibrates precisely next.
       // Auto-locked (click-through) so you can immediately draw over it.
-      setUnderlay({ src, idbKey, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
+      // B474 review (#2/#6): set the underlay WITHOUT idbKey first so src stays inline (the safe
+      // localStorage fallback dropIdbBackedSrc won't strip), and attach idbKey only AFTER idbPut CONFIRMS —
+      // so a failed/slow stash can never delete the underlay's only on-device copy.
+      const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
+      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
       setUnderlayErr(false);
+      setUnderlayLost(false);
       setUnderlayLoading(true);
       setCalib(null);
       requestFit();
+      if (idbKey && idbAvailable()) idbPut(idbKey, src).then((ok) => { if (ok) setUnderlay((u) => (u && u.src === src ? { ...u, idbKey } : u)); });
+      // B474 review (#5): back the underlay up to cloud Storage too (like overlays/drawings) so it survives
+      // a SECOND device and an IndexedDB eviction — previously its ONLY home was this device's IndexedDB.
+      if (isCloudActive()) uploadUnderlayDataUrl(siteId, src).then((res) => { if (res) setUnderlay((u) => (u && u.src === src ? { ...u, storageKey: res.key, ext: res.ext } : u)); }).catch(() => {});
     } catch (err) {
       alert(humanizeError(err));
     }
@@ -3273,9 +3297,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const ftPerPx = pick.ftPerPx;
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
-      if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src);
       const ov = {
-        id, name: file.name || "Site plan", src: r.src, idbKey: ovIdbKey, imgW: r.imgW, imgH: r.imgH,
+        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
@@ -3284,6 +3307,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       pushHistory();
       setSheetOverlays((arr) => [...arr, ov]);
       setSel(null); setSelOverlay(id); setLeftPanel("overlay");
+      // B474 review (#2): attach idbKey only AFTER the stash confirms — until then src stays inline so
+      // dropIdbBackedSrc can't strip it before it's durable (overlays also have the cloud-Storage fallback below).
+      if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src).then((ok) => { if (ok) setSheetOverlays((arr) => arr.map((x) => (x.id === id ? { ...x, idbKey: ovIdbKey } : x))); });
       if (pick.reason === "too-big" || pick.reason === "too-small") // honest, actionable note — never a silent mis-place
         flashWarn(`Added “${file.name || "drawing"}”, but its printed scale (1″=${r.detectedScale}′) would place it ${pick.reason === "too-big" ? "far too large" : "far too small"} — sized it to fit your view instead. Set the exact scale (or “Trace a length”) in the Site-plan overlay panel.`, 9000);
       if (isCloudActive()) { // back the source (PDF or image) up to Storage for cross-device reload (B72)
@@ -3351,6 +3377,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // cloud object when no OTHER overlay still points at it (else we'd orphan the sibling's image).
     const shared = o.storageKey && sheetOverlays.some((x) => x.id !== id && x.storageKey === o.storageKey);
     if (o.storageKey && !shared) deleteOverlayObject(o.storageKey); // clean up the cloud copy (B72 polish)
+    // B474 review (#23) — evict the cached IndexedDB raster too, ref-counted like storageKey (a Duplicate/Paste
+    // copies the key, so only drop the entry when no other overlay still points at it).
+    const sharedIdb = o.idbKey && sheetOverlays.some((x) => x.id !== id && x.idbKey === o.idbKey);
+    if (o.idbKey && !sharedIdb) idbDelete(o.idbKey);
     setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
@@ -6270,7 +6300,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
           until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
           stay on this device and union-merge in on reload. */}
-      {cloudConflict && (
+      {/* B474 review (#8): gated on !localSaveFailed — when the on-device write ALSO failed (full storage),
+          "your edits are safe on this device" is FALSE, so suppress this and let the truthful red
+          local-save-failed banner be the only message (no contradictory pair, no false reassurance). */}
+      {cloudConflict && !localSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6001, maxWidth: 680, display: "flex", alignItems: "center", gap: 12, background: "#1e3a5f", color: "#fff", border: "1px solid #60a5fa", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your changes <b>aren't reaching the cloud</b> — this plan was changed in <b>another session</b> (another tab, or another computer). Your edits are safe on this device. <b>Take over editing here</b> to pull in the latest and resume saving — nothing is lost.</span>
           <button onClick={takeOverEditing} data-testid="conflict-takeover-btn" title="Pull in the latest from the other session and make this the active editor (your work merges in — nothing is lost)" style={{ flex: "none", cursor: "pointer", background: "#60a5fa", color: "#0a1a2f", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
@@ -6282,13 +6315,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           NOT clear it while the other tab is open (the lock is still held), which is the trap the owner
           hit — so we say so and offer "Take over editing here" (steal the lock + push the pent-up work)
           instead. Closes automatically (lock hand-off) when the other tab is closed. */}
-      {readOnly && !cloudConflict && (
+      {readOnly && !cloudConflict && !localSaveFailed && (
         <div role="alert" data-testid="readonly-banner" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 740, display: "flex", alignItems: "center", gap: 12, background: "#3f3a2a", color: "#fff", border: "1px solid #d6b24a", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>👁 <b>Read-only</b> — this plan is open in another tab, which is the active editor. Your changes here are saved on <b>this device</b> but <b>aren't syncing to the cloud</b> yet. <b>Reloading won't help</b> while the other tab is open — take over here, or close the other tab.</span>
           <button onClick={takeOverEditing} data-testid="takeover-btn" title="Make this the active tab and save your changes to the cloud now" style={{ flex: "none", cursor: "pointer", background: "#d6b24a", color: "#2a2410", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Take over editing here</button>
         </div>
       )}
-      {cloudSaveFailed && (
+      {/* B474 review (#8): gated on !localSaveFailed — "saved on this device" is false when the device
+          write failed too; the red local-save-failed banner is the authoritative message in that case. */}
+      {cloudSaveFailed && !localSaveFailed && (
         <div role="alert" style={{ position: "fixed", top: 79, left: "50%", transform: "translateX(-50%)", zIndex: 6000, maxWidth: 620, display: "flex", alignItems: "center", gap: 12, background: "#7c2d12", color: "#fff", border: "1px solid #f59e0b", borderRadius: 10, padding: "9px 13px", fontSize: 12.5, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}>
           <span style={{ flex: 1 }}>⚠ Your last change <b>didn't reach the cloud</b>. It's saved on this device and will retry on your next edit — your work is not lost.</span>
           <button onClick={retryCloudSave} title="Try saving to the cloud again now" style={{ flex: "none", cursor: "pointer", background: "#f59e0b", color: "#1a1206", border: "none", borderRadius: 7, padding: "5px 11px", fontFamily: "inherit", fontSize: 12, fontWeight: 800 }}>Retry now</button>
@@ -7657,10 +7692,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button style={{ ...btn(showAerial), flex: 1 }} onClick={() => setShowAerial((v) => !v)}>{showAerial ? "Hide aerial" : "Show aerial"}</button>
                   <button style={{ ...btn(tool === "calibrate") }} onClick={() => { setShowAerial(true); setTool("calibrate"); setCalib(null); }}>Calibrate</button>
                   <button style={chip} onClick={requestFit}>Fit</button>
-                  <button style={{ ...chip, color: PAL.accent }} onClick={() => { setUnderlay(null); setCalib(null); setShowAerial(false); }}>Remove</button>
+                  <button style={{ ...chip, color: PAL.accent }} onClick={() => { if (underlay?.idbKey) idbDelete(underlay.idbKey); if (underlay?.storageKey) deleteOverlayObject(underlay.storageKey); setUnderlay(null); setCalib(null); setShowAerial(false); setUnderlayLost(false); }}>Remove</button>
                 </div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 7 }}>Scale: <b style={{ color: PAL.ink }}>{f2(1 / underlay.ftPerPx)}</b> px/ft · image ≈ {f0(underlay.imgW * underlay.ftPerPx)}′ wide</div>
                 {underlayErr && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>}
+                {underlayLost && <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>The saved aerial couldn't be recovered on this device (not in the offline cache or your account). Your boundary and tools are intact — <button style={{ ...chip, padding: "1px 7px", color: PAL.accent }} onClick={() => fileRef.current?.click()}>re-drop the screenshot</button> to restore the backdrop.</div>}
                 {tool === "calibrate" && (
                   <div style={{ marginTop: 9, padding: "9px 10px", borderRadius: 7, background: "#fbf3ee", border: `1px solid ${PAL.accentSoft}` }}>
                     {!calib?.a && <div style={{ fontSize: 11.5, color: PAL.ink }}>Click the <b>first</b> end of a known distance on the image (e.g. a building wall, a road width).</div>}

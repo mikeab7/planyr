@@ -10,7 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush } from "./cloudSync.js";
-import { idbGet, idbPut, idbAvailable } from "./localDb.js";
+import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
@@ -407,7 +407,14 @@ function writeHistoryAll(h) {
   // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
   // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
   if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, JSON.stringify(h));
-  return lsOk || (historyHydrated && idbAvailable()); // persisted somewhere durable (backupNow's gate)
+  // Return ONLY the synchronously-VERIFIED localStorage result (B474 review #14). The idb write above is
+  // fire-and-forget — idbAvailable() means "the API exists", not "the write committed" — so counting it
+  // here let backupNow() (the Restore safety gate) report a backup that may not exist when localStorage is
+  // full AND the idb put silently fails, and Restore would then wipe the canvas with no real backup. In
+  // the normal case the byte-capped localStorage write succeeds, so backupNow stays true; only a 100%-full
+  // localStorage now returns false → Restore is blocked honestly rather than destroying work. (Durability
+  // of the deep history is unchanged — it still lands in IndexedDB; this only governs what we CLAIM.)
+  return lsOk;
 }
 // Union two history maps per site by snapshot timestamp (`at`), newest-first, keep HISTORY_PER_SITE.
 function mergeHistory(a, b) {
@@ -723,6 +730,7 @@ export function deleteSite(id) {
   const sites = readSites();
   delete sites[id];
   writeSites(sites);
+  if (id) idbDeleteByPrefix(`raster:${id}:`); // B474 review — evict this site's cached underlay/overlay/drawing rasters from IndexedDB so they don't orphan forever (#13/#24); no-op when idb is absent
   recentlyDeleted.add(id); // tombstone so no in-flight flush can resurrect it (B372)
   if (getCurrentSiteId() === id) setCurrentSiteId(null);
   // Return the cloud-removal result so the caller can report an honest failure / no-op (B372).

@@ -60,6 +60,30 @@ export async function uploadParcelDrawingFile(siteId, drawingId, file) {
   return error ? null : { key, ext: kind.ext };
 }
 
+// Aerial underlay (B474 review #5) — same bucket + uid-first RLS, distinct path. The underlay is the one
+// raster that previously had NO cross-device / post-eviction recovery (it lived only in this device's
+// IndexedDB), so back it up like overlays/drawings. We store the DOWNSCALED data-URL the planner actually
+// renders (not the original file) so the restored raster matches the record's saved imgW/imgH + ftPerPx.
+export const siteUnderlayKey = (uid, siteId, ext = "png") =>
+  `${uid}/site-underlay/${siteId || "unfiled"}/underlay.${ext}`;
+
+/* Upload the underlay's downscaled data-URL so its backdrop can be rebuilt on another device or after a
+ * local IndexedDB eviction; returns { key, ext } or null (no client / not signed in / oversize / bad input
+ * / error → caller keeps the local copy, nothing regresses). */
+export async function uploadUnderlayDataUrl(siteId, dataUrl) {
+  if (!supabase || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) return null;
+  let blob;
+  try { blob = await (await fetch(dataUrl)).blob(); } catch (_) { return null; }
+  if (!blob || blob.size > MAX_BYTES) return null;
+  const ext = blob.type === "image/jpeg" ? "jpg" : "png";
+  const user = await getUser();
+  const uid = user && user.id;
+  if (!uid) return null;
+  const key = siteUnderlayKey(uid, siteId, ext);
+  const { error } = await supabase.storage.from(BUCKET).upload(key, blob, { contentType: blob.type || "image/png", upsert: true });
+  return error ? null : { key, ext };
+}
+
 /* Download stored overlay bytes as an ArrayBuffer (ready for loadPdf), or null. */
 export async function downloadOverlayBytes(key) {
   if (!supabase || !key) return null;
