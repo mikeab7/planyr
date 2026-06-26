@@ -32,7 +32,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "./AnchoredMenu.jsx";
 import {
-  listProjects, filterProjects, relTime,
+  listProjects, filterProjects, relTime, warmProjectsIfEmpty,
   renameProject as storeRename, deleteProject as storeDelete,
 } from "../projects/projects.js";
 
@@ -153,9 +153,15 @@ export default function ProjectBreadcrumb({
   useEffect(() => {
     if (controlled) return;
     refresh();
+    // B475 — cold device / fresh tab: the on-device project cache can be empty even when the
+    // user HAS cloud projects (it only fills after a Site-Planner cloud pull). Warm it once so
+    // the switcher matches the Markup Library instead of looking empty, then re-read. No-ops
+    // when logged out or already warm; the storage event below also re-refreshes once it lands.
+    let alive = true;
+    warmProjectsIfEmpty().then((warmed) => { if (warmed && alive) refresh(); });
     const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refresh(); };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    return () => { alive = false; window.removeEventListener("storage", onStorage); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlled]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -166,7 +172,7 @@ export default function ProjectBreadcrumb({
   const flagIfAtRisk = () => {
     if (!atRisk(saveState)) return;
     clearTimeout(toastTimer.current);
-    setToast("Your latest changes are saved on this device. The cloud is unreachable — they'll sync automatically when you reconnect.");
+    setToast("Your latest changes are saved on this device. The cloud is unreachable — they'll sync the next time you make a change or close this tab.");
     toastTimer.current = setTimeout(() => setToast(null), 6000);
   };
 
@@ -296,7 +302,7 @@ export default function ProjectBreadcrumb({
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
             borderRadius: 7, background: "#fef3c7", color: "#92400e", fontSize: 11.5, lineHeight: 1.4 }}>
             <span aria-hidden>⚠</span>
-            <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync when you reconnect.</span>
+            <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync next time you edit or close this tab.</span>
           </div>
         )}
 

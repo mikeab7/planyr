@@ -38,7 +38,14 @@ scaffolded). Last updated mid-2026.
 > ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
 > on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
 > build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
-> still need a signed-in check. **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
+> still need a signed-in check. **⛔ STANDING RULE — when you ship a UI change with any path you CANNOT verify
+> here (auth-only / cloud / signed-in-only / needs the live edge), you MUST add a numbered `V###` entry to
+> `VERIFICATION.md` for that check, every time, unprompted.** A `⏳` note buried in the BACKLOG item is NOT a
+> substitute: `VERIFICATION.md` is the single canonical list of "builds green but never clicked," and it's the
+> only place a browser-equipped teammate looks for the click-through. The entry records what you DID verify
+> (lint/test/build/headless) **and** the precise signed-in steps still pending — so the gap is visible, not lost.
+> (Owner rule, 2026-06-26, after a session captured an auth-only check only in the backlog and nearly skipped
+> the verification log.) **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
 > or a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
 >
 > **📦 `BACKLOG-DONE.md` / `VERIFICATION-DONE.md` are write-only archives — do NOT read them** unless looking

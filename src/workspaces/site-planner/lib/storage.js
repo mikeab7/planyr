@@ -23,6 +23,7 @@ export function setActiveUser(uid) {
   activeUser = next;
 }
 export const isCloudActive = () => !!activeUser;
+export const activeUid = () => activeUser; // signed-in user's id, or null (B475 — warm the project cache)
 const cloudKey = (uid) => "planarfit:sites:cloud:" + uid;
 
 // Session tombstone (per-tab): ids deleted in THIS tab. The bug it kills (B372): when you delete

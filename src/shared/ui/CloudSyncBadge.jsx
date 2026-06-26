@@ -33,7 +33,7 @@ export function cloudBadgeView(state) {
         title: "Syncing…", tip: "Saving your changes to the cloud…" };
     case "offline":
       return { variant: "cloud-pause", color: "var(--warn-text)", pulse: false, loud: false, actionable: true,
-        title: "Saved on this device", tip: "Saved on this device — the cloud is unreachable. Your work will sync automatically when you reconnect." };
+        title: "Saved on this device", tip: "Saved on this device — the cloud is unreachable. Your work will sync the next time you make a change or close this tab." };
     case "readonly":
       // B465/NEW-2 — NOT green. Another tab of this browser is the active editor, so this tab is
       // read-only and is NOT saving to the cloud. Amber + a lock glyph + an actionable popover that
