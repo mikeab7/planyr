@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
+import { idbGet, idbPut, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -967,9 +968,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Build + persist + open a drawing record from a rasterized page/image; back it with the source.
   const addDrawingFromRaster = (parcelId, name, kind, raster, pageCount, file) => {
-    const rec = { id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), parcelId,
+    const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
+    const idbKey = siteId ? `raster:${siteId}:drawing:${id}` : undefined;
+    if (idbKey && idbAvailable() && raster.src) idbPut(idbKey, raster.src);
+    const rec = { id, parcelId,
       name, kind, page: raster.page || 1, pageCount: pageCount || 1,
-      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src,
+      intrinsic: { w: raster.imgW, h: raster.imgH }, src: raster.src, idbKey,
       markups: [], createdAt: Date.now(), updatedAt: Date.now() };
     persistDrawings([...parcelDrawings, rec]);
     setOpenDrawingId(rec.id);
@@ -1004,19 +1009,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   useEffect(() => {
     if (!openDrawingId) return;
     const d = parcelDrawingsRef.current.find((x) => x.id === openDrawingId);
-    if (!d || d.src || !d.storageKey) return;
+    if (!d || d.src || (!d.storageKey && !d.idbKey)) return;
     let live = true;
     setRehydratingId(d.id);
     (async () => {
       let src = null;
       try {
-        if (d.kind === "pdf") { const bytes = await downloadOverlayBytes(d.storageKey); if (bytes) { const rr = await rasterizeStoredPdf(bytes, d.page || 1); src = rr && rr.src; } }
-        else { src = await downloadOverlayDataUrl(d.storageKey); }
+        if (d.idbKey && idbAvailable()) src = await idbGet(d.idbKey); // B474 — local IndexedDB cache first (fast, offline)
+        if (!src && d.storageKey) {                                   // fall back to cloud Storage (cross-device)
+          if (d.kind === "pdf") { const bytes = await downloadOverlayBytes(d.storageKey); if (bytes) { const rr = await rasterizeStoredPdf(bytes, d.page || 1); src = rr && rr.src; } }
+          else { src = await downloadOverlayDataUrl(d.storageKey); }
+        }
       } catch (_) { /* keep the placeholder */ }
       if (live) { if (src) setParcelDrawings((cur) => cur.map((x) => (x.id === d.id ? { ...x, src } : x))); setRehydratingId(null); }
     })();
     return () => { live = false; };
   }, [openDrawingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // B474 — re-hydrate the underlay raster from IndexedDB when the saved record carried only the ref (src
+  // was dropped to keep the record off the ~5MB localStorage cap). Mirrors the drawing/overlay rehydrate
+  // above; the underlay is the one raster that previously had NO recovery path (it needed a re-drop).
+  useEffect(() => {
+    if (!underlay || underlay.src || !underlay.idbKey || !idbAvailable()) return;
+    let live = true;
+    idbGet(underlay.idbKey).then((src) => { if (live && src) setUnderlay((u) => (u && !u.src ? { ...u, src } : u)); });
+    return () => { live = false; };
+  }, [underlay]);
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
   const deleteDrawing = (id) => {
@@ -3183,9 +3200,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const { src, w, h } = await loadAndDownscaleImage(file);
       pushHistory();
+      // B474 — stash the heavy underlay raster in IndexedDB (gigabytes) so the saved record stays small
+      // (off the ~5MB localStorage cap) and the image survives a reload instead of needing a re-drop.
+      const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
+      if (idbKey && idbAvailable()) idbPut(idbKey, src);
       // Start at ~600 ft across the image width; the user calibrates precisely next.
       // Auto-locked (click-through) so you can immediately draw over it.
-      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
+      setUnderlay({ src, idbKey, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
       setUnderlayErr(false);
       setUnderlayLoading(true);
       setCalib(null);
@@ -3250,8 +3271,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // offer it as one-click "Apply". (chooseOverlayScale is pure + unit-tested.)
       const pick = chooseOverlayScale({ detectedScale: r.detectedScale, sheetStd: !!(r.sheet && r.sheet.std), imgW: r.imgW, ppf: view.ppf, screenW: size.w });
       const ftPerPx = pick.ftPerPx;
+      // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
+      const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
+      if (ovIdbKey && idbAvailable() && r.src) idbPut(ovIdbKey, r.src);
       const ov = {
-        id, name: file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: file.name || "Site plan", src: r.src, idbKey: ovIdbKey, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
@@ -3486,18 +3510,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Cross-device reload (B72): an overlay that synced only its transform (raster stripped
   // from the cloud row) but kept a Storage key → fetch the original PDF and re-rasterize.
   useEffect(() => {
-    const missing = sheetOverlays.filter((o) => o.storageKey && !o.src && !overlayFetching.current.has(o.id));
+    const missing = sheetOverlays.filter((o) => (o.idbKey || o.storageKey) && !o.src && !overlayFetching.current.has(o.id));
     if (!missing.length) return;
     let cancelled = false;
     missing.forEach((o) => overlayFetching.current.add(o.id));
     (async () => {
       for (const o of missing) {
         try {
+          let cached = null;
+          if (o.idbKey && idbAvailable()) cached = await idbGet(o.idbKey); // B474 — local IndexedDB cache first (fast, offline)
+          if (cached) { if (!cancelled) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: cached } : x))); continue; }
           if ((o.storageKey || "").toLowerCase().endsWith(".pdf")) { // PDF: re-rasterize the stored page
             const bytes = await downloadOverlayBytes(o.storageKey);
             const r = bytes ? await rasterizeStoredPdf(bytes, o.page || 1) : null;
             if (!cancelled && r) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src: r.src, imgW: r.imgW, imgH: r.imgH, pageCount: r.pageCount } : x)));
-          } else { // image: its raster IS the source — restore the src directly (dims already known)
+          } else if (o.storageKey) { // image: its raster IS the source — restore the src directly (dims already known)
             const src = await downloadOverlayDataUrl(o.storageKey);
             if (!cancelled && src) setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, src } : x)));
           }

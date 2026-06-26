@@ -558,17 +558,29 @@ const sitesKey = () => (activeUser ? cloudKey(activeUser) : SITES_KEY);
 function readSites() {
   try { return JSON.parse(localStorage.getItem(sitesKey())) || {}; } catch (_) { return {}; }
 }
+// B474 — drop ONLY the rasters that are safely stashed in IndexedDB (have an `idbKey`), so the PERSISTED
+// record shrinks off the ~5MB cap while staying recoverable (a reload re-hydrates from IndexedDB). A
+// raster with no idbKey keeps its src (safe fallback). Mirrors stripDataUrls' three raster homes. NO-OP
+// for records without idbKey (e.g. every existing test) → behavior unchanged there.
+function dropIdbBackedSrc(m) {
+  let s = m;
+  if (s.underlay && s.underlay.idbKey && isDataUrl(s.underlay.src)) s = { ...s, underlay: { ...s.underlay, src: null } };
+  if (Array.isArray(s.sheetOverlays) && s.sheetOverlays.some((o) => o && o.idbKey && isDataUrl(o.src)))
+    s = { ...s, sheetOverlays: s.sheetOverlays.map((o) => (o && o.idbKey && isDataUrl(o.src) ? { ...o, src: null } : o)) };
+  if (Array.isArray(s.parcelDrawings) && s.parcelDrawings.some((d) => d && d.idbKey && isDataUrl(d.src)))
+    s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && d.idbKey && isDataUrl(d.src) ? { ...d, src: null } : d)) };
+  return s;
+}
 function writeSites(obj) {
-  try { localStorage.setItem(sitesKey(), JSON.stringify(obj)); return true; }
+  // B474 — proactively shed IndexedDB-backed raster src so the persisted record stays small (off cap).
+  const persist = {};
+  for (const [id, s] of Object.entries(obj)) persist[id] = dropIdbBackedSrc(s);
+  try { localStorage.setItem(sitesKey(), JSON.stringify(persist)); return true; }
   catch (_) {
-    // Over quota — usually a pasted screenshot dataURL. Drop those and retry so
-    // the (much smaller) geometry of every site still persists.
+    // Over quota anyway — shed ALL inline rasters (geometry still persists; rasters re-hydrate). B473.
     try {
-      // B473 — shed inline rasters from EVERY site (underlay + sheetOverlays + parcelDrawings, via the
-      // shared stripDataUrls), not just the underlay, so a raster-bloated store still persists ALL
-      // geometry on-device; the rasters re-hydrate from cloud/Storage on load.
       const slim = {};
-      for (const [id, s] of Object.entries(obj)) slim[id] = stripDataUrls(s);
+      for (const [id, s] of Object.entries(persist)) slim[id] = stripDataUrls(s);
       localStorage.setItem(sitesKey(), JSON.stringify(slim));
       return true;
     } catch (_2) { return false; }

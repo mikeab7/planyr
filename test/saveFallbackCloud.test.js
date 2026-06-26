@@ -87,3 +87,32 @@ describe("B473 — device-full degrades gracefully + the cloud save is never blo
     expect(upserts.length).toBe(0);
   });
 });
+
+describe("B474 — IndexedDB-backed raster src is dropped from the persisted record (off the cap)", () => {
+  beforeEach(() => { upserts.length = 0; setActiveUser(null); mockLocalStorage(); });
+
+  it("drops underlay src when it's idb-backed (idbKey present), keeping geometry + the ref", () => {
+    saveSite({ id: "u1", els: [bld("a")], underlay: { src: BIG, idbKey: "raster:u1:underlay", imgW: 10, imgH: 10 } });
+    const back = loadSite("u1");
+    expect(back.els.map((e) => e.id)).toEqual(["a"]);          // geometry kept
+    expect(back.underlay.src ?? null).toBe(null);              // heavy raster dropped from the record
+    expect(back.underlay.idbKey).toBe("raster:u1:underlay");   // ref kept → rehydrate on load
+  });
+
+  it("KEEPS underlay src when it is NOT idb-backed (no idbKey) — safe fallback, no data loss", () => {
+    saveSite({ id: "u2", els: [bld("a")], underlay: { src: BIG, imgW: 10, imgH: 10 } });
+    expect(loadSite("u2").underlay.src).toBe(BIG);             // not idb-backed → src preserved in the record
+  });
+
+  it("drops sheetOverlay + parcelDrawing src ONLY when idb-backed (keeps non-backed = safe)", () => {
+    saveSite({ id: "u3", els: [bld("a")],
+      sheetOverlays: [{ id: "o1", src: BIG, idbKey: "raster:u3:overlay:o1" }, { id: "o2", src: BIG }],
+      parcelDrawings: [{ id: "d1", src: BIG, idbKey: "raster:u3:drawing:d1" }, { id: "d2", src: BIG }] });
+    const back = loadSite("u3");
+    expect(back.sheetOverlays.find((o) => o.id === "o1").src ?? null).toBe(null);  // idb-backed → dropped
+    expect(back.sheetOverlays.find((o) => o.id === "o1").idbKey).toBe("raster:u3:overlay:o1"); // ref kept
+    expect(back.sheetOverlays.find((o) => o.id === "o2").src).toBe(BIG);           // NOT backed → src kept
+    expect(back.parcelDrawings.find((d) => d.id === "d1").src ?? null).toBe(null); // idb-backed → dropped
+    expect(back.parcelDrawings.find((d) => d.id === "d2").src).toBe(BIG);          // NOT backed → src kept
+  });
+});
