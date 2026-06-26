@@ -6,7 +6,7 @@ import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
 import { onAuthChange } from "./lib/auth.js";
 import { claimInvites } from "./lib/teams.js";
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -14,6 +14,7 @@ import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
 migrateScenarios();   // fold legacy named scenarios into Plans
+initHistoryStore();   // B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
