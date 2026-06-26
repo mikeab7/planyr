@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
+import { idbGet, idbPut, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
@@ -1017,6 +1018,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     })();
     return () => { live = false; };
   }, [openDrawingId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // B474 — re-hydrate the underlay raster from IndexedDB when the saved record carried only the ref (src
+  // was dropped to keep the record off the ~5MB localStorage cap). Mirrors the drawing/overlay rehydrate
+  // above; the underlay is the one raster that previously had NO recovery path (it needed a re-drop).
+  useEffect(() => {
+    if (!underlay || underlay.src || !underlay.idbKey || !idbAvailable()) return;
+    let live = true;
+    idbGet(underlay.idbKey).then((src) => { if (live && src) setUnderlay((u) => (u && !u.src ? { ...u, src } : u)); });
+    return () => { live = false; };
+  }, [underlay]);
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
   const deleteDrawing = (id) => {
@@ -3183,9 +3193,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const { src, w, h } = await loadAndDownscaleImage(file);
       pushHistory();
+      // B474 — stash the heavy underlay raster in IndexedDB (gigabytes) so the saved record stays small
+      // (off the ~5MB localStorage cap) and the image survives a reload instead of needing a re-drop.
+      const idbKey = siteId ? `raster:${siteId}:underlay` : undefined;
+      if (idbKey && idbAvailable()) idbPut(idbKey, src);
       // Start at ~600 ft across the image width; the user calibrates precisely next.
       // Auto-locked (click-through) so you can immediately draw over it.
-      setUnderlay({ src, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
+      setUnderlay({ src, idbKey, imgW: w, imgH: h, x: 0, y: 0, ftPerPx: 600 / w, opacity: 1, locked: true });
       setUnderlayErr(false);
       setUnderlayLoading(true);
       setCalib(null);

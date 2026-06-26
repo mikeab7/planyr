@@ -87,3 +87,20 @@ describe("B473 — device-full degrades gracefully + the cloud save is never blo
     expect(upserts.length).toBe(0);
   });
 });
+
+describe("B474 — IndexedDB-backed raster src is dropped from the persisted record (off the cap)", () => {
+  beforeEach(() => { upserts.length = 0; setActiveUser(null); mockLocalStorage(); });
+
+  it("drops underlay src when it's idb-backed (idbKey present), keeping geometry + the ref", () => {
+    saveSite({ id: "u1", els: [bld("a")], underlay: { src: BIG, idbKey: "raster:u1:underlay", imgW: 10, imgH: 10 } });
+    const back = loadSite("u1");
+    expect(back.els.map((e) => e.id)).toEqual(["a"]);          // geometry kept
+    expect(back.underlay.src ?? null).toBe(null);              // heavy raster dropped from the record
+    expect(back.underlay.idbKey).toBe("raster:u1:underlay");   // ref kept → rehydrate on load
+  });
+
+  it("KEEPS underlay src when it is NOT idb-backed (no idbKey) — safe fallback, no data loss", () => {
+    saveSite({ id: "u2", els: [bld("a")], underlay: { src: BIG, imgW: 10, imgH: 10 } });
+    expect(loadSite("u2").underlay.src).toBe(BIG);             // not idb-backed → src preserved in the record
+  });
+});
