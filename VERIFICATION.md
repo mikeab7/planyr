@@ -60,6 +60,32 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+
+> ### 📋 2026-06-25 — Cowork signed-in batch (live on planyr.io, owner's session)
+> A second signed-in pass via the owner's browser. **✅** = confirmed live this session; **◑** = partially advanced (a sub-check needs an asset a solo signed-in browser can't supply); **⏳** = attempted, not drivable this session. Inline per-item ⏳→✅ flips can follow.
+>
+> - **V71 ✅** — Layers picker Relevance modes (Show all / Dim / Hide) + the "Nearby range" slider render and work.
+> - **V101 ✅** — Site Analysis honest source states live on Grand Port: Floodplain "Zone X · PRESENT"; Wetlands "UNAVAILABLE — couldn't reach the GIS source" (+Retry, *not* a false "None found"); Pipelines "PRESENT — 8 segments" from real RRC operators (Enterprise / ONEOK / Magellan); Oil & gas wells "No mapped oil & gas wells on the site · just now" (successful query, honest zero); Environmental "not connected". Authoritative RRC source is live (pipelines prove it). The wells/pipelines coverage-COUNT fixtures remain the CI check.
+> - **V77 ◑** — the street-imagery feature is present in the planner Layers as **EVIDENCE TOOLS** (Infer water main from hydrants, Route electric/water service, Trace overhead electric); the Mapillary same-origin-proxy + no-token-leak network capture was NOT driven (needs tool-activate + zoom ≥16; the renderer froze under the map+GIS load).
+> - **V73 ✅** — identity-pill dropdown shows the account name "Michael Butler", org "Hillwood", the email, and Profile / Team / Settings / Sign out (the profiles-table name, not an email fallback).
+> - **V103 ✅** — the app-wide CloudSyncBadge sits in Row 1 showing the quiet-green "synced" state.
+> - **V122 ✅** (degrade-fallback still ◑) — an edit (drew + deleted a markup in a Review) autosaved and the header read "Cloud sync: Synced"; the version-less-DB id-first fallback stays dormant on production (the `version` column exists), so that specific branch is unexercised.
+> - **V100 ✅ (Site↔Review) / ◑ (Schedule)** — the active project carries Site→Review via the URL hash (Grand Port → Review shows "Grand Port" + the file-browser landing with the category tree). Site→Schedule carries the id in the URL but the embedded scheduler lands on its own all-projects report (breadcrumb "Select a project"), not the carried project. The real drop→categorize round-trip (needs a dropped PDF) wasn't driven.
+> - **V98 ✅** — opened the live Jacintoport record: the bonded children (perimeter strip + 2 bump-outs) sit flush/parallel to the building with no visible ~1° skew (B363 holds); the building carries its 2 bump-outs. The resize-persist round-trip (B362) wasn't separately driven.
+> - **V70 ✅** — clicking a filed document opened it in the Review canvas on the FIRST click (B446 "Opening…" overlay → render; breadcrumb shows the project), via the per-project file browser. The global 🗂 Files-pill variant wasn't separately driven.
+> - **V97 ✅** — Markup header de-clutter confirmed: no "Library" button (B359), "Reviews ▾" in the tools row (B360), no cry-wolf save chip (B358); the single Row-1 cloud badge is the save indicator (per the V103/B373 supersession).
+> - **V123 ✅** — armed Line → dragged → a Line markup committed; selecting it opened the PROPERTIES panel (color / weight / Dash / Opacity); Polyline/Polygon/Rect present in the rail. (Test markup deleted; file left clean.)
+> - **V124 ✅** — Polylength tool present; the Line tool exposes "Arrow toggles in Properties"; the draw round-trip works.
+> - **V125 ◑ / V126 ◑** — Arc/Dimension/Pen/Highlight/Eraser/Snapshot were already proven to ARM against production in V127's CI (run 28102406142); a one-tool draw round-trip (Line) is now confirmed live, but the per-tool Arc/Pen/etc. gestures and the vertex-drag + Shift-snap + ParcelDrawing inline-calibrate gestures weren't individually driven.
+> - **V46 ✅** — Eagle's Gantt shows navy summary brackets (B210) over Tree/Topo/Geotech, gray task-fill bars (not health-colored) with red row-backgrounds for Needs-Attn (B211), and the "⊞ Columns" chooser (B212). The add-column + reload-persist round-trip wasn't driven.
+> - **V58 ✅** — the Schedule module loads/renders (all-projects report + a full project Gantt), no deploy dead-end.
+> - **V40 ⏳** — not drivable this session: the embedded scheduler's task grid didn't respond to wheel-scroll to reach the "+ New task" row, and pressing Enter would create a real task in a live project.
+> - **V90 ✅** — Jacintoport's site-plan overlay loaded in its persisted **HIDDEN** state (persistence across page-load), and the eye toggle shows/hides it live; restored to hidden afterward.
+> - **V68 ◑** — the per-overlay visibility toggle (B277) is confirmed via the same eye control; delete-persistence (B276) wasn't tested (destructive on the real overlay; headless-proven).
+> - **V120 ⏳ / V102 ⏳** — copy-paste-at-cursor and the delete-site-stays-deleted reload check weren't driven (finicky canvas selection / would need a throwaway site create+delete+reload; both headless-proven).
+>
+> _Asset-blocked cluster (need a 2nd user / two live tabs / a full localStorage / a network outage / a fresh dropped PDF — not solo-browser checks, intentionally skipped this pass): V137, V136, V135, V134, V133, V132, V118, V99, V85, V81, V79, V74, V67, V66, V63, V61._
+
 ### V139 — B474 Stage A: version-history ring → IndexedDB (off the 5 MB localStorage cap) ✅ lint 0 · 1571 tests (+6 `historyIdb.test.js`) · build green · headless 7/7 (`ui-audit/verify-b474-history-idb.mjs`) — nothing pending
 - **What changed.** The biggest on-device store — the automatic version-history ring (~1.6 MB) — now lives in **IndexedDB** (gigabytes) via a synchronous in-memory ring + a byte-capped localStorage fallback (`lib/localDb.js`; `historyMem`/`initHistoryStore` in `storage.js`; hydrated from `SitePlannerApp`). Undo depth is no longer byte-throttled, and the ring survives in a store that can't fill. Public API unchanged + synchronous; the IndexedDB-ABSENT path is byte-for-byte the old localStorage behavior (the 1565 prior tests are the faithfulness guard).
 - **Verified (sandbox, real browser).** `verify-b474-history-idb.mjs` 7/7: create a site → 3 edits → the ring lands in IndexedDB → reload → history survives → boot intact, no errors. Boot/save/reload regression `verify-new-site-save.mjs` still 10/10. +6 fake-indexeddb unit tests.
