@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
+import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
+
+// B474 faithfulness guard (#31) — this suite runs with IndexedDB ABSENT (no fake-indexeddb import), which
+// is the WHOLE POINT: it proves the localStorage path is byte-for-byte the pre-B474 behavior. Pin it
+// explicitly so the guarantee can't quietly erode (e.g. someone adding a global idb polyfill to setup).
+describe("B474 — the localStorage faithfulness path (IndexedDB genuinely absent here)", () => {
+  it("idbAvailable() is false, so dropIdbBackedSrc + the history idb write are no-ops", () => {
+    expect(idbAvailable()).toBe(false);
+  });
+});
 
 // A plain building element (what users mostly lose); `bld("a")` etc.
 const bld = (id) => ({ id, type: "building", cx: 0, cy: 0, w: 100, h: 100 });

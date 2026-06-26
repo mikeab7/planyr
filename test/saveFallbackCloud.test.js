@@ -104,6 +104,20 @@ describe("B474 — IndexedDB-backed raster src is dropped from the persisted rec
     expect(loadSite("u2").underlay.src).toBe(BIG);             // not idb-backed → src preserved in the record
   });
 
+  it("over-quota with MIXED rasters: dropIdbBackedSrc sheds the idb-backed one; the still-too-big record then sheds the inline one too (#30)", () => {
+    mockLocalStorage({ quotaBytes: 60 * 1024 });
+    const ok = saveSite({ id: "u4", els: [bld("a")],
+      underlay: { src: BIG, idbKey: "raster:u4:underlay", imgW: 10, imgH: 10 },  // idb-backed → shed by dropIdbBackedSrc
+      sheetOverlays: [{ id: "o1", src: BIG }] });                                 // NOT idb-backed → only the over-quota stripDataUrls sheds it
+    expect(ok).toBe(true);                                                        // persisted via the slim retry
+    const back = loadSite("u4");
+    expect(back.els.map((e) => e.id)).toEqual(["a"]);            // geometry survived
+    expect(back.underlay.src ?? null).toBe(null);               // idb-backed underlay shed
+    expect(back.underlay.idbKey).toBe("raster:u4:underlay");    // ref kept → rehydrate from idb
+    expect(back.sheetOverlays[0].src ?? null).toBe(null);       // inline overlay shed by the quota fallback
+    expect(back.sheetOverlays[0].strippedForCloud).toBe(true);  // flagged to re-fetch from cloud
+  });
+
   it("drops sheetOverlay + parcelDrawing src ONLY when idb-backed (keeps non-backed = safe)", () => {
     saveSite({ id: "u3", els: [bld("a")],
       sheetOverlays: [{ id: "o1", src: BIG, idbKey: "raster:u3:overlay:o1" }, { id: "o2", src: BIG }],
