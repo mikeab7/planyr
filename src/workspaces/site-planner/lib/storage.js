@@ -10,6 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush } from "./cloudSync.js";
+import { idbGet, idbPut, idbAvailable } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
  * the working store switches to a per-user local cache (pulled from Supabase on
@@ -361,7 +362,26 @@ function stripDataUrls(m) {
     s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && isDataUrl(d.src) ? { ...d, src: null, strippedForCloud: true } : d)) };
   return s;
 }
-const historyAll = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch (_) { return {}; } };
+// B474 — the version ring lives in an in-memory cache `historyMem` backed by IndexedDB (gigabytes, no
+// ~5MB localStorage cap → undo depth is no longer byte-throttled and survives in a store that can't fill).
+// `historyAll` is the synchronous source of truth: it seeds from localStorage on first access (so the very
+// first snapshot is never empty — race-safe before async IndexedDB hydration), then initHistoryStore()
+// merges in the fuller IndexedDB copy. It re-seeds if the localStorage instance itself changes (test
+// isolation — beforeEach swaps the mock; in the real app the reference is stable so the ring persists for
+// the session). All reads/writes stay synchronous; the IndexedDB write is fire-and-forget.
+let historyMem = null;
+let historyHydrated = false;
+let historyLS = null; // the localStorage instance historyMem was seeded from (detects a test swap)
+const historyAll = () => {
+  const ls = (typeof localStorage !== "undefined") ? localStorage : null;
+  if (!historyMem || historyLS !== ls) {
+    historyLS = ls; historyHydrated = false;
+    try { historyMem = JSON.parse(localStorage.getItem(HISTORY_KEY)) || {}; } catch (_) { historyMem = {}; }
+  }
+  return historyMem;
+};
+// Reset hook for tests that drive the IndexedDB path (mirrors `_recentlyDeleted`). Not used by the app.
+export function _resetHistoryForTest() { historyMem = null; historyHydrated = false; historyLS = null; }
 // B473 — bound the version ring by BYTES, not just HISTORY_PER_SITE, so it can't creep back to ~MB
 // and crowd the ~5MB localStorage cap (the pressure that made saves fail). Thins uniformly (newest
 // kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
@@ -376,12 +396,48 @@ function capHistoryBytes(h) {
   return out;
 }
 function writeHistoryAll(h) {
-  const capped = capHistoryBytes(h);
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(capped)); return true; }
-  catch (_) { // still over quota — keep only the newest few per site and retry
-    try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); return true; }
-    catch (_2) { return false; }
+  historyMem = h;                                   // in-memory ring = the synchronous source of truth (uncapped depth)
+  let lsOk = false;
+  const capped = capHistoryBytes(h);                // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(capped)); lsOk = true; }
+  catch (_) { // over quota — keep only the newest few per site and retry
+    try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); lsOk = true; } catch (_2) {}
   }
+  // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
+  // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
+  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, JSON.stringify(h));
+  return lsOk || (historyHydrated && idbAvailable()); // persisted somewhere durable (backupNow's gate)
+}
+// Union two history maps per site by snapshot timestamp (`at`), newest-first, keep HISTORY_PER_SITE.
+function mergeHistory(a, b) {
+  const out = {};
+  const ids = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const id of ids) {
+    const seen = new Set(), list = [];
+    for (const v of [...((a && a[id]) || []), ...((b && b[id]) || [])]) {
+      if (!v || seen.has(v.at)) continue; seen.add(v.at); list.push(v);
+    }
+    list.sort((x, y) => (y.at || 0) - (x.at || 0));
+    out[id] = list.slice(0, HISTORY_PER_SITE);
+  }
+  return out;
+}
+// B474 — hydrate the version ring from IndexedDB at boot (called once from SitePlannerApp). Merges the
+// synchronous localStorage seed with the fuller IndexedDB copy, marks hydrated (so writes now persist to
+// IndexedDB), and persists the merge — one-time migrating the localStorage ring into IndexedDB. Resolves
+// even when IndexedDB is unavailable (then the ring just stays localStorage-backed = current behavior).
+export async function initHistoryStore() {
+  if (historyHydrated) return;
+  historyAll(); // ensure mem is seeded from localStorage (sync)
+  if (!idbAvailable()) { historyHydrated = true; return; }
+  try {
+    const raw = await idbGet(HISTORY_KEY);
+    let fromIdb = {};
+    if (raw) { try { fromIdb = JSON.parse(raw) || {}; } catch (_) {} }
+    historyMem = mergeHistory(historyMem || {}, fromIdb);
+    historyHydrated = true;
+    idbPut(HISTORY_KEY, JSON.stringify(historyMem)); // persist merge + migrate localStorage → IndexedDB
+  } catch (_) { historyHydrated = true; }
 }
 // Shape signature — counts of each drawn collection. A content DROP always changes it
 // (fewer items), so the pre-drop version is always captured; an identical-shape save
