@@ -11,6 +11,7 @@ import { idbPersist } from "./lib/localDb.js";
 import { SiteReviewModal } from "./components/SiteReviewModal.jsx";
 import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget } from "./lib/bootResume.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -54,14 +55,13 @@ export default function App({
   // otherwise resume the last-opened site — but ONLY when the page opened with no explicit
   // route, so a shared "#/" dashboard link or an explicit module URL isn't overridden.
   const bootActiveId = () => {
-    if (projectId) {
-      const plans = loadPlansOfGroup(projectId); // newest first
-      const cur = getCurrentSiteId();
-      const t = plans.find((p) => p.id === cur) || plans[0];
-      return t ? t.id : null;
-    }
-    if (resumeAllowed) { const cur = getCurrentSiteId(); return cur && loadSite(cur) ? cur : null; }
-    return null;
+    // No route project AND a route-bearing first visit (not a route-less resume) → don't
+    // resume the last site (an explicit "#/" / module URL must land on the dashboard).
+    if (!projectId && !resumeAllowed) return null;
+    return pickResumeTarget({
+      routeProjectId: projectId, currentId: getCurrentSiteId(),
+      plansOfGroup: loadPlansOfGroup, hasSite: (id) => !!loadSite(id),
+    });
   };
   const [activeSiteId, setActiveSiteId] = useState(bootActiveId);
   // Resume into the planner if there's an active site to pick up.
@@ -69,10 +69,21 @@ export default function App({
   // Live mirror of the URL project for the once-registered auth callback (which would
   // otherwise close over the first render's prop).
   const projectIdRef = useRef(projectId); projectIdRef.current = projectId;
+  // V13/V28 — "boot resolved" gate. False until the first auth event + cloud pull settles
+  // (so the route's project + the currentSite pointer aren't clobbered during the async gap
+  // where a signed-in user's cloud sites aren't loaded yet). True from the start when there's
+  // no Supabase to wait on (logged-out / unconfigured boots resolve synchronously).
+  const [bootResolved, setBootResolved] = useState(() => initialBootResolved(supabaseConfigured()));
   // Clear a dangling currentSite pointer (e.g. a never-persisted site from before
   // the fix) so it doesn't linger in storage. The finder fallback already handles
-  // the routing; this just tidies the stale pointer.
-  useEffect(() => { const cur = getCurrentSiteId(); if (cur && !loadSite(cur)) setCurrentSiteId(null); }, []);
+  // the routing; this just tidies the stale pointer. V13: gate on bootResolved — a
+  // signed-in cloud site looks "dangling" at first render ONLY because it isn't pulled
+  // yet, and nulling the pointer there loses the exact-plan resume. Run after the first
+  // auth + pull settles, when "absent" genuinely means absent.
+  useEffect(() => {
+    if (!mayReconcileUrl(bootResolved)) return;
+    const cur = getCurrentSiteId(); if (cur && !loadSite(cur)) setCurrentSiteId(null);
+  }, [bootResolved]);
 
   // PHASE 1 ONLY: test the Supabase connection (no data read/written). Drives a
   // tiny status chip + a console line + a window.pfCloudTest() helper. Persistence
@@ -146,15 +157,15 @@ export default function App({
       // synced copy rather than presenting a silent (and scary) empty library.
       setCloudError(res && res.ok === false ? "Couldn't reach the cloud — showing your last synced copy. Your saved sites are safe; reconnect to refresh." : "");
       // Resume target after the cloud pull: the URL's project wins (a deep link or a
-      // cross-module carry must survive sign-in), else the last-opened site (B124/B133).
-      const cur = getCurrentSiteId();
-      const urlPid = projectIdRef.current;
-      const urlPlans = urlPid ? loadPlansOfGroup(urlPid) : [];
-      const resume = urlPid
-        ? (urlPlans.find((p) => p.id === cur) || urlPlans[0] || null)
-        : (cur && loadSite(cur) ? { id: cur } : null);
-      if (resume) {
-        setActiveSiteId(resume.id); setCurrentSiteId(resume.id); setMode("plan"); // resume if it's one of theirs
+      // cross-module carry must survive sign-in — V13), else the last-opened site (B124/B133).
+      // projectIdRef stays the route's project because bootResolved gated the URL sync from
+      // clobbering it during the async pull (the whole point of the fix).
+      const resumeId = pickResumeTarget({
+        routeProjectId: projectIdRef.current, currentId: getCurrentSiteId(),
+        plansOfGroup: loadPlansOfGroup, hasSite: (id) => !!loadSite(id),
+      });
+      if (resumeId) {
+        setActiveSiteId(resumeId); setCurrentSiteId(resumeId); setMode("plan"); // resume if it's one of theirs
         // Force the keyed planner to re-read from the post-pull merged store even though `cur` is
         // unchanged, so the resumed plan can't linger on the stale pre-auth copy (B133). Safe: the
         // tab-focus SIGNED_IN re-emit is already skipped above (no remount mid-edit), and a boot
@@ -182,6 +193,11 @@ export default function App({
         uid ? "session active" : "session ended (signed out or token lapsed)", { event });
     }
     prevUid.current = uid;
+    // V13 — the first auth event + pull has now settled the store + the resume view; release
+    // the boot gate so the URL sync + the dangling-pointer cleanup may run. Batched with the
+    // resume's setActiveSiteId above, so the URL-sync effect only ever sees the resolved view
+    // (never the transient null that stripped the deep link).
+    setBootResolved(true);
   };
 
   useEffect(() => {
@@ -313,9 +329,14 @@ export default function App({
   //    sign-in resume, new blank), reflect it in the hash so the URL stays shareable and
   //    the next module switch carries the project. navigate() de-dupes identical hashes,
   //    so this never loops with (1).
+  //    V13: gate on bootResolved. At the first render of a signed-in deep link the cloud
+  //    project isn't pulled yet, so effGroup is transiently null — writing that null would
+  //    strip the route ("#/project/<id>/site" → "#/") and bounce to the finder before the
+  //    pull can resume. Hold the URL (the route is the source of truth during boot) until
+  //    the first auth + pull settles, then sync (de-duped if already correct).
   const effGroup = groupForPlan(activeSiteId, mode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { onProjectChange?.(effGroup); }, [effGroup]);
+  useEffect(() => { if (mayReconcileUrl(bootResolved)) onProjectChange?.(effGroup); }, [effGroup, bootResolved]);
 
   // 3) "New project" from any workspace → start a blank site here (a side effect, not a
   //    route: the blank has no saved id yet; once edited it writes its id into the URL).

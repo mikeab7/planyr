@@ -4,6 +4,38 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+<!-- Archived 2026-06-25 from Cowork signed-in verification passes on planyr.io (owner's own browser).
+     These fully passed — the previously-owed signed-in path was driven live and closed.
+     NOTE: V# numbers here are reused over time (the live file recycled V90/V97/V123/V129/V130); these
+     blocks are the Doc-Review/Schedule/GIS/overlay/older-Site-Planner items archived on this date. -->
+
+### V14 — Draw-tool rail scrolls to the bottom on desktop + denser rows (B117/B118) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 (Cowork, signed-in in 8 South's planner):** the draw-tool rail **scrolls to reveal the full set** on desktop — Line / Rectangle / Ellipse / Polygon / Polyline, then MEASURE, then ANNOTATE (Callout / Text), then SELECT — i.e. the reported B117 bug (tools stranded off-screen with no scrollbar) is fixed live. The B118 density tweak is cosmetic ("rows read tighter") and carries no data/regression risk; not separately measured.
+
+### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 (Cowork, signed-in in 8 South's planner):** a rail dropdown (the Measure variant menu) **opens fully visible, portaled to the left of the rail — not clipped behind it** (the exact NEW-3 repro). The sibling flyouts (Boundary/Building/Car Parking/Road, the header menus) ride the SAME `AnchoredMenu` document-root portal, so the mechanism is confirmed; they weren't each separately driven.
+
+
+### V129 — B445: GIS imagery cache, server-side (Drive-backed) ✅ VERIFIED LIVE end-to-end + in-app render (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 — in-app render confirmed live (Cowork, signed-in on planyr.io):** toggled FEMA flood zones, zoomed to street level → the NFHL raster **paints in-app**. Network: the export requests route through the same-origin proxy `…/api/gis-cache/svc/<b64>/export` (b64 decodes to the FEMA NFHL MapServer) returning **HTTP 200 image/png** — not a 302 fail-open, no direct `hazards.fema.gov` hit — plus a `&meta=1` sidecar at 200 driving the panel age badge ("just now"/"as of …"). This closes the one thing curl couldn't show; the backend was already VERIFIED LIVE on production 2026-06-24 (post #329).
+- **Backend (already proven 2026-06-24):** direct curl on planyr.io after the browser-UA fix → a real FEMA export returned HTTP 200 image/png and `…&meta=1` returned `{"cached":true,…,"stale":false}` — server-side fetch → store in Google Drive → serve from the durable copy → age tracking, end-to-end. Pure core `gisProxyCore.test.js` (15) + handler `gisCacheHandler.test.js` (28 incl. the browser-UA regression). `VITE_GIS_PROXY=0` kill switch; client one-shot falls back to the direct agency URL so a layer always renders. *(B# renumbered B439→B445 on 2026-06-24 to clear a collision.)*
+
+### V130 — B439/B440: rename + delete projects from the breadcrumb switcher ✅ VERIFIED LIVE incl. the Schedule module (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 — Schedule path confirmed live (Cowork, signed-in on planyr.io):** in the Schedule project switcher, hovering a row reveals the ⋯ kebab; on a throwaway project, **Rename** (inline edit) updated the name in BOTH the breadcrumb and the embedded scheduler; **Delete** showed the inline "this can't be undone" confirm, removed the project, and — it being the open one — dropped to the Dashboard. This was the owner's live report ("i cant change names or delete in the schedule module") — fixed and now confirmed live.
+- **Site path (already proven):** `ui-audit/verify-b439-b440-project-manage.mjs` 7/7 on the Site (uncontrolled) path — kebab reveal, right-click Rename/Delete, parent dropdown stays open, empty rename rejected, delete-confirm removes the group; + `test/deleteSiteGroup.test.js` (4). Collision resolved (the GIS cache renumbered B439→B445; this keeps B439/B440, PR #327).
+
+### V123 — B426/B427: shared MarkupRenderer + PropertyPanel + 4 new DocReview tools (Line/Polyline/Polygon/Ellipse) ✅ VERIFIED LIVE draw+property round-trip (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 — draw + property round-trip confirmed live (Cowork, signed-in on planyr.io):** armed **Line** → dragged → a Line markup committed; selecting it opened the **PROPERTIES** panel (color / weight / Dash / Opacity); **Polyline / Polygon / Rect** present in the rail. (Test markup deleted; file left clean.) This closes the owed signed-in draw+property round-trip.
+- **What shipped:** `src/shared/markup/MarkupRenderer.jsx` (pure SVG renderer, 12 kinds) + `PropertyPanel.jsx` (matrix-driven inline editor); DocReview wired to both (SVG layer = `<MarkupRenderer>`, property panel at the bottom of the left panel on select); 4 tools (Line / Polyline / Polygon / Ellipse) + `propStyle` sticky defaults. build + 1390 tests + lint clean.
+
+### V97 — Markup header de-clutter + truthful save chip (B357–B360) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 — de-clutter confirmed live (Cowork, signed-in on planyr.io):** no "Library" button (B359); "Reviews ▾" in the tools row (B360, Row 2); no cry-wolf save chip (B358); the single Row-1 cloud badge is the save indicator (per V103/B373). The Row-2 "cloud" chip's only-remaining optional eyeball was **superseded by V103/B373** (the app-wide Row-1 `CloudSyncBadge` is now the single save indicator), so nothing is owed.
+- **Already proven (2026-06-21, `ui-audit/verify-header-redesign.mjs`):** B357 row heights `[35, 44]` (Row 2 taller, duplicate title gone); B358 empty header shows no save chip; B359 no Library button in either header or the Stitcher toolbar; B360 Reviews relocated to Row 2.
+
+### V90 — Site-plan overlay "hide" (eye toggle) persists across reload (B343) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 — persistence across page-load confirmed live (Cowork, signed-in on planyr.io):** Jacintoport's site-plan overlay **loaded in its persisted HIDDEN state** (persistence survived the page-load), and the eye toggle **shows/hides it live**; restored to hidden afterward. This is exactly the owed signed-in confirm (hide → persists across load → show restores).
+- **Already proven (2026-06-21):** `ui-audit/verify-overlay-delete-hide.mjs` + `verify-overlay-hide-stripped.mjs` — hide keeps it LISTED + persists `visible:false` across reload; the signed-in reload shape (raster stripped + `storageKey` + `visible:false`) renders nothing and stays hidden. 8 unit tests lock the `visible` cloud round-trip. The fix has been LIVE in `main` since `b66774b`.
+
 ### V138 — B472: parking-field "Split rows/aisles" now EXPLODES into individual rows + aisles ✅ VERIFIED (headless, logged-out — no signed-in gap)
 - **Added + checked** 2026-06-25 · **Cadence** once (regression/feature acceptance) · headless **Chromium**, built app, `vite preview` :4173, seeded a single rectangular parking field (no parcel) — `ui-audit/verify-b472-explode-parking.mjs`, **9/9**.
 - **Result ✅:** a **double-loaded module (60′, 2 rows)** explodes into **3 elements** — 2 stall rows (`parking`) + 1 drive aisle (`paving`) — depths summing to exactly 60′ (no coordinate drift); the control is now offered on a **2-row** field (was gated ≥3 rows); the auto-selected exploded row **no longer re-offers** the control (no zero-depth aisle / infinite re-split). A **6-row field (180′)** explodes into **9 elements** (6 rows + 3 aisles). No uncaught page errors.
