@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
@@ -4694,14 +4694,43 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //     boot UNION-merges (this device's edits ∪ the other session's — nothing lost, B453) and
   //     resumes saving at the fresh version. (A brief reload is the price of a guaranteed-safe merge;
   //     it's exactly what fixes it by hand.)
-  const takeOverEditing = () => {
-    if (editorLockRef.current) editorLockRef.current.takeOver(); // same-browser steal (no-op cross-device)
+  // B480 — "Take over editing here" reconciles IN PLACE; it NEVER reloads. The old reload (for a cloud
+  // conflict) bounced to the map AND re-entered the version race with the still-open other tab → the
+  // pointless "changed in another session → take over → bounce → same prompt" loop the owner hit. Now:
+  // steal the per-plan lock + broadcast a yield (the other same-browser tab steps down to read-only and
+  // stops pushing), pull the latest for THIS plan to refresh the optimistic-version token AND union the
+  // other session's content, re-hydrate the canvas with that union (nothing lost from either side), clear
+  // the conflict, and push at the fresh version — making THIS tab the active editor without leaving the
+  // planner. Reuses the exact merge the cross-tab `storage` handler already uses. (Cross-DEVICE has no
+  // Web Lock to steal, but the same pull→union→push still reconciles via the version guard; a true
+  // multi-device single-editor lease stays the deferred per-sharing item.)
+  const takeOverEditing = async () => {
+    if (editorLockRef.current) editorLockRef.current.takeOver(); // same-browser: steal the per-plan lock + broadcast a yield → the other tab steps down to read-only and stops pushing
     reportClientEvent("readonly-takeover", "user took over editing in this tab", { id: siteId, conflict: conflictRef.current });
-    flushSite();
-    if (conflictRef.current) { window.location.reload(); return; } // cross-session/device → reconcile via boot union-merge
-    setReadOnly(false); // optimistic; the lock's onChange confirms the hand-off
-    if (isCloudActive() && siteId) cloudPushWithWatchdog(siteId);
-    flashWarn("You're now editing here — your changes are saving to the cloud.", 6000);
+    flushSite();             // persist live work to the device mirror first
+    setReadOnly(false);      // optimistic; the lock's onChange confirms the hand-off
+    setCloudConflict(false); // clear the gate so the reconciled save is allowed to push
+    if (!isCloudActive() || !siteId) { flashWarn("You're now editing here.", 5000); return; }
+    setSaveStatus("saving");
+    // Reconcile THIS plan from the cloud: refresh the optimistic-version token + fetch the latest copy.
+    // (Focused per-plan fetch — NOT the heavy pullCloud, whose fire-and-forget re-push could race our own
+    // push and re-trigger the conflict.) Then union the other session's content into the canvas so nothing
+    // is lost from either side; the state change drives a single autosave push at the fresh version.
+    let cloudData = null;
+    try { cloudData = await reconcileSiteFromCloud(siteId); } catch (_) { /* offline → push at the version we have */ }
+    if (cloudData) {
+      const live = liveRef.current || {};
+      const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
+      const merged = mergeSiteContent(liveModel, createSiteModel(cloudData)); // our (newest) scalars + union of both sides' content
+      // Re-hydrate the canvas (mirror the cross-tab `storage` handler — the live underlay stays as-is). This
+      // state change triggers the autosave, which — gate cleared + version now fresh — pushes the union ONCE.
+      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
+      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
+      saveSite(merged);                     // write the union to the device mirror immediately
+    } else {
+      cloudPushWithWatchdog(siteId);        // couldn't fetch the cloud row (offline) → push the live work at the version we have
+    }
+    flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
   const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
