@@ -60,6 +60,17 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V143 — Signed-in resume-into-planner after reload (B478 — the V13/V28 HIGH-PRIORITY fix) ⏳ signed-in confirm owed; logged-out no-regression ✅
+- **Added** 2026-06-25 · **Cadence** once (HIGH-PRIORITY bug-fix acceptance) · **Last checked** — · **Next check** the signed-in steps below, on the branch preview / planyr.io after deploy. **Claude cohort's job, never Michael's.**
+- **What changed (B478).** Signed-in, a deep link / refresh into a project (`#/project/<id>/site`) used to **bounce to the finder** (route stripped to `#/`) because the cloud sites aren't loaded at the first synchronous render, so a transient null active-project got written over the route AND nulled the `currentSite` pointer before `pullCloud` finished. A `bootResolved` gate (pure `lib/bootResume.js`) now holds the URL sync + the dangling-pointer cleanup until the first auth + pull settles; one shared `pickResumeTarget` picks the plan.
+- **✅ Already proven without sign-in:** lint 0 · **1585 tests (+11 `bootResume.test.js`)** · build green; logged-out headless **8/8** (`ui-audit/verify-resume-into-planner.mjs` — deep-link + reload stays in the planner, route intact, `currentSite` preserved, 0 page errors) + `verify-new-site-save.mjs` **10/10** (no regression on the new-site boot/save/reload path). The signed-in async-pull gap (the literal repro) **can't be driven in the sandbox** (no Supabase configured → no async gap; `bootResolved` starts true), so the end-to-end signed-in resume is the one owed check.
+- **Steps (signed in, on planyr.io / the branch preview):**
+  1. Sign in → open **8 South** (or any cloud site) → the planner loads (URL `#/project/<id>/site`).
+  2. **Reload** (soft F5 AND hard Ctrl+Shift+R). **Expect:** you **resume straight into that project's planner** — NOT bounced to the finder; the URL **stays** `#/project/<id>/site` (not stripped to `#/`); the breadcrumb names the project (not "Select a project"); the exact open plan (not just the newest) is shown.
+  3. **Cold deep link:** paste `https://planyr.io/#/project/<id>/site` into a fresh tab (signed in). **Expect:** it opens that project's planner directly, no finder bounce.
+  4. **Tab-refocus trigger:** switch away ~2–3 min, return. **Expect:** still in the planner, no bounce (the same-user re-emit is skipped; `bootResolved` is already true post-boot).
+- **If it fails (still bounces to `#/`):** capture the URL at boot + the console; this is the HIGH-PRIORITY resume class — flag it. (No data-loss risk either way — durability is independently ✅.)
+
 ### V142 — B474 Stage B (increment): site-plan overlays + parcel drawings → IndexedDB ✅ lint 0 · 1574 tests (+1) · build green · headless 7/7 (`ui-audit/verify-b474-overlay-idb.mjs`) — nothing pending
 - **What changed.** Overlays/drawings are stashed in IndexedDB on creation (`addOverlayFile`/`addDrawingFromRaster`); their rehydrate effects now try IndexedDB **first** (fast, offline) and fall back to cloud Storage; `dropIdbBackedSrc` drops their heavy `src` from the persisted record (off the cap). With this + V141 (underlay) + V139 (history), all three heavy local stores are now on IndexedDB.
 - **Verified (sandbox, real browser).** `verify-b474-overlay-idb.mjs` 7/7: drop a site-plan overlay → renders (SVG `<image data-overlay-image>`) → raster in IndexedDB → saved record `hasSrc:false` + the ref → reload → overlay re-hydrates from IndexedDB. +1 unit test (overlay/drawing `dropIdbBackedSrc`). Underlay V141 re-run 7/7 (no regression); full suite green. Drawings share the identical pattern (storage unit-tested; same rehydrate code).
@@ -427,15 +438,16 @@ was never clicked" quietly ships broken.
   mislabeled "Chambers". Hard to force on demand — opportunistic; verify when a border/FB
   lot is handy.
 
-### V5 — Opening a saved site is reliable (B64) ⏳
-- **Added** 2026-06-16 · **Cadence** on-change + monthly · **Last checked** — · **Next check** 2026-07-16
+### V5 — Opening a saved site is reliable (B64) ✅ confirmed live (Cowork 2026-06-25)
+- **Added** 2026-06-16 · **Cadence** on-change + monthly · **Last checked** 2026-06-25 ✅ (Cowork, signed-in — opened 8 South from the finder cleanly several times, landed in the planner with the plan intact each time) · **Next check** 2026-07-25 (monthly)
 - **Steps:** Open a saved site, zoom/pan to find its pin, then click it to enter the planner
   — repeatedly, especially right after a zoom.
 - **Expect:** The open registers **every time** (no dropped click). A mitigation shipped but
   is UNVERIFIED; if it still drops, that confirms the map-level hit-test fallback is needed.
 
-### V6 — No white flashing on zoom/pan (B65) ⏳
-- **Added** 2026-06-16 · **Cadence** on-change + monthly · **Last checked** — · **Next check** 2026-07-16
+### V6 — No white flashing on zoom/pan (B65) ⏳ (Cowork 2026-06-25: not drivable — sub-frame visual, needs a human eye / video)
+- **Added** 2026-06-16 · **Cadence** on-change + monthly · **Last checked** 2026-06-25 (attempted, not drivable) · **Next check** 2026-07-16
+- **⏳ 2026-06-25 (Cowork):** a white flash is a sub-frame transient that screenshots can't reliably catch — needs a human eye or a video capture. Not drivable in a solo signed-in pass; best caught by a deliberate video grab.
 - **Steps:** Open a site and zoom/pan hard, including big zoom jumps.
 - **Expect:** No repeated white flash between frames (the paper backdrop holds). A partial
   fix shipped UNVERIFIED; if it persists, re-enable zoom animation / double-buffer next.
@@ -502,8 +514,9 @@ was never clicked" quietly ships broken.
 - **Increment 2a (multi-page sheet picker) also landed** — verify the "Pick a sheet" dialog lists all
   pages and attaches the chosen one.
 
-### V10 — Snap defaults OFF; toggle + Alt hold-to-suppress (B114) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V10 — Snap defaults OFF; toggle + Alt hold-to-suppress (B114) ✅ default-OFF confirmed live (Cowork 2026-06-25); ⏳ the S-toggle + Alt-hold + persistence still owed
+- **✅ 2026-06-25 (Cowork, signed-in in 8 South's planner):** Snap **defaults OFF** (the toolbar pill reads "Snap off"). NOT separately exercised: the S-key / pill toggle to "Snap 10′", the Alt-hold-to-suppress for one drag, and the on/off persistence across sites/reload — those stay ⏳ below.
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (default-off ✅) · **Next check** the toggle/Alt/persistence steps below
 - **Steps:** (0) Open **any** site — incl. an existing one made before this change — and confirm the
   toolbar pill reads **`Snap off`** (grey dot) and dragging a road up against trailer parking does
   **not** stick to its edge (it lands where you drop it). (1) Press **S** (cursor on the canvas, not
@@ -534,8 +547,9 @@ was never clicked" quietly ships broken.
   corner should show a muted **"⊘ Cloud off"** pill (not empty); click it → a popover explains work is
   saved on this device only. (A configured build still shows the normal Sign in / account button.)
 
-### V12 — Site Planner measurement tools: Length / Polylength / Area (B116) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V12 — Site Planner measurement tools: Length / Polylength / Area (B116) ✅ mode menu confirmed live (Cowork 2026-06-25); ⏳ the draw round-trip + uncalibrated-warning still owed
+- **✅ 2026-06-25 (Cowork, signed-in in 8 South's planner):** the **Measure** tool dropdown offers **Length / Polylength / Area** (+ Count). NOT driven: actually drawing each mode + the labels, and the amber "⚠ Underlay isn't calibrated" path — those stay ⏳ below.
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (mode menu ✅) · **Next check** the draw round-trip below
 - **Steps:** Open a site in the Site Planner. Right rail → **Measure** (the `▾` opens the mode menu:
   **Length / Polylength / Area**). (1) **Length:** click two points → expect a teal line labeled the
   real distance in feet (e.g. `462′`). (2) **Polylength:** click several points along a path, then
@@ -554,8 +568,10 @@ was never clicked" quietly ships broken.
   Length/Polylength/Area) — this step confirms it in the running app.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V13 — ★ Persistence: saved work must never disappear (B124 / B125) — durability ✅ / resume-into-planner ❌ — HIGH PRIORITY
-- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** 2026-06-20 (Cowork, signed-in) · **Next check** on-change
+### V13 — ★ Persistence: saved work must never disappear (B124 / B125) — durability ✅ / resume-into-planner: ❌ confirmed 2026-06-25 → **FIX SHIPPED same session (B478)**, signed-in confirm owed — HIGH PRIORITY
+- **Added** 2026-06-16 · **Cadence** once (data-safety acceptance) + on-change · **Last checked** 2026-06-25 (Cowork re-confirmed ❌; fix then shipped — see below) · **Next check** the signed-in resume confirm (now **V143**)
+- **❌ RE-CONFIRMED 2026-06-25 (Cowork, signed-in on planyr.io), then ROOT-CAUSE PINNED + FIXED the same session.** Cowork opened **8 South** (URL `#/project/smqiljx5fngg/site`, planner rendered), ran `location.reload()` → at both ~2 s and ~7 s the app **bounced to the finder**, breadcrumb "Select a project", URL **stripped to `#/`**; a cold navigate straight to a project URL likewise bounced. Data durability is fine (8 South stays intact + reopenable) — it's purely the resume UX.
+- **✅ FIX SHIPPED this session (B478, branch `claude/v13-resume-into-planner`).** ROOT CAUSE found in `SitePlannerApp.jsx`: on a **signed-in** deep link/refresh the user's cloud sites aren't in the local store at the first synchronous render (auth + `pullCloud` are async), so `activeSiteId` is momentarily null even though the route names a project. Two boot reactions then destroyed the resume **before** the pull could finish: (1) the active-project→URL sync wrote that transient `null` over the route, **stripping `#/project/<id>/site` → `#/`** (and bouncing to the finder); (2) the "tidy a dangling `currentSite`" cleanup **nulled the pointer** because the cloud site only *looked* absent. FIX: a `bootResolved` gate (pure `lib/bootResume.js`) holds BOTH reconciliations until the first auth + pull settles; the resume target is now one shared, unit-tested `pickResumeTarget`. Verified: lint 0 · **1585 tests (+11 `bootResume.test.js`)** · build green · logged-out headless **8/8** (`ui-audit/verify-resume-into-planner.mjs` — deep-link + reload stays in the planner, route intact, pointer preserved) + `verify-new-site-save.mjs` **10/10** (no regression). **The signed-in async-gap repro can't run in the sandbox (no Supabase → no gap), so the signed-in confirm is owed — tracked as V143 below.**
 - **2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON; deployed bundle SitePlannerApp-BuRTao7i.js, Supabase HTTP 200 each boot, no console errors):**
   - **✅ Data durability (the critical part):** drew 3 buildings on a signed-in throwaway site; "Synced ✓"; the site + every element survived **~6 reloads** and reopened intact from the finder. Work never disappeared on its own.
   - **❌ Resume-into-planner (step 2):** every reload — **soft (F5) AND hard (Ctrl+Shift+R)**, on a brand-new site AND an established/reopened site — lands on the **map/finder**, NOT the open planner. Confirmed at the storage layer: `currentSite:v1` holds the open site's id going *into* the reload, and boot **nulls it** and shows the finder; even force-setting `currentSite:v1` in localStorage then reloading still nulled it → finder. No crash, no data loss — but it contradicts the written "resume straight into the planner, NOT bounced to the map" expectation. (Matches the prior "reload bounces NEW sites to finder" note, but now reproduces for established sites too.)
@@ -585,49 +601,15 @@ was never clicked" quietly ships broken.
 - **If it fails:** this is the one **CRITICAL** class — if saved work still vanishes, flag it immediately
   (note the exact step + the browser console), don't just log-and-move-on.
 
-### V14 — Draw-tool rail: scrolls to the bottom on desktop + denser rows (B117 / B118) ⏳
-- **Added** 2026-06-16 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-16
-- **Steps:** Open a site in the Site Planner on a normal laptop-height window (a ~13–15″ screen is the case
-  that overflowed — not a tall external monitor). Look at the dark right-hand tool rail (**Tools / Site
-  elements / Shapes / Measure / Annotate**). (1) **Reach the bottom (B117):** scroll the rail → expect it to
-  scroll cleanly all the way to the last row, so the **Shapes** group and **Measure / Annotate** below it are
-  reachable; nothing is stranded off-screen with no scrollbar. (2) **Density (B118):** the two-line buttons
-  (Building / Car Parking / Road / Paving / Trailer Parking / Detention Pond, plus Measure) read tighter —
-  less vertical padding and the small grey sub-label ("single-load", "drive / court", "24′ travel",
-  "back-in storage", "detention basin") one step smaller — and the whole **Site elements** group should now
-  fit without scrolling on a standard laptop.
-- **Expect:** every tool in the rail is reachable at any window height; the rail reads as one consistent,
-  denser column with rows still comfortably clickable (~40px); the **▾** preset menus (dock layout / parking
-  rows / road width / measure mode) still open and pick correctly. The phone layout (narrow width, B113) is
-  unchanged — the rail still slides in as an overlay there.
-- **If it fails:** not critical (no data risk) — log ❌ here with the window height and what was unreachable or mis-sized.
+<!-- V14 (B117/B118 draw-tool rail scrolls to the bottom + denser rows) PASSED — archived to
+     VERIFICATION-DONE.md on 2026-06-25 after Cowork confirmed live (8 South's planner) that the rail
+     scrolls to reveal the full set; B118 density is cosmetic-only. -->
+<!-- V16 (B127 rail/header dropdowns open fully visible, portaled, not clipped) PASSED — archived to
+     VERIFICATION-DONE.md on 2026-06-25 after Cowork confirmed the Measure variant menu opens fully
+     visible portaled left of the rail (the NEW-3 repro); sibling flyouts share the AnchoredMenu portal. -->
 
-### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ⏳
-- **Added** 2026-06-17 · **Cadence** once (fix acceptance) · **Last checked** — · **Next check** 2026-06-17
-- **Why:** the Measure mode menu (and the other rail/header flyouts) used to paint **behind / clipped by** the
-  tool rail after B117 made the rail scroll (`overflow:auto`). Fix = render every such menu in a **portal** at the
-  document root (`src/shared/ui/AnchoredMenu.jsx`), so it escapes the rail's clipping + stacking context. Needs a
-  real browser to confirm it now floats above everything and still picks correctly.
-- **Steps (planyr.io, desktop):** Open a site in the Site Planner.
-  1. **Measure ▾** (the caret next to the Measure tool's mode label) → the menu opens **fully visible**, above the
-     rail **and** above the map's +/– zoom-control rail to its left; **Length / Polylength / Area** are all clickable
-     and selecting one updates the tool's sub-label. (This is the exact NEW-3 repro.)
-  2. Repeat for the other rail flyouts — **Boundary ▾**, **Building ▾** (dock layout), **Car Parking ▾** (rows),
-     **Road ▾** (width): each opens to the left of the rail, fully on-screen, nothing clipped; picking an option works.
-  3. Header menus — **Site ▾**, **Plan ▾**, **File ▾**: each opens below its button, fully visible above the canvas;
-     typing in the Site/Plan **name field** still works (focus lands in the input); **File ▾ → Import JSON…** still
-     opens the file picker.
-  4. **Click-away + scroll:** clicking anywhere off an open menu closes it; with a menu open, the rail can't be left in
-     a half-open state. On a **short laptop-height window**, the menus still land on-screen (clamped into the viewport),
-     not cut off at the top/bottom.
-  5. **Phone width (~390px):** open the slide-in tool rail (✎ Tools) → Measure ▾ still opens above everything and is
-     usable.
-- **Expect:** no dropdown is ever clipped or hidden behind the rail / zoom rail; all open above the map; every option
-  selects; placement + widths look the same as before (just no longer cut off).
-- **If it fails:** not critical (no data risk) — log ❌ here with the menu, window size, and what was clipped/mispositioned.
-
-### V17 — Parking hugs the building: orientation + outward growth (B119 / B120) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V17 — Parking hugs the building: orientation + outward growth (B119 / B120) ⏳ (Cowork 2026-06-25: not driven — would need adding/sizing elements, destructive on a real plan)
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (not driven) · **Next check** 2026-06-16 — best driven headless on a seeded site (add a building + parking row), not on a real signed-in plan
 - **Steps:** Open a site, draw a **building**, select it, and add a **parking** row on one side (the
   per-side "add parking" control). (1) **Orientation (B119):** the **first stall row should sit directly
   against the building face**, with the **24′ drive aisle on the outside** (not the aisle against the
@@ -661,8 +643,8 @@ was never clicked" quietly ships broken.
   but identity is keyed on the stable `el.id`, which the delete leaves untouched.)
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong.
 
-### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V19 — Site element labels: no overlap pile; level-of-detail on zoom-out (B121 increment 1) ⏳ (Cowork 2026-06-25: not driven — subtle label LOD on zoom-out, needs canvas zoom / a human eye)
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (not driven) · **Next check** 2026-06-16 — best driven headless on a seeded crowded layout at varied ppf
 - **Steps:** Open a site and lay out adjacent elements (a big building, a narrow trailer strip beside it,
   a detention pond, a couple of sidewalks). (1) **Zoomed in:** each element shows its full centred label
   (name + sf/count + dimensions) as before. (2) **Zoom out:** labels should *thin out*, not pile up — the
@@ -678,8 +660,8 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (especially a label
   that vanished when it had room, or a pile that remained).
 
-### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V21 — Building label is a 4-line stack; square footage persists on zoom-out (B123) ⏳ (Cowork 2026-06-25: not driven — needs a building + bump-outs added + canvas zoom)
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (not driven) · **Next check** 2026-06-16 — best driven headless on a seeded building with bump-outs at varied ppf
 - **Steps:** Open a site, draw a **building** (rectangle), and add a **bump-out** or two (the purple ＋ at a
   dock corner). Its label should read as a 4-line stack: **"Building N"** / **"198,000 sf"** (its own line) /
   **"(incl. 2 bump-outs)"** / **"300′ × 638′"**. (1) **Wording:** the bump-out line reads **"(incl. 2
@@ -692,8 +674,9 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (no data risk) — log ❌ here with what looked wrong (e.g. sf still dropping
   before the dimensions, or wrong wording).
 
-### V22 — Red edge-dimension callouts hide when zoomed out (B121 round 2a) ⏳
-- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-16
+### V22 — Red edge-dimension callouts hide when zoomed out (B121 round 2a) ◑ callouts render confirmed (Cowork 2026-06-25); ⏳ the hide-on-zoom-out LOD still owed
+- **◑ 2026-06-25 (Cowork, signed-in in 8 South's planner):** the red **edge-dimension callouts render** on the building edges at a zoomed-in view. The **hide-on-zoom-out** LOD behavior wasn't cleanly driven (the Site-Planner SVG canvas doesn't zoom on double-click; the +/– zoom buttons were avoided to prevent renderer freezes under map+GIS load) — stays ⏳ below. Best driven by a headless harness that sets ppf directly.
+- **Added** 2026-06-16 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (render ◑) · **Next check** 2026-06-16
 - **Steps:** Open a site with a building / road / paving element (these carry the red short-side dimension
   tick, e.g. "300′" / "24′"). (1) **Working zoom:** the red dimension callout shows exactly as before.
   (2) **Zoom out** until the site is small on screen → the red dimension ticks **drop away** (rather than
@@ -720,8 +703,8 @@ was never clicked" quietly ships broken.
   until the next action; no cross-section double-run.
 - **If it fails:** not critical (cosmetic/UX, no data risk) — log ❌ here with what looked wrong.
 
-### V24 — "Print overlay" toggle includes the site-plan overlay in the print/export, exactly as shown (B131) ⏳
-- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** — · **Next check** 2026-06-17
+### V24 — "Print overlay" toggle includes the site-plan overlay in the print/export, exactly as shown (B131) ⏳ (Cowork 2026-06-25: not driven — needs an overlay dropped + the print/export dialog driven)
+- **Added** 2026-06-17 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-25 (not driven) · **Next check** 2026-06-17
 - **Steps:** Open a site, left rail → **Overlay** → drop a site-plan PDF and place / scale / rotate it (set
   opacity < 1 so the aerial shows through). Export menu → **Print / pick frame…**. In the print-frame toolbar,
   confirm a **"Print overlay"** checkbox appears between Orientation and Print (and is **absent** when no overlay
@@ -755,7 +738,8 @@ was never clicked" quietly ships broken.
 - **If it fails:** not critical (screening estimate, no data-loss risk) — log ❌ here with what looked wrong (ghost
   offset/rotated, gain number not updating, baseline lost on reload).
 
-### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134) ❌ / BLOCKED — HIGH PRIORITY, SIGNED-IN ONLY (the "limit")
+### V28 — ★ Boot fix: no stale-plan flash on reload; signed-in resume shows the latest (B134) — was BLOCKED on V13; resume FIX SHIPPED 2026-06-25 (B478) → now reachable, signed-in confirm owed — HIGH PRIORITY, SIGNED-IN ONLY
+- **UNBLOCKED 2026-06-25.** This test was unreachable because reload never resumed into the planner (it bounced to the finder), so there was no plan paint to flash. That **resume-into-planner bug is now FIXED this session (B478 — the `bootResolved` gate; see V13/V143).** Once the fix is confirmed signed-in (V143), re-run this flash check on the same reload: it should resume straight into the latest plan with no older/thinner copy flashing first. Until then it stays owed (the sandbox has no Supabase, so the signed-in resume can't be driven here).
 - **❌ / can't-confirm 2026-06-20 (Cowork — real signed-in Chrome on planyr.io, cloud ON; deployed bundle SitePlannerApp-BuRTao7i.js, Supabase HTTP 200, no console errors).** The premise of this test — a signed-in reload that *resumes into the planner* — **doesn't happen**: every reload (soft + hard) lands on the **finder**, and `currentSite:v1` is nulled on boot even when force-set (see V13). So the "no stale/thin plan flash on resume" can't be exercised — there's no resume to flash. Data is intact and reopenable. This needs the underlying resume-into-planner behavior fixed first (see V13/V28 cross-ref) before the flash question is even reachable.
 - **Added** 2026-06-17 · **Cadence** once (data-display acceptance) + on-change · **Last checked** — · **Next check** 2026-06-17
 - **Why a signed-in coworker must run this — the one thing this session could NOT self-verify.** The fix lives entirely on the **signed-in boot path**: `SitePlannerApp` bumps a `loadEpoch` after `applyUser`'s `pullCloud`, folded into the planner's `key`, so the keyed planner re-reads the freshly-merged cloud copy instead of lingering on the stale pre-auth one. Per the testing policy at the top of this file, the sandbox egress proxy **CORS-blocks the Supabase auth handshake**, so the in-session headless run is **logged-out only** — it confirmed the build (lint 0 · 197 tests · build green) and that logged-out behavior is byte-identical (the fix is gated to the signed-in branch; `loadEpoch` stays 0), but the actual signed-in resume can't be exercised here.

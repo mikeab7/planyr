@@ -4,10 +4,17 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
-<!-- Archived 2026-06-25 from a Cowork signed-in verification pass on planyr.io (owner's own browser).
-     These five fully passed — the previously-owed signed-in path was driven live and closed.
+<!-- Archived 2026-06-25 from Cowork signed-in verification passes on planyr.io (owner's own browser).
+     These fully passed — the previously-owed signed-in path was driven live and closed.
      NOTE: V# numbers here are reused over time (the live file recycled V90/V97/V123/V129/V130); these
-     blocks are the Doc-Review/Schedule/GIS/overlay items archived on this date. -->
+     blocks are the Doc-Review/Schedule/GIS/overlay/older-Site-Planner items archived on this date. -->
+
+### V14 — Draw-tool rail scrolls to the bottom on desktop + denser rows (B117/B118) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 (Cowork, signed-in in 8 South's planner):** the draw-tool rail **scrolls to reveal the full set** on desktop — Line / Rectangle / Ellipse / Polygon / Polyline, then MEASURE, then ANNOTATE (Callout / Text), then SELECT — i.e. the reported B117 bug (tools stranded off-screen with no scrollbar) is fixed live. The B118 density tweak is cosmetic ("rows read tighter") and carries no data/regression risk; not separately measured.
+
+### V16 — Rail/header dropdowns open fully visible, not clipped behind the rail (B127) ✅ VERIFIED LIVE (Cowork 2026-06-25)
+- **✅ Archived 2026-06-25 (Cowork, signed-in in 8 South's planner):** a rail dropdown (the Measure variant menu) **opens fully visible, portaled to the left of the rail — not clipped behind it** (the exact NEW-3 repro). The sibling flyouts (Boundary/Building/Car Parking/Road, the header menus) ride the SAME `AnchoredMenu` document-root portal, so the mechanism is confirmed; they weren't each separately driven.
+
 
 ### V129 — B445: GIS imagery cache, server-side (Drive-backed) ✅ VERIFIED LIVE end-to-end + in-app render (Cowork 2026-06-25)
 - **✅ Archived 2026-06-25 — in-app render confirmed live (Cowork, signed-in on planyr.io):** toggled FEMA flood zones, zoomed to street level → the NFHL raster **paints in-app**. Network: the export requests route through the same-origin proxy `…/api/gis-cache/svc/<b64>/export` (b64 decodes to the FEMA NFHL MapServer) returning **HTTP 200 image/png** — not a 302 fail-open, no direct `hazards.fema.gov` hit — plus a `&meta=1` sidecar at 200 driving the panel age badge ("just now"/"as of …"). This closes the one thing curl couldn't show; the backend was already VERIFIED LIVE on production 2026-06-24 (post #329).
