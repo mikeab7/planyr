@@ -18,12 +18,25 @@
 
 export const CANVAS_PX_BUDGET = 24e6; // ≤ ~24 MP backing store ≈ 96 MB RGBA
 
+/* The DETAIL window (the part of the sheet the user is actually reading) aims for this many
+ * device-pixels per CSS-pixel. Targeting 2× even on a plain 1× monitor SUPERSAMPLES the raster
+ * — pdf.js draws the thin CAD linework / small dimension text at twice the resolution and the
+ * browser down-samples it, which anti-aliases sub-pixel edges far more cleanly than a flat 1×
+ * raster (the residual "softer than Bluebeam" gap left after B415, which only restored *device*
+ * density). Capped at 2×: a 3× retina panel rendering at 3× would 2.25× the memory for no visible
+ * gain, and the budget below still clamps a large window down. Only the detail layer uses this;
+ * the whole-page backdrop keeps its own (smaller) device-density budget. */
+export const DETAIL_DENSITY_TARGET = 2;
+
 /* Pick how dense to render the canvas backing store for a base×scale on-screen size.
  * `devicePixelRatio` is injected (pdf.js passes window.devicePixelRatio) so this stays
  * pure + deterministic in tests. Returns the device-px-per-CSS-px multiplier. */
 export function backingScale(baseW, baseH, scale, devicePixelRatio = 1) {
   const cssW = Math.max(1, baseW * scale), cssH = Math.max(1, baseH * scale);
-  const want = Math.min(devicePixelRatio || 1, 2);            // device density, capped at 2×
+  // Clamp the render density to the 2× target on every display: a 1× monitor is supersampled
+  // UP to 2× (cleaner anti-aliased edges), and a >2× panel is held DOWN at 2× to bound memory.
+  // (The budget below still lowers this further on a very large window.)
+  const want = Math.min(Math.max(devicePixelRatio || 1, DETAIL_DENSITY_TARGET), DETAIL_DENSITY_TARGET);
   const budget = Math.sqrt(CANVAS_PX_BUDGET / (cssW * cssH)); // densest sampling that still fits the budget
   // Never exceed the budget (use `budget` even when it's < 1× — soft beats OOM); a tiny
   // floor only guards against a degenerate zero-area canvas at absurd zooms.

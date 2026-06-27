@@ -25,11 +25,11 @@ describe("renderBudget — backing-store pixel budget (NEW-2)", () => {
     expect(backingScale(E_W, E_H, 6, 2)).toBeLessThan(1); // density drops below 1× — soft, not OOM
   });
 
-  it("renders at full device density when the sheet comfortably fits the budget", () => {
-    // A small region at modest zoom: cssW*cssH well under budget, so use the device dpr (≤2×).
+  it("supersamples the detail window to the 2× target when it comfortably fits the budget", () => {
+    // A small region at modest zoom: cssW*cssH well under budget, so use the supersample target.
     expect(backingScale(800, 600, 1, 2)).toBe(2);
-    expect(backingScale(800, 600, 1, 1)).toBe(1);
-    expect(backingScale(800, 600, 1, 3)).toBe(2); // device density is still capped at 2×
+    expect(backingScale(800, 600, 1, 1)).toBe(2); // 1× monitor → still 2× (supersampled for cleaner AA)
+    expect(backingScale(800, 600, 1, 3)).toBe(2); // retina 3× → capped at the 2× target (bounds memory)
   });
 
   it("never returns a non-positive density (no degenerate zero-area canvas)", () => {

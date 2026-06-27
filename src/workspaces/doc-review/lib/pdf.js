@@ -7,11 +7,30 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
+/* PDF.js v6 ships the support assets it needs to render correctly — substitute fonts for
+ * non-embedded text, CMap tables for CID/CJK fonts, an ICC profile for colour-managed
+ * (CMYK) images, and the WASM image decoders (JBIG2 for scanned B&W sheets, OpenJPEG for
+ * JPEG2000/JPX scans & aerials) — as on-disk folders under pdfjs-dist/. They are NOT bundled
+ * into the worker: getDocument must be told where to fetch them, or pdf.js silently degrades
+ * (missing glyphs, wrong colours, and — for JBIG2/JPX — images that don't decode AT ALL, since
+ * both the WASM and the JS-fallback decoder paths build their URL from `wasmUrl`). The vite
+ * `pdfjs-assets` plugin copies these folders to `<base>pdfjs/…` (dev-served + build-emitted), so
+ * a root-absolute base (BASE_URL ends in "/") resolves identically on the main thread, inside the
+ * worker, and under any deploy subpath. Construction surveys lean on exactly these paths. */
+const PDFJS_ASSET_BASE = `${import.meta.env.BASE_URL || "/"}pdfjs/`;
+const PDFJS_ASSETS = {
+  cMapUrl: `${PDFJS_ASSET_BASE}cmaps/`,
+  cMapPacked: true, // the shipped .bcmap files are packed
+  standardFontDataUrl: `${PDFJS_ASSET_BASE}standard_fonts/`,
+  iccUrl: `${PDFJS_ASSET_BASE}iccs/`,
+  wasmUrl: `${PDFJS_ASSET_BASE}wasm/`,
+};
+
 const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRatio) || 1;
 
 export async function loadPdf(fileOrBuffer) {
   const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
-  return pdfjsLib.getDocument({ data }).promise;
+  return pdfjsLib.getDocument({ data, ...PDFJS_ASSETS }).promise;
 }
 
 /* Pull a page's embedded text as one string (for stated-scale / title-block reads, B267).
