@@ -15,6 +15,8 @@
  * `kind` into their semantic meaning.
  */
 
+import { dogEarGeom, dogEarSize, isDogEarSide } from "./dogEar.js";
+
 export const SITE_MODEL_VERSION = 9;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
@@ -54,14 +56,23 @@ const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 // headroom — a real plan deletes a handful of items, never thousands.
 const MAX_TOMBSTONES = 5000;
 
-/* ---- Bonded-child rotation invariant (B363) ----
+/* ---- Bonded-child rotation invariant (B363) + dog-ear edge re-anchor (NEW-6) ----
  * Every box element bonded to a host building (`attachedTo` set) is axis-aligned to that
  * host at a FIXED quarter-turn offset (0/90/180/270): sidewalks, truck courts, and corner
  * bump-outs share the host's angle; side-parking rows and wall trailers sit at a +90/180/270
  * turn. So a bonded child's angle is a DERIVED value — host.rot + its quarter-turn offset —
  * never an independent one. If a child's stored angle has drifted off that (the host was
  * re-angled by a path that didn't carry the child — e.g. Jacintoport: host 0°, all four
- * children 359.035°), it is repaired below. */
+ * children 359.035°), it is repaired below.
+ *
+ * A corner bump-out (`dogEar`) is bound even tighter: BOTH its angle AND its POSITION are
+ * derived — it must sit flush at the host's CURRENT corner from its {side, sign}. The B363
+ * rotation repair fixes angle drift but not a host that was RESIZED after the bump was placed,
+ * so a bump on a since-widened host straddled the OLD edge (Jacintoport Building 1: host
+ * widened ~27′; its truck court re-anchored but the bumps were skipped, leaving ~13.5′ of each
+ * bump INSIDE the building). The dog-ear branch re-derives the whole box via dogEarGeom against
+ * the host's current footprint so the record self-heals on load. dogEarGeom IS the placement
+ * function, so a correctly-anchored bump re-derives to itself (idempotent, no churn). */
 const norm360 = (a) => ((a % 360) + 360) % 360;
 // The quarter turn (0/90/180/270) a child sits at relative to its host — its fixed offset
 // with any sub-90° drift rounded away.
@@ -88,6 +99,26 @@ function normalizeBondedRotations(list) {
     const host = byId.get(e.attachedTo);
     if (!host || host.points ||
         typeof host.rot !== "number" || typeof host.cx !== "number" || typeof host.cy !== "number") return e;
+    // Corner bump-out (dog-ear): re-flush its WHOLE box to the host's CURRENT edge + angle
+    // (NEW-6). Guard the side (a malformed `side` would throw in dogEarGeom's SIDE_N destructure
+    // and blank the planner) and require finite host/child w·h (dogEarGeom reads them; a NaN box
+    // would never compare equal → churn every load). The stored span (along/proj) is honored when
+    // the tag carries it (preserving a user resize + its clamp/spring-back); a bare tag recovers
+    // its current rendered size from the box so ONLY the position moves — recovery stays LOCAL to
+    // `desc`, the tag is never rewritten (a bare tag stays bare, so a box clamped at save time can
+    // still spring back later). Tolerance compare returns the SAME object when nothing moves.
+    if (e.dogEar && isDogEarSide(e.dogEar.side) &&
+        Number.isFinite(host.w) && Number.isFinite(host.h) &&
+        Number.isFinite(e.w) && Number.isFinite(e.h)) {
+      const de = e.dogEar;
+      const desc = de.along != null && de.proj != null ? de : { ...de, ...dogEarSize(de, e.w, e.h) };
+      const g = dogEarGeom(host, desc);
+      const near = (a, b) => Math.abs(a - b) <= 1e-6;
+      if (near(g.cx, e.cx) && near(g.cy, e.cy) && near(g.w, e.w) && near(g.h, e.h) &&
+          near(norm360(g.rot), norm360(e.rot))) return e;
+      changed = true;
+      return { ...e, cx: g.cx, cy: g.cy, w: g.w, h: g.h, rot: g.rot };
+    }
     const offset = quarterOffset(e.rot, host.rot);
     const wantRot = norm360(host.rot + offset);
     // delta = how far the host has moved since the child was placed (the stale skew), as a
