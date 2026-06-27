@@ -9,6 +9,9 @@ nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
      NOTE: V# numbers here are reused over time (the live file recycled V90/V97/V123/V129/V130); these
      blocks are the Doc-Review/Schedule/GIS/overlay/older-Site-Planner items archived on this date. -->
 
+### V149 — Bump-outs vs. sidewalks & truck court (B488) ✅ VERIFIED HEADLESS (2026-06-27, logged-out)
+- **✅ `ui-audit/verify-b488-bump-sidewalk-court.mjs` 11/11 (real Chromium, this-device/logged-out).** Seeds a cross-dock building with sidewalks + a truck court, drives the real panel controls, and reads the persisted element list (feet) back from localStorage after each action: adding bump-outs grows the perpendicular sidewalks 300′→**420′** (full side incl. the 60′ projections) and pulls the truck court 600′→**490′** (clear face between the two 55′ bumps, stays centred); the new “Truck court length (ft)” editor sets the court along-span to 300′; removing the bumps restores the sidewalk to 300′. No pending signed-in path — this is pure planner-canvas geometry, fully exercisable logged-out.
+
 ### V14 — Draw-tool rail scrolls to the bottom on desktop + denser rows (B117/B118) ✅ VERIFIED LIVE (Cowork 2026-06-25)
 - **✅ Archived 2026-06-25 (Cowork, signed-in in 8 South's planner):** the draw-tool rail **scrolls to reveal the full set** on desktop — Line / Rectangle / Ellipse / Polygon / Polyline, then MEASURE, then ANNOTATE (Callout / Text), then SELECT — i.e. the reported B117 bug (tools stranded off-screen with no scrollbar) is fixed live. The B118 density tweak is cosmetic ("rows read tighter") and carries no data/regression risk; not separately measured.
 

@@ -46,21 +46,38 @@ const rot2 = (x, y, deg) => {
   return { x: x * c - y * s, y: x * s + y * c };
 };
 
+// The usable truck-court span between corner bump-outs (B488). The court (zone 0) pulls IN to the
+// clear dock face between the two corner bump-outs — `bumpStart`/`bumpEnd` are their along-wall
+// spans at the −axis / +axis ends. Returns the reduced length + the centre shift (toward the
+// smaller bump, in the +along-wall direction), so the paving stops overlapping the bump corners —
+// the same model the dock-door renderer already uses. PURE for unit testing.
+export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
+  return { along: Math.max(1, full - (bumpStart || 0) - (bumpEnd || 0)), shift: ((bumpStart || 0) - (bumpEnd || 0)) / 2 };
+}
+
 // Geometry of the i-th zone (0..2) on `side` of building box `b` ({cx,cy,w,h,rot}),
 // given the ordered `depths` of the zones present on that side. Each zone sits
 // flush beyond the previous one (cumulative inner depth), full wall length along
 // the dock face. The trailer (i=1) is rotated so its striped stalls run ALONG the
 // wall — matching the legacy `oppTrailerGeom`. Returns {cx,cy,w,h,rot}.
-export function layoutZone(b, side, i, depths) {
+// `opts` (B488) lets the CALLER pull zone 0 (the truck court) in to the usable dock face between
+// corner bump-outs: {along} overrides its wall-length span and {alongShift} offsets its centre
+// along the wall. Other zones (trailer/buffer) always keep the full wall length, so a 4-arg call
+// (and every existing caller/test) is unchanged.
+export function layoutZone(b, side, i, depths, opts = {}) {
   const [nx, ny] = SIDE_N[side] || SIDE_N.bottom;
   const horiz = ny !== 0;                       // top/bottom wall → zones run along X
-  const along = horiz ? b.w : b.h;              // full wall length
+  const fullAlong = horiz ? b.w : b.h;          // full wall length
+  const useOverride = i === 0 && Number.isFinite(opts.along);
+  const along = useOverride ? opts.along : fullAlong;
+  const alongShift = useOverride && Number.isFinite(opts.alongShift) ? opts.alongShift : 0;
   const inner = depths.slice(0, i).reduce((s, d) => s + (d || 0), 0); // depth nearer the wall
   const d = depths[i];
   const half = (horiz ? b.h : b.w) / 2;         // building face along the outward normal
   const center = half + inner + d / 2;          // this zone's centre, measured outward
   const u = rot2(nx, ny, b.rot || 0);           // outward normal in world feet
-  const cx = b.cx + u.x * center, cy = b.cy + u.y * center;
+  const tan = rot2(horiz ? 1 : 0, horiz ? 0 : 1, b.rot || 0); // along-wall unit (+X horiz / +Y vert)
+  const cx = b.cx + u.x * center + tan.x * alongShift, cy = b.cy + u.y * center + tan.y * alongShift;
   const rotBase = (((b.rot || 0) % 360) + 360) % 360;
   if (i === 1) {                                // trailer parking: w=wall length, h=depth, +90 on a side wall
     return { cx, cy, w: along, h: d, rot: ((((b.rot || 0) + (horiz ? 0 : 90)) % 360) + 360) % 360 };
