@@ -13,6 +13,10 @@ export const DOGEAR_W = 55; // default span along the dock wall
 export const DOGEAR_D = 60; // default projection out from the dock face
 
 const SIDE_N = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+// True only for a real dock-wall side. The model layer guards on this before re-anchoring a
+// dog-ear on load (NEW-6): a tampered/partial record with a missing or typo `side` must NOT
+// reach dogEarGeom's `SIDE_N[side]` destructure (which would throw and blank the planner).
+export const isDogEarSide = (s) => Object.prototype.hasOwnProperty.call(SIDE_N, s);
 const rot2 = (x, y, deg) => {
   const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
   return { x: x * c - y * s, y: x * s + y * c };
