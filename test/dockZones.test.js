@@ -31,6 +31,25 @@ describe("zoneDepthDefaults — user-configurable, not hardcoded", () => {
   });
 });
 
+describe("usableCourtSpan — court trims to the clear face between bump-outs (B492/B504 premise)", () => {
+  it("with no bumps the court keeps the full wall length, no shift", () => {
+    expect(usableCourtSpan(600, 0, 0)).toEqual({ along: 600, shift: 0 });
+  });
+  it("two corner bumps shorten the span by their combined projection (court excludes the bump)", () => {
+    // This is exactly why the yield loop must NOT also subtract the bump footprint (B504):
+    // the court's along-span is already trimmed past the bumps, so its area excludes them.
+    expect(usableCourtSpan(600, 55, 55)).toEqual({ along: 490, shift: 0 });
+  });
+  it("an asymmetric bump shifts the court centre toward the clear side", () => {
+    const { along, shift } = usableCourtSpan(300, 60, 0);
+    expect(along).toBe(240);
+    expect(shift).toBe(30);   // (60 - 0) / 2
+  });
+  it("never collapses below 1 ft even if bumps exceed the wall", () => {
+    expect(usableCourtSpan(100, 80, 80).along).toBe(1);
+  });
+});
+
 describe("layoutZone — flush-outward stacking on each side", () => {
   // 300' x 600' building at the origin, no rotation. Long sides are top/bottom.
   const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 };
