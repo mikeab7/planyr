@@ -76,6 +76,12 @@ doesn't write code. This is a standing rule, not a one-off.
   whether there's anything left for _me_ to do** — e.g. "nothing on your end, it's done"
   or "the one thing I need from you is X." Don't leave me to ask. (Browser click-throughs
   in `VERIFICATION.md` are the Claude cohort's job, never mine — those never count as my to-do.)
+- **📋 Keep `OWNER-TODO.md` current and SURFACE it whenever I ask "what's left / what do I
+  still need to do" (owner rule, 2026-06-27).** It's the single list of things only _I_ can do
+  — decisions, inputs you need from me (a 2nd test account, a heavy PDF, a big file), and quick
+  account housekeeping. Add to it the moment something lands on my plate; remove an item once I've
+  done it. Read it back to me in plain English when I ask. (Distinct from `VERIFICATION.md`, which
+  is the cohort's click-throughs, never mine.)
 - **If a step is on MY side, HAND ME THE FILE — never just name a repo path (owner rule,
   2026-06-22).** When I need to run a SQL file, upload something, or paste something into a
   console, deliver the actual file(s) to me directly (the harness `SendUserFile` tool), in the
