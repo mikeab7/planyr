@@ -15,7 +15,8 @@ describe("shared/coordinates (cross-workspace spine)", () => {
 
   it("carries the right unit constants", () => {
     expect(SQFT_PER_ACRE).toBe(43560);
-    expect(FT_PER_M).toBeCloseTo(3.280839895, 6);
+    // US survey foot (3937/1200), matching PROJECT_CRS us-ft — not the international foot (B57b).
+    expect(FT_PER_M).toBeCloseTo(3937 / 1200, 9);
   });
 
   it("ftToAcres: 43,560 sf == 1 acre", () => {
@@ -23,8 +24,9 @@ describe("shared/coordinates (cross-workspace spine)", () => {
     expect(ftToAcres(0)).toBe(0);
   });
 
-  it("metersToFeet: 0.3048 m == 1 ft", () => {
-    expect(metersToFeet(0.3048)).toBeCloseTo(1, 9);
+  it("metersToFeet: 1 US survey foot (1200/3937 m) == 1 ft", () => {
+    // The project grid is EPSG:2278 (us-ft), so metersToFeet uses the US survey foot (B57b).
+    expect(metersToFeet(1200 / 3937)).toBeCloseTo(1, 9);
   });
 
   it("makePoint builds an {x,y} point", () => {

@@ -15,7 +15,9 @@
 // Texas State Plane, South Central zone, US survey feet (the project grid).
 export const PROJECT_CRS = { epsg: 2278, name: "NAD83 / Texas South Central (ftUS)", unit: "us-ft" };
 
-export const FT_PER_M = 1 / 0.3048;
+// US survey foot (3937/1200 ft per metre) — matches PROJECT_CRS (EPSG:2278, us-ft) and
+// the US_FT_M constant below; NOT the international foot (1/0.3048), a ~2 ppm difference (B57b).
+export const FT_PER_M = 3937 / 1200;
 export const SQFT_PER_ACRE = 43560;
 
 // A project-grid point, in feet, about a shared origin: { x: east, y: north }.
