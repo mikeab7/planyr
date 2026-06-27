@@ -1,5 +1,20 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 10 (B551/B552 fixed; B550 filed): a 7th 6-lens Workflow (scheduler-logic /
+     keydown-in-input / geometry-correctness / event-binding / import-parse / shared-markup). 8 raw →
+     7 confirmed; 2 clean live bugs shipped, the scheduler cycle-hang class filed (B550, defensive +
+     high-churn). My two fixes were minted B548/B549 then RENUMBERED to B551/B552 when a concurrent
+     main took B548/B549 (+ V166) for the building-panel work below; V166→V167. TWO rejected on my own
+     re-read: ringCentroid "Math.abs(a)" (the signed area is REQUIRED — the cross-term sign cancels
+     num/denom; abs() would INVERT the centroid for CCW rings, introducing the very bug claimed) and a
+     MarkupRenderer callout-baseline "too low" (6px descender room isn't a clip — cosmetic non-defect). -->
+
+### B551 — Stitcher left pointer-capture held on a blur/visibility abort → frozen grab cursor `[Doc Review / Stitcher]` (bug — event binding) — MED  *(bug-hunt round 10, 2026-06-27; fixed same lap; renumbered from a provisional B548 a concurrent main took)*
+`[x]` **DONE + verified. lint 0 · 1774 tests · build green.** The pan-interrupt recovery (`abortGesture`) needs the pointerId to `releasePointerCapture`, but the window-blur / visibility-hidden handlers called it with NO argument, so `pid != null` was false → capture was never released. Alt-tabbing mid-pan left the SVG with a frozen grab cursor that swallowed clicks until refocus. **Fix:** store `pointerId` in `drag.current` on pan-start and have `recover` pass `drag.current.pointerId` so the capture is actually released. Anti-drift guard added. **⏳ Runtime eyeball (pan + alt-tab → no stuck cursor) → V167.**
+
+### B552 — pendingLegacyCount over-counted vs the list/import (the B128 count-mismatch class) `[Site Planner / persistence]` (bug — count) — MED  *(bug-hunt round 10; fixed same lap; renumbered from a provisional B549 a concurrent main took)*
+`[x]` **DONE + verified. lint 0 · 1774 tests · build green.** `pendingLegacyCount` looped raw localStorage keys and counted records with a missing/falsy normalized id, but `importLegacyIntoCloud` (and `pendingLegacySites`) skip those — so the "N sites to import" badge could read 3 while only 2 actually import (the B128 symptom). **Fix:** `pendingLegacyCount` now returns `pendingLegacySites(uid).length`, so the count can never disagree with the list or with what import copies. (Likely resolves the root of the filed B128 — left B128 open pending an owner repro to confirm.) Anti-drift guard added.
+
 ### B548 — Building dimensions mislabeled + mis-bound: "Width/Depth" → dock-relative "Length/Depth" `[Site Planner / massing panel]` (bug)  *(owner-dropped 2026-06-27 as "NEW-1"; minted **B548** = highest real B# across both files (B547) + 1 — twice-renumbered as concurrent merges took the lower IDs first (B542 Files-button, B543 Deed/Title, then B544/B545 bug-hunt round 9); branch `claude/building-dimensions-binding-andglj`)*
 `[x]` **DONE + shipped this session — fix + headless V166. lint 0 · 1746 tests · build green.** The Selected · Building panel bound "Width"→`el.w` and "Depth"→`el.h` (raw axes), so a tall footprint (`w 328 × h 1159`) printed the impossible **Depth 1159**. The dock-relative depth (`footprintDepth`, B417/B418) was already used by the canvas red dimension but never by the panel.
 - **Fix:** added pure `footprintAxes(el)` (which raw axis is depth vs length, off `dockSidesFor`) + `footprintLength(el)` in `lib/dockZones.js`; refactored `footprintDepth` onto the shared resolver (byte-identical output). The building panel now shows **Length** (= dock-parallel wall, `footprintLength`) and **Depth** (= dock-perpendicular span, `footprintDepth`); each edit drives the mapped physical edge via `resizeSelEl({ [ax.length|ax.depth]: n })`. The reported building now reads **Length 1159 / Depth 328**. The dock-doors readout repointed from `max(w,h)` to `footprintLength` (count unchanged, now explicit). "Width" retired for buildings (paving/pond keep their own labels).
