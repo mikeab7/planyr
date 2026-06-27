@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V153 — B494: Schedule loader handshake works against the REAL embedded app (signed-in / live) ✅ lint 0 · 1647 tests · build green · headless `verify-scheduler-loader.mjs` 3/3 (embed stubbed); ⏳ one live check with the real embed
+- **What changed.** The shell's Schedule loader now posts `planar:nav-request` on the iframe's `onLoad` (retried) and the embedded `/sequence/` app answers with `nav-state`, so the loader drops the instant the embed is interactive instead of waiting on a lone 9 s timer; bounded fallbacks (onLoad+2.5 s, 6 s backstop) cap the worst case.
+- **✅ Verified here (headless):** `verify-scheduler-loader.mjs` 3/3 with the embed STUBBED via request-interception — the handshake drops the loader ~520 ms; a silent embed is bounded ~3000 ms (not 9 s) and doesn't drop prematurely. The real embed can't boot in the sandbox (its React/Babel + Supabase CDNs are closed to the browser), so the live responder path is unproven here.
+- **⏳ Live check (Cowork / any browser that can reach the real embed):** open planyr.io → switch to **Schedule** a few times (cold + warm) → confirm the "assembling schedule" overlay drops PROMPTLY once the Gantt is interactive (no ~9 s hang), and that switching projects / Dashboard still works (the new `nav-request` responder didn't disturb the existing nav bridge). Cadence: once after ship.
+
 ### V152 — B493: cross-module schedule↔site link survives reload across BOTH backends (signed-in) ⏳ (logged-out wrapper path ✅ headless 4/4)
 - **Added** 2026-06-27 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-27 (headless wrapper path ✅) · **Next check** — on planyr.io, **signed in**.
 - **✅ What the sandbox already proved (logged-out, headless `ui-audit/verify-cross-module-link.mjs` 4/4):** landing on `#/project/<gid>/schedule` for a site with no linked schedule shows the **Connect a schedule** panel with a same-named suggestion; confirming the link **mirrors `scheduleProjectId` onto the site store**; once the schedule reports itself linked, the panel closes (the project-aware payoff). Pure logic is unit-tested (`findBySiteId`, `suggestNameMatch`, nav-state link round-trip, siteModel v9 round-trip). The embedded `index.html` edits parse clean.
