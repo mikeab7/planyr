@@ -4,6 +4,9 @@ Historical record only — **do not read** unless looking up a specific past V#.
 The live checklist is `VERIFICATION.md`. Items land here once fully verified with
 nothing pending (same archiving discipline as `BACKLOG-DONE.md`).
 
+### V154 — Flexible outward layer stack / "Add layer ▾" (B495) ✅ VERIFIED HEADLESS (2026-06-27, logged-out)
+- **✅ `ui-audit/verify-zone-catalog.mjs` 6/6 (real Chromium, this-device/logged-out).** Seeds a cross-dock building, builds the preset court→trailer→buffer with the fast ＋, then drives the new "Add layer ▾" chooser and reads the persisted `els` (feet) back from localStorage: appending **Road** behind the dock stack lands a `road` bonded `prevZone`→buffer with `travelW`, flush beyond the buffer at the full 600′ wall (both dock sides); appending **Landscape buffer** on the rear/non-dock sides lands a `landscape` per side; the "−" peels the road first (LIFO), the buffer stays. No pending signed-in path — pure planner-canvas geometry.
+
 <!-- Archived 2026-06-25 from Cowork signed-in verification passes on planyr.io (owner's own browser).
      These fully passed — the previously-owed signed-in path was driven live and closed.
      NOTE: V# numbers here are reused over time (the live file recycled V90/V97/V123/V129/V130); these

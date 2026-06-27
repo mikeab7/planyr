@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, zoneDepthDefault, layoutZone, layoutStack,
+  DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, zoneDepthDefault, catalogDepthDefault,
+  layoutZone, layoutZoneByKind, layoutStack,
   usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
@@ -120,6 +121,83 @@ describe("layoutZone opts — only the court (zone 0) pulls in (B492)", () => {
     const g = layoutZone(tall, "right", 0, depths, { along: 520, alongShift: -10 });
     expect(g.h).toBe(520);                 // along the tall axis
     expect(g.cy).toBeCloseTo(-10, 6);      // shifted −Y
+  });
+});
+
+describe("ZONE_CATALOG — the appendable-layer catalog (B495)", () => {
+  it("has the four owner-requested layer types plus the dock-sequence members", () => {
+    for (const k of ["court", "trailer", "buffer", "sidewalk", "parking", "road"]) expect(ZONE_CATALOG[k]).toBeTruthy();
+  });
+  it("a road is TERMINAL (nothing stacks behind it); trailer/court are dock-only", () => {
+    expect(ZONE_CATALOG.road.terminal).toBe(true);
+    expect(ZONE_CATALOG.buffer.terminal).toBe(false);
+    expect(ZONE_CATALOG.trailer.sides).toBe("dock");
+    expect(ZONE_CATALOG.court.sides).toBe("dock");
+    expect(ZONE_CATALOG.parking.sides).toBe("nondock");
+    expect(ZONE_CATALOG.buffer.sides).toBe("any");
+    expect(ZONE_CATALOG.road.sides).toBe("any");
+  });
+  it("a landscape buffer is the SAME element type tagged buffer (one concept, not two)", () => {
+    expect(ZONE_CATALOG.buffer.elType).toBe("landscape");
+    expect(ZONE_CATALOG.buffer.tag).toEqual({ buffer: true });
+  });
+  it("catalogDepthDefault honours a per-plan override, else the built-in fallback", () => {
+    expect(catalogDepthDefault("buffer", {})).toBe(15);
+    expect(catalogDepthDefault("buffer", { bufferD: 30 })).toBe(30);
+    expect(catalogDepthDefault("road", {})).toBe(24);      // a road's default is its TRAVEL width
+    expect(catalogDepthDefault("sidewalk", {})).toBe(5);
+  });
+});
+
+describe("layoutZoneByKind — generalized chain layout (B495)", () => {
+  const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
+  const near = (a, c, eps = 1e-6) => Math.abs(a - c) < eps;
+
+  it("is byte-identical to layoutZone for the default [strip,trailer,strip] dock sequence", () => {
+    const depths = [135, 50, 15];
+    const kinds = ["strip", "trailer", "strip"];
+    for (const i of [0, 1, 2]) {
+      expect(layoutZoneByKind(b, "bottom", i, depths, kinds)).toEqual(layoutZone(b, "bottom", i, depths));
+      expect(layoutZoneByKind(b, "left", i, depths, kinds)).toEqual(layoutZone(b, "left", i, depths));
+    }
+  });
+
+  it("lays a heterogeneous chain court→trailer→buffer→road flush + gap-free on a horizontal wall", () => {
+    const depths = [135, 50, 15, 25];                    // road depth = 24 travel + 2×0.5 curb
+    const kinds = ["strip", "trailer", "strip", "strip"];
+    const g = [0, 1, 2, 3].map((i) => layoutZoneByKind(b, "bottom", i, depths, kinds));
+    expect(g.map((z) => z.w)).toEqual([600, 600, 600, 600]); // every layer spans the full wall
+    expect(g.map((z) => z.h)).toEqual([135, 50, 15, 25]);
+    const far = (z) => z.cy + z.h / 2, near0 = (z) => z.cy - z.h / 2;
+    expect(near(near0(g[0]), 150)).toBe(true);            // court hugs the wall face
+    expect(near(near0(g[1]), far(g[0]))).toBe(true);      // each sits flush beyond the prior
+    expect(near(near0(g[2]), far(g[1]))).toBe(true);
+    expect(near(near0(g[3]), far(g[2]))).toBe(true);      // the road sits flush beyond the buffer
+    expect(g[3].rot).toBe(0);
+  });
+
+  it("on a vertical wall the trailer rotates 90° and the road runs along the wall", () => {
+    const tall = { cx: 0, cy: 0, w: 300, h: 600, rot: 0 }; // docks left/right
+    const depths = [135, 50, 15, 25];
+    const kinds = ["strip", "trailer", "strip", "strip"];
+    const road = layoutZoneByKind(tall, "right", 3, depths, kinds);
+    expect(road.h).toBe(600);   // full wall length along the tall axis
+    expect(road.w).toBe(25);    // its depth out from the wall
+    expect(road.rot).toBe(0);
+    expect(near(road.cx, 150 + 135 + 50 + 15 + 25 / 2)).toBe(true); // flush beyond court+trailer+buffer
+  });
+});
+
+describe("strandedZoneIds — cascades onto prevZone-appended layers (B495)", () => {
+  it("a stranded court drags its appended road off the wrong side", () => {
+    // built wide (docks top/bottom) with a court+road appended on top, then reshaped tall
+    const tall = { id: "b1", type: "building", w: 580, h: 664, dock: "cross" }; // docks now left/right
+    const els = [
+      tall,
+      { id: "c", type: "paving", attachedTo: "b1", truckCourt: { side: "top" }, zd: 135 },
+      { id: "r", type: "road", attachedTo: "b1", prevZone: "c", stackSide: "top", zd: 25 },
+    ];
+    expect(strandedZoneIds(els, tall).sort()).toEqual(["c", "r"]);
   });
 });
 
