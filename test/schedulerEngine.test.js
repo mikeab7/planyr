@@ -440,11 +440,14 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
   const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
 
-  it("the web snapshot uses the Planyr brand + real project names, not Hillwood/planar", () => {
+  it("the web/JSON/PDF exports use the Site-Planner filename format, not Hillwood/planar", () => {
     expect(src).not.toMatch(/Hillwood Schedule/);
-    expect(src).not.toMatch(/hillwood-schedule-export\.html/);
+    expect(src).not.toMatch(/hillwood-schedule/);
     expect(src).not.toMatch(/<title>planar<\/title>/);
-    expect(src).toMatch(/planyr-schedule-\$\{new Date\(\)\.toISOString\(\)\.slice\(0,10\)\}\.html/);
+    // all three exports route their name through scheduleExportName (Site-Planner format)
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.html`/);
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.json`/);
+    expect(src).toMatch(/<title>\$\{escapeHtml\(scheduleExportName\(selProjs\)\)\}<\/title>/);
   });
   it("the web snapshot guards percent/duration and escapes the status color", () => {
     expect(src).toMatch(/const pct = t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)/);
@@ -478,5 +481,29 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
   });
   it("the engine mirror carries computeRolledHealth verbatim", () => {
     expect(sjsx).toMatch(/export const computeRolledHealth = \(all\) =>/);
+  });
+  it("the schedule export name uses the Site-Planner format helper (mirrored)", () => {
+    expect(src).toMatch(/const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+    expect(sjsx).toMatch(/export const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+  });
+});
+
+describe("scheduleExportName — matches the Site Planner PDF filename format", () => {
+  const D = new Date(2026, 5, 27); // 2026-06-27 (local), date injectable for determinism
+  it("single project: 'YYYY.MM.DD {Project} - Schedule'", () => {
+    expect(E.scheduleExportName([{ id: 1, name: "Goose Creek" }], D)).toBe("2026.06.27 Goose Creek - Schedule");
+  });
+  it("zero-pads month/day to match the Site Planner stamp", () => {
+    expect(E.scheduleExportName([{ name: "X" }], new Date(2026, 0, 3))).toBe("2026.01.03 X - Schedule");
+  });
+  it("multiple projects collapse to the Planyr brand", () => {
+    expect(E.scheduleExportName([{ name: "A" }, { name: "B" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("no/blank projects fall back to the Planyr brand", () => {
+    expect(E.scheduleExportName([], D)).toBe("2026.06.27 Planyr - Schedule");
+    expect(E.scheduleExportName([{ name: "" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("strips filesystem-illegal chars but KEEPS letters/digits/spaces (the regex isn't a bad range)", () => {
+    expect(E.scheduleExportName([{ name: 'A/B: C* <x>|2' }], D)).toBe("2026.06.27 A B C x 2 - Schedule");
   });
 });
