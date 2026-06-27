@@ -1,5 +1,12 @@
 ## ✅ Done
 
+### B542 — Remove the now-redundant 🗂 Files button + ProjectFilesDrawer from the Site Planner banner `[Site Planner / Library]` (cleanup)  *(owner-dropped 2026-06-27 — "get rid of the files option in the top banner as it's likely now redundant" — follow-up to B496 once the Library tab shipped; branch `claude/library-drive-module-fpzane`; minted **B542** = highest real B# (B541) + 1)*
+`[x]` **DONE + headless-verified the SAME session per STANDING RULE #1. lint 0 errors · full suite 1732 tests · build green · `ui-audit/verify-library-tab.mjs` 8/8 (real Chromium, logged-out — Library tab + Review empty state unaffected).** The Site Planner's row-1 **🗂 Files** pill opened the old `ProjectFilesDrawer` slide-over — a second, in-context copy of the file browser that the new **Library** tab (B496) now does in full. Redundant, so removed.
+- **`[x]` Removed in `SitePlanner.jsx`:** the 🗂 Files `<button>`, the `<ProjectFilesDrawer>` render, the `filesOpen` state, and the `import` — that button was the drawer's ONLY trigger, so the drawer was fully orphaned.
+- **`[x]` Deleted the orphaned `src/workspaces/doc-review/components/ProjectFilesDrawer.jsx`** (no remaining importer). The shared file-storage data layer (`reviewStore`/`autofiling`/`fileFacts`) is untouched — Library + Review still use it.
+- **`[x]` Retired the obsolete B527 guard** in `test/bugHuntGuards.test.js` (it read the now-deleted drawer file for a dark-mode theming check — moot once the component is gone).
+- The shared `onOpenReviewInDocReview` Shell handler stays (Library uses it); its now-unused SitePlanner prop is harmless. Logged-out-verifiable (pure planner UI) — no signed-in path owed.
+
 <!-- Bug-hunt ROUND 5 (B533–B539 fixed; B540–B541 filed): a 5th 6-lens Workflow (units-geometry/
      async-errors/parse-robust/react-correctness/coords-projection/storage-migration). 13 raw → 11
      adversarially-confirmed real; the 7 clean crash-safety/correctness ones shipped this lap, 2
