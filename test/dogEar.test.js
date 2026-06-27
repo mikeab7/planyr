@@ -60,7 +60,7 @@ describe("dogEar — corner bump-out geometry (B362)", () => {
   });
 });
 
-describe("bumpSidewalkSide — which perpendicular wall a corner bump lengthens (B488)", () => {
+describe("bumpSidewalkSide — which perpendicular wall a corner bump lengthens (B492)", () => {
   it("maps a top/bottom dock corner to the left/right wall by sign", () => {
     expect(bumpSidewalkSide("top", -1)).toBe("left");
     expect(bumpSidewalkSide("top", 1)).toBe("right");
@@ -73,7 +73,7 @@ describe("bumpSidewalkSide — which perpendicular wall a corner bump lengthens 
   });
 });
 
-describe("sidewalkSpanForBumps — sidewalk spans the FULL building side incl. bump-outs (B488)", () => {
+describe("sidewalkSpanForBumps — sidewalk spans the FULL building side incl. bump-outs (B492)", () => {
   const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks on top/bottom
 
   it("with no bumps the run is just the wall length, no shift", () => {

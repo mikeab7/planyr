@@ -3755,7 +3755,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addSidewalkSide = (b, name) => {
     if (sidewalkOnSide(b, name)) return;
     // Full wall length, then folded out to the full building side if bump-outs already lengthen
-    // this wall (B488) — so a sidewalk added after the bumps starts at the right length.
+    // this wall (B492) — so a sidewalk added after the bumps starts at the right length.
     const sw = sidewalkFullRunPatch(els, b, makeStrip(b, ...SIDE_N[name], "sidewalk", SIDEWALK_W, { sidewalkSide: name }));
     const out = outwardUnit(b, name);
     const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
@@ -3839,7 +3839,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const d = arr.find((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign);
     return d ? (horiz ? d.w : d.h) : 0;
   };
-  // Truck-court (zone 0) along-span + centre shift on a dock side (B488): pulled IN to the clear
+  // Truck-court (zone 0) along-span + centre shift on a dock side (B492): pulled IN to the clear
   // dock face between the corner bump-outs, then capped by an optional manual length (court.alongLen)
   // so a typed length never re-overlaps a bump. Other zones (trailer/buffer) ignore this (full wall).
   const courtBumpOpts = (arr, b, side) => {
@@ -3852,7 +3852,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // Re-lay the whole stack on one side of building `b` (pure over `arr`): each present zone
   // flush-outward from the building face, depth-correct. The truck court (zone 0) pulls in to the
-  // clear face between corner bump-outs (B488); the trailer/buffer keep the full wall length.
+  // clear face between corner bump-outs (B492); the trailer/buffer keep the full wall length.
   const relayoutSide = (arr, b, side) => {
     const court = findCourtIn(arr, b, side);
     if (!court) return arr;
@@ -3953,7 +3953,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // The depth shown for zone index `i` (first dock side that has it).
   const zoneDepthShown = (b, i) => { const { dockSides } = dockSidesOf(b); for (const s of dockSides) { const z = findZoneIn(els, b, s, i); if (z) return Math.round(zoneDepthOf(z, b, s, i)); } return Math.round(zoneDepthDefaults(settings)[i]); };
-  // Inline LENGTH edit for the truck court (zone 0), applied across every dock side (B488). Stores
+  // Inline LENGTH edit for the truck court (zone 0), applied across every dock side (B492). Stores
   // the typed length on `alongLen` (relayout caps it to the clear face between bump-outs) so the
   // court's length along the dock is user-editable, like the sidewalk's Length field.
   const setCourtLengthAll = (b, newLen) => {
@@ -4041,7 +4041,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (resized && resized.type === "building" && !resized.dogEar) {
       next = relayoutAllSides(next, { ...resized, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, rot: nb.rot != null ? nb.rot : resized.rot });
     } else if (resized && resized.dogEar) {
-      // A bump-out resized on its own (B488): re-lay the host's full-side sidewalks and pull its
+      // A bump-out resized on its own (B492): re-lay the host's full-side sidewalks and pull its
       // truck court in to the new clear face between the (now-resized) bump-outs.
       const host = next.find((x) => x.id === resized.attachedTo);
       if (host) { next = relayoutBumpSidewalks(next, host); next = relayoutSide(next, host, resized.dogEar.side); }
@@ -4065,7 +4065,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addCourtTrailer = (tc) => { const b = buildingOf(tc); if (b && tc.truckCourt && !findTrailerIn(els, tc)) addZoneOnSide(b, tc.truckCourt.side); };
   const isWallStrip = (x) => x.type === "sidewalk" || x.type === "landscape"; // 5′ wall strips
   // Recompute a wall strip's run + along-centre to span the FULL building side, folding in any
-  // corner bump-outs that lengthen that wall (B488). Preserves the strip's thickness and its
+  // corner bump-outs that lengthen that wall (B492). Preserves the strip's thickness and its
   // outward offset from the wall — only its length along the wall and its centre move. So a
   // bump-out added/edited/removed keeps the sidewalk covering the whole side, at the real bump size.
   const sidewalkFullRunPatch = (arr, b, sw) => {
@@ -4081,7 +4081,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const relayoutBumpSidewalks = (arr, b) => arr.map((x) => (isWallStrip(x) && x.attachedTo === b.id && !x.points ? sidewalkFullRunPatch(arr, b, x) : x));
   // Add dog-ears at the given corners; re-lay the perpendicular sidewalks to the full building
-  // side and pull the truck court in to the clear face between the new bump-outs (B488).
+  // side and pull the truck court in to the clear face between the new bump-outs (B492).
   const placeDogEars = (b, corners) => {
     if (!corners.length) return;
     pushHistory();

@@ -406,7 +406,9 @@ export default function DocReview({
   };
 
   /* ---- prepare page + fit (B329) ---- */
-  const VIEW_MIN = 0.05, VIEW_MAX = 6; // px-per-page-unit clamp for the viewport
+  const VIEW_MIN = 0.05, VIEW_MAX = 10; // px-per-page-unit clamp for the viewport (10 lets you read
+  // the finest survey bearing/distance call-outs & tiny dimension text; the detail layer still
+  // rasterises the small visible window at full density, so the deeper zoom stays sharp + in-budget)
   // When the page or a load changes: refresh the page's base (scale-1) size, and — only on a
   // fresh open/reset/load (view === null) — fit the sheet to the viewport. Switching sheets
   // keeps the current zoom/pan (B292): view stays non-null, so we only update pageBase.
@@ -438,7 +440,9 @@ export default function DocReview({
   // tileCovers check inside renderDetail makes a settle that didn't move the window a no-op. (B415)
   useEffect(() => {
     if (!view) return;
-    const id = setTimeout(() => setDetailReq((n) => n + 1), 140);
+    const id = setTimeout(() => setDetailReq((n) => n + 1), 90); // settle delay: short enough that the
+    // sharp detail re-appears almost immediately after a pan/zoom stops (the soft CSS-scaled backdrop
+    // shows for less time), still long enough to coalesce a continuous gesture into one re-raster
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view && view.scale, view && view.tx, view && view.ty]);

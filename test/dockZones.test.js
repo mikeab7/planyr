@@ -85,7 +85,7 @@ describe("layoutZone — flush-outward stacking on each side", () => {
   });
 });
 
-describe("usableCourtSpan — truck court pulls in between corner bump-outs (B488)", () => {
+describe("usableCourtSpan — truck court pulls in between corner bump-outs (B492)", () => {
   it("with no bumps the court keeps the full wall, no shift", () => {
     expect(usableCourtSpan(600, 0, 0)).toEqual({ along: 600, shift: 0 });
   });
@@ -98,7 +98,7 @@ describe("usableCourtSpan — truck court pulls in between corner bump-outs (B48
   });
 });
 
-describe("layoutZone opts — only the court (zone 0) pulls in (B488)", () => {
+describe("layoutZone opts — only the court (zone 0) pulls in (B492)", () => {
   const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
   const depths = [135, 50, 15];
 

@@ -2,7 +2,56 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
+
+// PDF.js (v6) renders correctly only when it can fetch its support assets at runtime:
+// substitute fonts (non-embedded text), CMaps (CID/CJK fonts), an ICC profile (CMYK
+// colour), and the WASM image decoders (JBIG2 scanned B&W, OpenJPEG/JPX scans). These
+// ship as on-disk folders in pdfjs-dist/ and are NOT in the worker bundle. This plugin
+// exposes them at `<base>pdfjs/<folder>/…` — served straight from node_modules in dev,
+// emitted into the build output for production — so getDocument's *Url options resolve
+// (see src/workspaces/doc-review/lib/pdf.js). Sourcing from node_modules keeps them in
+// lock-step with the installed pdfjs-dist version (no committed, drift-prone copies).
+const PDFJS_ASSET_DIRS = ["standard_fonts", "cmaps", "iccs", "wasm"];
+function pdfjsAssets() {
+  const pdfjsRoot = path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));
+  const MIME = { ".wasm": "application/wasm", ".js": "text/javascript", ".mjs": "text/javascript",
+    ".bcmap": "application/octet-stream", ".pfb": "application/octet-stream", ".icc": "application/octet-stream" };
+  return {
+    name: "pdfjs-assets",
+    // Dev: stream each requested file out of node_modules/pdfjs-dist.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const reqPath = (req.url || "").split("?")[0];
+        const hit = reqPath.match(/\/pdfjs\/([^/]+)\/(.+)$/);
+        if (!hit || !PDFJS_ASSET_DIRS.includes(hit[1])) return next();
+        const rel = path.normalize(`${hit[1]}/${decodeURIComponent(hit[2])}`);
+        if (rel.startsWith("..")) return next();
+        const file = path.join(pdfjsRoot, rel);
+        fs.readFile(file, (err, buf) => {
+          if (err) return next();
+          res.setHeader("Content-Type", MIME[path.extname(file)] || "application/octet-stream");
+          res.end(buf);
+        });
+      });
+    },
+    // Build: emit every file under each folder into <outDir>/pdfjs/<folder>/ verbatim
+    // (explicit fileName → no content hashing, so pdf.js's `${url}${name}` paths hold).
+    generateBundle() {
+      for (const dir of PDFJS_ASSET_DIRS) {
+        const abs = path.join(pdfjsRoot, dir);
+        let names = [];
+        try { names = fs.readdirSync(abs); } catch { continue; }
+        for (const name of names) {
+          const f = path.join(abs, name);
+          if (!fs.statSync(f).isFile()) continue;
+          this.emitFile({ type: "asset", fileName: `pdfjs/${dir}/${name}`, source: fs.readFileSync(f) });
+        }
+      }
+    },
+  };
+}
 
 // Build identifier (short git SHA, timestamp fallback) baked into the bundle so the
 // error-telemetry rows (B279) can be traced back to the exact deploy that produced them.
@@ -32,6 +81,7 @@ export default defineConfig(({ command }) => ({
   define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [
     react(),
+    pdfjsAssets(),
     // In dev, Vite's SPA fallback would serve the main index.html for /sequence/.
     // This plugin intercepts /sequence/ (and /sequence/index.html) and serves the
     // standalone scheduler HTML directly, matching production Cloudflare behavior.

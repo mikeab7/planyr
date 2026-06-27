@@ -1,4 +1,4 @@
-/* Self-verification for B488 — bump-outs, sidewalks, and truck courts cooperate.
+/* Self-verification for B492 — bump-outs, sidewalks, and truck courts cooperate.
  *
  * Repro the owner reported:
  *   1) Adding/editing a bump-out should make the perpendicular SIDEWALK span the FULL building
@@ -8,7 +8,7 @@
  *
  * Ground truth = the persisted element list (feet, exact) read back from localStorage after each
  * UI action — far more precise than pixel measurement. Logged-out / this-device mode (no auth).
- * Run:  node ui-audit/verify-b488-bump-sidewalk-court.mjs   (preview server must be on :4173)
+ * Run:  node ui-audit/verify-b492-bump-sidewalk-court.mjs   (preview server must be on :4173)
  */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
@@ -20,7 +20,7 @@ mkdirSync(OUT, { recursive: true });
 
 // Cross-dock 600×300 building (docks on the long top/bottom walls). Sidewalks seeded on the two
 // non-dock SHORT ends (left/right), each a 5′-thick × 300′ run vertical strip.
-const DEMO_ID = "verify-b488";
+const DEMO_ID = "verify-b492";
 const els = [
   { id: "b1", type: "building", cx: 0, cy: 0, w: 600, h: 300, rot: 0, dock: "cross" },
   { id: "swL", type: "sidewalk", sidewalkSide: "left", cx: -302.5, cy: 0, w: 5, h: 300, rot: 0, attachedTo: "b1" },
@@ -28,7 +28,7 @@ const els = [
 ];
 const parcel = { id: "pc1", locked: false, points: [{ x: -800, y: -560 }, { x: 800, y: -560 }, { x: 800, y: 560 }, { x: -800, y: 560 }] };
 const demoSite = {
-  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B488", name: "Plan 1",
+  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B492", name: "Plan 1",
   origin: null, county: null, parcels: [parcel], els, measures: [], callouts: [],
   markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
@@ -111,12 +111,12 @@ const bumps = e1.filter((x) => x.dogEar);
 log(bumps.length === 4, `4 bump-outs placed (2 per dock side): ${bumps.length}`);
 const court1 = topCourt(e1), swL1 = byId(e1, "swL"), swR1 = byId(e1, "swR");
 // sidewalk now spans wall + the two 60′ projections that lengthen that wall (300 + 60 + 60 = 420)
-log(near(swL1.h, 420), `B488-1 SIDEWALK spans full side incl. bumps: left 300→${(swL1.h || 0).toFixed(0)}′ (expect 420)`);
-log(near(swR1.h, 420), `B488-1 SIDEWALK spans full side incl. bumps: right 300→${(swR1.h || 0).toFixed(0)}′ (expect 420)`);
+log(near(swL1.h, 420), `B492-1 SIDEWALK spans full side incl. bumps: left 300→${(swL1.h || 0).toFixed(0)}′ (expect 420)`);
+log(near(swR1.h, 420), `B492-1 SIDEWALK spans full side incl. bumps: right 300→${(swR1.h || 0).toFixed(0)}′ (expect 420)`);
 // court pulls IN to the clear face between the two 55′ bumps (600 − 55 − 55 = 490), still centred
-log(near(court1.w, 490), `B488-2 TRUCK COURT pulls in between bumps: 600→${(court1.w || 0).toFixed(0)}′ (expect 490)`);
-log(near(court1.cx, court0.cx), `B488-2 court stays centred on the clear face (cx ${(court1.cx || 0).toFixed(1)})`);
-await page.screenshot({ path: OUT + "b488-bumps.png" });
+log(near(court1.w, 490), `B492-2 TRUCK COURT pulls in between bumps: 600→${(court1.w || 0).toFixed(0)}′ (expect 490)`);
+log(near(court1.cx, court0.cx), `B492-2 court stays centred on the clear face (cx ${(court1.cx || 0).toFixed(1)})`);
+await page.screenshot({ path: OUT + "b492-bumps.png" });
 
 // ---- 2) editable truck-court length: select a court, type a new length ----
 const csel = await page.evaluate(() => {
@@ -145,7 +145,7 @@ if (setLen) {
 let e2 = await readEls((a) => { const c = topCourt(a); return c && near(c.w, 300, 3); });
 const court2 = topCourt(e2);
 log(!!setLen, `Truck court "Length (ft)" editor is present when a court is selected`);
-log(near(court2.w, 300), `B488-2 court length is EDITABLE along the dock: set 300 → ${(court2.w || 0).toFixed(0)}′`);
+log(near(court2.w, 300), `B492-2 court length is EDITABLE along the dock: set 300 → ${(court2.w || 0).toFixed(0)}′`);
 
 // ---- 3) remove bump-outs: sidewalk + court snap back to full side ----
 await selectBuilding();
@@ -156,7 +156,7 @@ log(near(swL3.h, 300), `removing bumps: sidewalk back to full 300′ side (${(sw
 log(near(court3.w, 600) || near(court3.w, 300), `removing bumps: court re-expands (w=${(court3.w || 0).toFixed(0)}; was capped at 300 by the manual length, now ${court3.alongLen ? "manual " + court3.alongLen : "full"})`);
 
 console.log(errors.length ? `\nPAGE ERRORS:\n${errors.slice(0, 8).join("\n")}` : "\n(no page errors)");
-console.log(fail === 0 ? "\n✓ ALL B488 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
+console.log(fail === 0 ? "\n✓ ALL B492 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 await ctx.close();
 await browser.close();
 process.exit(fail === 0 ? 0 : 1);

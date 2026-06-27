@@ -46,7 +46,7 @@ const rot2 = (x, y, deg) => {
   return { x: x * c - y * s, y: x * s + y * c };
 };
 
-// The usable truck-court span between corner bump-outs (B488). The court (zone 0) pulls IN to the
+// The usable truck-court span between corner bump-outs (B492). The court (zone 0) pulls IN to the
 // clear dock face between the two corner bump-outs — `bumpStart`/`bumpEnd` are their along-wall
 // spans at the −axis / +axis ends. Returns the reduced length + the centre shift (toward the
 // smaller bump, in the +along-wall direction), so the paving stops overlapping the bump corners —
@@ -60,7 +60,7 @@ export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
 // flush beyond the previous one (cumulative inner depth), full wall length along
 // the dock face. The trailer (i=1) is rotated so its striped stalls run ALONG the
 // wall — matching the legacy `oppTrailerGeom`. Returns {cx,cy,w,h,rot}.
-// `opts` (B488) lets the CALLER pull zone 0 (the truck court) in to the usable dock face between
+// `opts` (B492) lets the CALLER pull zone 0 (the truck court) in to the usable dock face between
 // corner bump-outs: {along} overrides its wall-length span and {alongShift} offsets its centre
 // along the wall. Other zones (trailer/buffer) always keep the full wall length, so a 4-arg call
 // (and every existing caller/test) is unchanged.
