@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DOCK_ZONES, MAX_DOCK_ZONES, zoneDepthDefaults, zoneDepthDefault, layoutZone, layoutStack,
-  dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones,
+  usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -82,6 +82,44 @@ describe("layoutZone — flush-outward stacking on each side", () => {
     // bottom normal (0,1) rotated 90° → (-1, 0); centre at distance 150+67.5 along it
     expect(near(g.cx, -(150 + 135 / 2))).toBe(true);
     expect(near(g.cy, 0)).toBe(true);
+  });
+});
+
+describe("usableCourtSpan — truck court pulls in between corner bump-outs (B492)", () => {
+  it("with no bumps the court keeps the full wall, no shift", () => {
+    expect(usableCourtSpan(600, 0, 0)).toEqual({ along: 600, shift: 0 });
+  });
+  it("subtracts both corner bump spans and re-centres toward the smaller bump", () => {
+    // 55′ bump at the −end, 35′ at the +end → 600−55−35 = 510, shift = (55−35)/2 = +10
+    expect(usableCourtSpan(600, 55, 35)).toEqual({ along: 510, shift: 10 });
+  });
+  it("never collapses below 1′ even if bumps exceed the wall", () => {
+    expect(usableCourtSpan(100, 80, 80).along).toBe(1);
+  });
+});
+
+describe("layoutZone opts — only the court (zone 0) pulls in (B492)", () => {
+  const b = { cx: 0, cy: 0, w: 600, h: 300, rot: 0 }; // docks top/bottom
+  const depths = [135, 50, 15];
+
+  it("court honours opts.along + opts.alongShift; full wall when omitted (back-compat)", () => {
+    expect(layoutZone(b, "bottom", 0, depths).w).toBe(600);            // 4-arg → unchanged
+    const g = layoutZone(b, "bottom", 0, depths, { along: 510, alongShift: 10 });
+    expect(g.w).toBe(510);                                             // pulled in
+    expect(g.cx).toBeCloseTo(10, 6);                                   // shifted +X along the wall
+    expect(g.cy).toBeCloseTo(150 + 135 / 2, 6);                        // depth/position unchanged
+  });
+
+  it("trailer (zone 1) and buffer (zone 2) IGNORE the override — they keep the full wall", () => {
+    expect(layoutZone(b, "bottom", 1, depths, { along: 510, alongShift: 10 }).w).toBe(600);
+    expect(layoutZone(b, "bottom", 2, depths, { along: 510, alongShift: 10 }).w).toBe(600);
+  });
+
+  it("on a vertical dock side the court pulls in along Y", () => {
+    const tall = { cx: 0, cy: 0, w: 300, h: 600, rot: 0 }; // docks left/right
+    const g = layoutZone(tall, "right", 0, depths, { along: 520, alongShift: -10 });
+    expect(g.h).toBe(520);                 // along the tall axis
+    expect(g.cy).toBeCloseTo(-10, 6);      // shifted −Y
   });
 });
 
