@@ -118,6 +118,23 @@ export const constrainedStartFrom = (pred, dep, taskDur) => {
 };
 export const calcEnd = (start, dur) => !start ? "" : dur === 0 ? start : addBD(start, Math.max(0, dur - 1));
 
+// Worst-of-descendants rolled status for each parent task (faithful copy from index.html).
+export const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
+export const computeRolledHealth = (all) => {
+  const rollup = (id, stack) => {
+    const children = all.filter(t => t.parentId === id);
+    if (!children.length || stack.has(id)) return all.find(t => t.id === id)?.health || "";
+    stack.add(id);
+    let best = "", bestP = 0;
+    for (const c of children) { const h = rollup(c.id, stack); const p = HEALTH_PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
+    stack.delete(id);
+    return best;
+  };
+  const map = {};
+  all.forEach(t => { if (all.some(c => c.parentId === t.id)) map[t.id] = rollup(t.id, new Set()); });
+  return map;
+};
+
 export const cascadeDates = tasks => {
   const map = {};
   tasks.forEach(t => { map[t.id] = {...t, predecessors: normPreds(t.predecessors)}; });
