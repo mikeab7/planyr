@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupProjects, filterProjects, relTime } from "../src/shared/projects/projectModel.js";
+import { groupProjects, filterProjects, relTime, suggestNameMatch, normalizeProjectName } from "../src/shared/projects/projectModel.js";
 
 describe("groupProjects", () => {
   it("collapses plans of one site into a single project entry", () => {
@@ -35,12 +35,53 @@ describe("groupProjects", () => {
 
   it("falls back to id when groupId is absent and to 'Untitled site' for a nameless record", () => {
     const out = groupProjects([{ id: "lonely", updatedAt: 1 }]);
-    expect(out).toEqual([{ id: "lonely", name: "Untitled site", updatedAt: 1, status: null }]);
+    expect(out).toEqual([{ id: "lonely", name: "Untitled site", updatedAt: 1, status: null, scheduleProjectId: null }]);
   });
 
   it("ignores null/blank records and never throws on junk", () => {
     expect(groupProjects([null, undefined, {}, { updatedAt: 5 }])).toEqual([]);
     expect(groupProjects()).toEqual([]);
+  });
+
+  it("surfaces the cross-module schedule link hint (schema v9) on the project entry", () => {
+    const [proj] = groupProjects([{ id: "p1", groupId: "g1", site: "Pappadoupolos", updatedAt: 100, scheduleProjectId: 7 }]);
+    expect(proj.scheduleProjectId).toBe(7);
+  });
+
+  it("keeps a link hint found on an OLDER plan even when the newest plan is unlinked", () => {
+    const [proj] = groupProjects([
+      { id: "p1", groupId: "g1", site: "Pappadoupolos", updatedAt: 100, scheduleProjectId: 7 },
+      { id: "p2", groupId: "g1", site: "Pappadoupolos", updatedAt: 500 }, // newest, no hint
+    ]);
+    expect(proj.name).toBe("Pappadoupolos");
+    expect(proj.updatedAt).toBe(500);   // newest record still wins label/timestamp
+    expect(proj.scheduleProjectId).toBe(7); // but the link isn't lost
+  });
+});
+
+describe("suggestNameMatch — suggest-and-confirm cross-module linking (never auto-guesses)", () => {
+  const sites = [
+    { id: "g1", name: "Pappadoupolos" },
+    { id: "g2", name: "Grand Port" },
+    { id: "g3", name: "Goose Creek" },
+  ];
+  it("matches a same-name counterpart ignoring case/whitespace/punctuation", () => {
+    expect(suggestNameMatch("pappadoupolos ", sites)?.id).toBe("g1");
+    expect(suggestNameMatch("Grand-Port", sites)?.id).toBe("g2");
+  });
+  it("returns null when nothing matches", () => {
+    expect(suggestNameMatch("Nowhere Ranch", sites)).toBeNull();
+    expect(suggestNameMatch("", sites)).toBeNull();
+  });
+  it("returns null on an AMBIGUOUS match (>1) — an explicit manual pick is required", () => {
+    const dupes = [{ id: "a", name: "Twin" }, { id: "b", name: "twin" }];
+    expect(suggestNameMatch("Twin", dupes)).toBeNull();
+  });
+  it("can exclude an id so a project never matches itself", () => {
+    expect(suggestNameMatch("Pappadoupolos", sites, { exclude: "g1" })).toBeNull();
+  });
+  it("normalizeProjectName collapses punctuation/case/whitespace", () => {
+    expect(normalizeProjectName("  Grand—Port!! ")).toBe("grand port");
   });
 });
 

@@ -4310,11 +4310,17 @@ function App() {
     });
   }, []);
 
-  const addProject = useCallback(() => {
+  const addProject = useCallback((opts) => {
+    // opts (optional) = { name, linkedSiteId, linkedSiteName } — used by the cross-module
+    // "create a schedule connected to this site" flow. Guard against a click event being
+    // passed as the first arg (the in-app + dropdown buttons call addProject() bare).
+    const o = (opts && typeof opts === "object" && !("nativeEvent" in opts)) ? opts : {};
     setData(d => {
       const id = d.nPid;
+      const proj = {id, name: o.name || `Project ${id}`, tasks: []};
+      if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
       return {...d, nPid: id+1, aPid: id, nTid: {...d.nTid, [id]: 1},
-        projects: {...d.projects, [id]: {id, name: `Project ${id}`, tasks: []}}};
+        projects: {...d.projects, [id]: proj}};
     });
   }, []);
 
@@ -4371,7 +4377,9 @@ function App() {
   const navSigRef = useRef("");
   useEffect(() => {
     if (!inShell || !data) return;
-    const list = Object.values(data.projects || {}).map(p => ({ id: p.id, name: p.name }));
+    // Carry the cross-module link (linkedSiteId/Name) so the shell can map this schedule ↔ a
+    // Site Planner project (group_id) and keep the project the same across the header tabs.
+    const list = Object.values(data.projects || {}).map(p => ({ id: p.id, name: p.name, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null }));
     const sig = JSON.stringify([data.section ?? "projects", data.aPid ?? null, list]);
     if (sig === navSigRef.current) return; // only emit when the nav state actually changes
     navSigRef.current = sig;
@@ -4390,8 +4398,40 @@ function App() {
       if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-shell") return;
+      // Tell the shell a cross-module link was set/cleared/created, so it can mirror the
+      // lightweight hint onto the Site Planner side (it can't read this app's backend).
+      const emitLinkChanged = (siteId, scheduleId, name) => {
+        try {
+          window.parent.postMessage({ source: "planar-seq", type: "planar:link-changed",
+            siteId: siteId ?? null, scheduleId: scheduleId ?? null, name: name ?? null }, window.location.origin);
+        } catch (_) {}
+      };
       if (m.type === "planar:nav-select" && m.id != null) {
         setData(d => (d.projects && d.projects[m.id]) ? { ...d, section: "projects", aPid: m.id } : d);
+      } else if (m.type === "planar:nav-select-by-site" && m.siteId != null) {
+        // Project-aware header tabs: activate the schedule linked to this Site Planner project
+        // (group_id). No link yet → leave state untouched; the shell shows the resolution panel.
+        setData(d => {
+          const match = Object.values(d.projects || {}).find(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
+          return match ? { ...d, section: "projects", aPid: match.id } : d;
+        });
+      } else if (m.type === "planar:nav-link" && m.id != null) {
+        // Set (m.siteId present) or clear (m.siteId null) the link on an existing schedule.
+        setData(d => {
+          if (!d.projects || !d.projects[m.id]) return d;
+          const proj = { ...d.projects[m.id] };
+          if (m.siteId != null) { proj.linkedSiteId = m.siteId; proj.linkedSiteName = m.siteName || null; }
+          else { delete proj.linkedSiteId; delete proj.linkedSiteName; }
+          return { ...d, section: "projects", aPid: m.id, projects: { ...d.projects, [m.id]: proj } };
+        });
+        emitLinkChanged(m.siteId ?? null, m.id, m.siteName ?? null);
+      } else if (m.type === "planar:nav-create-linked") {
+        // Create a new schedule pre-named after + linked to a Site Planner project, then open it.
+        // addProject mints id = current nPid, so capture it for the mirror message.
+        const newId = latestData.current ? latestData.current.nPid : null;
+        addProject({ name: m.name, linkedSiteId: m.siteId ?? null, linkedSiteName: m.siteName ?? null });
+        setData(d => ({ ...d, section: "projects" }));
+        if (newId != null && m.siteId != null) emitLinkChanged(m.siteId, newId, m.siteName ?? null);
       } else if (m.type === "planar:nav-dashboard") {
         setData(d => ({ ...d, section: "reports" }));
       } else if (m.type === "planar:nav-new") {
