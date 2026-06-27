@@ -1,5 +1,14 @@
 ## ✅ Done
 
+<!-- ROUND 8 (UX honesty) — cleared the last two small round-5 filed items: geocoder error
+     distinction (B540) + cloud-badge popover persistence (B541). -->
+
+### B540 — Address geocoder conflated "service unreachable" with "address not found" `[Site Planner / geocode]` (bug — honesty/UX)  *(filed round 5; fixed round 8, 2026-06-27)*
+`[x]` **DONE + verified. lint 0 · 1761 tests · build green.** `geocodeAddress` returned `null` for BOTH a real "no candidates" result AND any network failure — so when the lookup host was down/blocked, the user was told the address doesn't exist (and might abandon a valid one). **Fix (B540 contract):** track `reachedAny` (did any provider respond OK?). Return `{lat,lon,label}` on a hit, `null` only when a provider was REACHED and authoritatively found nothing, and `{ error }` when NO provider was reachable. Both callers updated to show the distinct "lookup unavailable" message vs "not found": `MapFinder.goAddress` + `SitePlanner.addByAddress` (each gained `if (hit && hit.error) …`). `test/geocode.test.js` updated (the old "null on throw" test now asserts `{error}`) + 3 new contract tests. Anti-drift guard added.
+
+### B541 — Cloud-sync badge popover closed itself on benign sync-state churn `[Shared / UI]` (bug — UX)  *(filed round 5; fixed round 8)*
+`[x]` **DONE + verified. lint 0 · 1761 tests · build green.** `CloudSyncBadge` keyed its error-boundary on `String(state)`, remounting the whole badge (and discarding the inner `Badge`'s open popover) on every save-cycle transition. **Fix:** the boundary is no longer remounted via a `key`; instead it takes a `resetKey` prop and clears a transient crash in `componentDidUpdate` when it changes. So the popover survives state transitions (the Badge's own effect still closes it when the state stops being actionable) while crash-recovery is fully preserved (a crash clears on the next state change, as before) and the badge still always renders the live `state`. Anti-drift guard added. **⏳ Signed-in eyeball that the detail popover stays open across a save cycle → V164** (same signed-in session as the B528/B529 check).
+
 <!-- ROUND 7 (concurrency) — the careful lap for the two HIGH save-race bugs (B528/B529) that
      rounds 4-5 filed and deferred as "needs its own pass". Fixed via a SHARED per-id write
      serializer so the two modules can't drift, with a unit test that models the exact race and

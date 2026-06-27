@@ -4813,6 +4813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
+      if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
       const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
       setAddrQuery("");
