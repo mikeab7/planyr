@@ -50,8 +50,8 @@ const LINE   = "var(--chrome-divider)";
 const TAB_IDLE = "var(--chrome-tab-inactive)";
 // Per-module accent: the FILL (the 2px underline) is fixed in both themes; the active
 // tab TEXT uses the -text token, which swaps by theme (sits on chrome). (B318)
-const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)" };
-const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)" };
+const ACCENT_FILL = { "site-planner": "var(--accent-site)", "scheduler": "var(--accent-schedule)", "doc-review": "var(--accent-review)", "library": "var(--accent-library)" };
+const ACCENT_TEXT = { "site-planner": "var(--accent-site-text)", "scheduler": "var(--accent-schedule-text)", "doc-review": "var(--accent-review-text)", "library": "var(--accent-library-text)" };
 
 // The Light/Dark/System picker now lives in the account → Settings panel (B389, AuthPanel)
 // for signed-in users. The row-1 gear below is kept ONLY when signed out, so a logged-out
@@ -137,6 +137,17 @@ const MODULES = [
       <>
         <path d="M3.5 12.5l7-7 3 3-7 7H3.5v-3z" />
         <line x1="9.5" y1="6.5" x2="11.5" y2="8.5" />
+      </>
+    ),
+  },
+  {
+    id: "library",
+    label: "Library",
+    // simplified ti-folders / stacked-files outline (16×16 viewBox)
+    icon: (
+      <>
+        <path d="M2.5 5.5l2-1.5h3l1 1.5h4.5v7.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" />
+        <line x1="2.5" y1="8" x2="13.5" y2="8" />
       </>
     ),
   },

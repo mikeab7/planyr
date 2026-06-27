@@ -12,7 +12,7 @@
  * `#`, so swapping to real paths later (if base flips to "/") is a localized change.
  *
  * Route shape: { module, projectId, cross }
- *   module    — workspace id ('site-planner' | 'scheduler' | 'doc-review')
+ *   module    — workspace id ('site-planner' | 'scheduler' | 'doc-review' | 'library')
  *   projectId — active project (a Site Planner site-group id) | null
  *   cross     — cross-project mode (the tree spans all of the user's projects)
  *
@@ -26,8 +26,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 export const DEFAULT_MODULE = "site-planner";
-export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review" };
-export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup" };
+export const MODULE_BY_SLUG = { site: "site-planner", schedule: "scheduler", markup: "doc-review", library: "library" };
+export const SLUG_BY_MODULE = { "site-planner": "site", scheduler: "schedule", "doc-review": "markup", library: "library" };
 
 const slugFor = (module) => SLUG_BY_MODULE[module] || SLUG_BY_MODULE[DEFAULT_MODULE];
 
