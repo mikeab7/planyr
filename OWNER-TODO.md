@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-06-27._
+_Last updated: 2026-06-27 (added the Claude↔Scheduler connector turn-on steps, B527)._
 
 ## Decisions only Michael can make
 - [ ] **Which big feature to build next.** In progress: he picked **Team Workspaces** (find/fix bugs) on 2026-06-27.
@@ -28,6 +28,26 @@ _Last updated: 2026-06-27._
       Team invites trust a person's email; if confirmation were off, someone could sign up as a co-worker's
       address (without owning it) and auto-join their team. On by default — this is just a didn't-get-turned-off
       check, again before inviting people. (B491)
+
+## Turn on the Claude↔Scheduler connector (B527) — lets Claude on YOUR account propose schedule changes
+> This is the "chat with Claude and it adjusts my schedule" feature, connector half. Once on, in a normal
+> Claude chat (or a Project) you can say *"here's an email from the city — update my Goose Creek schedule"* and
+> Claude drops proposed changes into your Scheduler's **Review panel** for you to Approve/Dismiss. It runs on
+> your existing Claude subscription (no per-message cost). Claude can only **suggest** — never edits directly.
+> Claude hands you the SQL file. Do these in order:
+- [ ] **Run `public/sequence/db/suggestions_rls.sql`** — one paste in the SQL editor of the **Scheduler** Supabase
+      project (`ksetjztkplttbcehyicv` — the one in `public/sequence/index.html`, *not* the main app). Lets the
+      connector file suggestions; it can't touch your live schedule. Idempotent.
+- [ ] **Add 3 settings in Cloudflare Pages** (Production env): `SCHEDULER_SUPABASE_URL` =
+      `https://ksetjztkplttbcehyicv.supabase.co`, `SCHEDULER_SUPABASE_ANON_KEY` = that project's anon key, and
+      `SCHEDULER_CONNECTOR_TOKEN` = a long random password you make up (this is the connector's key). Then redeploy.
+- [ ] **Confirm your Claude plan allows custom connectors** (Pro/Max/Team/Enterprise). If not, it still works from
+      the Claude **Desktop** app.
+- [ ] **Add the connector once** — in claude.ai → Settings → Connectors, point it at `https://planyr.io/api/mcp`
+      (or, in Claude Desktop, use `mcp-remote` with the token). Then attach it to a Project so its chats can use it.
+      *(Heads-up: the claude.ai-web "add connector" flow expects a login handshake (OAuth) — Claude still owes a
+      small piece of wiring for that web path; the Desktop path works as soon as the steps above are done. Tracked
+      in VERIFICATION V153.)*
 
 ## Things Claude needs FROM Michael to finish/verify
 - [ ] **A second test account** — to verify Team Workspaces end-to-end (invite → accept → shared edit → member
