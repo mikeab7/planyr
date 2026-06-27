@@ -190,7 +190,7 @@ export async function importLegacyIntoCloud(uid) {
 // cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
 export function pendingLegacyCount(uid) {
   if (!uid) return 0;
-  // B549: delegate to pendingLegacySites so the COUNT can't disagree with the LIST or with what
+  // B552: delegate to pendingLegacySites so the COUNT can't disagree with the LIST or with what
   // importLegacyIntoCloud actually copies. The old raw-key loop counted records with a missing/
   // falsy normalized id (which import skips), so the badge could read "3 pending" while only 2
   // imported (the B128 symptom). pendingLegacySites already normalizes (migrate) + drops !id.

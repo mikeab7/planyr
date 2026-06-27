@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, zoneDepthDefault, catalogDepthDefault,
   layoutZone, layoutZoneByKind, layoutStack,
-  usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones,
+  usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones,
 } from "../src/workspaces/site-planner/lib/dockZones.js";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -277,6 +277,37 @@ describe("footprintDepth — building depth is the dock-normal span, never the f
     const els = [b, ...stackOn("b1", "left"), ...stackOn("b1", "right")];
     // even with 135′ courts bonded on, the building's depth is its own 580′ footprint span
     expect(footprintDepth(els.find((e) => e.id === "b1"))).toBe(580);
+  });
+});
+
+describe("footprintAxes / footprintLength — the dock-parallel counterpart of depth (B548)", () => {
+  it("resolves depth and length to the two perpendicular footprint axes, dock-relative", () => {
+    // The EXACT reported case — el.w 328 × el.h 1159: h>w → docks ride left/right → depth is the
+    // horizontal (w) span = 328, length the vertical (h) span = 1159. The panel must read
+    // Length 1159 / Depth 328, never the old transposed Depth 1159.
+    const tall = { w: 328, h: 1159, dock: "single" };
+    expect(footprintAxes(tall)).toEqual({ depth: "w", length: "h" });
+    expect(footprintDepth(tall)).toBe(328);
+    expect(footprintLength(tall)).toBe(1159);
+    // Same footprint laid the other way — el.w 1159 × el.h 328: w>h → docks ride top/bottom →
+    // depth is the vertical (h) span = 328, length the horizontal (w) span = 1159.
+    const wide = { w: 1159, h: 328, dock: "single" };
+    expect(footprintAxes(wide)).toEqual({ depth: "h", length: "w" });
+    expect(footprintDepth(wide)).toBe(328);
+    expect(footprintLength(wide)).toBe(1159);
+  });
+  it("length is the dock-parallel (long) wall in both cross-dock orientations", () => {
+    expect(footprintLength({ w: 580, h: 664, dock: "cross" })).toBe(664);
+    expect(footprintLength({ w: 664, h: 580, dock: "cross" })).toBe(664);
+  });
+  it("depth and length are exactly the element's two axes — no value invented, area preserved", () => {
+    const b = { w: 328, h: 1159, dock: "cross" };
+    expect(footprintDepth(b) * footprintLength(b)).toBe(328 * 1159);
+  });
+  it("single-load: length runs along the dock wall, depth dock-wall→rear", () => {
+    const b = { w: 664, h: 580, dock: "single", dockSide: "bottom" }; // docks on the bottom (long, horizontal) wall
+    expect(footprintLength(b)).toBe(664); // the frontage the doors array along
+    expect(footprintDepth(b)).toBe(580);  // dock-wall → rear-wall
   });
 });
 

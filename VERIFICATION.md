@@ -60,7 +60,7 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V166 — B548: Stitcher releases pointer capture on a mid-pan blur (no frozen grab cursor) ✅ unit/anti-drift here; ⏳ runtime check owed
+### V167 — B551: Stitcher releases pointer capture on a mid-pan blur (no frozen grab cursor) ✅ unit/anti-drift here; ⏳ runtime check owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** The Stitcher's blur/visibility pan-abort now passes the in-flight `pointerId` to `abortGesture`, so it actually releases pointer capture (it previously called it with no id → capture held → frozen grab cursor + swallowed clicks until refocus).
 - **✅ Verified here (no browser).** Anti-drift guard in `test/bugHuntGuards.test.js` (B548); lint 0 · 1774 tests · build green.
 - **⏳ Why pending (needs a real window-blur during a drag — hard to script headless).** In the Review → Stitcher with a set placed, start a pan (mouse down + move) and, mid-drag, alt-tab / switch tabs to blur the window; return and confirm the cursor is normal and clicks register (not stuck in grab mode).
