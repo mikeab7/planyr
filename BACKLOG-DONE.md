@@ -1,5 +1,16 @@
 ## ✅ Done
 
+<!-- ROUND 7 (concurrency) — the careful lap for the two HIGH save-race bugs (B528/B529) that
+     rounds 4-5 filed and deferred as "needs its own pass". Fixed via a SHARED per-id write
+     serializer so the two modules can't drift, with a unit test that models the exact race and
+     proves the genuine cross-device guard is NOT weakened. -->
+
+### B528 — Doc Review: overlapping same-id cloud saves false-tripped the self-conflict guard → autosave lockout `[Doc Review / persistence]` (bug — concurrency) — HIGH  *(filed round 4; fixed round 7, 2026-06-27)*
+`[x]` **DONE + verified. lint 0 · 1752 tests · build green.** `usePersistence`'s `writeNow` (debounce flush + visibility/unmount/manual flush) could fire a second cloud write for the same review id BEFORE the first resolved; both read the same `reviewVersions[id]`, so the loser failed the CAS and was reported as a foreign "conflict" — which trips `canCloudSave` and silently stops autosave until reload (no data loss, but alarming + sticky). **Fix:** a per-id write serializer (`src/shared/cloud/serializeWrites.js` `makeWriteSerializer`) wraps `upsertReview` → the second write for an id WAITS for the in-flight one, so it reads the version that write threaded back and the CAS succeeds. The genuine cross-device guard (`casUpsert`) is untouched. Unit test `test/serializeWrites.test.js` models the exact race (serialized → both succeed; naïve → one false-conflicts) AND asserts a real stale version still conflicts. Anti-drift guard added. **⏳ Signed-in runtime confirm (rapid edit + tab-hide doesn't flip to "saved elsewhere") → V164.**
+
+### B529 — Site Planner: overlapping same-id cloud saves false-tripped the self-conflict guard `[Site Planner / persistence]` (bug — concurrency) — HIGH  *(filed round 4; fixed round 7)*
+`[x]` **DONE + verified. lint 0 · 1752 tests · build green.** Same root cause in `cloudSync.cloudUpsert` (Site Planner). **Fix:** the SAME shared serializer wraps `cloudUpsert` per site id, so serialization also keeps the B459 thin-clobber content baseline (`siteContent`/`siteTombs`) fresh for the second write. Lifting the latch into one shared helper means the two modules can't drift. Covered by the shared `test/serializeWrites.test.js` + an anti-drift guard. **⏳ Signed-in runtime confirm → V164.**
+
 <!-- ROUND 6 (a11y) — shipped the B530–B532 accessibility group that rounds 4-5 filed but deferred
      (cleanly-actionable work shouldn't keep getting deferred). Escape-to-close + dialog roles on the
      two scrim modals; keyboard-reachable rows/section headers. B530 verified live headless. -->

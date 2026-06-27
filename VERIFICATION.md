@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V164 — B528/B529: per-id write serialization stops a tab false-conflicting against itself ✅ unit-proven here; ⏳ signed-in runtime confirm owed
+- **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** A shared per-id write serializer (`src/shared/cloud/serializeWrites.js`) now wraps both `reviewStore.upsertReview` (B528) and `cloudSync.cloudUpsert` (B529), so a debounced autosave and a near-simultaneous visibility/unmount/manual flush for the SAME id no longer race the optimistic-concurrency `version` into a false "saved elsewhere" that locks out autosave.
+- **✅ Verified here (no browser).** `test/serializeWrites.test.js` (6 tests): same-key ordering, cross-key independence, value pass-through, rejection isolation, the exact bug model (serialized → both writes succeed; naïve → one false-conflicts), and that a GENUINE stale version still conflicts (guard not weakened). lint 0 · 1752 tests · build green. Anti-drift guards confirm both stores call the serializer.
+- **⏳ Why pending (auth + timing-dependent, can't drive logged-out).** Signed-in: open a review/site, make a rapid edit and immediately hide the tab (or unmount) so the debounced save and the flush overlap; confirm the badge stays "Saved" and does NOT flip to "saved elsewhere"/conflict with autosave stopped. Then confirm a REAL cross-device edit (edit the same row in a second browser) still shows the honest conflict + reload prompt.
+- Cadence: once after ship.
+
 ### V163 — B530/B531/B532: modal Escape-to-close + keyboard-reachable rows (a11y) ✅ B530 verified live here; ⏳ the auth/legacy-gated paths owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** **B530** — AuthPanel modals (shared `Wrap`) close on Escape + carry `role="dialog" aria-modal`. **B531** — the ReviewsBar review row and the SitePlanner left-rail Section header became keyboard-reachable (`role="button" tabIndex=0` + Enter/Space `onKeyDown`; the Section header also `aria-expanded`). **B532** — the SiteReviewModal (unsaved-on-device review) closes on Escape + `role="dialog"`.
 - **✅ Verified here (headless, logged-out).** `ui-audit/verify-b530-modal-escape.mjs` drives a real Chromium against a Supabase-configured build: the sign-in modal opens as a dialog, **Escape closes it, repeatably** (5/5 checks). Plus anti-drift guards in `test/bugHuntGuards.test.js` (B530/B531/B532) and lint 0 · 1736 tests · build green.
