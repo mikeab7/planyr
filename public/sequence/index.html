@@ -792,6 +792,20 @@ const computeRolledHealth = (all) => {
 
 const fmtD = s => { if (!s) return ""; const [y,m,d] = s.split('-'); if (!y||!m||!d) return ""; return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
 const toShortDate = s => { if (!s) return ""; const [y,m,d] = s.split("-"); return `${+m}/${+d}/${y.slice(2)}`; };
+// Export filename — matches the Site Planner's PDF/PNG naming (src/workspaces/site-planner/lib/printSheet.js
+// → "YYYY.MM.DD {Project} - {Plan}"): here "YYYY.MM.DD {Project} - Schedule" (the trailing slot is the
+// document type, since a project has one schedule). A single selected project uses its name; multiple use
+// the Planyr brand. Filesystem-illegal chars are stripped (same rule as sanitizeFilename). The caller adds
+// the .pdf/.html/.json extension; for the PDF exhibit this string is the <title> the browser's "Save as
+// PDF" uses as the filename.
+const scheduleExportName = (projects, date = new Date()) => {
+  const p2 = n => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}.${p2(date.getMonth() + 1)}.${p2(date.getDate())}`;
+  const clean = s => String(s == null ? "" : s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const names = (Array.isArray(projects) ? projects : []).map(p => p && p.name).filter(Boolean);
+  const proj = clean(names.length === 1 ? names[0] : "Planyr") || "Planyr";
+  return `${stamp} ${proj} - Schedule`;
+};
 const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -4658,7 +4672,7 @@ function App() {
     } catch(e) { /* cancelled */ }
   };
 
-  const exportJSON = () => dl(JSON.stringify(data, null, 2), "planyr-schedule.json", "application/json");
+  const exportJSON = () => dl(JSON.stringify(data, null, 2), `${scheduleExportName(Object.values(data.projects))}.json`, "application/json");
   const importJSON = e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
@@ -4707,7 +4721,7 @@ function App() {
     const names = Object.values(data.projects).map(p => p.name).filter(Boolean);
     const title = names.length === 1 ? names[0] : "Planyr Schedule";
     dl(`<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>${escapeHtml(title)} — ${new Date().toLocaleDateString()}</h1>${rows}</body></html>`,
-      `planyr-schedule-${new Date().toISOString().slice(0,10)}.html`, "text/html");
+      `${scheduleExportName(Object.values(data.projects))}.html`, "text/html");  // match the Site Planner PDF filename format
   };
 
   const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks) : {}, [proj?.tasks]);
@@ -9271,7 +9285,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     });
   }
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>${cfg.exhibitLabel?escapeHtml(cfg.exhibitLabel)+" &#x2014; ":""}${escapeHtml(cfg.projectTitle)}</title>
+<title>${escapeHtml(scheduleExportName(selProjs))}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @page{size:${ps.css} ${cfg.orientation};margin:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in}

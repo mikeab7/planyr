@@ -70,7 +70,8 @@ if (booted) {
     // "Hillwood …", which is real data, not the old hardcoded "Hillwood Schedule" heading.
     const titleStr = (html.match(/<title>([^<]*)<\/title>/) || [])[1] || "";
     ok("web snapshot title uses the Planyr brand, not the stale Hillwood/planar", /Planyr Schedule/.test(html) && !/Hillwood Schedule/.test(html) && !/<title>planar<\/title>/.test(html), JSON.stringify(titleStr));
-    ok("web snapshot filename is planyr-schedule-<date>.html", /^planyr-schedule-\d{4}-\d{2}-\d{2}\.html$/.test(download.suggestedFilename()), download.suggestedFilename());
+    // Site-Planner filename format: "YYYY.MM.DD {Project} - Schedule.html"
+    ok("web snapshot filename matches the Site-Planner format", /^\d{4}\.\d{2}\.\d{2} .+ - Schedule\.html$/.test(download.suggestedFilename()), download.suggestedFilename());
     ok("web snapshot has no undefined%/NaN/bare-d artifacts", !/undefined%/.test(html) && !/NaN/.test(html) && !/>\s*d<\/td>/.test(html) && !/undefinedd/.test(html));
   } catch (e) { ok("web snapshot export ran", false, e.message); }
 
