@@ -7,7 +7,7 @@
  * select / dashboard / new-project commands. That makes the Schedule picker show
  * SCHEDULE projects (Goose Creek, Grand Port, …) and switch them in place — instead
  * of listing the Site Planner's sites and bouncing into the Site Planner. */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import ModuleLoader from "../../shared/ui/ModuleLoader.jsx";
 import { parseNavState, deriveCurrentProject } from "./lib/navState.js";
@@ -24,6 +24,14 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
   // done, so the FIRST such message is our "ready" signal.
   const [ready, setReady] = useState(false);
   const [showLoader, setShowLoader] = useState(true);
+  // `ready` flips exactly once (whichever signal lands first); the ref makes the timers +
+  // message handler idempotent so a late nav-state can't re-trigger the cross-fade.
+  const readyRef = useRef(false);
+  const markReady = useCallback(() => {
+    if (readyRef.current) return;
+    readyRef.current = true;
+    setReady(true);
+  }, []);
   // B388 — the embedded app's action toolbar, lifted into this shell header. The embedded app
   // reports its live toolbar state up over the bridge (planar:toolbar-state); the lifted
   // controls render it and post commands (planar:*) back down. `ready` stays false until the
@@ -59,17 +67,39 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
       setProjects(nav.projects);
       setActiveId(nav.activeId);
       setSection(nav.section);
-      setReady(true);   // first nav-state ⇒ the embedded app is interactive
+      markReady();   // first nav-state ⇒ the embedded app is interactive
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, []);
+  }, [markReady]); // markReady is a stable useCallback → still effectively attach-once
 
-  // Safety net: never let the loader stick if the ready signal is missed.
+  // When the iframe document finishes loading, ASK the embedded app to (re-)announce its
+  // nav-state, retrying briefly in case its own message listener isn't attached yet. The lone
+  // 9 s timer used to be the ONLY backstop, so any time the first nav-state was slow or missed
+  // (a network hiccup, the embed's deps loading slowly) the loader sat for a full 9 seconds —
+  // the "slow/buggy sometimes" the owner saw. This handshake makes the fast path reliable, and
+  // a short fallback reveals the embed ~2.5 s after it loads even if it never answers (a slow/
+  // broken embed shouldn't hold a full-screen spinner).
+  const onIframeLoad = useCallback(() => {
+    let tries = 0;
+    const ask = () => {
+      if (readyRef.current) return;
+      try {
+        iframeRef.current?.contentWindow?.postMessage(
+          { source: "planar-shell", type: "planar:nav-request" }, window.location.origin,
+        );
+      } catch (_) {}
+      if (++tries < 7) setTimeout(ask, 380); // ~2.3 s of polite retries
+    };
+    ask();
+    setTimeout(markReady, 2500); // reveal even if the embed never reports interactive
+  }, [markReady]);
+
+  // Absolute backstop in case `onLoad` itself never fires (e.g. the iframe doc hangs).
   useEffect(() => {
-    const t = setTimeout(() => setReady(true), 9000);
+    const t = setTimeout(markReady, 6000);
     return () => clearTimeout(t);
-  }, []);
+  }, [markReady]);
 
   // Once ready, let the cross-fade finish, then drop the overlay entirely.
   useEffect(() => {
@@ -125,6 +155,7 @@ export default function Scheduler({ shellModule, onShellSwitch, authControl, acc
           ref={iframeRef}
           src="/sequence/"
           title="Sequence Planyr"
+          onLoad={onIframeLoad}
           style={{ position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block" }}
         />
         {showLoader && (

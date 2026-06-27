@@ -4411,6 +4411,18 @@ function App() {
       if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-shell") return;
+      if (m.type === "planar:nav-request") {
+        // The shell's loader asks us to (re-)announce our nav state, so a missed or slow first
+        // emit can't strand it on its fallback timer. Answer from the latest data — a no-op until
+        // it's loaded (the shell retries, and the data-change emit above also fires once it loads).
+        const d = latestData.current;
+        if (d) {
+          const list = Object.values(d.projects || {}).map(p => ({ id: p.id, name: p.name }));
+          try { window.parent.postMessage({ source: "planar-seq", type: "planar:nav-state",
+            section: d.section ?? "projects", activeId: d.aPid ?? null, projects: list }, window.location.origin); } catch (_) {}
+        }
+        return;
+      }
       if (m.type === "planar:nav-select" && m.id != null) {
         setData(d => (d.projects && d.projects[m.id]) ? { ...d, section: "projects", aPid: m.id } : d);
       } else if (m.type === "planar:nav-dashboard") {
