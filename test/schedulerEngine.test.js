@@ -263,8 +263,57 @@ describe("rebuildHealthMaps — corrupt custom-status settings must not crash re
   });
 });
 
+describe("B550 — a parentId cycle in loaded data can't hang the scheduler", () => {
+  // True acyclicity check: every task's parent chain must terminate (no loop).
+  const isAcyclic = (tasks) => {
+    const byId = {}; tasks.forEach(t => { byId[t.id] = t; });
+    return tasks.every(t => {
+      const seen = new Set([t.id]); let p = t.parentId;
+      while (p != null && byId[p]) { if (seen.has(p)) return false; seen.add(p); p = byId[p].parentId; }
+      return true;
+    });
+  };
+
+  it("normalizeIds breaks a 3-task parentId cycle (1→3→2→1) instead of leaving it", () => {
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: 3 }), T(2, { parentId: 1 }), T(3, { parentId: 2 }),
+    ] } }, nTid: {} };
+    let out;
+    expect(() => { out = E.normalizeIds(d); }).not.toThrow();
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true); // cycle broken → safe for every downstream walk
+    expect(out.projects[1].tasks.length).toBe(3);        // no task lost
+  });
+
+  it("normalizeIds leaves a valid hierarchy unchanged in shape (no-op on clean data)", () => {
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: null }), T(2, { parentId: 1 }), T(3, { parentId: 1 }),
+    ] } }, nTid: {} };
+    const out = E.normalizeIds(d);
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true);
+    // renumber compacts ids 1..n but the parent/child SHAPE is preserved: two children under the root.
+    const tasks = out.projects[1].tasks;
+    const root = tasks.find(t => t.parentId == null);
+    expect(tasks.filter(t => t.parentId === root.id).length).toBe(2);
+  });
+
+  it("the cycle-break is what protects the arbitrary-root operation walks (getSubtreeIds etc.)", () => {
+    // A descendant walk that STARTS at a node inside a cycle (e.g. outdent's getSubtreeIds) would
+    // infinite-loop; after normalizeIds breaks the cycle, any such walk over the result terminates.
+    const d = { projects: { 1: { id: 1, name: "P", tasks: [
+      T(1, { parentId: 2 }), T(2, { parentId: 1 }), // a 2-cycle, both reachable as each other's child
+    ] } }, nTid: {} };
+    const out = E.normalizeIds(d);
+    expect(isAcyclic(out.projects[1].tasks)).toBe(true);
+    expect(out.projects[1].tasks.length).toBe(2);
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  it("B550: normalizeIds breaks a parentId cycle on load (protects every downstream tree-walk)", () => {
+    expect(src).toMatch(/break any parentId cycle on load/);                          // the comment marking the fix
+    expect(src).toMatch(/if \(seen\.has\(p\)\) return \{\.\.\.t, parentId: null\}/);  // the actual break
+  });
   it("addBD coerces + bounds its step count (MAX_BD_STEPS)", () => {
     expect(src).toMatch(/MAX_BD_STEPS/);
     expect(src).toMatch(/if \(isNaN\(d\)\) return s;/);

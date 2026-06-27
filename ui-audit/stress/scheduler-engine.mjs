@@ -293,7 +293,14 @@ export const normalizeIds = d => {
   const projects = {};
   Object.entries(d.projects).forEach(([pid, proj]) => {
     if (!proj || typeof proj !== "object") return;
-    const tasks = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+    const tasks0 = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+    // B550: break any parentId cycle on load (faithful copy of the index.html fix)
+    const byId = {}; tasks0.forEach(t => { byId[t.id] = t; });
+    const tasks = tasks0.map(t => {
+      const seen = new Set([t.id]); let p = t.parentId;
+      while (p != null && byId[p]) { if (seen.has(p)) return {...t, parentId: null}; seen.add(p); p = byId[p].parentId; }
+      return t;
+    });
     projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
   });
   const nTid = {...(d.nTid || {})};
