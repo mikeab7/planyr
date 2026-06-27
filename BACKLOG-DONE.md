@@ -1,5 +1,19 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 10 (B548/B549 fixed; B550 filed): a 7th 6-lens Workflow (scheduler-logic /
+     keydown-in-input / geometry-correctness / event-binding / import-parse / shared-markup). 8 raw →
+     7 confirmed; 2 clean live bugs shipped, the scheduler cycle-hang class filed (B550, defensive +
+     high-churn). TWO rejected on my own re-read: ringCentroid "Math.abs(a)" (the signed area is
+     REQUIRED — the cross-term sign cancels num/denom; abs() would INVERT the centroid for CCW rings,
+     introducing the very bug claimed) and a MarkupRenderer callout-baseline "too low" (6px descender
+     room isn't a clip — cosmetic non-defect). -->
+
+### B548 — Stitcher left pointer-capture held on a blur/visibility abort → frozen grab cursor `[Doc Review / Stitcher]` (bug — event binding) — MED  *(bug-hunt round 10, 2026-06-27; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1774 tests · build green.** The pan-interrupt recovery (`abortGesture`) needs the pointerId to `releasePointerCapture`, but the window-blur / visibility-hidden handlers called it with NO argument, so `pid != null` was false → capture was never released. Alt-tabbing mid-pan left the SVG with a frozen grab cursor that swallowed clicks until refocus. **Fix:** store `pointerId` in `drag.current` on pan-start and have `recover` pass `drag.current.pointerId` so the capture is actually released. Anti-drift guard added. **⏳ Runtime eyeball (pan + alt-tab → no stuck cursor) → V166.**
+
+### B549 — pendingLegacyCount over-counted vs the list/import (the B128 count-mismatch class) `[Site Planner / persistence]` (bug — count) — MED  *(bug-hunt round 10; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1774 tests · build green.** `pendingLegacyCount` looped raw localStorage keys and counted records with a missing/falsy normalized id, but `importLegacyIntoCloud` (and `pendingLegacySites`) skip those — so the "N sites to import" badge could read 3 while only 2 actually import (the B128 symptom). **Fix:** `pendingLegacyCount` now returns `pendingLegacySites(uid).length`, so the count can never disagree with the list or with what import copies. (Likely resolves the root of the filed B128 — left B128 open pending an owner repro to confirm.) Anti-drift guard added.
+
 <!-- Bug-hunt ROUND 9 (B544–B547 fixed): a 6th 6-lens Workflow (resource-lifecycle / stale-response /
      empty-collection / number-display / export-safety / effect-correctness). 7 raw → 6 adversarially
      confirmed; 4 shipped this lap. TWO were REJECTED on my own re-read: a FileBrowser "await refresh()"

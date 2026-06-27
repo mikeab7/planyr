@@ -383,7 +383,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       }
       return;
     }
-    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY }; svgRef.current.setPointerCapture(e.pointerId); return; }
+    if (tool === "pan") { drag.current = { sx: e.clientX, sy: e.clientY, panX: view.panX, panY: view.panY, pointerId: e.pointerId }; svgRef.current.setPointerCapture(e.pointerId); return; } // B548: remember pointerId so a blur/visibility abort can release the capture
     // B313 — refuse a distance/area point that lands on a not-yet-aligned sheet (its scale
     // isn't set, so the reading would be silently wrong). Calibrate is exempt — it SETS scale.
     if ((tool === "distance" || tool === "area") && blockedOverUnaligned([w])) return;
@@ -412,7 +412,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   // capture held and a frozen grab cursor that swallows clicks.
   const abortGesture = (pid) => { if (pid != null && svgRef.current) { try { svgRef.current.releasePointerCapture(pid); } catch (_) {} } drag.current = null; };
   useEffect(() => {
-    const recover = () => abortGesture();
+    // B548: pass the in-flight pointerId so abortGesture actually RELEASES the capture (without it,
+    // `pid != null` was false → capture held → frozen grab cursor + swallowed clicks after alt-tab).
+    const recover = () => { if (drag.current) abortGesture(drag.current.pointerId); };
     const onVis = () => { if (document.hidden) recover(); };
     window.addEventListener("blur", recover);
     document.addEventListener("visibilitychange", onVis);

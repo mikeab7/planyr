@@ -162,6 +162,18 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/Number\.isFinite\(totals\.distFt\)/);
   });
 
+  it("B548: Stitcher releases pointer capture on a blur/visibility abort (passes the pointerId)", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/panY: view\.panY, pointerId: e\.pointerId/);          // pan stores the pointerId
+    expect(src).toMatch(/if \(drag\.current\) abortGesture\(drag\.current\.pointerId\)/); // recover passes it
+  });
+
+  it("B549: pendingLegacyCount delegates to pendingLegacySites (count == list == import)", () => {
+    const src = read("../src/workspaces/site-planner/lib/storage.js");
+    expect(src).toMatch(/return pendingLegacySites\(uid\)\.length/);
+    expect(src).not.toMatch(/for \(const \[id, rec\] of Object\.entries\(legacy\)\)/); // the old over-counting loop is gone
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}

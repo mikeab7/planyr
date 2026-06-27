@@ -190,16 +190,11 @@ export async function importLegacyIntoCloud(uid) {
 // cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
 export function pendingLegacyCount(uid) {
   if (!uid) return 0;
-  let legacy = {}, cloud = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  let n = 0;
-  for (const [id, rec] of Object.entries(legacy)) {
-    const cur = cloud[id];
-    const lAt = (rec && rec.updatedAt) || 0;
-    if (!cur || (cur.updatedAt || 0) < lAt) n++;
-  }
-  return n;
+  // B549: delegate to pendingLegacySites so the COUNT can't disagree with the LIST or with what
+  // importLegacyIntoCloud actually copies. The old raw-key loop counted records with a missing/
+  // falsy normalized id (which import skips), so the badge could read "3 pending" while only 2
+  // imported (the B128 symptom). pendingLegacySites already normalizes (migrate) + drops !id.
+  return pendingLegacySites(uid).length;
 }
 
 // Returns the list of on-device (legacy) sites that are not yet in (or are newer than)
