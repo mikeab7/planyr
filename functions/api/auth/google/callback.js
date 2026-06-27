@@ -12,7 +12,7 @@
 import { exchangeCodeForTokens } from "../../../../server/oauth/googleAuth.js";
 
 // HTML-escape any interpolated value (the refresh token, Google's error strings) so a stray
-// character can never break out of the markup (B488 hardening — defense in depth on the one
+// character can never break out of the markup (B491 hardening — defense in depth on the one
 // page that renders a secret).
 const esc = (s) =>
   String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

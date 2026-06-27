@@ -10,7 +10,7 @@
 -- SECURITY DEFINER so the helper can scan doc_reviews regardless of the storage policy context;
 -- it still only returns true for reviews shared with a team the CALLER is in (is_team_member).
 --
--- SECURITY FIX (B488 — cross-user PDF read): the candidate object path MUST belong to the review's
+-- SECURITY FIX (B491 — cross-user PDF read): the candidate object path MUST belong to the review's
 -- OWNER. `data->sources[].storageKey` is attacker-writable (a user fully controls the `data` jsonb on
 -- their OWN rows), so without binding the path to the row owner an attacker could create a review they
 -- own, share it with a team they're on, and list ANOTHER user's storage path (`<victim_uid>/…`) in

@@ -21,13 +21,13 @@ _Last updated: 2026-06-27._
 - [ ] **Run `doc-review/db/team_storage.sql`** — closes a gap where a teammate could read **another person's
       private PDF**. The old rule let a teammate's own shared review "claim" any file path (including yours); the
       fix ties a readable file to its true owner, so a teammate can only read files that genuinely belong to a
-      review shared with them. **Run before inviting people.** (B488 — found in the 2026-06-27 security pass.)
+      review shared with them. **Run before inviting people.** (B491 — found in the 2026-06-27 security pass.)
 - [ ] **Run `db/team_rehome_guard.sql`** — closes a gap where a teammate (not the owner) on two teams could move
       your shared project to their other team. **Run it before you start actually inviting people.** (B486)
 - [ ] **(2-min dashboard check) Confirm "Confirm email" is ON** in Supabase → Authentication → Providers → Email.
       Team invites trust a person's email; if confirmation were off, someone could sign up as a co-worker's
       address (without owning it) and auto-join their team. On by default — this is just a didn't-get-turned-off
-      check, again before inviting people. (B488)
+      check, again before inviting people. (B491)
 
 ## Things Claude needs FROM Michael to finish/verify
 - [ ] **A second test account** — to verify Team Workspaces end-to-end (invite → accept → shared edit → member

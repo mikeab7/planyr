@@ -77,10 +77,8 @@ const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 
 try {
-  await page.goto(BASE, { waitUntil: "load" });
-  await page.waitForTimeout(1000);
-  await page.locator('button:has-text("Library")').first().click({ timeout: 8000 });
-  await page.waitForTimeout(700);
+  await page.goto(BASE + "#markup", { waitUntil: "load" }); // the module's hash route (the tab was renamed "Library"→"Review", B418)
+  await page.waitForTimeout(1200);
   await page.setInputFiles('input[type="file"]', PDF_PATH, { timeout: 8000 });
   await page.waitForFunction(() => { const c = document.querySelector("canvas"); return c && c.width > 0 && c.getBoundingClientRect().width > 0; }, { timeout: 12000 });
   await page.waitForTimeout(500);
