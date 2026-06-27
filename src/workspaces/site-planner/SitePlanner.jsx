@@ -4614,13 +4614,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") pondArea += a;
   });
-  // A dog-ear bump-out sits inside its truck court footprint — that overlap is
-  // building, not paving (you can only place one there). Don't double-count it.
-  els.forEach((e) => {
-    if (!e.dogEar) return;
-    const hasCourt = els.some((c) => c.truckCourt && c.attachedTo === e.attachedTo && c.truckCourt.side === e.dogEar.side);
-    if (hasCourt) paving = Math.max(0, paving - e.w * e.h);
-  });
+  // B504: no bump/court de-double-count any more. Since B492 the truck court's wall-length
+  // span is trimmed (usableCourtSpan) to the clear face BETWEEN the corner bump-outs, so the
+  // court's paving area already excludes the bump footprint — subtracting the bump again here
+  // understated impervious/coverage (and overstated open). The bump itself is type "building",
+  // already counted in `bldg`; there is no remaining bump∩court overlap to remove.
   const impervious = bldg + paving + parkArea + trailArea;
   const cov = siteSqft ? (bldg / siteSqft) * 100 : 0;
   const far = siteSqft ? bldg / siteSqft : 0; // single-story assumption

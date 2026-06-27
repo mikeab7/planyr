@@ -22,14 +22,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
-<!-- Bug-hunt batch 2026-06-27 (B501–B509): surfaced by a 6-hunter Workflow over the real
-     codebase, each finding adversarially confirmed (verify + refute agents) as a genuine,
-     low-risk defect before filing. B510 (Dimension label) was fixed + shipped the same lap
-     — B500 was taken by a concurrent pond-grading fix, so the Dimension item is B510. -->
-
-### B504 — Site Planner: truck-court paving double-subtracts a corner bump-out footprint → yield understates impervious/coverage `[Site Planner / yield]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
-`[ ]` Since B492, `relayoutSide` trims a same-side truck court IN to the clear face (court `w` already excludes the bump), but the yield loop (`SitePlanner.jsx` ~L4608–4614) STILL subtracts the bump's full footprint from `paving` (stale comment "a dog-ear sits inside its truck court footprint"). Net: paving/impervious understated by the bump area (~3300 sf default), `open` overstated by the same. Only fires with a building that has both a same-side court AND a corner bump-out. **Fix:** remove the now-spurious L4608–4614 de-double-count block. Verify against pondGeom/area conventions.
-
 ### B498 — Dog-ear bump-outs don't re-anchor on host resize → overlap the building `[Site Planner / Site Model]` (bug)  *(owner-found 2026-06-26 on planyr.io reading the live element model, provisional "NEW-6"; minted **B498** = highest real B# across both files (B497) + 1; branch `claude/dog-ear-resize-overlap-v4yvit`)*
 `[x]` **Fixed + headless-verified this session (model-layer self-heal on load). *Moves to BACKLOG-DONE on merge.***
 - **Repro (Jacintoport `smqdxst8pf3g`, Building 1):** host building `e8984` was widened ~27′ (to 328.49′) AFTER its two right-side corner bump-outs (`e8986`/`e8987`, `dogEar{side:"right"}`) were placed flush to the old 301.5′ edge. The bumps never re-anchored, so each froze at `cx 4.19` — inner edge `−25.81`, **13.5′ INSIDE** the host's current right edge (`−12.32`), straddling the truck-court seam. The truck-court child *did* re-anchor; only the dog-ears were skipped (a B362-era gap — dog-ear re-anchoring was added to the live `refitChildren` path AFTER this host was widened).
