@@ -295,6 +295,11 @@ input[type="range"] { height: 18px; }
 .dark-scroll::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-color: var(--chrome-bg); }
 .dark-scroll::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 
+/* Phone header rows scroll sideways but hide the bar (V11) — the swipe is the affordance,
+   a 10px bar under a 35px row would eat the chrome. Content stays fully scroll-reachable. */
+.no-hscrollbar { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
+.no-hscrollbar::-webkit-scrollbar { height: 0; width: 0; display: none; }
+
 @keyframes pf-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .35; transform: scale(.7); }

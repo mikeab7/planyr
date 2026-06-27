@@ -59,7 +59,7 @@ describe("backdropDensity — the fixed whole-page floor (B415)", () => {
     expect(backdropDensity(99999, 99999, 2)).toBeGreaterThan(0.05);
   });
 
-  it("the 16 MP budget (B487) lifts the whole-page floor on a large sheet (was sub-1× at 8 MP)", () => {
+  it("the 16 MP budget (B488) lifts the whole-page floor on a large sheet (was sub-1× at 8 MP)", () => {
     const d = backdropDensity(3456, 2592, 2); // 8 MP gave ~0.95× here; 16 MP gives ~1.34×, still in budget
     expect(d).toBeGreaterThan(1.2);
     expect(Math.floor(3456 * d) * Math.floor(2592 * d)).toBeLessThanOrEqual(BACKDROP_PX_BUDGET * 1.001);
@@ -102,7 +102,7 @@ describe("visibleRegion — the page-rect the detail layer rasterises (B415)", (
     expect(visibleRegion({ scale: 1, tx: 0, ty: 0 }, PAGE, 0, 0)).toBe(null);
   });
 
-  it("the wider default margin (0.40, B487) pre-renders a larger halo than an explicit 0.25 — still in budget", () => {
+  it("the wider default margin (0.40, B488) pre-renders a larger halo than an explicit 0.25 — still in budget", () => {
     const view = { scale: 3, tx: -2972, ty: -1926 }; // zoomed interior window, not clamped to a page edge
     const wide = visibleRegion(view, PAGE, 1400, 900);          // default 0.40
     const narrow = visibleRegion(view, PAGE, 1400, 900, 0.25);

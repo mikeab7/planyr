@@ -602,6 +602,40 @@ const fmtPreds = preds => normPreds(preds).map(p => {
   return s;
 }).join(", ");
 
+// Validate a proposed predecessor list for task `id` against the project's tasks. Returns
+// { preds, selfRemoved, unknownIds, cyclic } where `preds` is the accepted subset with
+//   • self-references dropped (a task can't depend on itself), and
+//   • references to ids that don't exist in this project dropped (they'd render as a live
+//     dependency but do nothing — cascadeDates filters them), and
+//   • references that would create a circular dependency dropped (A→B→A produces silently
+//     arbitrary dates otherwise — cascadeDates doesn't loop, but the result is meaningless).
+// Pure (no React/DOM) so it's unit-testable; the caller surfaces a toast per dropped reason.
+const validatePredEdit = (tasks, id, parsed) => {
+  const list = Array.isArray(parsed) ? parsed : [];
+  const selfRemoved = list.some(p => p && p.id === id);
+  let preds = list.filter(p => p && p.id !== id);
+  const known = new Set((Array.isArray(tasks) ? tasks : []).map(t => t.id));
+  const unknownIds = [...new Set(preds.filter(p => !known.has(p.id)).map(p => p.id))];
+  preds = preds.filter(p => known.has(p.id));
+  // Existing depends-on adjacency (id → [predecessor ids]) from the stored tasks.
+  const predMap = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
+  // A new edge id→p closes a cycle iff p already (transitively) depends on id.
+  const reachesId = startId => {
+    const stack = [startId], seen = new Set();
+    while (stack.length) {
+      const cur = stack.pop();
+      if (cur === id) return true;
+      if (seen.has(cur)) continue; seen.add(cur);
+      (predMap[cur] || []).forEach(x => stack.push(x));
+    }
+    return false;
+  };
+  const accepted = [], cyclic = [];
+  preds.forEach(p => { if (reachesId(p.id)) cyclic.push(p.id); else accepted.push(p); });
+  return { preds: accepted, selfRemoved, unknownIds, cyclic };
+};
+
 // Constrained start of a task given one predecessor dep (MS Project convention)
 // End dates are INCLUSIVE (last working day of task), so:
 //   FS: successor starts NEXT BD after pred.end  (+lag BDs on top)
@@ -709,6 +743,13 @@ const rollupParentDates = tasks => {
   }
   return tasks.map(t => map[t.id]);
 };
+
+// Recompute leaf cascade + parent roll-ups after a STRUCTURAL move (indent / outdent /
+// paste) that changes parentId. Without this the moved task's old and new parents keep
+// stale summary start/end/duration until the next in-subtree date edit happens to run
+// the rollup — the same recompute updateTask runs after a date edit. Pure; preserves
+// array order (so a caller can still renumber afterwards).
+const recomputeAfterStructureChange = tasks => rollupParentDates(cascadeDates(tasks));
 
 let NOW = fdLocal(new Date()); // local "today"; refreshed live by App (focus / midnight rollover)
 
@@ -3552,7 +3593,13 @@ function App() {
         }
         if ('duration' in updates && !('end' in updates))   u.end      = calcEnd(u.start, u.duration);
         else if ('start' in updates && !('end' in updates)) u.end      = calcEnd(u.start, u.duration);
-        else if ('end' in updates && !('start' in updates)) u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : "";
+        else if ('end' in updates && !('start' in updates)) {
+          // Setting a Finish on a task that has no Start: anchor a 1-day task on that date
+          // instead of leaving duration "" (which rendered a bare "d") and letting the
+          // cascade wipe the just-typed finish (calcEnd("",…) === "").
+          if (u.end && !u.start) { u.start = u.end; u.duration = 1; }
+          else u.duration = (u.start && u.end) ? Math.max(0, difBD(u.start, u.end) + 1) : 0;  // numeric 0, never "" (no bare "d")
+        }
         // Duration-only: pin start but flag as direct edit so cascadeDates re-anchors from predecessor
         // duration-only edit: no pinning needed — cascade will re-anchor from predecessor or keep current start
         // Start directly set (drag/manual date): pin position, successors still cascade from new end
@@ -3946,7 +3993,7 @@ function App() {
         if (t.id === newParent.id) return {...t, isExpanded: true, focused: false};
         return t;
       });
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(sortByVisualOrder(newTasks))}}};
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
     });
   }, [selectedId]);
 
@@ -3980,7 +4027,7 @@ function App() {
       const reordered = [...withoutSel];
       reordered.splice(insertAfter + 1, 0, updated.find(t => t.id === sel.id));
 
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(sortByVisualOrder(reordered))}}}; 
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(reordered)))}}};
     });
   }, [selectedId]);
 
@@ -4174,7 +4221,9 @@ function App() {
       }
 
       // Normalize ordering/IDs, and record where the pasted root landed so we can select it.
-      const sorted = sortByVisualOrder(final);
+      // recomputeAfterStructureChange refreshes parent roll-ups for the new placement (it
+      // preserves array order + ids, so the rootIdx lookup below stays valid).
+      const sorted = recomputeAfterStructureChange(sortByVisualOrder(final));
       const rootTempId = idMap[cb.sourceRootId];
       const rootIdx = sorted.findIndex(t => t.id === rootTempId);
       pasteSelectRef.current = rootIdx >= 0 ? rootIdx + 1 : null; // renumberTasks assigns id = index + 1
@@ -4227,7 +4276,7 @@ function App() {
         if (t.id === newParent.id) return {...t, isExpanded: true, focused: false};
         return t;
       });
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(sortByVisualOrder(newTasks))}}};
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(newTasks)))}}};
     });
   }, []);
 
@@ -4257,7 +4306,7 @@ function App() {
       const reordered = [...withoutSel];
       reordered.splice(insertAfter + 1, 0, updated.find(t => t.id === sel.id));
 
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(sortByVisualOrder(reordered))}}};
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(sortByVisualOrder(reordered)))}}};
     });
   }, []);
 
@@ -5967,15 +6016,27 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const handleScroll = e => { setScrollTop(e.currentTarget.scrollTop); if (onScroll) onScroll(e); };
 
   const applyUpdate = (id, col, val) => {
-    if (col==="start"||col==="end") { const p=parseFlexDate(val); if(p) updateTask(id,{[col]:p}); }
+    if (col==="start"||col==="end") {
+      const raw = String(val ?? "").trim();
+      if (!raw) { updateTask(id,{[col]:""}); return; }                  // cleared → unschedule that endpoint (was: silently reverted)
+      const p = parseFlexDate(raw);
+      if (!p) { showToast("Couldn't read that date — try M/D or M/D/YY"); return; }  // was: silently reverted, no feedback
+      if (col==="end") {
+        const t = tasks.find(x => x.id === id);
+        if (t && t.start && p < t.start) { showToast("Finish can't be before Start — change the Start date first."); return; }  // was: silently collapsed to a 0-day milestone, losing the typed date
+      }
+      updateTask(id,{[col]:p});
+    }
     else if (col==="percentComplete") updateTask(id,{percentComplete:Math.max(0,Math.min(100,parseInt(val)||0))});
     else if (col==="duration") updateTask(id,{duration:Math.max(0,Math.min(100000,parseInt(val)||0))});  // upper clamp: no real schedule needs >100k working days; stops a fat-fingered freeze
     else if (col==="predecessors") {
-      // Fix #16: strip self-references — a task can't be its own predecessor
-      const parsed = parsePreds(val);
-      const selfRemoved = parsed.some(p => p.id === id);
-      const preds = parsed.filter(p => p.id !== id);
+      // Drop self-references (Fix #16), references to ids that don't exist, and references
+      // that would create a circular dependency — each surfaced with a toast so the edit is
+      // honest rather than silently stored-but-inert / silently-wrong.
+      const { preds, selfRemoved, unknownIds, cyclic } = validatePredEdit(proj?.tasks || tasks, id, parsePreds(val));
       if (selfRemoved) showToast(`Task ${id} can't be its own predecessor — removed.`);
+      else if (cyclic.length) showToast(`That would create a circular dependency (task ${cyclic.join(", ")}) — ignored.`);
+      else if (unknownIds.length) showToast(`No task ${unknownIds.join(", ")} in this project — ignored.`);
       updateTask(id, {predecessors: preds});
     }
     else if (col==="health"||col==="status") updateTask(id,{health:val});
@@ -6861,7 +6922,7 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
     case "duration":
       return <span style={{...s,...mono,color: task.hasChildren ? "#94a3b8" : "var(--mut)"}}
         title={task.hasChildren ? "Computed from subtasks" : undefined}>
-        {task.duration}d
+        {(task.duration === "" || task.duration == null) ? "" : task.duration + "d"}
       </span>;
     case "predecessors": {
       const preds = normPreds(task.predecessors);
@@ -8086,7 +8147,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     // Only call updateTask if the value actually changed — prevents no-op edits
     // from triggering cascadeDates and shifting successor start dates
     if (col==="duration") {
-      const nv = Math.max(0, parseInt(val)||0);
+      const nv = Math.max(0, Math.min(100000, parseInt(val)||0));  // upper clamp matches the project grid (line ~5972) — stops a fat-fingered freeze
       if (nv !== t.duration) updateTask(t.id, {duration: nv}, t.projId);
     } else if (col==="health") {
       if (val !== t.health) updateTask(t.id, {health: val}, t.projId);
@@ -9441,10 +9502,10 @@ td{padding:4px 6px;vertical-align:middle;line-height:1.3}
   <div class="dh-left">
     ${cfg.exhibitLabel?`<div class="exhibit">${escapeHtml(cfg.exhibitLabel)}</div>`:""}
     <div class="title">${escapeHtml(cfg.projectTitle)}</div>
-    ${cfg.preparedFor?`<div class="subline">Prepared for: <strong>${cfg.preparedFor}</strong></div>`:""}
+    ${cfg.preparedFor?`<div class="subline">Prepared for: <strong>${escapeHtml(cfg.preparedFor)}</strong></div>`:""}
   </div>
   <div class="dh-right">
-    <div>Date:&nbsp;<strong>${cfg.docDate}</strong></div>
+    <div>Date:&nbsp;<strong>${escapeHtml(cfg.docDate)}</strong></div>
     ${cfg.preparedBy?`<div>Prepared by:&nbsp;<strong>${escapeHtml(cfg.preparedBy)}</strong></div>`:""}
     ${cfg.confidential?`<div class="conf">${escapeHtml(cfg.confidential)}</div>`:""}
   </div>
