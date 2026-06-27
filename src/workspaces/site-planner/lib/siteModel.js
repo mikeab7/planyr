@@ -15,7 +15,7 @@
  * `kind` into their semantic meaning.
  */
 
-export const SITE_MODEL_VERSION = 8;
+export const SITE_MODEL_VERSION = 9;
 
 // Markup `kind`s grouped by what they MEAN (used by the selectors).
 export const EASEMENT_KINDS = ["encumbrance", "easement"];        // title metes-and-bounds tracts/corridors + first-class easement objects (NEW-1)
@@ -41,7 +41,8 @@ const normStatus = (s, fallback) => (STATUSES.includes(s) ? s : fallback);
 // A record already stamped with an older schemaVersion predates the status feature,
 // so a record with NO explicit status is presumed live → "active". Records v3+ carry
 // an explicit status, so the version bump (→6 B276 delete-tombstones, →7 B362/B363
-// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId) doesn't disturb it. (saveSite re-normalizes
+// bump-out sizing + bonded-rotation repair, →8 team sharing teamId/ownerId, →9 cross-module
+// schedule link hint scheduleProjectId/Name) doesn't disturb it. (saveSite re-normalizes
 // through this, so the status it reads back is the explicit one when a status was passed in.)
 const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVersion < SITE_MODEL_VERSION;
 // Type-confusion guards: a tampered/legacy/bad-sync record can carry a non-array where an array is
@@ -122,6 +123,17 @@ export function createSiteModel(p = {}) {
     // flat + back-compatible: an old record has neither → both null → behaves exactly as before.
     teamId: p.teamId || null,
     ownerId: p.ownerId || null,
+    // cross-module connection hint (B-cross-module, schema v9; additive). A project (= site
+    // group) and a Schedule (Sequence Planyr) project live in SEPARATE cloud backends that
+    // can't read each other, so the canonical pairing is stored on the schedule record
+    // (`linkedSiteId`). This is a lightweight MIRROR of that pairing kept on the site so the
+    // Site Planner can answer "does this site have a schedule?" instantly — without booting the
+    // hidden Schedule iframe. `scheduleProjectId` = the schedule's numeric project id;
+    // `scheduleProjectName` = its name cached for display. Both null = no linked schedule
+    // (every existing record). Never the source of truth — the Shell re-mirrors it whenever the
+    // schedule reports a link change, so a stale hint self-heals on the next visit.
+    scheduleProjectId: p.scheduleProjectId != null ? p.scheduleProjectId : null,
+    scheduleProjectName: p.scheduleProjectName || null,
     // geo anchor + jurisdiction
     origin: p.origin || null,
     county: p.county || null,
