@@ -284,3 +284,107 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
     expect(src).toMatch(/skip a null\/garbage custom status/);
   });
 });
+
+// ── Schedule INPUT hardening (2026-06-27) ──────────────────────────────────
+// Bugs found in how a user's typed/edited values flow into the model.
+
+describe("validatePredEdit — predecessor input guards (self / unknown / cycle)", () => {
+  const tasks = [
+    { id: 1, predecessors: [] },
+    { id: 2, predecessors: [{ id: 1, type: "FS", lag: 0 }] },
+    { id: 3, predecessors: [{ id: 2, type: "FS", lag: 0 }] },
+  ];
+  const FS = id => ({ id, type: "FS", lag: 0 });
+
+  it("passes a normal predecessor through untouched", () => {
+    const r = E.validatePredEdit(tasks, 4, [FS(1)]);
+    expect(r.preds).toEqual([FS(1)]);
+    expect(r.selfRemoved).toBe(false);
+    expect(r.unknownIds).toEqual([]);
+    expect(r.cyclic).toEqual([]);
+  });
+  it("drops a self-reference and flags it", () => {
+    const r = E.validatePredEdit(tasks, 2, [FS(2)]);
+    expect(r.preds).toEqual([]);
+    expect(r.selfRemoved).toBe(true);
+  });
+  it("drops a reference to a nonexistent task id and reports it", () => {
+    const r = E.validatePredEdit(tasks, 2, [FS(99)]);
+    expect(r.preds).toEqual([]);
+    expect(r.unknownIds).toEqual([99]);
+  });
+  it("rejects a predecessor that closes a multi-hop cycle (1→3 with 3→2→1)", () => {
+    const r = E.validatePredEdit(tasks, 1, [FS(3)]);
+    expect(r.cyclic).toEqual([3]);
+    expect(r.preds).toEqual([]);
+  });
+  it("rejects a direct two-node cycle (1↔2)", () => {
+    const r = E.validatePredEdit(tasks, 1, [FS(2)]);
+    expect(r.cyclic).toEqual([2]);
+    expect(r.preds).toEqual([]);
+  });
+  it("keeps the valid predecessor of a mixed set, dropping only the cyclic one", () => {
+    const t2 = [...tasks, { id: 4, predecessors: [] }];
+    const r = E.validatePredEdit(t2, 1, [FS(3), FS(4)]);
+    expect(r.cyclic).toEqual([3]);
+    expect(r.preds).toEqual([FS(4)]);
+  });
+  it("never throws on junk input", () => {
+    expect(() => E.validatePredEdit(null, 1, null)).not.toThrow();
+    expect(() => E.validatePredEdit(tasks, 1, "nope")).not.toThrow();
+    expect(E.validatePredEdit(tasks, 1, [null, undefined]).preds).toEqual([]);
+  });
+});
+
+describe("recomputeAfterStructureChange — parents roll up after an indent/outdent/paste move", () => {
+  it("a task moved under a parent expands the parent's start/end to cover it", () => {
+    // 'Phase B' (id 2) currently a short parent; move the long leaf (id 3) under it.
+    const tasks = [
+      { id: 1, name: "Phase B", start: "2026-03-02", end: "2026-03-04", duration: 3, predecessors: [], parentId: null },
+      { id: 2, name: "Sub", start: "2026-03-02", end: "2026-03-04", duration: 3, predecessors: [], parentId: 1 },
+      { id: 3, name: "Survey", start: "2026-01-05", end: "2026-01-30", duration: 20, predecessors: [], parentId: 1 },
+    ];
+    const out = E.rollupParentDates(E.cascadeDates(tasks));
+    const parent = out.find(t => t.id === 1);
+    expect(parent.start).toBe("2026-01-05"); // min child start
+    expect(parent.end).toBe("2026-03-04");   // max child end
+  });
+});
+
+describe("anti-drift: the schedule-input fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("export cover Date + Prepared-for are HTML-escaped", () => {
+    expect(src).toMatch(/Prepared for: <strong>\$\{escapeHtml\(cfg\.preparedFor\)\}/);
+    expect(src).toMatch(/Date:&nbsp;<strong>\$\{escapeHtml\(cfg\.docDate\)\}/);
+  });
+  it("the master grid clamps duration the same way the project grid does", () => {
+    expect(src).toMatch(/Math\.max\(0, Math\.min\(100000, parseInt\(val\)\|\|0\)\)/);
+  });
+  it("indent/outdent/paste recompute roll-ups after a structural move", () => {
+    expect(src).toMatch(/const recomputeAfterStructureChange = tasks => rollupParentDates\(cascadeDates\(tasks\)\);/);
+    // every structural-move handler routes through it (5 call sites)
+    expect((src.match(/renumberTasks\(recomputeAfterStructureChange\(/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect(src).toMatch(/recomputeAfterStructureChange\(sortByVisualOrder\(final\)\)/);
+  });
+  it("setting Finish on a startless task anchors a 1-day task (no bare 'd', no lost date)", () => {
+    expect(src).toMatch(/if \(u\.end && !u\.start\) \{ u\.start = u\.end; u\.duration = 1; \}/);
+  });
+  it("the duration cell never renders a bare 'd'", () => {
+    expect(src).toMatch(/\(task\.duration === "" \|\| task\.duration == null\) \? "" : task\.duration \+ "d"/);
+  });
+  it("grid date input clears, gives feedback on junk, and rejects Finish-before-Start", () => {
+    expect(src).toMatch(/Couldn't read that date/);
+    expect(src).toMatch(/Finish can't be before Start/);
+    expect(src).toMatch(/if \(!raw\) \{ updateTask\(id,\{\[col\]:""\}\); return; \}/);
+  });
+  it("predecessor edits go through validatePredEdit (self / unknown / cycle)", () => {
+    expect(src).toMatch(/validatePredEdit\(proj\?\.tasks \|\| tasks, id, parsePreds\(val\)\)/);
+    expect(src).toMatch(/would create a circular dependency/);
+    expect(src).toMatch(/const validatePredEdit = \(tasks, id, parsed\) =>/);
+  });
+  it("the engine mirror carries validatePredEdit verbatim", () => {
+    expect(sjsx).toMatch(/export const validatePredEdit = \(tasks, id, parsed\) =>/);
+  });
+});
