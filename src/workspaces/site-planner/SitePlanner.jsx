@@ -56,7 +56,8 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
-import { addedAreaLabelPoint, pondContours, smoothRing, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
+import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
+import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
@@ -405,29 +406,37 @@ const pointInRing = (pt, ring) => {
 /* Detention storage for a pond whose drawn footprint is TOP-OF-BANK, with
  * `slope`:1 (H:V) interior side slopes — so the basin tapers inward with depth
  * (not a vertical-wall box). Water surface sits `freeboard` below top of bank.
- * Stored volume uses the prismoidal (Simpson) rule over the water column, which
- * is exact for linear side slopes. Areas come from inward polygon offsets:
- * offset = slope × (depth below top of bank). Returns areas (sf) + volume. */
+ * Stage areas come from a ROBUST inward offset (clipper-lib offsetInward, B500) —
+ * offset = slope × (depth below top of bank) — which pinches off cleanly when the
+ * opposing slopes meet (no bogus inverted-ring area). Stored volume is the
+ * average-end-area method over the water column, integrated only over the slabs
+ * that actually exist, so a basin that daylights before full depth never inflates
+ * the number. `feasible`/`maxDepth` report whether the footprint can hold the
+ * design depth at this slope (maxDepth = max inscribed reach / slope). */
+let _detCache = null; // 1-entry memo: panel + label + chip all call this with the same args per frame
 function detentionStorage(ring, depth, freeboard, slope) {
-  const sgnArea = (r) => { let a = 0; for (let i = 0, m = r.length; i < m; i++) { const p = r[i], q = r[(i + 1) % m]; a += p.x * q.y - q.x * p.y; } return a / 2; };
-  const ringSgn = sgnArea(ring);
-  const areaAt = (down) => { // wetted/section area at `down` ft below top of bank
-    if (down <= 0) return polyArea(ring);
-    const r = offsetPolygon(ring, slope * down);
-    if (!r) return 0; // offset collapsed to nothing
-    // An over-taper makes offsetPolygon return an inverted/self-intersecting ring whose
-    // |area| is bogus; a winding-sign flip vs. the footprint means the basin tapered
-    // PAST a point → zero area (so the "tapers to a point" guard can fire) (B60).
-    if (ringSgn === 0 || sgnArea(r) * ringSgn <= 0) return 0;
-    return polyArea(r);
-  };
+  const sig = `${depth}|${freeboard}|${slope}|${ring.length}|${ring[0] ? `${ring[0].x.toFixed(2)},${ring[0].y.toFixed(2)}` : ""}|${polyArea(ring).toFixed(1)}`;
+  if (_detCache && _detCache.sig === sig) return _detCache.val;
+  const areaAt = (down) => (down <= 0 ? polyArea(ring) : ringsArea(offsetInward(ring, slope * down)));
+  const maxDepth = slope > 0 ? maxInwardOffset(ring) / slope : 0;
   const aTop = polyArea(ring);
-  const dw = Math.max(0, depth - freeboard);       // water depth
+  const dw = Math.max(0, depth - freeboard);       // design water depth
   const aWater = areaAt(freeboard);                 // water surface
-  const aBottom = areaAt(depth);                    // basin bottom
-  const aMid = areaAt(freeboard + dw / 2);
-  const vol = dw > 0 ? (dw / 6) * (aBottom + 4 * aMid + aWater) : 0; // cu ft
-  return { aTop, aWater, aBottom, dw, vol };
+  const aBottom = areaAt(depth);                    // basin floor (0 if it daylights first)
+  // Average-end-area over the column from the water surface to the achievable floor
+  // (min of design depth and what the footprint can actually grade to), ~1-ft slabs.
+  const floor = Math.min(depth, maxDepth);
+  let vol = 0;
+  if (floor > freeboard) {
+    const step = 1;
+    for (let d = freeboard; d < floor - 1e-9; d += step) {
+      const h = Math.min(step, floor - d);
+      vol += ((areaAt(d) + areaAt(d + h)) / 2) * h;
+    }
+  }
+  const val = { aTop, aWater, aBottom, dw, vol, feasible: depth <= maxDepth + 0.05, maxDepth };
+  _detCache = { sig, val };
+  return val;
 }
 
 /* ------------------- utility service routing (elec/water) ------------------ */
@@ -5382,8 +5391,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             : Math.min(el.w, el.h);
           if (detailLabelVisible(pminFt, view.ppf)) {
             const d = el.det || {};
-            const r = detentionStorage(poly ? el.points : elCorners(el), d.depth ?? 8, d.freeboard ?? 1, d.slope ?? 3);
-            if (r.vol > 0) lines.push(`Holds ${f2(r.vol / SQFT_PER_ACRE)} ac-ft · ${f1(r.dw)}′ deep`);
+            const fb = d.freeboard ?? 1;
+            const r = detentionStorage(poly ? el.points : elCorners(el), d.depth ?? 8, fb, d.slope ?? 3);
+            // When the footprint can't grade to the design depth, report the ACHIEVABLE water
+            // depth (max gradeable − freeboard), not the over-stated design depth.
+            const achievableDw = r.feasible ? r.dw : Math.max(0, r.maxDepth - fb);
+            if (r.vol > 0) lines.push(`Holds ${f2(r.vol / SQFT_PER_ACRE)} ac-ft · ${f1(achievableDw)}′ deep${r.feasible ? "" : " (max)"}`);
           }
         }
       }
@@ -8539,9 +8552,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {pondRow("Stored volume", `${f0(r.vol)} cf`)}
                       {pondRow("", `${f2(r.vol / 43560)} ac-ft`)}
                     </div>
-                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>Top-of-bank footprint; basin tapers {slope}:1 — prismoidal volume, screening only.</div>
-                    {r.aBottom === 0 && (
-                      <div style={{ fontSize: 10.5, color: PAL.warn, lineHeight: 1.4, marginTop: 4 }}>⚠ Side slopes meet before full depth — reduce the depth or the side slope.</div>
+                    <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 6 }}>Top-of-bank footprint; basin tapers {slope}:1 — average-end-area volume, screening only.</div>
+                    {!r.feasible && (
+                      <div style={{ fontSize: 10.5, color: PAL.danger, lineHeight: 1.4, marginTop: 4, fontWeight: 700 }}>
+                        ⚠ This footprint can't hold an {f1(depth)}′ pond at {slope}:1 side slopes — the opposing slopes meet at about {f1(r.maxDepth)}′ deep. The volume above is for that {f1(r.maxDepth)}′ basin. Reduce the depth, flatten the side slope, or enlarge the footprint.
+                      </div>
                     )}
                     {/* B139 — Expand this pond: enter mode (auto-baseline + ghost), then steppers
                         (push banks out / dig deeper) or free drag feed one Existing→Proposed delta. */}
@@ -9470,13 +9485,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 }
 
 /* Stage-contour overlay for a detention pond (the "topographic" depth rings inside the
-   basin). Smoothed depth rings, the water-surface and bottom emphasized, each labelled by
-   real elevation (when a top-of-bank elevation is set) or depth below top. DISPLAY-ONLY:
-   the rings/areas come from pondContours (true offset geometry); smoothRing is cosmetic.
-   Default-on (det.contours !== false); zoom-gated so a site overview stays clean; rings
-   whose offset is sub-pixel are skipped (B149 anti-flicker). Points are world feet → f2p;
-   the caller counter-rotates this group for a rotated rect pond. Returns [] when nothing
-   to draw. */
+   basin). Each level's rings come from a ROBUST inward offset (pondContours → clipper-lib),
+   so acute corners round cleanly, a narrowing tail pinches off, and a split basin draws as
+   separate rings — the water-surface and floor emphasized, each labelled by real elevation
+   (when a top-of-bank elevation is set) or depth below top. When the design depth exceeds
+   what the footprint can grade to, draws the real (partial) contours plus a LOUD max-depth
+   callout instead of nonsense. Default-on (det.contours !== false); zoom-gated so a site
+   overview stays clean; rings whose offset is sub-pixel are skipped (B149 anti-flicker).
+   Points are world feet → f2p; the caller counter-rotates this group for a rotated rect
+   pond. Returns [] when nothing to draw. */
 function pondContourEls(el, f2p, ppf, keyPfx = "") {
   if (el.type !== "pond") return [];
   const det = el.det || {};
@@ -9488,30 +9505,34 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
   if (el.points) { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of ring) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } minFt = Math.min(hi - lo, hi2 - lo2); }
   else minFt = Math.min(el.w, el.h);
   if (!detailLabelVisible(minFt, ppf)) return [];
-  const cont = pondContours(ring, det, offsetPolygon);
+  const cont = pondContours(ring, det);
   const slope = cont.meta.slope;
   const toPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+  const largestRing = (rings) => rings.reduce((best, r) => (ringsArea([r]) > ringsArea([best]) ? r : best), rings[0]);
   const out = [];
   // Rings — outer (down=0) is the drawn edge already; skip sub-pixel offsets (anti-flicker).
+  // Each level can hold MULTIPLE rings (a split basin), so draw a path per ring.
   cont.levels.forEach((lv, idx) => {
     if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
-    const d = toPath(smoothRing(lv.ring));
-    if (lv.isWater) {
-      out.push(<path key={`${keyPfx}wf${idx}`} d={d} fill="#3E7C8C" fillOpacity={0.16} stroke="none" pointerEvents="none" />);
-      out.push(<path key={`${keyPfx}w${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={2} opacity={0.95} pointerEvents="none" data-contour="water" />);
-    } else if (lv.isBottom) {
-      out.push(<path key={`${keyPfx}b${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={1.75} strokeDasharray="4 3" opacity={0.9} pointerEvents="none" data-contour="bottom" />);
-    } else {
-      out.push(<path key={`${keyPfx}c${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={0.75} opacity={0.5} pointerEvents="none" data-contour="line" />);
-    }
+    lv.rings.forEach((r, ri) => {
+      const d = toPath(r);
+      if (lv.isWater) {
+        out.push(<path key={`${keyPfx}wf${idx}_${ri}`} d={d} fill="#3E7C8C" fillOpacity={0.16} stroke="none" pointerEvents="none" />);
+        out.push(<path key={`${keyPfx}w${idx}_${ri}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={2} opacity={0.95} pointerEvents="none" data-contour="water" />);
+      } else if (lv.isBottom) {
+        out.push(<path key={`${keyPfx}b${idx}_${ri}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={1.75} strokeDasharray="4 3" opacity={0.9} pointerEvents="none" data-contour="bottom" />);
+      } else {
+        out.push(<path key={`${keyPfx}c${idx}_${ri}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={0.75} opacity={0.5} pointerEvents="none" data-contour="line" />);
+      }
+    });
   });
   // Labels — only the two callouts that matter: the water surface (anchored to the top of its
-  // ring) and the basin floor (anchored to the bottom), so they frame the centred pond name
-  // instead of stacking on it. Real elevation when a datum is set, else depth below top of bank.
+  // largest ring) and the basin floor (anchored to the bottom), so they frame the centred pond
+  // name instead of stacking on it. Real elevation when a datum is set, else depth below top.
   cont.levels.forEach((lv, idx) => {
     if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
     if (!lv.isWater && !lv.isBottom) return;
-    const lp = contourLabelPoint(lv.ring, lv.isBottom ? "bottom" : "top");
+    const lp = contourLabelPoint(largestRing(lv.rings), lv.isBottom ? "bottom" : "top");
     if (!lp) return;
     const q = f2p(lp);
     const lead = lv.isWater ? "WS " : "Floor ";
@@ -9524,14 +9545,15 @@ function pondContourEls(el, f2p, ppf, keyPfx = "") {
         style={{ fontWeight: 700 }}>{txt}</text>,
     );
   });
-  // Over-taper: side slopes meet before full depth — on-canvas echo of the panel warning.
-  if (cont.collapsedAt != null) {
+  // Infeasible: the design depth is deeper than this footprint can grade to at this slope.
+  // We've already drawn the real contours that DO exist; add a loud, specific max-depth call.
+  if (!cont.feasible) {
     const q = f2p(centroid(ring));
     out.push(
       <text key={`${keyPfx}xt`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
-        fontSize={9} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36" stroke="#fff"
-        strokeWidth={2.75} paintOrder="stroke" pointerEvents="none" data-contour="collapsed"
-        style={{ fontWeight: 700 }}>✕ slopes meet</text>,
+        fontSize={9.5} fontFamily="Inter, system-ui, sans-serif" fill="#B3361B" stroke="#fff"
+        strokeWidth={2.9} paintOrder="stroke" pointerEvents="none" data-contour="infeasible"
+        style={{ fontWeight: 800 }}>⚠ Too deep — max ≈ {f1(cont.maxDepth)}′ at {f0(slope)}:1</text>,
     );
   }
   return out;
