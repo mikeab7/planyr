@@ -280,7 +280,7 @@ describe("footprintDepth — building depth is the dock-normal span, never the f
   });
 });
 
-describe("footprintAxes / footprintLength — the dock-parallel counterpart of depth (B542)", () => {
+describe("footprintAxes / footprintLength — the dock-parallel counterpart of depth (B544)", () => {
   it("resolves depth and length to the two perpendicular footprint axes, dock-relative", () => {
     // The EXACT reported case — el.w 328 × el.h 1159: h>w → docks ride left/right → depth is the
     // horizontal (w) span = 328, length the vertical (h) span = 1159. The panel must read

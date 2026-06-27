@@ -49,13 +49,9 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/CHROME = "var\(--surface-raised\)"/);
   });
 
-  it("B527: the Project Files drawer themes its panel + controls (no white slab / invisible text in dark mode)", () => {
-    const src = read("../src/workspaces/doc-review/components/ProjectFilesDrawer.jsx");
-    expect(src).not.toMatch(/background: "#fff"/);                              // panel/control backgrounds were hardcoded white
-    expect(src).not.toMatch(/#92400e|#2c2a26|#4b5563|#6b7280|#b45309|#fffbeb/); // hardcoded light text / cream-box hexes
-    expect(src).toMatch(/paper: "var\(--surface-raised\)"/);                    // PAL is token-backed
-    expect(src).toMatch(/color: "var\(--warn-text\)"/);                         // amber labels themed
-  });
+  // B527's guard (Project Files drawer dark-mode theming) was retired with the drawer itself:
+  // the redundant 🗂 Files button + ProjectFilesDrawer.jsx were removed once the Library tab
+  // replaced them (B497). No component left to theme-guard.
 
   it("B517: the TxRRC well/pipeline overlay no longer points at the retired Harris-clipped host", () => {
     const src = read("../src/workspaces/site-planner/lib/layers.js");
@@ -91,6 +87,54 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     const src = read("../src/workspaces/site-planner/lib/supabase.js");
     // the JSON.parse now lives inside a nested try whose catch continues the loop
     expect(src).toMatch(/corrupt entry — skip and keep scanning/);
+  });
+
+  it("B530: AuthPanel modals close on Escape and announce as a dialog", () => {
+    const src = read("../src/workspaces/site-planner/components/AuthPanel.jsx");
+    expect(src).toMatch(/role="dialog"/);
+    expect(src).toMatch(/e\.key === "Escape"/);
+  });
+
+  it("B531: the ReviewsBar row and the SitePlanner Section header are keyboard-reachable", () => {
+    const rb = read("../src/workspaces/doc-review/components/ReviewsBar.jsx");
+    expect(rb).toMatch(/role="button" tabIndex=\{0\}/);
+    expect(rb).toMatch(/e\.key === "Enter" \|\| e\.key === " "/);
+    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(sp).toMatch(/className="sec-head"[\s\S]{0,200}role="button" tabIndex=\{0\} aria-expanded=\{open\}/);
+  });
+
+  it("B532: the Site review modal closes on Escape and announces as a dialog", () => {
+    const src = read("../src/workspaces/site-planner/components/SiteReviewModal.jsx");
+    expect(src).toMatch(/role="dialog"/);
+    expect(src).toMatch(/e\.key === "Escape"/);
+  });
+
+  it("B528: Doc Review upsertReview serializes per-id writes (no false self-conflict)", () => {
+    const src = read("../src/workspaces/doc-review/lib/reviewStore.js");
+    expect(src).toMatch(/makeWriteSerializer/);
+    expect(src).toMatch(/serializeReviewWrite\(record\.id, \(\) => upsertReviewCore\(record\)\)/);
+  });
+
+  it("B529: Site Planner cloudUpsert serializes per-id writes (no false self-conflict)", () => {
+    const src = read("../src/workspaces/site-planner/lib/cloudSync.js");
+    expect(src).toMatch(/makeWriteSerializer/);
+    expect(src).toMatch(/serializeSiteWrite\(model\.id, \(\) => cloudUpsertCore\(uid, model\)\)/);
+  });
+
+  it("B540: geocodeAddress distinguishes 'unreachable' from 'not found' (returns { error } vs null)", () => {
+    const src = read("../src/workspaces/site-planner/lib/geocode.js");
+    expect(src).toMatch(/reachedAny/);
+    expect(src).toMatch(/return reachedAny \? null : \{ error:/);
+    // both callers handle the { error } shape
+    expect(read("../src/workspaces/site-planner/MapFinder.jsx")).toMatch(/hit && hit\.error/);
+    expect(read("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/hit && hit\.error/);
+  });
+
+  it("B541: CloudSyncBadge boundary resets via resetKey, not a remount key (popover survives state churn)", () => {
+    const src = read("../src/shared/ui/CloudSyncBadge.jsx");
+    expect(src).not.toMatch(/<CloudBadgeBoundary key=/);     // no longer remounted on every state change
+    expect(src).toMatch(/resetKey=\{String\(state/);          // passes a reset signal instead
+    expect(src).toMatch(/prevProps\.resetKey !== this\.props\.resetKey/); // and clears a crash on its change
   });
 
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {

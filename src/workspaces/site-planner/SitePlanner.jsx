@@ -23,7 +23,6 @@ import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
-import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
@@ -144,6 +143,10 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
+  // B543 — deed/title launcher glyph: a document page (folded corner) over a few
+  // text lines, signalling "read a deed / title commitment". Same currentColor
+  // stroke style (no fill) as the other tool glyphs.
+  deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -1154,7 +1157,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
-  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -4815,6 +4817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
+      if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
       const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
       setAddrQuery("");
@@ -6382,11 +6385,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
-      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
-      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
-        🗂 Files
-      </button>
     </span>
   );
 
@@ -6444,8 +6442,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
             <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-            <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
           </AnchoredMenu>
         </div>
       </div>
@@ -6497,20 +6493,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
 
-      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review.
-          Clicking a file hands the whole review row up to the Shell, which stashes it and
-          switches to Document Review — DR opens it once it mounts. Passing only
-          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
-          (NEW-1). */}
-      <ProjectFilesDrawer
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        signedIn={isCloudActive()}
-        projectId={groupId}
-        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
-        onPlaceOnMap={() => setFilesOpen(false)}
-      />
       {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
           until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
           stay on this device and union-merge in on reload. */}
@@ -7723,6 +7705,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
+          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
+              metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
+              it never gets the active-tool highlight and never calls selectTool (which
+              would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
+              the scrim first so the zIndex:3000 modal isn't shown over a dimmed rail. */}
+          <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
+            data-testid="tool-deed"
+            title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
+            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
+            <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
+          </button>
+
           {railHdr("Site elements")}
 
           {DRAW_TYPES.map((id) => {
@@ -8219,10 +8214,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
                   ) : isBuilding(selEl) ? (() => {
-                    // B542 + B543 — grouped building inspector. Four concept groups (Footprint ·
+                    // B544 + B545 — grouped building inspector. Four concept groups (Footprint ·
                     // Loading · Structure · Placement); headers build hierarchy by weight + size +
                     // uppercase tracking, never by fading (house rule). Footprint dimensions are
-                    // dock-relative (B542): Length runs ALONG the dock wall (dock doors array on it),
+                    // dock-relative (B544): Length runs ALONG the dock wall (dock doors array on it),
                     // Depth PERPENDICULAR to it (dock face → rear; dock-wall → dock-wall for cross-dock),
                     // via footprintAxes/footprintLength/footprintDepth — never a hardcoded X/Y axis, so
                     // they stay correct when docks move walls. resizeSelEl drives the mapped physical edge.
@@ -8240,7 +8235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
                     const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
-                    // B543 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
+                    // B545 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
                     // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
                     const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
                     const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
@@ -8369,7 +8364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </select>
                     </Field>
                   )}
-                  {/* B543 — Clear height/Slab (now under Structure) and the dock-features build-out
+                  {/* B545 — Clear height/Slab (now under Structure) and the dock-features build-out
                       (now under Loading) render inside the grouped building inspector above; only the
                       dog-ear path keeps its standalone Docks control. */}
                   {selEl.type === "parking" && (() => {
@@ -8452,7 +8447,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
-                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B542)
+                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B544)
                       const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
                       return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
                     })()}
@@ -9793,7 +9788,10 @@ function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
     <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      <div className="sec-head" onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
+      <div className="sec-head" onClick={() => setOpen((o) => !o)}
+        role="button" tabIndex={0} aria-expanded={open} aria-label={title}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
+        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
         {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
         <span className="sec-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", flex: 1, transition: "color .12s" }}>{title}</span>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>

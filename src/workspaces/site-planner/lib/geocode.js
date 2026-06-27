@@ -6,23 +6,31 @@
  * (MapFinder) and the planner (SitePlanner) import it.
  *
  * Esri World Geocoding first (keyless, single non-stored lookup, biased to the map/plan centre),
- * Nominatim as the fallback. Returns { lat, lon, label } or null. Pure I/O over fetch — no React.
+ * Nominatim as the fallback. Pure I/O over fetch — no React.
+ *
+ * Return contract (B540 — honest error surfacing, never conflate "down" with "not found"):
+ *   { lat, lon, label }  → a hit.
+ *   null                 → at least one service was REACHED and authoritatively found nothing.
+ *   { error }            → NO service could be reached (offline / blocked / non-OK) — so the
+ *                          caller can say "lookup is unavailable" instead of "address not found".
  */
 export async function geocodeAddress(q, center) {
   const near = center ? `&location=${center.lng},${center.lat}` : "";
+  let reachedAny = false; // did any provider actually respond OK? (distinguishes down vs not-found)
   // 1) Esri World Geocoding Service — single, non-stored lookup (keyless).
   try {
     const u = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates` +
       `?f=json&singleLine=${encodeURIComponent(q)}&maxLocations=1&outFields=Match_addr&countryCode=USA${near}`;
     const r = await fetch(u);
     if (r.ok) {
+      reachedAny = true;
       const j = await r.json();
       const c = j && j.candidates && j.candidates[0];
       if (c && c.location && isFinite(c.location.y) && isFinite(c.location.x)) {
         return { lat: c.location.y, lon: c.location.x, label: c.address || q };
       }
     }
-  } catch (_) { /* fall through to Nominatim */ }
+  } catch (_) { /* unreachable — fall through to Nominatim */ }
   // 2) Nominatim fallback — bias to a ~0.6° viewbox around the centre.
   try {
     let vb = "";
@@ -30,9 +38,11 @@ export async function geocodeAddress(q, center) {
     const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(q)}${vb}`;
     const r = await fetch(u);
     if (r.ok) {
+      reachedAny = true;
       const j = await r.json();
       if (j && j.length) return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name || q };
     }
-  } catch (_) { /* both failed */ }
-  return null;
+  } catch (_) { /* unreachable */ }
+  // Reached a provider but no match → genuinely not found (null). Reached NONE → service is down.
+  return reachedAny ? null : { error: "Address lookup is unavailable right now — check your connection and try again, or pan the map to your site." };
 }

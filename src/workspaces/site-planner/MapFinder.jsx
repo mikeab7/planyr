@@ -899,6 +899,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
     try {
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
+      if (hit && hit.error) { setErr(hit.error); return; } // B540: service unreachable ≠ not found
       if (!hit) { setErr("Couldn't find that address — add the city or ZIP, or just pan the map to it."); return; }
       mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
       await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label); // NEW-2: select + surface parcel info
