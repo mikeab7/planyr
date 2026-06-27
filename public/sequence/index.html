@@ -2219,7 +2219,10 @@ function SgqChangeRow({field, fromVal, toVal, onEditTo, onRemove}) {
 }
 
 function InlineDate({value, onCommit}) {
-  const disp = value ? ((+value.split('-')[1]) + "/" + (+value.split('-')[2])) : "";
+  // B502: keep the YEAR (M/D/YY via toShortDate) — the old month/day-only display made
+  // parseFlexDate default the year to the current year on commit, silently rewriting a
+  // past/future-year date just by opening + blurring the field.
+  const disp = value ? toShortDate(value) : "";
   const [txt, setTxt] = useState(disp);
   useEffect(() => { setTxt(disp); }, [disp]);
   const commit = () => { const isoV = parseFlexDate(txt); if (isoV) onCommit(isoV); else setTxt(disp); };
@@ -3713,7 +3716,10 @@ function App() {
     setData(d => {
       const proj = d.projects[d.aPid];
       if (!proj) return d;
-      return {...d, projects: {...d.projects, [d.aPid]: {...proj, tasks: renumberTasks(proj.tasks.filter(t => !del.has(t.id)))}}};
+      // B501: recompute parent roll-ups + cascade after removal (matching indent/outdent/
+      // paste/move) — else a deleted child leaves the parent summary bar/row showing a stale
+      // span for work that no longer exists, until an unrelated edit re-triggers a rollup.
+      return {...d, projects: {...d.projects, [d.aPid]: {...proj, tasks: renumberTasks(recomputeAfterStructureChange(proj.tasks.filter(t => !del.has(t.id))))}}};
     });
     notifyRowsDeleted(rowCount, totalCount);
   }, []);
@@ -3922,7 +3928,9 @@ function App() {
       const del = new Set();
       const mark = id => { del.add(id); d.projects[pid].tasks.filter(t => t.parentId === id).forEach(t => mark(t.id)); };
       mark(taskId);
-      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(d.projects[pid].tasks.filter(t => !del.has(t.id)))}}};
+      // B501: recompute roll-ups/cascade after removal (see deleteTasks) so a deleted child
+      // doesn't leave its parent summary span stale until the next unrelated edit.
+      return {...d, projects: {...d.projects, [pid]: {...d.projects[pid], tasks: renumberTasks(recomputeAfterStructureChange(d.projects[pid].tasks.filter(t => !del.has(t.id))))}}};
     });
     if (selectedId === taskId) setSelectedId(null);
   }, [selectedId]);
@@ -8248,6 +8256,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const fmtDate = s => {
     if (!s) return "";
     const [y,m,d] = s.split('-');
+    if (!y||!m||!d) return "";   // B503: guard a non-ISO value (matches fmtD) — never render NaN/NaN/yy
     return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2);
   };
 
