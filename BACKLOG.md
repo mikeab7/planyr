@@ -27,15 +27,6 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
      low-risk defect before filing. B510 (Dimension label) was fixed + shipped the same lap
      — B500 was taken by a concurrent pond-grading fix, so the Dimension item is B510. -->
 
-### B501 — Scheduler: deleting a task never recomputes parent roll-ups / cascade → stale summary dates `[Schedule]` (bug) — HIGH  *(bug-hunt 2026-06-27, adversarially confirmed)*
-`[ ]` `deleteTask`/`deleteTasks` (`public/sequence/index.html` ~L3919/L3705) call `renumberTasks(tasks.filter(...))` with NO recompute — every other structural handler (indent/outdent/paste/move) wraps with `recomputeAfterStructureChange = rollupParentDates(cascadeDates(...))` (the exact class B487 fixed). A deleted child leaves the parent summary bar/row showing a span for work that's gone until an unrelated edit re-triggers a rollup. **Fix:** wrap both filtered arrays with `recomputeAfterStructureChange(...)` before renumber (already exists ~L752). Add an engine unit test in `ui-audit/stress/scheduler-engine.mjs` + `test/schedulerEngine.test.js`.
-
-### B502 — Scheduler: InlineDate strips the year → silently rewrites a non-current-year date to this year on commit `[Schedule]` (bug) — MED, data corruption  *(bug-hunt 2026-06-27, adversarially confirmed)*
-`[ ]` `InlineDate` (`public/sequence/index.html` ~L2222) renders month/day only (drops the year); on commit `parseFlexDate` defaults a missing year to the current year, so just opening + Enter/blur mutates a `2025-…` date to `2026-…`. Every other date editor seeds with `toShortDate` (M/D/YY). **Fix:** seed the display with `toShortDate(value)` (keeps the year, reads back losslessly). One-line change.
-
-### B503 — Scheduler: MasterView `fmtDate` lacks the malformed-date guard `fmtD` got in B489 → can render NaN/NaN/yy `[Schedule]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
-`[ ]` The dashboard's inline `fmtDate` (`public/sequence/index.html` ~L8248) splits on `-` with no presence check, unlike the hardened module-level `fmtD` (B489). A non-ISO value renders `NaN/NaN/26`. **Fix:** add `if (!y||!m||!d) return ""` (or reuse `fmtD`).
-
 ### B504 — Site Planner: truck-court paving double-subtracts a corner bump-out footprint → yield understates impervious/coverage `[Site Planner / yield]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
 `[ ]` Since B492, `relayoutSide` trims a same-side truck court IN to the clear face (court `w` already excludes the bump), but the yield loop (`SitePlanner.jsx` ~L4608–4614) STILL subtracts the bump's full footprint from `paving` (stale comment "a dog-ear sits inside its truck court footprint"). Net: paving/impervious understated by the bump area (~3300 sf default), `open` overstated by the same. Only fires with a building that has both a same-side court AND a corner bump-out. **Fix:** remove the now-spurious L4608–4614 de-double-count block. Verify against pondGeom/area conventions.
 

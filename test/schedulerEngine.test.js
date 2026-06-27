@@ -76,6 +76,26 @@ describe("rollupParentDates — orphaned parentId must not crash the recompute",
   });
 });
 
+describe("B501 — deleting a task must recompute parent roll-ups (no stale summary span)", () => {
+  it("recomputeAfterStructureChange after removing a child shrinks the parent to the survivor", () => {
+    // Durations drive the cascade (06-22 is a Monday): child 2 = 1 BD → ends 06-22;
+    // child 3 = 5 BD → ends 06-26 (Fri). recompute = rollupParentDates(cascadeDates(...)).
+    const tasks = [
+      T(1, { parentId: null }),
+      T(2, { parentId: 1, start: "2026-06-22", duration: 1 }),
+      T(3, { parentId: 1, start: "2026-06-22", duration: 5 }),
+    ];
+    // Parent spans both children.
+    expect(E.rollupParentDates(E.cascadeDates(tasks)).find((t) => t.id === 1).end).toBe("2026-06-26");
+    // Delete the later child (id 3). The fix wraps the filtered list with the same recompute
+    // the indent/outdent handlers use; without it the parent would keep the stale 06-26 end.
+    const afterDelete = tasks.filter((t) => t.id !== 3);
+    const recomputed = E.rollupParentDates(E.cascadeDates(afterDelete)).find((t) => t.id === 1);
+    expect(recomputed.end).toBe("2026-06-22");   // shrunk to the surviving child
+    expect(recomputed.start).toBe("2026-06-22");
+  });
+});
+
 describe("parseFlexDate — reject garbage and impossible calendar dates", () => {
   it("accepts real flexible dates", () => {
     expect(E.parseFlexDate("6/22/26")).toBe("2026-06-22");
@@ -282,6 +302,16 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
   it("rebuildHEALTH guards corrupt custom-status settings", () => {
     expect(src).toMatch(/\(Array\.isArray\(custom\) \? custom : \[\]\)\.forEach/);
     expect(src).toMatch(/skip a null\/garbage custom status/);
+  });
+  it("B501: both delete handlers recompute roll-ups (renumberTasks(recomputeAfterStructureChange(...filter)))", () => {
+    const calls = src.match(/renumberTasks\(recomputeAfterStructureChange\([^)]*\.filter\(t => !del\.has\(t\.id\)\)\)\)/g) || [];
+    expect(calls.length).toBeGreaterThanOrEqual(2);   // deleteTask + deleteTasks
+  });
+  it("B502: InlineDate seeds its display with toShortDate (keeps the year)", () => {
+    expect(src).toMatch(/const disp = value \? toShortDate\(value\) : "";/);
+  });
+  it("B503: MasterView fmtDate guards a non-ISO value before formatting", () => {
+    expect(src).toMatch(/if \(!y\|\|!m\|\|!d\) return "";\s*\/\/ B503/);
   });
 });
 
