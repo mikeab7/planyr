@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V160 — B511/B516: legacy-prune data-loss guard (signed-in) + scheduler cross-origin guard ✅ unit/parse here; ⏳ two runtime checks owed
+- **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** **B511** — `pruneMigratedLegacy` now compares timestamps before deleting an on-device site, so a newer logged-out edit can't be silently dropped on sign-in. **B516** — the three scheduler preview-iframe postMessage handlers now enforce a same-origin check.
+- **✅ Verified here (no browser).** `npm test` 1716 incl. B511 unit tests (keeps-newer / prunes-same-or-older / keeps-cloud-absent) and the esbuild parse of the scheduler block; lint 0 · build green.
+- **⏳ Why pending (auth / cross-origin, not drivable logged-out here).** (B511) Signed-in end-to-end: create a site logged-out → sign in and migrate it → sign out → edit it logged-out → sign back in → confirm the newer edit survives (and still appears, not silently dropped). (B516) Confirm a cross-origin page framing `/sequence/` can no longer mutate the export config via a `planarColResize` postMessage (and the legitimate same-origin preview still resizes/collapses).
+- Cadence: once after ship.
+
 ### V159 — B505–B509: bug-hunt round 2 (stuck-spinner error paths, LayerPanel dark-mode tokens, PropertyPanel a11y) ✅ unit/anti-drift + lint/build here; ⏳ live checks owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** Five confirmed bug-hunt fixes: **B505** Stitcher `loadStitch` now `.catch`-consumes a failed load (no stuck `pendingStitch`); **B506/B507** the two device-full `pushModelToCloud().then` paths got a `.catch` so a rejected push can't strand the save badge/banner on "saving"; **B508** the LayerPanel Relevance control + stale stamp use theme tokens (`--accent`/`--on-accent`/`--warn-text`) instead of hardcoded warm-dark hex (was dark-on-dark in dark mode); **B509** PropertyPanel number/range/enum/color controls now carry an `aria-label` (the caption was a detached `<div>`).
 - **✅ Verified here (no browser).** `npm test` **1703** incl. `test/bugHuntGuards.test.js` anti-drift guards for all five; `npm run lint` 0 · `npm run build` green.

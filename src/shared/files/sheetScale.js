@@ -61,9 +61,23 @@ export function parseSheetScale(text) {
   const eng = t.match(/1\s*(?:"|in(?:ch)?)\s*=\s*(\d{1,4})\s*(?:['′]|ft\b|feet\b)/i);
   if (eng) { const s = +eng[1]; if (s >= 1 && s <= 2000) return { ftPerInch: s, form: "engineer", label: `1"=${s}'` }; }
 
-  // 4) Ratio: 1:200  (1 paper unit = N real units → N/12 feet per paper inch)
-  const ratio = t.match(/\b1\s*:\s*(\d{1,5})\b/);
-  if (ratio) { const n = +ratio[1]; if (n >= 2 && n <= 10000) return { ftPerInch: n / 12, form: "ratio", label: `1:${n}` }; }
+  // 4) Ratio: 1:200  (1 paper unit = N real units → N/12 feet per paper inch). GUARDED (B512):
+  //    a rise:run SLOPE/grade callout ("MAX SLOPE 1:4", "1:3 TYP") or a clock time ("1:30 PM")
+  //    printed in the drawing body must NOT be misread as the drawing scale — that silently
+  //    auto-mis-calibrated the whole stitched group. Skip any "1:N" whose surrounding text
+  //    carries a slope/grade keyword or that is immediately followed by AM/PM. The engineer/
+  //    arch/NTS steps run first, so a sheet with a real stated scale is unaffected.
+  const SLOPE_KW = /slope|grade|grad\b|pitch|batter|ratio|h\s*:\s*v|v\s*:\s*h|\btyp\b|\bmax\b|\bmin\b/i;
+  const ratioRe = /\b1\s*:\s*(\d{1,5})\b/g;
+  let rm;
+  while ((rm = ratioRe.exec(t))) {
+    const n = +rm[1];
+    if (n < 2 || n > 10000) continue;
+    const ctx = t.slice(Math.max(0, rm.index - 16), rm.index + rm[0].length + 8);
+    if (SLOPE_KW.test(ctx)) continue;                                       // slope/grade callout, not a scale
+    if (/^\s*(a|p)m\b/i.test(t.slice(rm.index + rm[0].length))) continue;   // clock time "1:30 PM"
+    return { ftPerInch: n / 12, form: "ratio", label: `1:${n}` };
+  }
 
   // 5) No numeric plan scale — a bare "NOT TO SCALE" / "NTS" anywhere means uncalibrate.
   if (/\bnot\s*to\s*scale\b/i.test(t) || /\bn\.?t\.?s\.?\b/i.test(t)) {

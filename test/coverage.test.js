@@ -60,6 +60,12 @@ describe("srPointToLatLon — spatial-reference aware", () => {
   it("returns null for an unrecognized SR (→ caller fails open)", () => {
     expect(srPointToLatLon(1, 2, 9999)).toBe(null);
   });
+  it("B515: WKID 102739 (Texas CENTRAL / EPSG:2277) is NOT aliased to 2278 → null, fails open", () => {
+    // 102739 is a different projection (Central zone); running it through the 2278 math produced a
+    // garbage bbox that marked the layer out-of-coverage statewide. It must fail open, not closed.
+    expect(srPointToLatLon(3114226, 10070436, 102739)).toBe(null);
+    expect(esriExtentToBounds({ xmin: 3114226, ymin: 10070436, xmax: 3120000, ymax: 10075000, spatialReference: { wkid: 102739 } })).toBe(null);
+  });
 });
 
 // ---------------------------------------------------------------------------

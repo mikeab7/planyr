@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow } from "../src/workspaces/site-planner/lib/storage.js";
+import { mergePulledSites, saveSite, loadSite, snapshotVersion, listVersions, getVersion, summarizeVersion, backupNow, pruneMigratedLegacy } from "../src/workspaces/site-planner/lib/storage.js";
 import { mergeSiteContent, contentCount, createSiteModel } from "../src/workspaces/site-planner/lib/siteModel.js";
 import { idbAvailable } from "../src/workspaces/site-planner/lib/localDb.js";
 
@@ -228,6 +228,41 @@ describe("version history — every save backs up the prior version (B126)", () 
 
   it("contentCount tallies drawn work across collections", () => {
     expect(contentCount({ els: [bld("a")], parcels: [{ id: "p" }] })).toBe(2);
+  });
+});
+
+// B511 — pruneMigratedLegacy must NOT drop a NEWER on-device (logged-out) site just because an
+// OLDER copy already exists in the cloud. Pruning by id-exists alone was silent data loss (edit
+// while signed out → sign back in → newer local work deleted before the migration modal saw it).
+describe("B511 — pruneMigratedLegacy compares timestamps before deleting", () => {
+  const SITES_KEY = "planarfit:sites:v1";
+  beforeEach(() => {
+    const store = {};
+    globalThis.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      clear: () => { for (const k of Object.keys(store)) delete store[k]; },
+      key: (i) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length; },
+    };
+  });
+  it("keeps a legacy site that is NEWER than the cloud copy", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 200, els: [bld("new")] } }));
+    pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 } }); // cloud has an OLDER x
+    const left = JSON.parse(localStorage.getItem(SITES_KEY));
+    expect(left.x).toBeTruthy();              // newer local work survives
+    expect(left.x.els[0].id).toBe("new");
+  });
+  it("prunes a legacy site the cloud has at the same or newer timestamp (B473 reclamation)", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 100 } }));
+    pruneMigratedLegacy({ x: { id: "x", updatedAt: 100 }, y: { id: "y", updatedAt: 250 } });
+    expect(JSON.parse(localStorage.getItem(SITES_KEY))).toEqual({}); // both reclaimed (cloud same/newer)
+  });
+  it("keeps a legacy site the cloud doesn't have at all", () => {
+    localStorage.setItem(SITES_KEY, JSON.stringify({ z: { id: "z", updatedAt: 50 } }));
+    pruneMigratedLegacy({});                  // empty cloud
+    expect(JSON.parse(localStorage.getItem(SITES_KEY)).z).toBeTruthy();
   });
 });
 

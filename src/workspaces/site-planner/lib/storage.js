@@ -128,13 +128,20 @@ export function clearCloudCache(uid) { try { if (uid) localStorage.removeItem(cl
 // pressure that made writeSites fail → new-site data loss). Drop ONLY ids confirmed present in the cloud
 // map; an un-migrated legacy site (not in the cloud) is KEPT untouched. Runs after a SUCCESSFUL pullCloud
 // (the cloud copy is authoritative). Never throws.
-function pruneMigratedLegacy(cloudMap) {
+export function pruneMigratedLegacy(cloudMap) {
   try {
     const raw = localStorage.getItem(SITES_KEY);
     if (!raw || !cloudMap) return;
     const legacy = JSON.parse(raw) || {};
     let dropped = 0;
-    for (const id of Object.keys(legacy)) { if (cloudMap[id]) { delete legacy[id]; dropped++; } }
+    // B511: prune a migrated legacy site ONLY when the cloud copy is same-or-newer than the
+    // on-device copy. Pruning by id-exists alone silently dropped a NEWER logged-out edit
+    // (edit while signed out → sign back in → the older cloud row exists → the newer local
+    // work was deleted before the migration modal could ever surface it). Mirror the inverse
+    // of pendingLegacyCount's predicate so reclaimed duplicates still get cleaned up.
+    for (const id of Object.keys(legacy)) {
+      if (cloudMap[id] && (cloudMap[id].updatedAt || 0) >= ((legacy[id] && legacy[id].updatedAt) || 0)) { delete legacy[id]; dropped++; }
+    }
     if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
   } catch (_) {}
 }

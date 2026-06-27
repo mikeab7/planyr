@@ -9748,6 +9748,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
   // Collapse toggles fired from the ▾/▸ triangles inside the preview iframe.
   useEffect(() => {
     const onToggle = e => {
+      if (e.origin !== window.location.origin) return;   // B516: same-origin only (matches the nav/toolbar bridges)
       if (!e.data || e.data.type !== "planarToggleCollapse") return;
       const key = e.data.key, c = cfgRef.current, s = new Set(c.collapsedIds || []);
       if (s.has(key)) s.delete(key); else s.add(key);
@@ -9763,6 +9764,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
   // it on the schedule so the tuned exhibit comes back next time.
   useEffect(() => {
     const onResize = e => {
+      if (e.origin !== window.location.origin) return;   // B516: same-origin only — this persists to saved data
       if (!e.data || e.data.type !== "planarColResize") return;
       const { key, w } = e.data;
       if (!key || !(w > 0)) return;
@@ -9810,6 +9812,7 @@ function PDFExportModal({data, activePid, onClose, setData}) {
   useEffect(() => { setIframeH(pageH); }, [pageH]);
   useEffect(() => {
     const handler = e => {
+      if (e.origin !== window.location.origin) return;   // B516: same-origin only (matches the nav/toolbar bridges)
       if (e.data?.type === 'planarPreviewHeight') setIframeH(Math.max(pageH, e.data.h));
     };
     window.addEventListener('message', handler);
