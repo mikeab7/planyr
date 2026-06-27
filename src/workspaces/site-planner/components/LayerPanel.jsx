@@ -81,7 +81,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
           <span style={{ flex: 1, fontSize: compact ? 12 : 12.5, color: INK }}>{cfg.label}</span>
           {age && (ls.state === "loaded" || ls.state === "empty") && (
             <span title={`Cached copy — refreshed ${age}${ls.stale ? " · showing last-good while it refreshes" : ""}. Screening only; verify against the source.`}
-              style={{ fontSize: 9.5, color: ls.stale ? "#b45309" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
+              style={{ fontSize: 9.5, color: ls.stale ? "var(--warn-text)" : MUTED, flex: "none", whiteSpace: "nowrap" }}>{age}</span>
           )}
           {meta && (
             <span title={meta.label} style={{ width: 8, height: 8, borderRadius: 99, flex: "none", background: meta.color,
@@ -161,7 +161,7 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
 
   const segBtn = (active) => ({
     flex: 1, padding: "3px 6px", fontSize: 10.5, fontWeight: active ? 700 : 500, cursor: "pointer",
-    background: active ? "#3b3a36" : "transparent", color: active ? "#fbfaf6" : INK, border: "none",
+    background: active ? "var(--accent)" : "transparent", color: active ? "var(--on-accent)" : INK, border: "none",  // B508: theme tokens, not hardcoded warm-dark hex (was dark-on-dark in dark mode)
   });
 
   return (
