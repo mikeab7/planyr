@@ -137,6 +137,31 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/prevProps\.resetKey !== this\.props\.resetKey/); // and clears a crash on its change
   });
 
+  it("B544: PDF export revokes its blob URL immediately (no 8s leak window)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).not.toMatch(/setTimeout\(\(\) => URL\.revokeObjectURL\(aEl\.href\), 8000\)/);
+    expect(src).toMatch(/URL\.revokeObjectURL\(aEl\.href\); \/\/ B544/);
+  });
+
+  it("B545: MapFinder address search is guarded by a request-token (no stale-response clobber)", () => {
+    const src = read("../src/workspaces/site-planner/MapFinder.jsx");
+    expect(src).toMatch(/addrTokRef = useRef\(0\)/);
+    expect(src).toMatch(/const tok = \+\+addrTokRef\.current/);
+    expect(src).toMatch(/if \(tok !== addrTokRef\.current\) return/);
+  });
+
+  it("B546: Stitcher calibration display guards a non-finite ftPerUnit + commitCalibrate rejects u<1", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/Number\.isFinite\(ftPerUnit\) && ftPerUnit/);
+    expect(src).toMatch(/if \(!\(u >= 1\)\)/);
+  });
+
+  it("B547: Stitcher takeoff totals guard against a NaN/Infinity rollup", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/Number\.isFinite\(totals\.areaSf\)/);
+    expect(src).toMatch(/Number\.isFinite\(totals\.distFt\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}

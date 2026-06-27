@@ -5196,7 +5196,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.download = `${fileName}.pdf`;
         aEl.click();
         mark("downloaded");
-        setTimeout(() => URL.revokeObjectURL(aEl.href), 8000);
+        URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).

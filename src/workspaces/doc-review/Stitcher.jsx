@@ -442,6 +442,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     if (r.empty) { setCalInput(null); setErr(""); return; }
     if (!r.ok) { setErr(r.message); return; }
     const u = dist(calInput.pts[0], calInput.pts[1]);
+    if (!(u >= 1)) { setErr("Points too close — recalibrate."); setCalInput(null); return; } // B546: never divide by ~0 → Infinity ftPerUnit (mirrors doCalibrate's guard; also catches NaN)
     pushHistory();
     setFtPerUnit(r.ft / u);
     setCalInput(null); setErr("");
@@ -855,8 +856,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {composite.map((s) => (
                 <div key={s.groupLabel} style={{ fontSize: 11.5, color: PAL.ink, padding: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.groupLabel}>{s.groupLabel}</div>
               ))}
-              <div style={{ fontSize: 10.5, color: ftPerUnit ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
-                {ftPerUnit ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
+              <div style={{ fontSize: 10.5, color: (Number.isFinite(ftPerUnit) && ftPerUnit) ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
+                {/* B546: Number.isFinite guard — a non-finite ftPerUnit (e.g. a corrupt loaded review) is truthy and would render "1\" ≈ ∞'". */}
+                {(Number.isFinite(ftPerUnit) && ftPerUnit) ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
               </div>
               {noteCount > 0 && (
                 <div style={{ marginTop: 6, borderTop: `1px solid ${PAL.line}`, paddingTop: 5 }}>
@@ -955,7 +957,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
               <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
-              {[["Area", `${f2(ftToAcres(totals.areaSf))} ac`], ["", `${f0(totals.areaSf)} sf`], ["Distance", `${f1(totals.distFt)} ft`], ["Measures", `${measures.length}`]].map(([k, v], i) => (
+              {/* B547: Number.isFinite guard — one degenerate/NaN measure must not propagate "NaN ac · NaN sf · NaN ft" into the rollup. */}
+              {[["Area", Number.isFinite(totals.areaSf) ? `${f2(ftToAcres(totals.areaSf))} ac` : "—"], ["", Number.isFinite(totals.areaSf) ? `${f0(totals.areaSf)} sf` : "—"], ["Distance", Number.isFinite(totals.distFt) ? `${f1(totals.distFt)} ft` : "—"], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>
               ))}
               {/* Per-measure list with a × delete (B376): the stitched canvas has no select-and-delete,
