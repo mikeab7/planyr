@@ -25,11 +25,12 @@ describe("renderBudget — backing-store pixel budget (NEW-2)", () => {
     expect(backingScale(E_W, E_H, 6, 2)).toBeLessThan(1); // density drops below 1× — soft, not OOM
   });
 
-  it("renders at full device density when the sheet comfortably fits the budget", () => {
-    // A small region at modest zoom: cssW*cssH well under budget, so use the device dpr (≤2×).
+  it("supersamples the detail window between the 2× floor and the 2.5× cap when it fits the budget", () => {
+    // A small region at modest zoom: cssW*cssH well under budget, so use the floor/cap, not the budget.
     expect(backingScale(800, 600, 1, 2)).toBe(2);
-    expect(backingScale(800, 600, 1, 1)).toBe(1);
-    expect(backingScale(800, 600, 1, 3)).toBe(2); // device density is still capped at 2×
+    expect(backingScale(800, 600, 1, 1)).toBe(2);   // 1× monitor → still 2× (supersampled for cleaner AA)
+    expect(backingScale(800, 600, 1, 3)).toBe(2.5); // 3× retina → a bit denser than the floor, capped at 2.5×
+    expect(backingScale(800, 600, 1, 4)).toBe(2.5); // 4× → held at the 2.5× cap (bounds memory)
   });
 
   it("never returns a non-positive density (no degenerate zero-area canvas)", () => {
@@ -56,6 +57,12 @@ describe("backdropDensity — the fixed whole-page floor (B415)", () => {
 
   it("never collapses to a zero-area backdrop", () => {
     expect(backdropDensity(99999, 99999, 2)).toBeGreaterThan(0.05);
+  });
+
+  it("the 16 MP budget (B488) lifts the whole-page floor on a large sheet (was sub-1× at 8 MP)", () => {
+    const d = backdropDensity(3456, 2592, 2); // 8 MP gave ~0.95× here; 16 MP gives ~1.34×, still in budget
+    expect(d).toBeGreaterThan(1.2);
+    expect(Math.floor(3456 * d) * Math.floor(2592 * d)).toBeLessThanOrEqual(BACKDROP_PX_BUDGET * 1.001);
   });
 });
 
@@ -93,6 +100,15 @@ describe("visibleRegion — the page-rect the detail layer rasterises (B415)", (
     expect(visibleRegion({ scale: 1, tx: -99999, ty: 0 }, PAGE, 1400, 900)).toBe(null);
     expect(visibleRegion(null, PAGE, 1400, 900)).toBe(null);
     expect(visibleRegion({ scale: 1, tx: 0, ty: 0 }, PAGE, 0, 0)).toBe(null);
+  });
+
+  it("the wider default margin (0.40, B488) pre-renders a larger halo than an explicit 0.25 — still in budget", () => {
+    const view = { scale: 3, tx: -2972, ty: -1926 }; // zoomed interior window, not clamped to a page edge
+    const wide = visibleRegion(view, PAGE, 1400, 900);          // default 0.40
+    const narrow = visibleRegion(view, PAGE, 1400, 900, 0.25);
+    expect(wide.rect.rw).toBeGreaterThan(narrow.rect.rw);
+    expect(wide.rect.rh).toBeGreaterThan(narrow.rect.rh);
+    expect(backingPixels(wide.rect.rw, wide.rect.rh, view.scale, 2)).toBeLessThanOrEqual(CANVAS_PX_BUDGET);
   });
 });
 
