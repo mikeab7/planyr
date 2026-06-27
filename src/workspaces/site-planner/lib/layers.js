@@ -93,17 +93,21 @@ export const STATEWIDE = {
   },
   txrrc_pipe: {
     label: "Pipelines (TxRRC)",
-    // Texas Railroad Commission T-4 pipelines, mirrored on the Harris County GIS
-    // server the app already uses (reliable, keyless). Verify live — RRC moves services.
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Pipelines/MapServer",
-    layers: null,
+    // B517: repointed to the AUTHORITATIVE statewide RRC service — matches the GIS source
+    // registry (sources.js `pipelines`) and the Site Analysis count path. The old Harris-County
+    // republication (www.gis.hctx.net/.../TXRRC/Pipelines) is ~99.8% incomplete outside Harris,
+    // so the MAP overlay silently under-painted (a false all-clear on Chambers/Gulf-coast sites)
+    // while the analysis panel queried the right host — they now agree.
+    url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
+    layers: [13], // Pipelines (polyline) — the registry's brief-verified sublayer
     note: "RRC T-4 permit routes — schematic, not surveyed locations.",
     opacity: 0.9,
   },
   txrrc_wells: {
     label: "Oil & gas wells (TxRRC)",
-    url: "https://www.gis.hctx.net/arcgishcpid/rest/services/TXRRC/Wells/MapServer",
-    layers: null, // surface + bottom-hole + connectors; RRC symbology shows status
+    // B517: authoritative statewide RRC service (see txrrc_pipe). Was the Harris-clipped host.
+    url: "https://gis.rrc.texas.gov/server/rest/services/rrc_public/RRC_Public_Viewer_Srvs/MapServer",
+    layers: [1], // Well Locations (point); RRC symbology shows status
     note: "Well symbols show status — active, plugged, dry hole, injection, etc.",
     opacity: 0.9,
   },

@@ -30,6 +30,24 @@ describe("hitMarkup — per-kind rules", () => {
     expect(hitMarkup(counts, { x: 81, y: 82 }, 1, 10)).toBe(true);
     expect(hitMarkup(counts, { x: 45, y: 45 }, 1, 10)).toBe(false); // between markers, not on a connecting line
   });
+
+  // B521: a closed box stored as TWO opposite corners (the Document Review form) must be hit on
+  // its whole interior + outline, not just the diagonal between the two corners.
+  it("a 2-corner rect/cloud/snapshot is hit on its interior and every rendered edge, not just the diagonal", () => {
+    for (const kind of ["rect", "cloud", "snapshot"]) {
+      const box = { id: "x", kind, pts: [{ x: 0, y: 0 }, { x: 100, y: 100 }] };
+      expect(hitMarkup(box, { x: 80, y: 20 }, 1)).toBe(true);  // off-diagonal interior (missed before)
+      expect(hitMarkup(box, { x: 50, y: 0.5 }, 1)).toBe(true); // rendered top edge (missed before)
+      expect(hitMarkup(box, { x: 50, y: 50 }, 1)).toBe(true);  // centre
+      expect(hitMarkup(box, { x: 150, y: 50 }, 1)).toBe(false); // outside
+    }
+  });
+  it("a 2-corner ellipse is hit inside the ellipse but NOT at the bounding-box corner", () => {
+    const el = { id: "y", kind: "ellipse", pts: [{ x: 0, y: 0 }, { x: 100, y: 100 }] };
+    expect(hitMarkup(el, { x: 50, y: 50 }, 1)).toBe(true);   // centre
+    expect(hitMarkup(el, { x: 50, y: 6 }, 1)).toBe(true);    // near the top of the ellipse
+    expect(hitMarkup(el, { x: 2, y: 2 }, 1)).toBe(false);    // bbox corner — outside the ellipse
+  });
 });
 
 describe("pickMarkup — top-most wins", () => {

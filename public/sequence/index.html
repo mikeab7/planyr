@@ -9024,7 +9024,10 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         for(const pr of preds){
           if(!ix.has(pr.id)) continue;
           const pt=p.tasks[ix.get(pr.id)-base];
-          if(!pt||!pt.start||!pt.end||!t.start||!t.end) continue;
+          // B519: also skip an endpoint whose date is present but UNPARSEABLE — else xOf()→NaN
+          // emits a garbage "MNaN,…" arrow path into the exported SVG. Matches the bar renderer's
+          // isNaN(pd(...)) guard (the bar is correctly blanked; only this arrow path had drifted).
+          if(!pt||!pt.start||!pt.end||!t.start||!t.end||isNaN(pd(pt.start))||isNaN(pd(pt.end))||isNaN(pd(t.start))||isNaN(pd(t.end))) continue;
           const pi=ix.get(pr.id), si=ix.get(t.id);
           if(pi===si) continue;
           const type=(pr.type||"FS").toUpperCase();
