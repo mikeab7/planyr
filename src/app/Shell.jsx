@@ -20,6 +20,7 @@ import { useHashRoute, INITIAL_HASH_EMPTY } from "./route.js";
 const WORKSPACES = [
   { id: "site-planner", label: "Site Planyr",     Comp: lazy(() => import("../workspaces/site-planner/SitePlannerApp.jsx")) },
   { id: "doc-review",   label: "Review", Comp: lazy(() => import("../workspaces/doc-review/DocReview.jsx")) },
+  { id: "library",      label: "Library", Comp: lazy(() => import("../workspaces/library/Library.jsx")) },
   { id: "scheduler",    label: "Sequence Planyr",  Comp: lazy(() => import("../workspaces/scheduler/Scheduler.jsx")) },
 ];
 
@@ -135,7 +136,7 @@ export default function Shell() {
   // B223 — once boot is idle, quietly warm the non-active workspaces (chunk +,
   // for Schedule, the heavy /sequence/ iframe doc) so switching to them feels
   // instant. Lazy-loading still gates the first paint; this only runs after.
-  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review"]); }, []);
+  useEffect(() => { prefetchOnIdle(["scheduler", "doc-review", "library"]); }, []);
 
   // B279 — tag telemetry rows with the workspace the user is in, so a reported error
   // says WHERE it happened (site-planner / doc-review / scheduler).

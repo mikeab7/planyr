@@ -16,6 +16,7 @@
 const IMPORTERS = {
   "site-planner": () => import("../workspaces/site-planner/SitePlannerApp.jsx"),
   "doc-review":   () => import("../workspaces/doc-review/DocReview.jsx"),
+  "library":      () => import("../workspaces/library/Library.jsx"),
   "scheduler":    () => import("../workspaces/scheduler/Scheduler.jsx"),
 };
 
