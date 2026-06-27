@@ -66,6 +66,11 @@ export const ANALYSIS_SOURCES = [
     ttl: 7 * DAY, verified: true,
     absentLabel: "No mapped Special Flood Hazard Area (typically Zone X / minimal risk)",
     caveat: "FEMA's digital flood maps (NFHL). Screening only — confirm against the current effective FIRM / any LOMA and a survey before finished-floor design.",
+    // Flood is the ONE screening layer whose source also returns the ALL-CLEAR zones
+    // (Zone X) as polygons — so "a feature intersects" is NOT "a flood constraint." Classify
+    // by ZONE, not mere presence (B147 false-positive fix): only a Special Flood Hazard Area
+    // (A*/V*) is a present constraint; Zone X is none-found / (0.2% shaded) info; D is unknown.
+    classify: (rows, src) => classifyFlood(rows, src),
     summarize: (rows) => zoneSummary(rows),
     detail: (rows) => zoneDetail(rows),
   },
@@ -247,6 +252,46 @@ function zoneDetail(rows) {
   return Array.from(seen.keys());
 }
 
+// FEMA Special Flood Hazard Area (SFHA) zone codes — the regulatory 1%-annual-chance
+// (100-yr) floodplain that triggers flood-insurance + floodplain-development rules.
+// Everything ELSE the NFHL returns (X, D, OPEN WATER, AREA NOT INCLUDED) is NOT an SFHA;
+// Zone X in particular is the MINIMAL-risk zone — the all-clear, never a constraint.
+const SFHA_ZONES = new Set(["A", "AE", "AH", "AO", "AR", "A99", "V", "VE", "VO",
+  "AR/AE", "AR/AH", "AR/AO", "AR/A", "AR/A99"]);
+export function isSFHA(zone) {
+  const z = String(zone == null ? "" : zone).trim().toUpperCase();
+  if (!z) return false;
+  if (SFHA_ZONES.has(z)) return true;
+  return /^(A|V)([1-9]|[12][0-9]|30)$/.test(z); // legacy numbered zones A1-A30 / V1-V30
+}
+// Shaded Zone X = the 0.2%-annual-chance (500-yr) area: moderate, but NOT an SFHA.
+const isShadedX = (r) => /0\.2\s*pct|0\.2\s*%|\b500[-\s]?(?:yr|year)/i.test(String(r && r.ZONE_SUBTY != null ? r.ZONE_SUBTY : ""));
+
+/* Flood status, zone-aware (B147 false-positive fix). The generic classifier marks ANY
+ * returned feature "present," but the FEMA NFHL returns Zone X (the minimal-risk all-clear)
+ * as polygons too — which wrongly flagged "constraint present" on the majority of sites.
+ * Decide by zone instead:
+ *   present — any Special Flood Hazard Area (A / AE / V / VE …): the regulatory 100-yr floodplain
+ *   info    — no SFHA, but the 0.2% (500-yr) shaded Zone X touches the site (moderate)
+ *   unknown — Zone D (flood hazard undetermined; FEMA hasn't studied the area — not clear)
+ *   absent  — empty, or only unshaded Zone X / open water (outside any mapped SFHA)
+ * Pure. */
+export function classifyFlood(rows, source = {}) {
+  const none = source.absentLabel || "No mapped Special Flood Hazard Area (Zone X / minimal risk)";
+  if (!rows || !rows.length) return { status: "absent", summary: none, detail: [] };
+  const sfha = rows.filter((r) => isSFHA(r.FLD_ZONE));
+  if (sfha.length) return { status: "present", summary: zoneSummary(sfha), detail: zoneDetail(sfha) };
+  if (rows.some(isShadedX)) {
+    return { status: "info", detail: zoneDetail(rows),
+      summary: "Outside the SFHA, but within the 0.2%-annual-chance (500-yr) shaded Zone X — moderate flood risk, not the regulatory floodplain." };
+  }
+  if (rows.some((r) => String(r && r.FLD_ZONE != null ? r.FLD_ZONE : "").trim().toUpperCase() === "D")) {
+    return { status: "unknown", detail: [],
+      summary: "Zone D — flood hazard undetermined; FEMA has not studied this area (not an all-clear)." };
+  }
+  return { status: "absent", summary: none, detail: zoneDetail(rows) };
+}
+
 export function wetlandSummary(rows) {
   const types = uniq(rows.map((r) => r.WETLAND_TYPE));
   if (!types.length) return "Mapped wetlands present";
@@ -356,12 +401,25 @@ export function analyzeSource(source, rings, opts = {}) {
     const haveStale = !!(r.error && r.data != null);
     const hardError = r.error && !haveStale ? gisErrorMessage(r.error) : null;
     const attrs = hardError ? null : (r.data || []);
-    const status = classifyStatus(attrs, { error: hardError, verified: source.verified });
+    // A source MAY supply its own classifier for when "a feature intersects" is not the
+    // same as "a constraint" (flood: the NFHL returns the all-clear Zone X as polygons too).
+    // Otherwise fall back to the generic presence/verified classifier (the silent-error guard).
+    let status, summary, detail;
+    if (hardError) {
+      status = "unavailable"; summary = null; detail = [];
+    } else if (typeof source.classify === "function") {
+      const c = source.classify(attrs, source) || {};
+      status = c.status || "unknown";
+      summary = c.summary != null ? c.summary : null;
+      detail = c.detail || [];
+    } else {
+      status = classifyStatus(attrs, { error: hardError, verified: source.verified });
+      summary = status === "present" ? source.summarize(attrs) : status === "absent" ? source.absentLabel || "None found" : null;
+      detail = status === "present" && source.detail ? source.detail(attrs) : [];
+    }
     return {
       id: source.id, category: source.category, label: source.label,
-      status,
-      summary: status === "present" ? source.summarize(attrs) : status === "absent" ? source.absentLabel || "None found" : null,
-      detail: status === "present" && source.detail ? source.detail(attrs) : [],
+      status, summary, detail,
       rows: null,
       sourceName: source.sourceName, ageMs: r.ageMs ?? null, ts: r.ts ?? null,
       error: hardError,
