@@ -666,6 +666,29 @@ export function loadPlansOfGroup(groupId) {
 export function renameSiteGroup(groupId, site) {
   loadPlansOfGroup(groupId).forEach((s) => saveSite({ id: s.id, site }));
 }
+// Mirror the cross-module schedule link onto a site group (schema v9). The canonical pairing
+// lives on the Schedule record (its `linkedSiteId`); this writes the lightweight HINT
+// (scheduleProjectId/Name) onto every plan in the group so the Site Planner can show "has a
+// schedule" without booting the Schedule iframe. Pass `{ scheduleProjectId: null }` to clear it.
+// Goes through saveSite, so it persists locally + syncs to the cloud like any other edit.
+export function setScheduleLink(groupId, { scheduleProjectId = null, name = null } = {}) {
+  if (!groupId) return;
+  const id = scheduleProjectId != null ? scheduleProjectId : null;
+  loadPlansOfGroup(groupId).forEach((s) => {
+    // No-op if the hint already matches — avoids a needless save + cloud write on every visit.
+    if ((s.scheduleProjectId ?? null) === id && (s.scheduleProjectName ?? null) === (name ?? null)) return;
+    saveSite({ id: s.id, scheduleProjectId: id, scheduleProjectName: id != null ? name : null });
+  });
+}
+// The schedule link recorded on a site group (reads the first plan; the hint is mirrored
+// identically across every plan in the group). Returns { scheduleProjectId, name } | null.
+export function scheduleLinkOf(groupId) {
+  const plans = loadPlansOfGroup(groupId);
+  for (const s of plans) {
+    if (s.scheduleProjectId != null) return { scheduleProjectId: s.scheduleProjectId, name: s.scheduleProjectName || null };
+  }
+  return null;
+}
 // Delete a whole site (group) — every plan in it, locally (instant/optimistic) AND from the
 // cloud when signed in. Returns a promise resolving { ok, removed, error? } aggregated across
 // the group's plans, so a caller can AWAIT it and surface a LOUD error if any cloud removal
