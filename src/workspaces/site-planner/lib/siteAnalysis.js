@@ -100,7 +100,7 @@ export const ANALYSIS_SOURCES = [
     ttl: 30 * DAY, verified: true, countMode: true,
     absentLabel: "No mapped oil & gas wells on the site",
     caveat: "RRC well points are schematic and historic locations can be inaccurate or unmapped (orphaned wells). An RRC records search — possibly a survey — is the real check.",
-    summarize: (rows) => `${rows.length} well${rows.length === 1 ? "" : "s"} on or adjacent to the site`,
+    summarize: (rows, total) => { const n = total != null ? total : rows.length; return `${n} well${n === 1 ? "" : "s"} on or adjacent to the site`; },
     detail: (rows) => uniq(rows.map((r) => (r.API ? "API " + r.API : ""))).slice(0, 8),
   },
   {
@@ -110,10 +110,10 @@ export const ANALYSIS_SOURCES = [
     // the Harris-clipped republication (B368). Fields: OPERATOR / COMMODITY_DESCRIPTION /
     // DIAMETER / STATUS / SYSTEM_NAME / COUNTY_NAME.
     ...reg("pipelines"),
-    ttl: 30 * DAY, verified: true,
+    ttl: 30 * DAY, verified: true, countMode: true,
     absentLabel: "No mapped RRC pipelines crossing the site",
     caveat: "RRC T-4 permit routes are SCHEMATIC, not surveyed alignments — and public pipeline data is deliberately low-resolution. Trigger 811 / one-call + operator outreach; never treat as a precise location.",
-    summarize: (rows) => pipelineSummary(rows),
+    summarize: (rows, total) => pipelineSummary(rows, total),
     detail: (rows) => uniq(rows.map((r) => [r.OPERATOR, r.COMMODITY_DESCRIPTION].filter(Boolean).join(" · "))).slice(0, 6),
   },
   {
@@ -301,9 +301,9 @@ function wetlandDetail(rows) {
   return uniq(rows.map((r) => [r.WETLAND_TYPE, r.ATTRIBUTE].filter(Boolean).join(" · "))).slice(0, 8);
 }
 
-export function pipelineSummary(rows) {
+export function pipelineSummary(rows, total) {
   const ops = uniq(rows.map((r) => r.OPERATOR));
-  const n = rows.length;
+  const n = total != null ? total : rows.length;
   const head = `${n} pipeline segment${n === 1 ? "" : "s"}`;
   return ops.length ? `${head} — ${ops.slice(0, 3).join(", ")}${ops.length > 3 ? "…" : ""}` : head;
 }
@@ -338,6 +338,19 @@ function queryLayer(source, layer, rings, fetchJson) {
     return fetchJson(buildQueryUrl(source.url, layer, {}), { body: params });
   }
   return fetchJson(getUrl);
+}
+
+// Exact intersecting-feature COUNT for a count-mode source (wells / pipelines). Uses
+// returnCountOnly so the number is the true total, NOT the page-size cap (resultRecordCount)
+// — a dense RRC corridor has thousands of segments, far past any single page. Pure.
+function countLayer(source, layer, rings, fetchJson) {
+  const params = { ...buildAnalysisParams(source, rings), returnCountOnly: true };
+  delete params.outFields; delete params.resultRecordCount; delete params.returnGeometry;
+  const getUrl = buildQueryUrl(source.url, layer, params);
+  const p = getUrl.length > GIS_MAX_GET_URL
+    ? fetchJson(buildQueryUrl(source.url, layer, {}), { body: params })
+    : fetchJson(getUrl);
+  return Promise.resolve(p).then((j) => (j && typeof j.count === "number" ? j.count : (j && j.features ? j.features.length : 0)));
 }
 
 // Log the REAL failure (status / url / ArcGIS code) so an opaque failure is debuggable
@@ -394,7 +407,27 @@ export function analyzeSource(source, rings, opts = {}) {
     throw lastErr;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: source.ttl || 0 });
-  return fresh.then((r) => {
+  // Count-mode sources (wells, pipelines) DISPLAY a count, so they need the exact number,
+  // not "however many features fit in one page." Fetch it via returnCountOnly in a SEPARATE
+  // cache entry — the feature cache stays a plain attrs array (untouched), the detail still
+  // rides the fetched sample, and the count rides the same throttled fetch pool.
+  let countFresh = null;
+  if (source.countMode) {
+    const countFetcher = async () => {
+      let lastErr = null;
+      for (const ep of endpoints) {
+        try {
+          const layers = ep.layers || (ep.layer != null ? [ep.layer] : [null]);
+          let total = 0;
+          for (const L of layers) total += await countLayer(ep, L, rings, fetchJson);
+          return total;
+        } catch (e) { lastErr = e; /* try the next mirror */ }
+      }
+      throw lastErr;
+    };
+    countFresh = cache.swr("analysiscount:" + source.id + ":" + ringsSignature(rings), countFetcher, { ttl: source.ttl || 0 }).fresh;
+  }
+  return Promise.all([fresh, countFresh]).then(([r, rc]) => {
     if (r.error) logQueryFailure(source.id, r.error);
     // A failed refresh that still carries last-good data → keep showing it (stale), not
     // a hard error. A failure with no cached copy → a hard UNAVAILABLE.
@@ -414,7 +447,12 @@ export function analyzeSource(source, rings, opts = {}) {
       detail = c.detail || [];
     } else {
       status = classifyStatus(attrs, { error: hardError, verified: source.verified });
-      summary = status === "present" ? source.summarize(attrs) : status === "absent" ? source.absentLabel || "None found" : null;
+      // Exact total for count-mode sources (returnCountOnly); falls back to the fetched
+      // sample size if the count query failed. Non-count sources ignore it.
+      const total = source.countMode
+        ? ((rc && !rc.error && typeof rc.data === "number") ? rc.data : (attrs ? attrs.length : null))
+        : (attrs ? attrs.length : null);
+      summary = status === "present" ? source.summarize(attrs, total) : status === "absent" ? source.absentLabel || "None found" : null;
       detail = status === "present" && source.detail ? source.detail(attrs) : [];
     }
     return {
