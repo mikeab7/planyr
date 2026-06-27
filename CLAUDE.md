@@ -241,6 +241,22 @@ server/                   # placeholder README only — NOT built or deployed; b
 ### Multi-workspace foundation
 - Monorepo restructure via **PR #3** (clean `main`): shell, workspace folders, coordinate stub,
   `/server` placeholder; Site Planner moved in unchanged. Build passes; real lazy-chunk split.
+- **Cross-module project connections — a schedule linked to a site (B493; also CLOSED B477).** A
+  project = a Site Planner **site group** (`group_id`); Site↔Review already share it. This wires the
+  **Schedule** in too: the canonical pairing lives on the schedule project (`linkedSiteId`/`Name`,
+  free in the `hs-v1` blob), mirrored as a lightweight HINT onto the Site Model
+  (`scheduleProjectId`/`Name`, **schema v9**, additive) so the Site Planner sees "has a schedule"
+  without booting the iframe (the two live in **separate backends** — the Shell brokers the mirror).
+  **Payoff = the top-header tabs carry the project:** `Scheduler.jsx` honors the routed `projectId`
+  (`planar:nav-select-by-site` activates the linked schedule; the active schedule pushes its
+  `linkedSiteId` back via `onProjectChange`). Land on an unlinked site → `LinkSchedulePanel`
+  resolution card (**suggest-and-confirm**, never auto-links: same-named suggestion + manual pick +
+  "Create a schedule for this site"). Bridge: `public/sequence/index.html` (nav-state carries the
+  link; inbound `nav-select-by-site`/`nav-link`/`nav-create-linked`; outbound `link-changed`),
+  `scheduler/lib/navState.js` (`findBySiteId`), `shared/projects/projectModel.js` (`suggestNameMatch`),
+  `storage.js` (`setScheduleLink`/`scheduleLinkOf`), 📅 chip in `ProjectBreadcrumb.jsx`. Headless
+  `verify-cross-module-link.mjs` 4/4 (wrapper path); the live cross-iframe round-trip (Schedule's own
+  Supabase, unreachable in the sandbox) is **V152**.
 
 ### Document Review — cloud persistence
 - Persists to the **existing Supabase backend** (reuses the anon client + auth session, no new
@@ -442,10 +458,20 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   empty-state heading, and the error-boundary label all say "Review". The **internal id stays `doc-review`**,
   the folder is `src/workspaces/doc-review/`, the route is `/markup`, and the data-model field is `markups` —
   none of those change (renaming them would orphan routes/storage). The module accent token is
-  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**,
-  **"Document Review"**, and **"Library"** ALL mean this same module — don't treat them as separate features.
-  Distinct from this: the in-module **🗂 Files** drawer (the `FileBrowser` / `ProjectLibrary` file explorer)
-  and the Site Planner's **"Markup line/rect"** drawing tools are their own things — leave their labels alone.
+  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**
+  and **"Document Review"** mean this same Review module — don't treat them as separate features.
+  Distinct from this: the Site Planner's **"Markup line/rect"** drawing tools are their own thing — leave
+  their labels alone.
+  - **⚠ UPDATE (B496, 2026-06-27): "Library" is now its OWN top-level workspace, NOT the Review module.**
+    The file browser (`FileBrowser`, was Review's landing screen) was lifted into a dedicated **Library** tab
+    (`src/workspaces/library/`, internal id `library`, route `#/library`, teal accent `--accent-library`
+    **#0E7490** / JS `accentLibrary`). Review is now purely "open one drawing + mark it up" — with nothing
+    open it shows a "No drawing open" empty state with a **Browse the Library** button. Clicking a file in
+    Library opens it in Review via the existing Shell `onOpenReviewInDocReview` intent. The file-storage
+    **data layer (`reviewStore`/`autofiling`/`fileIndex`) stays in `doc-review/lib`** (project-scoped,
+    canvas-independent) and Library imports it cross-workspace — no new backend/tables/keys. So pre-B496
+    text below that calls `FileBrowser` "the Document Review landing surface" now means the **Library**
+    tab. The Site Planner's slide-over `ProjectFilesDrawer` (in-context map peek) is unchanged.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and

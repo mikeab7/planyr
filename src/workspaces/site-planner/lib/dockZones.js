@@ -28,6 +28,37 @@ export const DOCK_ZONES = [
 
 export const MAX_DOCK_ZONES = DOCK_ZONES.length;
 
+// Catalog of every layer type the outward stack can carry (B495). The fixed dock sequence above is
+// a SUBSET of this; the "Add layer ▾" chooser offers these by side. Fields:
+//   key      — stable id (also the chain-step key + the element tag used to recover it)
+//   elType   — the drawn element `type` written into `els`
+//   label    — human text for the menu / panel / tooltips
+//   setting  — per-plan default-depth key in `settings` (null → use `fallback` / element default)
+//   fallback — built-in default depth (feet); for a road this is the TRAVEL width (curbs add on)
+//   layout   — geometry branch: "strip" (full-wall rectangle), "trailer" (rotated striped row);
+//              parking/road reuse "strip"/"parking" handling in the wiring (a road laid ALONG a
+//              wall is geometrically a strip — its curbs are a render detail keyed on `el.curb`)
+//   sides    — where the chooser may offer it: "dock" | "nondock" | "any"
+//   terminal — true ⇒ nothing may stack BEHIND it (a road is the end of a run)
+//   tag      — extra fields merged onto the created element (e.g. buffer:true for landscape)
+export const ZONE_CATALOG = {
+  court:    { key: "court",    elType: "paving",    label: "Truck court",     setting: "truckCourtD", fallback: 135, layout: "strip",   sides: "dock",    terminal: false },
+  trailer:  { key: "trailer",  elType: "trailer",   label: "Trailer parking", setting: "trailerParkD", fallback: 50, layout: "trailer", sides: "dock",    terminal: false },
+  buffer:   { key: "buffer",   elType: "landscape", label: "Landscape buffer", setting: "bufferD",    fallback: 15,  layout: "strip",   sides: "any",     terminal: false, tag: { buffer: true } },
+  sidewalk: { key: "sidewalk", elType: "sidewalk",  label: "Sidewalk",        setting: null,          fallback: 5,   layout: "strip",   sides: "any",     terminal: false },
+  parking:  { key: "parking",  elType: "parking",   label: "Parking row",     setting: null,          fallback: null, layout: "parking", sides: "nondock", terminal: false },
+  road:     { key: "road",     elType: "road",      label: "Road",            setting: "roadDefaultW", fallback: 24, layout: "road",    sides: "any",     terminal: true },
+};
+
+// Default depth (feet) for a catalog layer: a positive per-plan override wins, else the built-in.
+// (For a road this returns the TRAVEL width; the wiring adds the two curbs to get the box depth.)
+export function catalogDepthDefault(key, settings = {}) {
+  const c = ZONE_CATALOG[key];
+  if (!c) return 0;
+  const v = Number(settings && c.setting && settings[c.setting]);
+  return Number.isFinite(v) && v > 0 ? v : (c.fallback || 0);
+}
+
 // User-configurable default depths (Setup → Dock zones), falling back to the
 // built-ins. Always positive feet.
 export function zoneDepthDefaults(settings = {}) {
@@ -64,7 +95,11 @@ export function usableCourtSpan(full, bumpStart = 0, bumpEnd = 0) {
 // corner bump-outs: {along} overrides its wall-length span and {alongShift} offsets its centre
 // along the wall. Other zones (trailer/buffer) always keep the full wall length, so a 4-arg call
 // (and every existing caller/test) is unchanged.
-export function layoutZone(b, side, i, depths, opts = {}) {
+// Generalized (B495): lay the i-th zone of an ARBITRARY chain whose per-zone layout kinds are
+// `kinds` ("strip" | "trailer"; road/buffer/sidewalk/court are all "strip" — a road along a wall is
+// geometrically a strip). `i === 0` (the chain head, a court) still honours the bump-out trim opts.
+// Other zones keep full wall length. The cumulative-outward math is identical to the old layoutZone.
+export function layoutZoneByKind(b, side, i, depths, kinds = [], opts = {}) {
   const [nx, ny] = SIDE_N[side] || SIDE_N.bottom;
   const horiz = ny !== 0;                       // top/bottom wall → zones run along X
   const fullAlong = horiz ? b.w : b.h;          // full wall length
@@ -79,10 +114,17 @@ export function layoutZone(b, side, i, depths, opts = {}) {
   const tan = rot2(horiz ? 1 : 0, horiz ? 0 : 1, b.rot || 0); // along-wall unit (+X horiz / +Y vert)
   const cx = b.cx + u.x * center + tan.x * alongShift, cy = b.cy + u.y * center + tan.y * alongShift;
   const rotBase = (((b.rot || 0) % 360) + 360) % 360;
-  if (i === 1) {                                // trailer parking: w=wall length, h=depth, +90 on a side wall
+  if (kinds[i] === "trailer") {                 // trailer parking: w=wall length, h=depth, +90 on a side wall
     return { cx, cy, w: along, h: d, rot: ((((b.rot || 0) + (horiz ? 0 : 90)) % 360) + 360) % 360 };
   }
   return { cx, cy, w: horiz ? along : d, h: horiz ? d : along, rot: rotBase };
+}
+
+// Geometry of the i-th zone of the DEFAULT dock sequence (court, trailer, buffer) — a thin wrapper
+// over layoutZoneByKind with kinds = [strip, trailer, strip, …]. Kept for back-compat: every prior
+// caller/test sees byte-identical output. `opts` is the B492 court bump-out trim.
+export function layoutZone(b, side, i, depths, opts = {}) {
+  return layoutZoneByKind(b, side, i, depths, depths.map((_, j) => (j === 1 ? "trailer" : "strip")), opts);
 }
 
 // Position the whole stack on a side at once → [{i, geom}] for the zones present.
@@ -133,11 +175,14 @@ export function strandedZoneIds(els, building) {
       .map((x) => x.id),
   );
   let grew = true;
-  while (grew) {                                       // cascade onto bonded trailers, then their buffers
+  while (grew) {                                       // cascade onto bonded trailers, buffers + any appended layers
     grew = false;
     (els || []).forEach((x) => {
       if (kill.has(x.id)) return;
-      if ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer))) { kill.add(x.id); grew = true; }
+      // forCourt/forTrailer = the legacy bonds; prevZone = the generic outward-stack bond (B495), so a
+      // stranded court drags its road/landscape too. Only court-headed chains seed `kill`, so this never
+      // touches a legitimate non-dock road/landscape (its prevZone never reaches a stranded court).
+      if ((x.forCourt && kill.has(x.forCourt)) || (x.forTrailer && kill.has(x.forTrailer)) || (x.prevZone && kill.has(x.prevZone))) { kill.add(x.id); grew = true; }
     });
   }
   return [...kill];
