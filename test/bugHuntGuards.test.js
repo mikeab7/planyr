@@ -121,6 +121,22 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/serializeSiteWrite\(model\.id, \(\) => cloudUpsertCore\(uid, model\)\)/);
   });
 
+  it("B540: geocodeAddress distinguishes 'unreachable' from 'not found' (returns { error } vs null)", () => {
+    const src = read("../src/workspaces/site-planner/lib/geocode.js");
+    expect(src).toMatch(/reachedAny/);
+    expect(src).toMatch(/return reachedAny \? null : \{ error:/);
+    // both callers handle the { error } shape
+    expect(read("../src/workspaces/site-planner/MapFinder.jsx")).toMatch(/hit && hit\.error/);
+    expect(read("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/hit && hit\.error/);
+  });
+
+  it("B541: CloudSyncBadge boundary resets via resetKey, not a remount key (popover survives state churn)", () => {
+    const src = read("../src/shared/ui/CloudSyncBadge.jsx");
+    expect(src).not.toMatch(/<CloudBadgeBoundary key=/);     // no longer remounted on every state change
+    expect(src).toMatch(/resetKey=\{String\(state/);          // passes a reset signal instead
+    expect(src).toMatch(/prevProps\.resetKey !== this\.props\.resetKey/); // and clears a crash on its change
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
