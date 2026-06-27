@@ -1,5 +1,18 @@
 ## ✅ Done
 
+<!-- ROUND 6 (a11y) — shipped the B530–B532 accessibility group that rounds 4-5 filed but deferred
+     (cleanly-actionable work shouldn't keep getting deferred). Escape-to-close + dialog roles on the
+     two scrim modals; keyboard-reachable rows/section headers. B530 verified live headless. -->
+
+### B530 — AuthPanel modals: no Escape-to-close, no dialog role `[Site Planner / a11y]` (bug — accessibility)  *(filed round 4; fixed round 6, 2026-06-27)*
+`[x]` **DONE + verified LIVE (headless). lint 0 · 1736 tests · build green.** The shared `Wrap` (sign-in / Profile / Settings / password views all route through it) had no Escape handler and no dialog semantics. **Fix:** a window `keydown` Escape listener mounted while open (cleaned up on unmount) + `role="dialog" aria-modal="true" aria-label="Account"` — one change covers every AuthPanel view. **Verified:** `ui-audit/verify-b530-modal-escape.mjs` drives a real Chromium (Supabase-configured build) → modal opens as a dialog, Escape closes it, repeatably (5/5). Anti-drift guard in `test/bugHuntGuards.test.js`.
+
+### B531 — Reviews row + planner Section header weren't keyboard-reachable `[Doc Review + Site Planner / a11y]` (bug — accessibility)  *(filed round 4; fixed round 6)*
+`[x]` **DONE + verified. lint 0 · 1736 tests · build green.** Click-only `<div>`s: the `ReviewsBar` review row and the `SitePlanner` left-rail `Section` header. **Fix:** both got `role="button" tabIndex={0}` + an Enter/Space `onKeyDown` mirroring the `onClick` (the Section header also `aria-expanded={open}`; the row an `aria-label`). The Reviews bar TOGGLE was already a real `<button>` — only the row/header needed it. Anti-drift guard added. **⏳ The signed-in row-activate + the Section-header keyboard-toggle eyeball → V163.**
+
+### B532 — SiteReviewModal: no Escape-to-close `[Site Planner / a11y]` (bug — accessibility)  *(filed round 4; fixed round 6)*
+`[x]` **DONE + verified. lint 0 · 1736 tests · build green.** The unsaved-on-device review modal closed only by × / scrim-click. **Fix:** an Escape `keydown` listener (closes with the current `savedCount`) + `role="dialog" aria-modal="true" aria-label` — the same pattern B530 verified live. Anti-drift guard added. **⏳ The legacy-gated Escape eyeball (needs pending on-device sites) → V163.**
+
 <!-- Bug-hunt ROUND 5 (B533–B539 fixed; B540–B541 filed): a 5th 6-lens Workflow (units-geometry/
      async-errors/parse-robust/react-correctness/coords-projection/storage-migration). 13 raw → 11
      adversarially-confirmed real; the 7 clean crash-safety/correctness ones shipped this lap, 2
