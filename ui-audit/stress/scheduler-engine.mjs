@@ -208,6 +208,16 @@ export const rollupParentDates = tasks => {
   return tasks.map(t => map[t.id]);
 };
 
+// Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");
+// here the trailing slot is "Schedule". Faithful copy from index.html (date injectable for tests).
+export const scheduleExportName = (projects, date = new Date()) => {
+  const p2 = n => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}.${p2(date.getMonth() + 1)}.${p2(date.getDate())}`;
+  const clean = s => String(s == null ? "" : s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const names = (Array.isArray(projects) ? projects : []).map(p => p && p.name).filter(Boolean);
+  const proj = clean(names.length === 1 ? names[0] : "Planyr") || "Planyr";
+  return `${stamp} ${proj} - Schedule`;
+};
 export const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;

@@ -312,6 +312,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   useEffect(() => { let live = true; (async () => { const { uid } = await currentIdentity(); if (!live) return; setMyUid(uid); if (uid) { try { const t = await listMyTeams(); if (live) setMyTeams(t); } catch (_) {} } })(); return () => { live = false; }; }, []);
   // Open the per-project menu and refresh the team list so newly-created teams appear.
   const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };
+  // Escape closes the open project menu, matching click-outside (B158 acceptance:
+  // the right-click menu dismisses on click-outside, Escape, or selecting an option).
+  useEffect(() => {
+    if (!statusMenu) return;
+    const onKey = (e) => { if (e.key === "Escape") setStatusMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [statusMenu]);
   // Share a project (site group) with a team, or make it private again (teamId=null).
   const doShare = async (site, teamId) => {
     const gid = site.groupId || site.id;

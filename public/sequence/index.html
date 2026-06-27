@@ -792,6 +792,20 @@ const computeRolledHealth = (all) => {
 
 const fmtD = s => { if (!s) return ""; const [y,m,d] = s.split('-'); if (!y||!m||!d) return ""; return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
 const toShortDate = s => { if (!s) return ""; const [y,m,d] = s.split("-"); return `${+m}/${+d}/${y.slice(2)}`; };
+// Export filename — matches the Site Planner's PDF/PNG naming (src/workspaces/site-planner/lib/printSheet.js
+// → "YYYY.MM.DD {Project} - {Plan}"): here "YYYY.MM.DD {Project} - Schedule" (the trailing slot is the
+// document type, since a project has one schedule). A single selected project uses its name; multiple use
+// the Planyr brand. Filesystem-illegal chars are stripped (same rule as sanitizeFilename). The caller adds
+// the .pdf/.html/.json extension; for the PDF exhibit this string is the <title> the browser's "Save as
+// PDF" uses as the filename.
+const scheduleExportName = (projects, date = new Date()) => {
+  const p2 = n => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}.${p2(date.getMonth() + 1)}.${p2(date.getDate())}`;
+  const clean = s => String(s == null ? "" : s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const names = (Array.isArray(projects) ? projects : []).map(p => p && p.name).filter(Boolean);
+  const proj = clean(names.length === 1 ? names[0] : "Planyr") || "Planyr";
+  return `${stamp} ${proj} - Schedule`;
+};
 const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -4331,11 +4345,17 @@ function App() {
     });
   }, []);
 
-  const addProject = useCallback(() => {
+  const addProject = useCallback((opts) => {
+    // opts (optional) = { name, linkedSiteId, linkedSiteName } — used by the cross-module
+    // "create a schedule connected to this site" flow. Guard against a click event being
+    // passed as the first arg (the in-app + dropdown buttons call addProject() bare).
+    const o = (opts && typeof opts === "object" && !("nativeEvent" in opts)) ? opts : {};
     setData(d => {
       const id = d.nPid;
+      const proj = {id, name: o.name || `Project ${id}`, tasks: []};
+      if (o.linkedSiteId != null) { proj.linkedSiteId = o.linkedSiteId; proj.linkedSiteName = o.linkedSiteName || null; }
       return {...d, nPid: id+1, aPid: id, nTid: {...d.nTid, [id]: 1},
-        projects: {...d.projects, [id]: {id, name: `Project ${id}`, tasks: []}}};
+        projects: {...d.projects, [id]: proj}};
     });
   }, []);
 
@@ -4392,7 +4412,9 @@ function App() {
   const navSigRef = useRef("");
   useEffect(() => {
     if (!inShell || !data) return;
-    const list = Object.values(data.projects || {}).map(p => ({ id: p.id, name: p.name }));
+    // Carry the cross-module link (linkedSiteId/Name) so the shell can map this schedule ↔ a
+    // Site Planner project (group_id) and keep the project the same across the header tabs.
+    const list = Object.values(data.projects || {}).map(p => ({ id: p.id, name: p.name, linkedSiteId: p.linkedSiteId ?? null, linkedSiteName: p.linkedSiteName ?? null }));
     const sig = JSON.stringify([data.section ?? "projects", data.aPid ?? null, list]);
     if (sig === navSigRef.current) return; // only emit when the nav state actually changes
     navSigRef.current = sig;
@@ -4411,8 +4433,52 @@ function App() {
       if (e.origin !== window.location.origin) return;
       const m = e.data;
       if (!m || m.source !== "planar-shell") return;
+      if (m.type === "planar:nav-request") {
+        // The shell's loader asks us to (re-)announce our nav state, so a missed or slow first
+        // emit can't strand it on its fallback timer. Answer from the latest data — a no-op until
+        // it's loaded (the shell retries, and the data-change emit above also fires once it loads).
+        const d = latestData.current;
+        if (d) {
+          const list = Object.values(d.projects || {}).map(p => ({ id: p.id, name: p.name }));
+          try { window.parent.postMessage({ source: "planar-seq", type: "planar:nav-state",
+            section: d.section ?? "projects", activeId: d.aPid ?? null, projects: list }, window.location.origin); } catch (_) {}
+        }
+        return;
+      }
+      // Tell the shell a cross-module link was set/cleared/created, so it can mirror the
+      // lightweight hint onto the Site Planner side (it can't read this app's backend).
+      const emitLinkChanged = (siteId, scheduleId, name) => {
+        try {
+          window.parent.postMessage({ source: "planar-seq", type: "planar:link-changed",
+            siteId: siteId ?? null, scheduleId: scheduleId ?? null, name: name ?? null }, window.location.origin);
+        } catch (_) {}
+      };
       if (m.type === "planar:nav-select" && m.id != null) {
         setData(d => (d.projects && d.projects[m.id]) ? { ...d, section: "projects", aPid: m.id } : d);
+      } else if (m.type === "planar:nav-select-by-site" && m.siteId != null) {
+        // Project-aware header tabs: activate the schedule linked to this Site Planner project
+        // (group_id). No link yet → leave state untouched; the shell shows the resolution panel.
+        setData(d => {
+          const match = Object.values(d.projects || {}).find(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
+          return match ? { ...d, section: "projects", aPid: match.id } : d;
+        });
+      } else if (m.type === "planar:nav-link" && m.id != null) {
+        // Set (m.siteId present) or clear (m.siteId null) the link on an existing schedule.
+        setData(d => {
+          if (!d.projects || !d.projects[m.id]) return d;
+          const proj = { ...d.projects[m.id] };
+          if (m.siteId != null) { proj.linkedSiteId = m.siteId; proj.linkedSiteName = m.siteName || null; }
+          else { delete proj.linkedSiteId; delete proj.linkedSiteName; }
+          return { ...d, section: "projects", aPid: m.id, projects: { ...d.projects, [m.id]: proj } };
+        });
+        emitLinkChanged(m.siteId ?? null, m.id, m.siteName ?? null);
+      } else if (m.type === "planar:nav-create-linked") {
+        // Create a new schedule pre-named after + linked to a Site Planner project, then open it.
+        // addProject mints id = current nPid, so capture it for the mirror message.
+        const newId = latestData.current ? latestData.current.nPid : null;
+        addProject({ name: m.name, linkedSiteId: m.siteId ?? null, linkedSiteName: m.siteName ?? null });
+        setData(d => ({ ...d, section: "projects" }));
+        if (newId != null && m.siteId != null) emitLinkChanged(m.siteId, newId, m.siteName ?? null);
       } else if (m.type === "planar:nav-dashboard") {
         setData(d => ({ ...d, section: "reports" }));
       } else if (m.type === "planar:nav-new") {
@@ -4646,7 +4712,7 @@ function App() {
     } catch(e) { /* cancelled */ }
   };
 
-  const exportJSON = () => dl(JSON.stringify(data, null, 2), "planyr-schedule.json", "application/json");
+  const exportJSON = () => dl(JSON.stringify(data, null, 2), `${scheduleExportName(Object.values(data.projects))}.json`, "application/json");
   const importJSON = e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
@@ -4695,7 +4761,7 @@ function App() {
     const names = Object.values(data.projects).map(p => p.name).filter(Boolean);
     const title = names.length === 1 ? names[0] : "Planyr Schedule";
     dl(`<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>${escapeHtml(title)} — ${new Date().toLocaleDateString()}</h1>${rows}</body></html>`,
-      `planyr-schedule-${new Date().toISOString().slice(0,10)}.html`, "text/html");
+      `${scheduleExportName(Object.values(data.projects))}.html`, "text/html");  // match the Site Planner PDF filename format
   };
 
   const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks) : {}, [proj?.tasks]);
@@ -9259,7 +9325,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     });
   }
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>${cfg.exhibitLabel?escapeHtml(cfg.exhibitLabel)+" &#x2014; ":""}${escapeHtml(cfg.projectTitle)}</title>
+<title>${escapeHtml(scheduleExportName(selProjs))}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @page{size:${ps.css} ${cfg.orientation};margin:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in}

@@ -14,7 +14,7 @@
  * workspace ErrorBoundary.
  */
 import { describe, it, expect } from "vitest";
-import { sanitizeProjects, parseNavState, deriveCurrentProject } from "../src/workspaces/scheduler/lib/navState.js";
+import { sanitizeProjects, parseNavState, deriveCurrentProject, findBySiteId } from "../src/workspaces/scheduler/lib/navState.js";
 
 const WELL_FORMED = [{ id: 1, name: "Goose Creek" }, { id: 3, name: "Grand Port Logistics" }];
 const navMsg = (over = {}) => ({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 3, projects: WELL_FORMED, ...over });
@@ -87,5 +87,42 @@ describe("deriveCurrentProject — a project or null, never undefined, never a t
     expect(deriveCurrentProject(null, 1, "projects")).toBeNull();
     expect(() => deriveCurrentProject([undefined, null, { id: 1, name: "A" }], 1, "projects")).not.toThrow();
     expect(deriveCurrentProject([undefined, null, { id: 1, name: "A" }], 1, "projects")).toEqual({ id: 1, name: "A" });
+  });
+});
+
+describe("cross-module link (schema v9) — carry linkedSiteId and find a schedule by site", () => {
+  it("an UNLINKED schedule keeps the exact prior {id,name} shape (no null-field noise)", () => {
+    expect(sanitizeProjects([{ id: 1, name: "Goose Creek" }])).toEqual([{ id: 1, name: "Goose Creek" }]);
+  });
+
+  it("a LINKED schedule carries linkedSiteId/linkedSiteName through", () => {
+    const out = sanitizeProjects([{ id: 2, name: "Pappadoupolos", linkedSiteId: "grp-9", linkedSiteName: "Pappadoupolos" }]);
+    expect(out).toEqual([{ id: 2, name: "Pappadoupolos", linkedSiteId: "grp-9", linkedSiteName: "Pappadoupolos" }]);
+  });
+
+  it("a link with no cached name defaults linkedSiteName to null but keeps the id", () => {
+    expect(sanitizeProjects([{ id: 3, name: "X", linkedSiteId: "grp-1" }]))
+      .toEqual([{ id: 3, name: "X", linkedSiteId: "grp-1", linkedSiteName: null }]);
+  });
+
+  it("parseNavState passes the link fields through for the project-aware breadcrumb", () => {
+    const linked = [{ id: 2, name: "Pappadoupolos", linkedSiteId: "grp-9", linkedSiteName: "Pappadoupolos" }];
+    const nav = parseNavState({ source: "planar-seq", type: "planar:nav-state", section: "projects", activeId: 2, projects: linked });
+    expect(nav.projects).toEqual(linked);
+  });
+
+  it("findBySiteId returns the schedule linked to a Site Planner project (group_id)", () => {
+    const projects = sanitizeProjects([
+      { id: 1, name: "Goose Creek" },
+      { id: 2, name: "Pappadoupolos", linkedSiteId: "grp-9", linkedSiteName: "Pappadoupolos" },
+    ]);
+    expect(findBySiteId(projects, "grp-9")).toEqual({ id: 2, name: "Pappadoupolos", linkedSiteId: "grp-9", linkedSiteName: "Pappadoupolos" });
+  });
+
+  it("findBySiteId returns null when nothing is linked to that site, or args are missing", () => {
+    const projects = sanitizeProjects([{ id: 1, name: "Goose Creek" }]);
+    expect(findBySiteId(projects, "grp-9")).toBeNull();
+    expect(findBySiteId(projects, null)).toBeNull();
+    expect(findBySiteId(undefined, "grp-9")).toBeNull();
   });
 });

@@ -6,6 +6,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { onAuthChange, signOut } from "../workspaces/site-planner/lib/auth.js";
+import { setScheduleLink } from "../workspaces/site-planner/lib/storage.js";
 import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
@@ -113,6 +114,14 @@ export default function Shell() {
     const pid = row && (row.project_id ?? row.projectId ?? null);
     setDocIntent({ kind: "open-review", row, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false });
+  };
+  // Cross-module schedule link (the Schedule + the Site Planner live in SEPARATE cloud backends
+  // and can't read each other). When the embedded Schedule app reports a link set/created, mirror
+  // the lightweight hint onto the Site Planner side so the Site dashboard can show "has a schedule"
+  // without booting the iframe. The Schedule record stays the source of truth; this is the copy.
+  const scheduleLinkChanged = (groupId, info) => {
+    if (!groupId) return; // a clear with no group can't be mirrored; the stale hint self-heals on relink
+    try { setScheduleLink(groupId, info || {}); } catch (_) {}
   };
 
   useEffect(() => {
@@ -281,6 +290,7 @@ export default function Shell() {
               onGoDashboard={goDashboard}
               onNewProject={newProject}
               onOpenReviewInDocReview={openReviewInDocReview}
+              onScheduleLinkChanged={scheduleLinkChanged}
             />
           </Suspense>
         </ErrorBoundary>

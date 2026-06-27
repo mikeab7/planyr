@@ -181,6 +181,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⚠ One nudge is often NOT enough, and a PR never merges itself — BABYSIT it to `merged:true`
+  (learned 2026-06-27 on PR #379).** Automation-token pushes (PR-open + a single nudge) frequently
+  still don't fire the `pull_request` build — recent PRs have needed **two** `Nudge CI` commits — so
+  after nudging, **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch
+  / `pull_request_read get_status`) and **nudge again** if not. Separately, `main` moves fast (many
+  concurrent sessions) so a PR often goes `mergeable_state:dirty` on `BACKLOG*.md`/`VERIFICATION*.md`
+  — resolve by merging `origin/main` in (keep both sides' done-entries; renumber only a genuinely
+  colliding new B#/V#), re-run the gate, push. **Poll every ~150s while a PR is open** (webhooks do
+  NOT deliver CI-success / merge / conflict transitions — always re-fetch), never on a 20-min idle tick.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
@@ -232,6 +241,22 @@ server/                   # placeholder README only — NOT built or deployed; b
 ### Multi-workspace foundation
 - Monorepo restructure via **PR #3** (clean `main`): shell, workspace folders, coordinate stub,
   `/server` placeholder; Site Planner moved in unchanged. Build passes; real lazy-chunk split.
+- **Cross-module project connections — a schedule linked to a site (B493; also CLOSED B477).** A
+  project = a Site Planner **site group** (`group_id`); Site↔Review already share it. This wires the
+  **Schedule** in too: the canonical pairing lives on the schedule project (`linkedSiteId`/`Name`,
+  free in the `hs-v1` blob), mirrored as a lightweight HINT onto the Site Model
+  (`scheduleProjectId`/`Name`, **schema v9**, additive) so the Site Planner sees "has a schedule"
+  without booting the iframe (the two live in **separate backends** — the Shell brokers the mirror).
+  **Payoff = the top-header tabs carry the project:** `Scheduler.jsx` honors the routed `projectId`
+  (`planar:nav-select-by-site` activates the linked schedule; the active schedule pushes its
+  `linkedSiteId` back via `onProjectChange`). Land on an unlinked site → `LinkSchedulePanel`
+  resolution card (**suggest-and-confirm**, never auto-links: same-named suggestion + manual pick +
+  "Create a schedule for this site"). Bridge: `public/sequence/index.html` (nav-state carries the
+  link; inbound `nav-select-by-site`/`nav-link`/`nav-create-linked`; outbound `link-changed`),
+  `scheduler/lib/navState.js` (`findBySiteId`), `shared/projects/projectModel.js` (`suggestNameMatch`),
+  `storage.js` (`setScheduleLink`/`scheduleLinkOf`), 📅 chip in `ProjectBreadcrumb.jsx`. Headless
+  `verify-cross-module-link.mjs` 4/4 (wrapper path); the live cross-iframe round-trip (Schedule's own
+  Supabase, unreachable in the sandbox) is **V152**.
 
 ### Document Review — cloud persistence
 - Persists to the **existing Supabase backend** (reuses the anon client + auth session, no new
