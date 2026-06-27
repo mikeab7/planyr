@@ -18,25 +18,27 @@
 
 export const CANVAS_PX_BUDGET = 24e6; // ≤ ~24 MP backing store ≈ 96 MB RGBA
 
-/* The DETAIL window (the part of the sheet the user is actually reading) aims for this many
- * device-pixels per CSS-pixel. Targeting 2× even on a plain 1× monitor SUPERSAMPLES the raster
- * — pdf.js draws the thin CAD linework / small dimension text at twice the resolution and the
- * browser down-samples it, which anti-aliases sub-pixel edges far more cleanly than a flat 1×
- * raster (the residual "softer than Bluebeam" gap left after B415, which only restored *device*
- * density). Capped at 2×: a 3× retina panel rendering at 3× would 2.25× the memory for no visible
- * gain, and the budget below still clamps a large window down. Only the detail layer uses this;
- * the whole-page backdrop keeps its own (smaller) device-density budget. */
-export const DETAIL_DENSITY_TARGET = 2;
+/* The DETAIL window (the part of the sheet the user is actually reading) renders between a
+ * supersample FLOOR and a memory CAP, in device-pixels per CSS-pixel:
+ *  • FLOOR 2× — a plain 1× monitor is SUPERSAMPLED to 2×: pdf.js draws the thin CAD linework /
+ *    small dimension text at twice the resolution and the browser down-samples it, anti-aliasing
+ *    sub-pixel edges far more cleanly than a flat 1× raster (the residual "softer than Bluebeam"
+ *    gap left after B415, which only restored *device* density).
+ *  • CAP 2.5× — a 3×/4× retina panel renders a bit denser than the 2× floor (sharper for that
+ *    display) but is held below its native ratio so memory stays bounded; the budget below still
+ *    clamps a large window further. Only the detail layer uses this; the whole-page backdrop keeps
+ *    its own (smaller) device-density budget. */
+export const DETAIL_DENSITY_TARGET = 2;   // supersample floor (1× monitors get 2×)
+export const DETAIL_DENSITY_CAP = 2.5;    // ceiling on a high-dpi panel, bounding memory
 
 /* Pick how dense to render the canvas backing store for a base×scale on-screen size.
  * `devicePixelRatio` is injected (pdf.js passes window.devicePixelRatio) so this stays
  * pure + deterministic in tests. Returns the device-px-per-CSS-px multiplier. */
 export function backingScale(baseW, baseH, scale, devicePixelRatio = 1) {
   const cssW = Math.max(1, baseW * scale), cssH = Math.max(1, baseH * scale);
-  // Clamp the render density to the 2× target on every display: a 1× monitor is supersampled
-  // UP to 2× (cleaner anti-aliased edges), and a >2× panel is held DOWN at 2× to bound memory.
-  // (The budget below still lowers this further on a very large window.)
-  const want = Math.min(Math.max(devicePixelRatio || 1, DETAIL_DENSITY_TARGET), DETAIL_DENSITY_TARGET);
+  // At least the 2× supersample floor (so a 1× monitor still gets crisp AA), at most the cap
+  // (so a 3×/4× panel can't balloon memory). (The budget below lowers this on a very large window.)
+  const want = Math.min(Math.max(devicePixelRatio || 1, DETAIL_DENSITY_TARGET), DETAIL_DENSITY_CAP);
   const budget = Math.sqrt(CANVAS_PX_BUDGET / (cssW * cssH)); // densest sampling that still fits the budget
   // Never exceed the budget (use `budget` even when it's < 1× — soft beats OOM); a tiny
   // floor only guards against a degenerate zero-area canvas at absurd zooms.
@@ -69,7 +71,10 @@ export function backingPixels(baseW, baseH, scale, devicePixelRatio = 1) {
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-export const BACKDROP_PX_BUDGET = 8e6; // ≈ 32 MB RGBA — crisp at fit, cheap to keep resident
+export const BACKDROP_PX_BUDGET = 16e6; // ≈ 64 MB RGBA (one bitmap, off the gesture path) — keeps the
+// whole-page "soft floor" the user stares at DURING a gesture ~1.4× sharper on a large E-size sheet at
+// retina (≈73→103 dpi); no-op on a 1× monitor (the backdrop already caps at the device ratio there).
+// Stays under Safari's ~16.78 MP single-canvas limit; freed on page change.
 
 /* Density (device-px per page-unit) for the whole-page backdrop: the device dpr (capped 2×),
  * lowered only as far as the backdrop budget needs on a very large sheet. Independent of zoom —
@@ -86,8 +91,11 @@ export function backdropDensity(pageW, pageH, devicePixelRatio = 1) {
  * the wrap), expanded by `marginFrac` on each side and clamped to the page — the region the
  * detail layer rasterises at full density. `visible` is the un-margined on-screen rect, used by
  * `tileCovers` to skip a needless re-raster on a tiny pan. Returns null when the page is panned
- * fully off-screen. view = { scale, tx, ty } with screen = page*scale + t (shared transform). */
-export function visibleRegion(view, pageBase, vw, vh, marginFrac = 0.25) {
+ * fully off-screen. view = { scale, tx, ty } with screen = page*scale + t (shared transform).
+ * marginFrac 0.40 pre-renders ~0.4 screen-widths of halo each side, so a decisive flick-pan
+ * stays sharp to its leading edge (a smaller halo trailed a soft backdrop strip); still
+ * region-sized, so the 24 MP budget keeps density native on any normal sheet. */
+export function visibleRegion(view, pageBase, vw, vh, marginFrac = 0.40) {
   if (!view || !pageBase || !view.scale || !(vw > 0) || !(vh > 0)) return null;
   const s = view.scale, pw = Math.max(1, pageBase.w), ph = Math.max(1, pageBase.h);
   const vx0 = clamp((0 - view.tx) / s, 0, pw), vy0 = clamp((0 - view.ty) / s, 0, ph);

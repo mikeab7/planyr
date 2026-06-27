@@ -60,7 +60,7 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-### V147 — B486: production serving of the pdf.js support assets on planyr.io ✅ lint 0 · 1597 tests · build green · headless `verify-pdfjs-assets.mjs` 9/9 (+ a fix↔control A/B) + `verify-docreview-viewer.mjs` 13/13 (no regression); ⏳ one post-deploy live-edge curl
+### V147 — B486: production serving of the pdf.js support assets on planyr.io ✅ lint 0 · 1599 tests · build green · headless `verify-pdfjs-assets.mjs` 9/9 (+ a fix↔control A/B) + `verify-docreview-viewer.mjs` 13/13 (no regression); ⏳ one post-deploy live-edge curl
 The wiring is fully proven in `vite preview` — which serves the built `dist/` exactly as Cloudflare Pages will — and the routing was checked (no `/* /index.html` SPA catch-all; `/assets/*` doesn't match `/pdfjs/*`; Cloudflare serves real static files first). The ONE thing the sandbox can't reach is the live production deploy of this branch. After it merges + Cloudflare deploys, curl each of `https://planyr.io/pdfjs/wasm/openjpeg.wasm`, `…/standard_fonts/FoxitDingbats.pfb`, `…/cmaps/Adobe-Japan1-0.bcmap`, `…/iccs/CGATS001Compat-v2-micro.icc` and confirm each returns **200 with bytes** (NOT the SPA `index.html` / `text/html`). If any returns HTML, a Cloudflare routing rule is intercepting `/pdfjs/*` and needs an exclusion.
 
 ### V146 — B481 + B482: signed-in re-confirm of the Cowork-found overlay/switcher fixes ⏳ (logged-out + headless ✅; the exact signed-in cases need Cowork)
