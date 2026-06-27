@@ -109,6 +109,18 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/e\.key === "Escape"/);
   });
 
+  it("B528: Doc Review upsertReview serializes per-id writes (no false self-conflict)", () => {
+    const src = read("../src/workspaces/doc-review/lib/reviewStore.js");
+    expect(src).toMatch(/makeWriteSerializer/);
+    expect(src).toMatch(/serializeReviewWrite\(record\.id, \(\) => upsertReviewCore\(record\)\)/);
+  });
+
+  it("B529: Site Planner cloudUpsert serializes per-id writes (no false self-conflict)", () => {
+    const src = read("../src/workspaces/site-planner/lib/cloudSync.js");
+    expect(src).toMatch(/makeWriteSerializer/);
+    expect(src).toMatch(/serializeSiteWrite\(model\.id, \(\) => cloudUpsertCore\(uid, model\)\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}

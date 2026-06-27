@@ -6,6 +6,7 @@
  */
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { contentCount } from "./siteModel.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
@@ -70,7 +71,18 @@ function slimForCloud(model) {
   return m;
 }
 
-export async function cloudUpsert(uid, model) {
+// B529: serialize cloud writes per site id so a tab can't race ITSELF (debounced autosave + a
+// visibility/unmount/manual flush firing together) into a false self-conflict. A second write
+// for an id waits for the in-flight one, so it reads the version that write threaded back into
+// `siteVersions` (and the content baseline rememberContent() set) → the CAS + thin-clobber guard
+// both see fresh state. The genuine cross-device guard in casUpsert is untouched.
+const serializeSiteWrite = makeWriteSerializer();
+export function cloudUpsert(uid, model) {
+  if (!model || !model.id) return cloudUpsertCore(uid, model); // no id → nothing to serialize on; core returns the error
+  return serializeSiteWrite(model.id, () => cloudUpsertCore(uid, model));
+}
+
+async function cloudUpsertCore(uid, model) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
   const m = slimForCloud(model);
   // B459 — refuse to silently overwrite a fuller cloud row with a stale/thin model (the CAS below

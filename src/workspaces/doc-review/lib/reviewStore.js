@@ -22,6 +22,7 @@ import { supabase, supabaseRest, currentAccessToken } from "../../site-planner/l
 import { getUser } from "../../site-planner/lib/auth.js";
 import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf } from "../../site-planner/lib/siteModel.js";
 
 export const BUCKET = "doc-review-files";
@@ -82,7 +83,18 @@ const storageKeyFor = (uid, projectId, discipline, srcId) =>
 const reviewVersions = {};
 export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; }
 
-export async function upsertReview(record) {
+// B528: serialize cloud writes per review id so a tab can't race ITSELF (debounced autosave +
+// a visibility/unmount/manual flush firing together) into a false self-conflict that locks out
+// autosave. A second write for an id waits for the in-flight one, so it reads the version that
+// write threaded back into `reviewVersions` → the CAS succeeds. Cross-device conflicts are
+// unaffected (the genuine guard in casUpsert is untouched).
+const serializeReviewWrite = makeWriteSerializer();
+export function upsertReview(record) {
+  if (!record || !record.id) return upsertReviewCore(record); // no id → nothing to serialize on; core returns the error
+  return serializeReviewWrite(record.id, () => upsertReviewCore(record));
+}
+
+async function upsertReviewCore(record) {
   if (!supabase) return { ok: false, error: "Cloud not configured." };
   const uid = await currentUid();
   if (!uid) return { ok: false, error: "Sign in to save." };
