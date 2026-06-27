@@ -16,9 +16,16 @@ const linkBtn = { border: "none", background: "transparent", color: PAL.accent, 
 const s = (v) => (v == null ? "" : String(v)).trim();
 
 function Wrap({ onClose, children, msg, width = 360 }) {
+  // B530: a keyboard user must be able to dismiss the modal with Escape, and assistive tech must
+  // announce it as a dialog. One handler on the shared Wrap covers every AuthPanel view.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
+      <div role="dialog" aria-modal="true" aria-label="Account" onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink }}>Account</h2>
           <button onClick={onClose} style={{ ...btn(false), padding: "4px 10px", fontSize: 12 }}>Close ✕</button>

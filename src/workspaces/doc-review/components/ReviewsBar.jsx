@@ -98,6 +98,8 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
             {!busy && rows && rows.length === 0 && <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 6 }}>{signedIn ? "No saved reviews yet." : "—"}</div>}
             {!busy && rows && rows.map((r) => (
               <div key={r.id} onClick={() => { onOpen?.(r); setOpen(false); }}
+                role="button" tabIndex={0} aria-label={`Open ${r.title || "untitled review"}`}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(r); setOpen(false); } }} /* B531: keyboard-reachable row */
                 style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 6px", borderRadius: 7, cursor: "pointer" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>

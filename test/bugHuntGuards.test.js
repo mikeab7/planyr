@@ -89,6 +89,26 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/corrupt entry — skip and keep scanning/);
   });
 
+  it("B530: AuthPanel modals close on Escape and announce as a dialog", () => {
+    const src = read("../src/workspaces/site-planner/components/AuthPanel.jsx");
+    expect(src).toMatch(/role="dialog"/);
+    expect(src).toMatch(/e\.key === "Escape"/);
+  });
+
+  it("B531: the ReviewsBar row and the SitePlanner Section header are keyboard-reachable", () => {
+    const rb = read("../src/workspaces/doc-review/components/ReviewsBar.jsx");
+    expect(rb).toMatch(/role="button" tabIndex=\{0\}/);
+    expect(rb).toMatch(/e\.key === "Enter" \|\| e\.key === " "/);
+    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(sp).toMatch(/className="sec-head"[\s\S]{0,200}role="button" tabIndex=\{0\} aria-expanded=\{open\}/);
+  });
+
+  it("B532: the Site review modal closes on Escape and announces as a dialog", () => {
+    const src = read("../src/workspaces/site-planner/components/SiteReviewModal.jsx");
+    expect(src).toMatch(/role="dialog"/);
+    expect(src).toMatch(/e\.key === "Escape"/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
