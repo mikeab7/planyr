@@ -759,7 +759,7 @@ const computeDisplayHealth = (task, settings) => {
   if (!task) return task?.health;
   // Rule order matters: more specific overrides general
   if (cf.completeGreen && (task.percentComplete||0) >= 100) return "green";
-  if (cf.overdueRed && task.end && task.end < NOW && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
+  if (cf.overdueRed && task.end && task.end < NOW && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused" && task.health !== "red") return "red";
   if (cf.dueSoonYellow && task.end && task.end >= NOW && task.health === "gray") {
     // Within 7 calendar days
     const today = new Date(NOW + "T12:00:00");
@@ -769,8 +769,43 @@ const computeDisplayHealth = (task, settings) => {
   }
   return task.health;
 };
-const fmtD = s => { if (!s) return ""; const [y,m,d] = s.split('-'); return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
+
+// Worst-of-descendants rolled status for each PARENT task — the value the grid shows on a
+// collapsed parent. Shared by the project grid (rolledHealthMap) and the cross-project
+// dashboard (MasterView) so the two never disagree about a parent's status. Pure; uses raw
+// stored child health (a parent reflects what its children actually are).
+const HEALTH_PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
+const computeRolledHealth = (all) => {
+  const rollup = (id, stack) => {
+    const children = all.filter(t => t.parentId === id);
+    if (!children.length || stack.has(id)) return all.find(t => t.id === id)?.health || "";
+    stack.add(id);
+    let best = "", bestP = 0;
+    for (const c of children) { const h = rollup(c.id, stack); const p = HEALTH_PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
+    stack.delete(id);
+    return best;
+  };
+  const map = {};
+  all.forEach(t => { if (all.some(c => c.parentId === t.id)) map[t.id] = rollup(t.id, new Set()); });
+  return map;
+};
+
+const fmtD = s => { if (!s) return ""; const [y,m,d] = s.split('-'); if (!y||!m||!d) return ""; return String(+m).padStart(2,'0')+'/'+String(+d).padStart(2,'0')+'/'+y.slice(2); };
 const toShortDate = s => { if (!s) return ""; const [y,m,d] = s.split("-"); return `${+m}/${+d}/${y.slice(2)}`; };
+// Export filename — matches the Site Planner's PDF/PNG naming (src/workspaces/site-planner/lib/printSheet.js
+// → "YYYY.MM.DD {Project} - {Plan}"): here "YYYY.MM.DD {Project} - Schedule" (the trailing slot is the
+// document type, since a project has one schedule). A single selected project uses its name; multiple use
+// the Planyr brand. Filesystem-illegal chars are stripped (same rule as sanitizeFilename). The caller adds
+// the .pdf/.html/.json extension; for the PDF exhibit this string is the <title> the browser's "Save as
+// PDF" uses as the filename.
+const scheduleExportName = (projects, date = new Date()) => {
+  const p2 = n => String(n).padStart(2, "0");
+  const stamp = `${date.getFullYear()}.${p2(date.getMonth() + 1)}.${p2(date.getDate())}`;
+  const clean = s => String(s == null ? "" : s).replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const names = (Array.isArray(projects) ? projects : []).map(p => p && p.name).filter(Boolean);
+  const proj = clean(names.length === 1 ? names[0] : "Planyr") || "Planyr";
+  return `${stamp} ${proj} - Schedule`;
+};
 const parseFlexDate = s => {
   if (!s) return null; s = String(s).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -4665,7 +4700,7 @@ function App() {
     } catch(e) { /* cancelled */ }
   };
 
-  const exportJSON = () => dl(JSON.stringify(data, null, 2), "hillwood-schedule.json", "application/json");
+  const exportJSON = () => dl(JSON.stringify(data, null, 2), `${scheduleExportName(Object.values(data.projects))}.json`, "application/json");
   const importJSON = e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
@@ -4707,31 +4742,17 @@ function App() {
   const exportHTML = () => {
     const rows = Object.values(data.projects).map(p =>
       `<h2>${escapeHtml(p.name)}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
-      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${t.duration}d</td><td style="color:${h.dot}">${escapeHtml(h.label)}</td><td>${t.percentComplete}%</td><td>${escapeHtml(t.responsibleParty||"—")}</td></tr>`; }).join("") +
+      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = t.health==="green" ? 100 : (t.percentComplete||0); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(t.responsibleParty||"—")}</td></tr>`; }).join("") +
       `</table>`).join("");
-    dl(`<!DOCTYPE html><html><head><title>planar</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>Hillwood Schedule — ${new Date().toLocaleDateString()}</h1>${rows}</body></html>`,
-      "hillwood-schedule-export.html", "text/html");
+    // Title from the real data, not a hardcoded legacy project name / old brand:
+    // a single project uses its name, multiple use the Planyr brand.
+    const names = Object.values(data.projects).map(p => p.name).filter(Boolean);
+    const title = names.length === 1 ? names[0] : "Planyr Schedule";
+    dl(`<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:monospace;background:#0d1117;color:#e6edf3;padding:24px}h1{color:#e6a817;margin-bottom:24px}h2{color:#58a6ff;margin:24px 0 8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:6px 10px;text-align:left;font-size:12px}th{background:#161b22;color:#8b949e}</style></head><body><h1>${escapeHtml(title)} — ${new Date().toLocaleDateString()}</h1>${rows}</body></html>`,
+      `${scheduleExportName(Object.values(data.projects))}.html`, "text/html");  // match the Site Planner PDF filename format
   };
 
-  const rolledHealthMap = useMemo(() => {
-    if (!proj) return {};
-    const all = proj.tasks;
-    const PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
-    const rollup = id => {
-      const children = all.filter(t => t.parentId === id);
-      if (!children.length) return all.find(t => t.id === id)?.health || "";
-      let best = "", bestP = 0;
-      for (const c of children) {
-        const h = rollup(c.id);
-        const p = PRIO[h] || 0;
-        if (p > bestP) { bestP = p; best = h; }
-      }
-      return best;
-    };
-    const map = {};
-    all.forEach(t => { if (all.some(c => c.parentId === t.id)) map[t.id] = rollup(t.id); });
-    return map;
-  }, [proj?.tasks]);
+  const rolledHealthMap = useMemo(() => proj ? computeRolledHealth(proj.tasks) : {}, [proj?.tasks]);
 
   if (!data) return (
     <div style={{height:"100vh",background:"#ffffff",display:"flex",alignItems:"center",justifyContent:"center",color:"#e6a817",fontFamily:"'Inter',system-ui,sans-serif",fontSize:14,letterSpacing:".1em"}}>LOADING...</div>
@@ -7470,8 +7491,8 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     on any fill color. Paint order is locked by z-index: the row fill lives on the
                     row <div> (z auto, bottom) → grid / today / dependency lines (z2–4) → bars and
                     milestones (z5, the data layer) → bar + name labels (z6–7, top). */}
-                {(() => { return null; })()}
-                {isMilestone ? (<>
+                {/* a duration-0 PARENT renders as a summary bracket, not a diamond (B2) — so gate milestone on !isSummary */}
+                {(isMilestone && !isSummary) ? (<>
                   {(() => {                                    // milestone name: Left=before / Center=above / Right=after the diamond (B393)
                     const fs = NAME_SIZE(task.level), bl = settings?.barLabels;
                     const place = placeGanttLabel({kind:"milestone", align:labelAlign, bx, bw:0, rowTop:0,
@@ -8142,20 +8163,27 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   const masterHealthFilter = data.masterHealthFilter ?? true; // true = active only (red+yellow), false = all
   const setHealthFilter = v => setData(d => ({...d, masterHealthFilter: v}));
 
-  const rows = useMemo(() =>
-    Object.values(data.projects).flatMap(p => {
+  // Per-project rolled status, so a PARENT row shows the worst-of-its-children status (matching
+  // the grid/Gantt) instead of its own stale `health`. Recomputes when projects/settings/today
+  // change so the at-risk filter, sort and color stay live (overdue/due-soon + CF-rule edits).
+  const rows = useMemo(() => {
+    const dispOf = (t, isParent, rolled) => isParent ? (rolled[t.id] || t.health) : computeDisplayHealth(t, data.settings);
+    return Object.values(data.projects).flatMap(p => {
       const childIds = new Set(p.tasks.filter(t => t.parentId !== null).map(t => t.parentId));
+      const rolled = computeRolledHealth(p.tasks);
       return p.tasks
-        .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(computeDisplayHealth(t, data.settings)))
+        .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(dispOf(t, childIds.has(t.id), rolled)))
         .map(t => {
           let depth = 0, cur = t;
           while (cur && cur.parentId !== null) {
             depth++;
             cur = p.tasks.find(x => x.id === cur.parentId) || null;
           }
-          return {...t, projName: p.name, projId: p.id, depth, isLeaf: !childIds.has(t.id)};
+          const isLeaf = !childIds.has(t.id);
+          return {...t, projName: p.name, projId: p.id, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled)};
         });
-    }), [data.projects, masterHealthFilter]);
+    });
+  }, [data.projects, masterHealthFilter, data.settings, NOW]);
 
   const filteredRows = useMemo(() => {
     if (lvlFilter.leafOnly) return rows.filter(r => r.isLeaf);
@@ -8223,7 +8251,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
     return [...filteredRows].sort((a, b) => {
       let av, bv;
       switch(col) {
-        case "health":      av = HEALTH_ORDER[computeDisplayHealth(a, data.settings)]??5; bv = HEALTH_ORDER[computeDisplayHealth(b, data.settings)]??5; break;
+        case "health":      av = HEALTH_ORDER[a._disp]??5; bv = HEALTH_ORDER[b._disp]??5; break;  // rolled for parents (B486-out)
         case "id":          av = a.id;                           bv = b.id;                         break;
         case "duration":    av = a.duration;                     bv = b.duration;                   break;
         case "percentComplete": av = a.percentComplete||0;       bv = b.percentComplete||0;         break;
@@ -8372,7 +8400,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
   };
 
   const renderCell = (t, col, ri) => {
-    const dispHealth = computeDisplayHealth(t, data.settings);
+    const dispHealth = t._disp ?? computeDisplayHealth(t, data.settings);  // rolled-up for parents, computed for leaves
     const h = HEALTH[dispHealth];
     const ci = activeCols.indexOf(col);
     const isSel = selCell && selCell.ri === ri && selCell.ci === ci;
@@ -8849,6 +8877,9 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
   const rowBands=[], barLayer=[], labelLayer=[], nameRecords=[];
   allTasks.forEach((t,i)=>{
     const y=HEADER_H+i*ROW_H, bg=i%2?"#f6f6f6":"#fff";
+    // An unscheduled task (no/invalid start or end) gets NO bar — drawing one yields NaN SVG
+    // coords (an invisible, broken row). Mirror the on-screen Gantt's "Unscheduled" treatment.
+    const blank = !t.start || !t.end || isNaN(pd(t.start)) || isNaN(pd(t.end));
     const bx=xOf(t.start), bw=Math.max(3,Math.round((pd(t.end)-pd(t.start))/86400000*ppd));
     const color=HC[t.health]||"#94a3b8";
     const isMilestone=t.duration===0;
@@ -8866,7 +8897,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       })();
     const barY=y+ROW_H*0.22, barH=ROW_H*0.55, midY=y+ROW_H*0.5;
     let blText="";
-    if(opts.barLabels && !isParent){
+    if(opts.barLabels && !isParent && !blank){
       const L=barLabelText(t,opts.barLabels.left,opts.barLabels.year), R=barLabelText(t,opts.barLabels.right,opts.barLabels.year);
       const lx=isMilestone?bx-8:bx-3, rx=isMilestone?bx+8:bx+bw+3;
       if(L) blText+=`<text x="${lx}" y="${y+ROW_H*0.68}" font-size="6.5" fill="#555" text-anchor="end" font-family="Arial,sans-serif">${escapeHtml(L)}</text>`;
@@ -8877,10 +8908,12 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     const GRAY="#94a3b8";
     const pct = t.health==="green" ? 100 : Math.max(0, Math.min(100, t.percentComplete||0));
     let barSvg;
-    if(isMilestone){
-      const done = pct>=100;
-      barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
+    if(blank){
+      barSvg="";   // unscheduled — no geometry; an "Unscheduled" tag is added to labelLayer below
     }else if(isParent){
+      // a summary (has children) renders as a BRACKET even when its rolled span is 0 days —
+      // checked before the milestone branch so a parent whose children are all milestones
+      // isn't mistaken for a single diamond (B2).
       // Depth-stepped BRACKET (B210): a thin span + straight-down legs (no triangles). The
       // GRAPHIC keeps its ramp (depth 0 = #2B3340, darkest/thickest, stepping lighter/thinner);
       // magnitudes compressed a touch vs B210 so the always-above caption has clear air (B393).
@@ -8891,6 +8924,9 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       barSvg=`<rect x="${bx}" y="${sTop}" width="${bw}" height="${SPAN}" rx="1" fill="${NAVY}"/>`
         +`<rect x="${bx}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`
         +`<rect x="${bx+bw-legW}" y="${sTop}" width="${legW}" height="${SPAN+LEG}" fill="${NAVY}"/>`;
+    }else if(isMilestone){
+      const done = pct>=100;
+      barSvg=`<polygon points="${bx},${midY-5} ${bx+5},${midY} ${bx},${midY+5} ${bx-5},${midY}" fill="${done?GRAY:'#fff'}" stroke="${GRAY}" stroke-width="1.1"/>`;
     }else{
       const LH=ROW_H*0.30, by=midY-LH/2, bw2=Math.max(bw,5), r=LH/2;
       if(pct>=100){
@@ -8911,7 +8947,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     // Skip a name whose bar is fully OUTSIDE the visible window (B361 zoom/pan) — otherwise its
     // label would clamp onto the chart edge with no bar (no-op for the auto-fit default, where
     // every bar is in view).
-    const nameInView = isMilestone ? (bx>=LABEL_W-2 && bx<=svgWidth+2) : (bx+bw>=LABEL_W-2 && bx<=svgWidth+2);
+    const nameInView = !blank && (isMilestone ? (bx>=LABEL_W-2 && bx<=svgWidth+2) : (bx+bw>=LABEL_W-2 && bx<=svgWidth+2));
     if(opts.barNames!==false && nameInView){
       const kind = isMilestone?"milestone":isParent?"summary":"leaf";
       const align = opts.labelAlign || resolveLabelAlign(proj);
@@ -8933,9 +8969,10 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
       nameRecords.push({x:place.x, y:place.y, anchor:place.anchor, mode:place.mode, lw, fs,
         weight:ganttNameWeight(depth, kind, t.bold), italic:!!t.italic, str:escapeHtml(nm)});
     }
+    const unsched = blank ? `<text x="${LABEL_W+6}" y="${y+ROW_H*0.68}" font-size="7.5" fill="#9aa0a6" font-style="italic" font-family="Arial,sans-serif">Unscheduled</text>` : "";
     rowBands.push(`<rect x="0" y="${y}" width="${svgWidth}" height="${ROW_H}" fill="${bg}"/>`);
     barLayer.push(barSvg);
-    labelLayer.push(`${labelHtml}${blText}`);   // task-column name + bar labels (in-chart names → nameLayer, B402)
+    labelLayer.push(`${labelHtml}${blText}${unsched}`);   // task-column name + bar labels (+ Unscheduled tag) (in-chart names → nameLayer, B402)
   });
   // Dependency connectors — same curved style as the in-app Gantt (cubic bezier,
   // direction-flipped 32px handles, type colors, dashed). Opacity lifted .55 -> .7 for print.
@@ -8962,9 +8999,9 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
         const LH=ROW_H*0.30; return which==='top'?midY-LH/2:midY+LH/2;                  // leaf bar edges
       };
       for(const t of p.tasks){
-        const preds=Array.isArray(t.predecessors)?t.predecessors:[];
+        const preds=normPreds(t.predecessors);   // tolerate plain-number preds (seed/imported) so arrows draw like the table (F2)
         for(const pr of preds){
-          if(!pr||!ix.has(pr.id)) continue;
+          if(!ix.has(pr.id)) continue;
           const pt=p.tasks[ix.get(pr.id)-base];
           if(!pt||!pt.start||!pt.end||!t.start||!t.end) continue;
           const pi=ix.get(pr.id), si=ix.get(t.id);
@@ -9132,7 +9169,7 @@ function buildPDFHtml(cfg, data, forPreview) {
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${t.percentComplete||0}%`;
+      case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
       case "health":{const h=HC[t.health]||{l:t.health,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
       case "name":{const dep=getDepth(tasks,t.id);const ind=dep*14;const fw=dep===0?700:dep===1?600:400;const fs=dep===0?10.5:dep===1?10:9.5;const isP=tasks.some(x=>x.parentId===t.id);const key=projId+":"+t.id;const col=collapsedSet.has(key);const tri=(forPreview&&isP)?`<span class="pl-tri${col?"":" open"}" data-collapse="${key}" title="${col?"Expand":"Collapse"}">${col?"\u25B8":"\u25BE"}</span>`:"";return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;}
@@ -9170,7 +9207,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     const cellText=(t,k,tasks)=>{ switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${t.percentComplete||0}%`;
+      case "percentComplete": return `${t.health==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
       case "health": { const h=HC[t.health]; return h?h.l:(t.health||""); }
       case "name": return t.name==null?"":String(t.name);
@@ -9276,7 +9313,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     });
   }
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>${cfg.exhibitLabel?escapeHtml(cfg.exhibitLabel)+" &#x2014; ":""}${escapeHtml(cfg.projectTitle)}</title>
+<title>${escapeHtml(scheduleExportName(selProjs))}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @page{size:${ps.css} ${cfg.orientation};margin:${cfg.margins.top}in ${cfg.margins.right}in ${cfg.margins.bottom}in ${cfg.margins.left}in}

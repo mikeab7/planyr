@@ -388,3 +388,122 @@ describe("anti-drift: the schedule-input fixes still exist in the real source", 
     expect(sjsx).toMatch(/export const validatePredEdit = \(tasks, id, parsed\) =>/);
   });
 });
+
+// ── Schedule OUTPUT hardening (2026-06-27) ─────────────────────────────────
+// Bugs in what the scheduler PRODUCES / EXPORTS / DISPLAYS.
+
+describe("computeRolledHealth — a parent reflects the worst of its descendants", () => {
+  const T = (id, health, parentId = null) => ({ id, name: "t" + id, health, parentId });
+  it("rolls a red child up to its parent (and grandparent)", () => {
+    const map = E.computeRolledHealth([
+      T(1, "gray"), T(2, "gray", 1), T(3, "red", 2), T(4, "green", 1),
+    ]);
+    expect(map[1]).toBe("red");   // worst across the whole subtree
+    expect(map[2]).toBe("red");   // direct parent of the red task
+    expect(map[3]).toBeUndefined(); // a leaf gets no rolled entry
+    expect(map[4]).toBeUndefined();
+  });
+  it("worst-wins ordering: red > yellow > paused > green > gray", () => {
+    const map = E.computeRolledHealth([T(1, "gray"), T(2, "yellow", 1), T(3, "green", 1), T(4, "paused", 1)]);
+    expect(map[1]).toBe("yellow");
+  });
+  it("a parent whose children are all green rolls up green, not its own stale gray", () => {
+    const map = E.computeRolledHealth([T(1, "gray"), T(2, "green", 1), T(3, "green", 1)]);
+    expect(map[1]).toBe("green");
+  });
+  it("never throws and terminates on a parentId cycle", () => {
+    expect(() => E.computeRolledHealth([T(1, "gray", 2), T(2, "red", 1)])).not.toThrow();
+  });
+  it("matches the prior inline grid algorithm on a random tree", () => {
+    // reference = the original App rolledHealthMap logic
+    const ref = (all) => {
+      const PRIO = { red: 4, yellow: 3, paused: 2, green: 1, gray: 0, "": 0 };
+      const rollup = id => {
+        const kids = all.filter(t => t.parentId === id);
+        if (!kids.length) return all.find(t => t.id === id)?.health || "";
+        let best = "", bestP = 0;
+        for (const c of kids) { const h = rollup(c.id); const p = PRIO[h] || 0; if (p > bestP) { bestP = p; best = h; } }
+        return best;
+      };
+      const m = {}; all.forEach(t => { if (all.some(c => c.parentId === t.id)) m[t.id] = rollup(t.id); });
+      return m;
+    };
+    const H = ["red", "yellow", "paused", "green", "gray"];
+    let s = 7; const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const tasks = [];
+    for (let i = 1; i <= 50; i++) tasks.push({ id: i, name: "t" + i, health: H[Math.floor(rnd() * H.length)], parentId: i === 1 ? null : (rnd() < 0.6 ? 1 + Math.floor(rnd() * (i - 1)) : null) });
+    expect(E.computeRolledHealth(tasks)).toEqual(ref(tasks));
+  });
+});
+
+describe("anti-drift: the schedule-output fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const sjsx = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+
+  it("the web/JSON/PDF exports use the Site-Planner filename format, not Hillwood/planar", () => {
+    expect(src).not.toMatch(/Hillwood Schedule/);
+    expect(src).not.toMatch(/hillwood-schedule/);
+    expect(src).not.toMatch(/<title>planar<\/title>/);
+    // all three exports route their name through scheduleExportName (Site-Planner format)
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.html`/);
+    expect(src).toMatch(/`\$\{scheduleExportName\(Object\.values\(data\.projects\)\)\}\.json`/);
+    expect(src).toMatch(/<title>\$\{escapeHtml\(scheduleExportName\(selProjs\)\)\}<\/title>/);
+  });
+  it("the web snapshot guards percent/duration and escapes the status color", () => {
+    expect(src).toMatch(/const pct = t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)/);
+    expect(src).toMatch(/\$\{Number\(t\.duration\)\|\|0\}d/);
+    expect(src).toMatch(/style="color:\$\{escapeHtml\(h\.dot\)\}"/);
+  });
+  it("buildGanttSVG skips an unscheduled task's bar and tags it instead of drawing NaN", () => {
+    expect(src).toMatch(/const blank = !t\.start \|\| !t\.end \|\| isNaN\(pd\(t\.start\)\) \|\| isNaN\(pd\(t\.end\)\);/);
+    expect(src).toMatch(/if\(blank\)\{\s*barSvg="";/);
+    expect(src).toMatch(/>Unscheduled<\/text>/);
+  });
+  it("buildGanttSVG draws a summary bracket before a milestone diamond + normalizes preds for arrows", () => {
+    expect(src).toMatch(/\}else if\(isParent\)\{[\s\S]*?\}else if\(isMilestone\)\{/);
+    expect(src).toMatch(/const preds=normPreds\(t\.predecessors\);/);
+  });
+  it("the on-screen Gantt renders a duration-0 parent as a bracket, not a diamond", () => {
+    expect(src).toMatch(/\(isMilestone && !isSummary\) \? \(<>/);
+  });
+  it("the exhibit table %Done matches the green→100 bar convention", () => {
+    expect(src).toMatch(/return `\$\{t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
+  });
+  it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
+    expect(src).toMatch(/const computeRolledHealth = \(all\) =>/);
+    expect(src).toMatch(/const rolled = computeRolledHealth\(p\.tasks\);/);
+    expect(src).toMatch(/_disp: dispOf\(t, !isLeaf, rolled\)/);
+    expect(src).toMatch(/\}, \[data\.projects, masterHealthFilter, data\.settings, NOW\]\);/);
+    expect(src).toMatch(/const rolledHealthMap = useMemo\(\(\) => proj \? computeRolledHealth\(proj\.tasks\) : \{\}/);
+  });
+  it("the overdue rule no longer fires on a 100%-complete task", () => {
+    expect(src).toMatch(/cf\.overdueRed && task\.end && task\.end < NOW && \(task\.percentComplete\|\|0\) < 100/);
+  });
+  it("the engine mirror carries computeRolledHealth verbatim", () => {
+    expect(sjsx).toMatch(/export const computeRolledHealth = \(all\) =>/);
+  });
+  it("the schedule export name uses the Site-Planner format helper (mirrored)", () => {
+    expect(src).toMatch(/const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+    expect(sjsx).toMatch(/export const scheduleExportName = \(projects, date = new Date\(\)\) =>/);
+  });
+});
+
+describe("scheduleExportName — matches the Site Planner PDF filename format", () => {
+  const D = new Date(2026, 5, 27); // 2026-06-27 (local), date injectable for determinism
+  it("single project: 'YYYY.MM.DD {Project} - Schedule'", () => {
+    expect(E.scheduleExportName([{ id: 1, name: "Goose Creek" }], D)).toBe("2026.06.27 Goose Creek - Schedule");
+  });
+  it("zero-pads month/day to match the Site Planner stamp", () => {
+    expect(E.scheduleExportName([{ name: "X" }], new Date(2026, 0, 3))).toBe("2026.01.03 X - Schedule");
+  });
+  it("multiple projects collapse to the Planyr brand", () => {
+    expect(E.scheduleExportName([{ name: "A" }, { name: "B" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("no/blank projects fall back to the Planyr brand", () => {
+    expect(E.scheduleExportName([], D)).toBe("2026.06.27 Planyr - Schedule");
+    expect(E.scheduleExportName([{ name: "" }], D)).toBe("2026.06.27 Planyr - Schedule");
+  });
+  it("strips filesystem-illegal chars but KEEPS letters/digits/spaces (the regex isn't a bad range)", () => {
+    expect(E.scheduleExportName([{ name: 'A/B: C* <x>|2' }], D)).toBe("2026.06.27 A B C x 2 - Schedule");
+  });
+});
