@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V161 — B517 TxRRC overlay host + B520 phone-width banners ✅ unit/build here; ⏳ two runtime eyeballs owed
+- **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** **B517** — the oil & gas wells / pipelines MAP overlay now points at the authoritative statewide RRC service (was the Harris-clipped host that under-painted outside Harris). **B520** — fixed top notification banners now cap at `min(<px>, calc(100vw - 16px))` so their action button stays on-screen at phone width.
+- **✅ Verified here (no browser).** `npm test` 1720 incl. anti-drift guards (retired TxRRC host gone / authoritative present; banner caps); GIS source audit OK; lint 0; build green.
+- **⏳ Why pending (runtime over live tiles, not drivable here).** (B517) On a Chambers/Gulf-coast site, toggle the Oil & gas wells + Pipelines overlays and confirm the map now paints the dense statewide coverage (not the old ~14-well sliver), matching the Site Analysis count. (B520) On a ~390px phone viewport, trigger a top banner (e.g. the split-note one logged-out) and confirm its button is fully on-screen and tappable.
+- Cadence: once after ship.
+
 ### V160 — B511/B516: legacy-prune data-loss guard (signed-in) + scheduler cross-origin guard ✅ unit/parse here; ⏳ two runtime checks owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** **B511** — `pruneMigratedLegacy` now compares timestamps before deleting an on-device site, so a newer logged-out edit can't be silently dropped on sign-in. **B516** — the three scheduler preview-iframe postMessage handlers now enforce a same-origin check.
 - **✅ Verified here (no browser).** `npm test` 1716 incl. B511 unit tests (keeps-newer / prunes-same-or-older / keeps-cloud-absent) and the esbuild parse of the scheduler block; lint 0 · build green.

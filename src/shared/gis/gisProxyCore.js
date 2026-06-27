@@ -27,8 +27,11 @@ export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 // general-purpose image relay. Covers the agencies the layers actually use (Esri basemaps/world
 // services, FEMA, USFWS wetlands, USGS, EPA, Texas state + TNRIS, Houston + the Gulf-coast
 // counties). Matched against the decoded upstream host. Extend alongside counties.js layer hosts.
+// B518: hctx.net (HCFCD ROW raster), nationalmap.gov (USGS 3DEP elevation), harcresearch.org
+// (HARC MUD boundaries) were missing, so those raster overlays 400'd at the proxy and never got
+// B445 outage caching (they fell back to a direct uncached fetch every paint). Added here.
 export const ALLOWED_GIS_HOST_RE =
-  /(?:^|\.)(?:arcgis\.com|arcgisonline\.com|fema\.gov|fws\.gov|usgs\.gov|epa\.gov|texas\.gov|tnris\.org|tx\.gov|houstontx\.gov|harriscountytx\.gov|hcfcd\.org|fortbendcountytx\.gov|fbcad\.org|chambers-county\.com|h-gac\.com)$/i;
+  /(?:^|\.)(?:arcgis\.com|arcgisonline\.com|fema\.gov|fws\.gov|usgs\.gov|epa\.gov|texas\.gov|tnris\.org|tx\.gov|houstontx\.gov|harriscountytx\.gov|hcfcd\.org|fortbendcountytx\.gov|fbcad\.org|chambers-county\.com|h-gac\.com|hctx\.net|nationalmap\.gov|harcresearch\.org)$/i;
 
 /* URL-safe base64 (no +,/,= so it survives a URL path segment untouched). The values encoded
  * here are plain ASCII https URLs, so btoa/atob (present in browsers, Cloudflare Workers, and
