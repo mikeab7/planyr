@@ -24,7 +24,8 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 <!-- Bug-hunt batch 2026-06-27 (B501–B509): surfaced by a 6-hunter Workflow over the real
      codebase, each finding adversarially confirmed (verify + refute agents) as a genuine,
-     low-risk defect before filing. B500 (Dimension label) was fixed + shipped the same lap. -->
+     low-risk defect before filing. B510 (Dimension label) was fixed + shipped the same lap
+     — B500 was taken by a concurrent pond-grading fix, so the Dimension item is B510. -->
 
 ### B501 — Scheduler: deleting a task never recomputes parent roll-ups / cascade → stale summary dates `[Schedule]` (bug) — HIGH  *(bug-hunt 2026-06-27, adversarially confirmed)*
 `[ ]` `deleteTask`/`deleteTasks` (`public/sequence/index.html` ~L3919/L3705) call `renumberTasks(tasks.filter(...))` with NO recompute — every other structural handler (indent/outdent/paste/move) wraps with `recomputeAfterStructureChange = rollupParentDates(cascadeDates(...))` (the exact class B487 fixed). A deleted child leaves the parent summary bar/row showing a span for work that's gone until an unrelated edit re-triggers a rollup. **Fix:** wrap both filtered arrays with `recomputeAfterStructureChange(...)` before renumber (already exists ~L752). Add an engine unit test in `ui-audit/stress/scheduler-engine.mjs` + `test/schedulerEngine.test.js`.

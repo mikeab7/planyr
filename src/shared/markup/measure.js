@@ -30,7 +30,7 @@ export function measureValue(m, ftPerUnit) {
   if (m.kind === "distance" || m.kind === "dimension") {
     // `dimension` is distance + witness ticks (a Bluebeam-style annotation): same length
     // calc as distance, but keep its own kind so callers still render the ticked variant.
-    // (B500 — without this branch a Dimension fell through and its label read "—".)
+    // (B510 — without this branch a Dimension fell through and its label read "—".)
     if (pts.length < 2) return { kind: m.kind, calibrated: false, lengthFt: null, raw: 0 };
     const u = dist(pts[0], pts[1]);
     return { kind: m.kind, calibrated: cal, lengthFt: cal ? u * ftPerUnit : null, raw: u };

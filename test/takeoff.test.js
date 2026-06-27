@@ -28,10 +28,10 @@ describe("doc-review takeoff geometry + unit conversion", () => {
     });
   });
 
-  // B500: the Dimension tool is distance + witness ticks — it must report a calibrated
-  // length, not fall through to "—". Regression guard: a concurrent merge could drop the
-  // dimension branch from measureValue.
-  it("B500: dimension reports a calibrated length like distance, keeping its own kind", () => {
+  // B510: the Dimension tool is distance + witness ticks — it must report a calibrated
+  // length, not fall through to "—" (B500 went to a concurrent pond fix). Regression guard:
+  // a concurrent merge could drop the dimension branch from measureValue.
+  it("B510: dimension reports a calibrated length like distance, keeping its own kind", () => {
     const m = { kind: "dimension", pts: [{ x: 0, y: 0 }, { x: 10, y: 0 }] };
     expect(measureValue(m, 2)).toMatchObject({ kind: "dimension", calibrated: true, lengthFt: 20, raw: 10 });
     expect(measureLabel(m, 2)).toBe("20.0 ft");
