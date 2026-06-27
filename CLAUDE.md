@@ -433,10 +433,20 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   empty-state heading, and the error-boundary label all say "Review". The **internal id stays `doc-review`**,
   the folder is `src/workspaces/doc-review/`, the route is `/markup`, and the data-model field is `markups` —
   none of those change (renaming them would orphan routes/storage). The module accent token is
-  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**,
-  **"Document Review"**, and **"Library"** ALL mean this same module — don't treat them as separate features.
-  Distinct from this: the in-module **🗂 Files** drawer (the `FileBrowser` / `ProjectLibrary` file explorer)
-  and the Site Planner's **"Markup line/rect"** drawing tools are their own things — leave their labels alone.
+  **`--accent-review`** (JS mirror `accentReview`), amber **#EF9F27** (B419). Historical names **"Markup"**
+  and **"Document Review"** mean this same Review module — don't treat them as separate features.
+  Distinct from this: the Site Planner's **"Markup line/rect"** drawing tools are their own thing — leave
+  their labels alone.
+  - **⚠ UPDATE (B493, 2026-06-27): "Library" is now its OWN top-level workspace, NOT the Review module.**
+    The file browser (`FileBrowser`, was Review's landing screen) was lifted into a dedicated **Library** tab
+    (`src/workspaces/library/`, internal id `library`, route `#/library`, teal accent `--accent-library`
+    **#0E7490** / JS `accentLibrary`). Review is now purely "open one drawing + mark it up" — with nothing
+    open it shows a "No drawing open" empty state with a **Browse the Library** button. Clicking a file in
+    Library opens it in Review via the existing Shell `onOpenReviewInDocReview` intent. The file-storage
+    **data layer (`reviewStore`/`autofiling`/`fileIndex`) stays in `doc-review/lib`** (project-scoped,
+    canvas-independent) and Library imports it cross-workspace — no new backend/tables/keys. So pre-B493
+    text below that calls `FileBrowser` "the Document Review landing surface" now means the **Library**
+    tab. The Site Planner's slide-over `ProjectFilesDrawer` (in-context map peek) is unchanged.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and

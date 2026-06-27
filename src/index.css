@@ -35,12 +35,15 @@
   --accent-site:          #1D9E75;
   --accent-schedule:      #7F77DD;
   --accent-review:        #EF9F27;
+  --accent-library:       #0E7490;   /* teal — dark enough that white-on-it clears AA in both themes */
   --on-accent-site:       #FFFFFF;
   --on-accent-schedule:   #FFFFFF;
   --on-accent-review:     #412402;   /* dark text on amber — never white */
+  --on-accent-library:    #FFFFFF;
   --accent-site-text:     #0F6E56;
   --accent-schedule-text: #534AB7;
   --accent-review-text:   #8A5410;
+  --accent-library-text:  #0C677E;
 
   /* Semantic TEXT colors (success / danger / info) — theme-aware so a colored label
      stays AA on a themed panel in BOTH themes. A hardcoded #15803d / #b3361b / #1d4ed8
@@ -145,6 +148,7 @@
   --accent-site-text:     #5DCAA5;
   --accent-schedule-text: #AFA9EC;
   --accent-review-text:   #EF9F27;
+  --accent-library-text:  #5AC4DB;   /* light cyan on dark chrome (fill + on-accent inherit from light) */
 
   /* Semantic TEXT colors — lightened for legibility on the dark panels (B354). */
   --success-text: #4FBF7B;
