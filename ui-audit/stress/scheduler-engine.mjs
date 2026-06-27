@@ -79,6 +79,31 @@ export const parsePreds = raw => {
     return {id: parseInt(m[1]), type: (m[2]||"FS").toUpperCase(), lag: m[3] ? parseInt(m[3].replace(/\s/g,"")) : 0};
   }).filter(Boolean);
 };
+// Validate a proposed predecessor list for task `id` (faithful copy from index.html):
+// drops self-refs, refs to nonexistent ids, and refs that would create a circular dependency.
+export const validatePredEdit = (tasks, id, parsed) => {
+  const list = Array.isArray(parsed) ? parsed : [];
+  const selfRemoved = list.some(p => p && p.id === id);
+  let preds = list.filter(p => p && p.id !== id);
+  const known = new Set((Array.isArray(tasks) ? tasks : []).map(t => t.id));
+  const unknownIds = [...new Set(preds.filter(p => !known.has(p.id)).map(p => p.id))];
+  preds = preds.filter(p => known.has(p.id));
+  const predMap = {};
+  (Array.isArray(tasks) ? tasks : []).forEach(t => { predMap[t.id] = normPreds(t.predecessors).map(p => p.id); });
+  const reachesId = startId => {
+    const stack = [startId], seen = new Set();
+    while (stack.length) {
+      const cur = stack.pop();
+      if (cur === id) return true;
+      if (seen.has(cur)) continue; seen.add(cur);
+      (predMap[cur] || []).forEach(x => stack.push(x));
+    }
+    return false;
+  };
+  const accepted = [], cyclic = [];
+  preds.forEach(p => { if (reachesId(p.id)) cyclic.push(p.id); else accepted.push(p); });
+  return { preds: accepted, selfRemoved, unknownIds, cyclic };
+};
 export const constrainedStartFrom = (pred, dep, taskDur) => {
   const lag = dep.lag || 0;
   switch ((dep.type||"FS").toUpperCase()) {
