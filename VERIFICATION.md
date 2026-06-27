@@ -60,6 +60,10 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V147 — B486: team re-home guard — only the OWNER can change a project's sharing (needs 2 accounts) ⏳ owner must run `db/team_rehome_guard.sql` first
+- **What changed.** A BEFORE UPDATE trigger on `sites`/`doc_reviews`/`file_facts` blocks a non-owner from changing `team_id` (share/unshare/re-home) — closes the gap where a teammate on two teams could re-home the owner's shared project. SQL-only (no app code); audited the rest of the Team Workspaces surface and this was the one real bug.
+- **Owner step first:** run `db/team_rehome_guard.sql` in the Supabase SQL editor (handed over + on OWNER-TODO).
+- **⏳ Verify (needs 2 test accounts, signed-in — the sandbox can't):** A owns a project shared with team X; B is a member of X **and** of another team Y. As B, attempt to set the project's `team_id` to Y (re-home) → it must FAIL with "Only the project owner can change sharing." As B, edit the project's CONTENT (a building/markup) → still SUCCEEDS (team_id unchanged). As A (owner), share/unshare/re-home → all SUCCEED. Folds into the broader B406 team round-trip (V118). Cadence: once after the SQL is run.
 ### V146 — B481 + B482: signed-in re-confirm of the Cowork-found overlay/switcher fixes ⏳ (logged-out + headless ✅; the exact signed-in cases need Cowork)
 - **B481 (large overlay rehydrate)** ✅ headless `verify-b480-overlay-large.mjs` 8/8 (a 2.1 MB overlay re-renders after reload from IndexedDB, no placeholder) + `verify-b474-overlay-idb.mjs` 7/7 (no regression). ⏳ **Signed-in re-confirm (Cowork):** the exact 7.5 MB+ case — drop a >5 MB site-plan overlay, reload, confirm it RE-RENDERS (not the "Re-add … not on this device" placeholder).
 - **B482 (cold Review switcher)** — the cache warm only fires signed in, so logged-out can't drive it (logged-out the switcher correctly reads the legacy store). ⏳ **Signed-in re-confirm (Cowork):** open a FRESH tab straight into Review (`/project/<id>/markup`) without opening the Site Planner first → open the "▾" switcher → it lists your projects (briefly "Loading projects…", then populated), NOT "No projects yet."
