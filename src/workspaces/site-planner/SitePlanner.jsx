@@ -23,7 +23,6 @@ import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
-import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
@@ -1154,7 +1153,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
-  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -6382,11 +6380,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
-      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
-      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
-        🗂 Files
-      </button>
     </span>
   );
 
@@ -6497,20 +6490,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
 
-      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review.
-          Clicking a file hands the whole review row up to the Shell, which stashes it and
-          switches to Document Review — DR opens it once it mounts. Passing only
-          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
-          (NEW-1). */}
-      <ProjectFilesDrawer
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        signedIn={isCloudActive()}
-        projectId={groupId}
-        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
-        onPlaceOnMap={() => setFilesOpen(false)}
-      />
       {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
           until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
           stay on this device and union-merge in on reload. */}

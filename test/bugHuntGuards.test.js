@@ -49,13 +49,9 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/CHROME = "var\(--surface-raised\)"/);
   });
 
-  it("B527: the Project Files drawer themes its panel + controls (no white slab / invisible text in dark mode)", () => {
-    const src = read("../src/workspaces/doc-review/components/ProjectFilesDrawer.jsx");
-    expect(src).not.toMatch(/background: "#fff"/);                              // panel/control backgrounds were hardcoded white
-    expect(src).not.toMatch(/#92400e|#2c2a26|#4b5563|#6b7280|#b45309|#fffbeb/); // hardcoded light text / cream-box hexes
-    expect(src).toMatch(/paper: "var\(--surface-raised\)"/);                    // PAL is token-backed
-    expect(src).toMatch(/color: "var\(--warn-text\)"/);                         // amber labels themed
-  });
+  // B527's guard (Project Files drawer dark-mode theming) was retired with the drawer itself:
+  // the redundant 🗂 Files button + ProjectFilesDrawer.jsx were removed once the Library tab
+  // replaced them (B497). No component left to theme-guard.
 
   it("B517: the TxRRC well/pipeline overlay no longer points at the retired Harris-clipped host", () => {
     const src = read("../src/workspaces/site-planner/lib/layers.js");

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   ANALYSIS_SOURCES, simplifyRing, ringsBBox, ringCentroid, representativeRing,
   ringsSignature, buildAnalysisParams, buildQueryUrl, normalizeAttrs, zoneSummary, wetlandSummary,
-  pipelineSummary, classifyStatus, analyzeSource, runSiteAnalysis,
+  pipelineSummary, classifyStatus, classifyFlood, isSFHA, analyzeSource, runSiteAnalysis,
   buildJurisdictionFinding, buildRoadFinding, deriveZoning,
 } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
@@ -126,6 +126,42 @@ describe("classifyStatus — the silent-error guard", () => {
   });
 });
 
+describe("classifyFlood — Zone X is the all-clear, not a constraint (B147 false-positive fix)", () => {
+  it("isSFHA: A*/V* are SFHA; X / D / blank / open-water are not", () => {
+    for (const z of ["A", "AE", "AH", "AO", "AR", "A99", "V", "VE", "A12", "V30"]) expect(isSFHA(z)).toBe(true);
+    for (const z of ["X", "x", "D", "", null, "OPEN WATER", "AREA NOT INCLUDED"]) expect(isSFHA(z)).toBe(false);
+  });
+  it("an SFHA zone (AE) is PRESENT with a zone summary", () => {
+    const c = classifyFlood([{ FLD_ZONE: "AE", STATIC_BFE: 92 }]);
+    expect(c.status).toBe("present");
+    expect(c.summary).toBe("Zone AE");
+  });
+  it("only unshaded Zone X (minimal) → ABSENT, never present (the live bug)", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X", ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD" }],
+      { absentLabel: "No mapped Special Flood Hazard Area (Zone X / minimal risk)" });
+    expect(c.status).toBe("absent");
+    expect(c.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("shaded Zone X (0.2% / 500-yr) → INFO (moderate), not present and not a green all-clear", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X", ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" }]);
+    expect(c.status).toBe("info");
+    expect(c.summary).toMatch(/0\.2%|500-yr/);
+  });
+  it("a mix of SFHA + X reports PRESENT and summarizes only the SFHA zone", () => {
+    const c = classifyFlood([{ FLD_ZONE: "X" }, { FLD_ZONE: "AE" }]);
+    expect(c.status).toBe("present");
+    expect(c.summary).toBe("Zone AE");
+  });
+  it("Zone D (undetermined) → UNKNOWN, never absent (not an all-clear)", () => {
+    expect(classifyFlood([{ FLD_ZONE: "D" }]).status).toBe("unknown");
+  });
+  it("empty result → ABSENT with the source's none-found label", () => {
+    const c = classifyFlood([], { absentLabel: "none here" });
+    expect(c.status).toBe("absent");
+    expect(c.summary).toBe("none here");
+  });
+});
+
 describe("analyzeSource — rides the cache, honest on failure", () => {
   const flood = ANALYSIS_SOURCES.find((s) => s.id === "flood");
   it("present + summary when the SFHA layer returns a zone", async () => {
@@ -143,6 +179,20 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
     expect(f.status).toBe("absent");
     expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("flood: an intersecting Zone X reads ABSENT, not present (B147 live false-positive)", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X", ZONE_SUBTY: "AREA OF MINIMAL FLOOD HAZARD" } }] });
+    const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("absent");
+    expect(f.summary).toMatch(/No mapped Special Flood Hazard/);
+  });
+  it("flood: shaded Zone X (0.2%) reads INFO (moderate) and keeps its map layer", async () => {
+    const cache = freshCache();
+    const fetchJson = fakeFetch({ "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X", ZONE_SUBTY: "0.2 PCT ANNUAL CHANCE FLOOD HAZARD" } }] });
+    const f = await analyzeSource(flood, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("info");
+    expect(f.mapLayer).toBe("fema");
   });
   it("error → unavailable, surfaced not thrown (honest, not 'CORS' — B366)", async () => {
     const cache = freshCache();
@@ -286,7 +336,7 @@ describe("runSiteAnalysis — orchestration", () => {
   it("assembles every category in display order with injected sources", async () => {
     const cache = freshCache();
     const fetchJson = fakeFetch({
-      "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "X" } }],
+      "/NFHL/MapServer/28/query": () => [{ attributes: { FLD_ZONE: "AE" } }], // SFHA → a real present constraint
       "Wetlands_gdb_split": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/1/query": () => [],
       "RRC_Public_Viewer_Srvs/MapServer/13/query": () => [],

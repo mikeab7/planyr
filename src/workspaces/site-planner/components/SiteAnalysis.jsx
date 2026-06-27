@@ -109,7 +109,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
           // "Show on map" (B190): only for a category whose query RESOLVED (present/absent)
           // AND that maps to a drawable shared overlay. UNKNOWN / failed / no-source
           // categories have nothing to draw — no blank toggle; their error stays surfaced.
-          const canMap = !!f.mapLayer && !!onToggleLayer && (f.status === "present" || f.status === "absent");
+          const canMap = !!f.mapLayer && !!onToggleLayer && (f.status === "present" || f.status === "absent" || f.status === "info");
           const layerOn = canMap && !!isLayerOn && isLayerOn(f.mapLayer);
           const mapFailed = layerOn && layerStatus?.[f.mapLayer]?.state === "failed";
           return (
@@ -184,7 +184,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                       {f.detail.map((d, i) => <li key={i}>{d}</li>)}
                     </ul>
                   )}
-                  {f.sourceName && <div style={{ color: muted, marginTop: 2 }}>Source: {f.sourceName}{f.ageMs != null && ` · updated ${formatAge(f.ageMs)} ago`}</div>}
+                  {f.sourceName && <div style={{ color: muted, marginTop: 2 }}>Source: {f.sourceName}{f.ageMs != null && ` · updated ${formatAge(f.ageMs)}`}</div>}
                   {f.caveat && <div style={{ color: "var(--warn-text)", marginTop: 4, fontStyle: "italic", lineHeight: 1.45 }}>{f.caveat}</div>}
                 </div>
               )}
