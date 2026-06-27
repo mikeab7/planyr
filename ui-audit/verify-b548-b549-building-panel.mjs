@@ -1,14 +1,14 @@
-/* Self-verification for B544 + B545 — the Selected · Building massing panel.
+/* Self-verification for B548 + B549 — the Selected · Building massing panel.
  *
  * Seeds the EXACT reported case: a single-load building with footprint w=328 × h=1159
  * (so h>w → docks ride the left/right walls → depth = the horizontal span = 328, length
  * = the vertical span = 1159), rotated 359° to prove rotation independence. Boots the
  * planner logged-out, selects the building, and reads the property panel:
  *
- *   B544 — the two plan dimensions read **Length 1159 / Depth 328** (dock-relative), never
+ *   B548 — the two plan dimensions read **Length 1159 / Depth 328** (dock-relative), never
  *          the old transposed "Width 328 / Depth 1159"; the word "Width" is gone for a
  *          building; rotation (359°) does not alter Length/Depth.
- *   B545 — the panel is grouped Footprint → Loading → Structure → Placement (in that order),
+ *   B549 — the panel is grouped Footprint → Loading → Structure → Placement (in that order),
  *          every original control still present (Docks, Dock zones, Car parking, Bump-outs,
  *          Clear height, Slab, Rotation), Rotation last.
  *
@@ -29,7 +29,7 @@ const DEMO_ID = "verify-b542";
 const els = [{ id: "b1", type: "building", cx: 0, cy: 0, w: 328, h: 1159, rot: 359, dock: "single", dockSide: "right" }];
 const parcel = { id: "pc1", locked: false, points: [{ x: -340, y: -700 }, { x: 340, y: -700 }, { x: 340, y: 700 }, { x: -340, y: 700 }] };
 const demoSite = {
-  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B544", name: "Plan 1",
+  id: DEMO_ID, groupId: DEMO_ID, site: "Verify B548", name: "Plan 1",
   origin: null, county: null, parcels: [parcel], els, measures: [], callouts: [],
   markups: [], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now(),
 };
@@ -111,14 +111,14 @@ console.log("  has a 'Width (ft)' label:", panel.hasWidth);
 let fail = 0;
 const check = (cond, msg) => { console.log((cond ? "  ✓ " : "  ✗ ") + msg); if (!cond) fail++; };
 
-// ---- B544: dock-relative Length/Depth, rotation-independent, no "Width" ----
+// ---- B548: dock-relative Length/Depth, rotation-independent, no "Width" ----
 check(/Selected · Building/.test(panel.title), "panel is the Selected · Building inspector");
 check(panel.fields["Length (ft)"] === "1159", `Length reads 1159 (got ${panel.fields["Length (ft)"]})`);
 check(panel.fields["Depth (ft)"] === "328", `Depth reads 328 — not the old transposed 1159 (got ${panel.fields["Depth (ft)"]})`);
 check(!panel.hasWidth, "the word 'Width' is retired for a building");
 check(!("Width (ft)" in panel.fields), "no Width field present");
 
-// ---- B545: four concept groups in order, Rotation last, all controls present ----
+// ---- B549: four concept groups in order, Rotation last, all controls present ----
 check(JSON.stringify(panel.headerOrder) === JSON.stringify(["Footprint", "Loading", "Structure", "Placement"]),
   `groups are Footprint → Loading → Structure → Placement (got ${panel.headerOrder.join(", ")})`);
 check(panel.fields["Docks"] === "single", "Docks control present (single-load)");
@@ -127,7 +127,7 @@ check("Clear height (ft)" in panel.fields, "Clear height present (Structure)");
 check("Slab (in)" in panel.fields, "Slab present (Structure)");
 check("Rotation (°)" in panel.fields, "Rotation present (Placement)");
 
-console.log(fail === 0 ? "\n✓ ALL B544+B545 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
+console.log(fail === 0 ? "\n✓ ALL B548+B549 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
 await ctx.close();
 await browser.close();
 process.exit(fail === 0 ? 0 : 1);

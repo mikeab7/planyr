@@ -154,7 +154,7 @@ export function dockSidesFor(el) {
 // face and length parallel to it. For a rectangle depth = the short axis and length = the long
 // axis (the dock always rides the long walls), but we derive it from the dock axis so intent is
 // explicit and robust. PURE — the single source of truth shared by the canvas, the massing panel
-// and the dock-door readout (B544).
+// and the dock-door readout (B548).
 export function footprintAxes(el) {
   const { dockSides, dside } = dockSidesFor(el);
   const side = dockSides[0] || dside;                 // a dock side (or the implied one when dock=none)
@@ -172,7 +172,7 @@ export function footprintDepth(el) {
 }
 
 // The building's LENGTH (feet): its footprint extent PARALLEL to the dock face — the wall the
-// dock doors array along (B544). The dock-axis counterpart of footprintDepth; for a rectangle
+// dock doors array along (B548). The dock-axis counterpart of footprintDepth; for a rectangle
 // this is the longer side, derived from the dock axis so it stays correct as docks move walls.
 export function footprintLength(el) {
   return el[footprintAxes(el).length];

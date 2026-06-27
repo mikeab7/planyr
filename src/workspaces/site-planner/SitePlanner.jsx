@@ -5196,7 +5196,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.download = `${fileName}.pdf`;
         aEl.click();
         mark("downloaded");
-        setTimeout(() => URL.revokeObjectURL(aEl.href), 8000);
+        URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
@@ -8214,10 +8214,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
                   ) : isBuilding(selEl) ? (() => {
-                    // B544 + B545 — grouped building inspector. Four concept groups (Footprint ·
+                    // B548 + B549 — grouped building inspector. Four concept groups (Footprint ·
                     // Loading · Structure · Placement); headers build hierarchy by weight + size +
                     // uppercase tracking, never by fading (house rule). Footprint dimensions are
-                    // dock-relative (B544): Length runs ALONG the dock wall (dock doors array on it),
+                    // dock-relative (B548): Length runs ALONG the dock wall (dock doors array on it),
                     // Depth PERPENDICULAR to it (dock face → rear; dock-wall → dock-wall for cross-dock),
                     // via footprintAxes/footprintLength/footprintDepth — never a hardcoded X/Y axis, so
                     // they stay correct when docks move walls. resizeSelEl drives the mapped physical edge.
@@ -8235,7 +8235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
                     const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
-                    // B545 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
+                    // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
                     // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
                     const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
                     const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
@@ -8364,7 +8364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       </select>
                     </Field>
                   )}
-                  {/* B545 — Clear height/Slab (now under Structure) and the dock-features build-out
+                  {/* B549 — Clear height/Slab (now under Structure) and the dock-features build-out
                       (now under Loading) render inside the grouped building inspector above; only the
                       dog-ear path keeps its standalone Docks control. */}
                   {selEl.type === "parking" && (() => {
@@ -8447,7 +8447,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
-                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B544)
+                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B548)
                       const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
                       return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
                     })()}
