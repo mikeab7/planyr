@@ -23,7 +23,6 @@ import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 import LayerPanel from "./components/LayerPanel.jsx";
 import SiteAnalysis from "./components/SiteAnalysis.jsx";
-import ProjectFilesDrawer from "../doc-review/components/ProjectFilesDrawer.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
@@ -144,7 +143,7 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
-  // B542 — deed/title launcher glyph: a document page (folded corner) over a few
+  // B543 — deed/title launcher glyph: a document page (folded corner) over a few
   // text lines, signalling "read a deed / title commitment". Same currentColor
   // stroke style (no fill) as the other tool glyphs.
   deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
@@ -1158,7 +1157,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
-  const [filesOpen, setFilesOpen] = useState(false); // Project Files drawer (B180) — a shelf reachable from Row 1 in every workspace
   // Utility-evidence drawing: manual power-line trace + inferred water main.
   const [traceMode, setTraceMode] = useState(false);
   const [tracePts, setTracePts] = useState([]);
@@ -6386,11 +6384,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </button>
         </AnchoredMenu>
       </div>
-      {/* Project Files — a shelf reachable from Row 1 in any workspace (B180), not a module tab. */}
-      <button className="dbtn" onClick={() => setFilesOpen(true)} title="Project Files — saved views over your tagged file index"
-        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 10px", border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)" }}>
-        🗂 Files
-      </button>
     </span>
   );
 
@@ -6499,20 +6492,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         toolbarContent={plannerToolbar}
       />
 
-      {/* Project Files drawer (B180) — opens from the Row 1 🗂 Files pill above. Reading
-          the file index needs a signed-in cloud session; reviews open in Document Review.
-          Clicking a file hands the whole review row up to the Shell, which stashes it and
-          switches to Document Review — DR opens it once it mounts. Passing only
-          onShellSwitch dropped the row, so the first click landed on DR's empty placeholder
-          (NEW-1). */}
-      <ProjectFilesDrawer
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        signedIn={isCloudActive()}
-        projectId={groupId}
-        onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
-        onPlaceOnMap={() => setFilesOpen(false)}
-      />
       {/* B455/NEW-7 — a conflict is now BLOCKING (no dismiss): further cloud saves are gated
           until you reload, so a stale copy can't be re-pushed over the newer one. Your edits
           stay on this device and union-merge in on reload. */}
@@ -7725,7 +7704,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {/* B542 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
+          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
               metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
               it never gets the active-tool highlight and never calls selectTool (which
               would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
@@ -9793,7 +9772,10 @@ function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
   return (
     <div style={{ marginBottom: 9, background: "var(--surface-raised)", border: "1px solid #ece6d9", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      <div className="sec-head" onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
+      <div className="sec-head" onClick={() => setOpen((o) => !o)}
+        role="button" tabIndex={0} aria-expanded={open} aria-label={title}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
+        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
         {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
         <span className="sec-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", flex: 1, transition: "color .12s" }}>{title}</span>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>

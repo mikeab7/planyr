@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/* B542 — the Deed / Title reader (Schedule B + metes-and-bounds) is a first-class
+/* B543 — the Deed / Title reader (Schedule B + metes-and-bounds) is a first-class
  * tool-rail launcher, not a menu item buried in the File ▾ (export) dropdown.
  *
  * SitePlanner.jsx is edited by many concurrent sessions, so this is a string-level
@@ -17,7 +17,7 @@ const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
 // (no nested <button>, so the first </button> is this element's).
 const deedButton = (src.match(/data-testid="tool-deed"[\s\S]{0,700}?<\/button>/) || [])[0];
 
-describe("B542 — Deed / Title launcher lives in the tool rail", () => {
+describe("B543 — Deed / Title launcher lives in the tool rail", () => {
   it("registers a rail launcher with data-testid='tool-deed'", () => {
     expect(deedButton).toBeTruthy();
   });
@@ -41,7 +41,7 @@ describe("B542 — Deed / Title launcher lives in the tool rail", () => {
   });
 });
 
-describe("B542 — the old export-menu launcher is gone (relocated, not duplicated)", () => {
+describe("B543 — the old export-menu launcher is gone (relocated, not duplicated)", () => {
   it("the File ▾ / export menu no longer carries the title-reader item", () => {
     expect(src).not.toMatch(/Title reader \/ metes/);
     expect(src).not.toMatch(/Read a deed\/title block to plot/);

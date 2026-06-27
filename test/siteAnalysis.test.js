@@ -94,6 +94,10 @@ describe("summarizers", () => {
   it("pipelineSummary counts + names operators (RRC layer-13 field OPERATOR, B368)", () => {
     expect(pipelineSummary([{ OPERATOR: "Kinder Morgan" }, { OPERATOR: "Kinder Morgan" }])).toMatch(/2 pipeline segments.*Kinder/);
   });
+  it("pipelineSummary uses the EXACT total when given, not the capped sample length", () => {
+    const sample = Array.from({ length: 30 }, () => ({ OPERATOR: "Kinder Morgan" }));
+    expect(pipelineSummary(sample, 3207)).toMatch(/3207 pipeline segments/);
+  });
 });
 
 describe("normalizeAttrs — joined-layer field qualifier (B189)", () => {
@@ -299,6 +303,46 @@ describe("analyzeSource — rides the cache, honest on failure", () => {
     const contam = ANALYSIS_SOURCES.find((s) => s.id === "contamination");
     const f = await analyzeSource(contam, [SQUARE], {});
     expect(f.status).toBe("pending");
+  });
+});
+
+describe("exact counts — returnCountOnly bypasses the page cap (count-mode sources)", () => {
+  it("pipelines is a count-mode source", () => {
+    expect(ANALYSIS_SOURCES.find((s) => s.id === "pipelines").countMode).toBe(true);
+  });
+  it("shows the EXACT pipeline count from returnCountOnly, not the capped feature sample", async () => {
+    const cache = freshCache();
+    const pipe = ANALYSIS_SOURCES.find((s) => s.id === "pipelines");
+    const sample = Array.from({ length: 30 }, () => ({ attributes: { OPERATOR: "Kinder Morgan" } }));
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) return { count: 3207 };       // exact total
+      return { features: sample, exceededTransferLimit: true };            // capped page
+    };
+    const f = await analyzeSource(pipe, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/3207 pipeline segments/);
+    expect(f.summary).toMatch(/Kinder Morgan/);
+  });
+  it("shows the EXACT well count from returnCountOnly", async () => {
+    const cache = freshCache();
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) return { count: 7291 };
+      return { features: [{ attributes: { API: "42-000" } }] };
+    };
+    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
+    expect(f.summary).toMatch(/7291 wells/);
+  });
+  it("falls back to the fetched sample size when the count query fails (never throws)", async () => {
+    const cache = freshCache();
+    const wells = ANALYSIS_SOURCES.find((s) => s.id === "oilgas");
+    const fetchJson = async (url) => {
+      if (/returnCountOnly=true/i.test(url)) throw new Error("count failed");
+      return { features: [{ attributes: { API: "1" } }, { attributes: { API: "2" } }] };
+    };
+    const f = await analyzeSource(wells, [SQUARE], { cache, fetchJson });
+    expect(f.status).toBe("present");
+    expect(f.summary).toMatch(/2 wells/);
   });
 });
 
