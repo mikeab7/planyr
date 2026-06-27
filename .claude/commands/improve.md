@@ -61,14 +61,31 @@ npm run build
   what you DID verify and the precise signed-in steps still pending — this is mandatory, every time.
 
 ### 4. Ship it live
+- **Merge `origin/main` into the branch RIGHT BEFORE pushing** (`git fetch origin main && git merge
+  origin/main`) — `main` moves fast (multiple concurrent sessions), so syncing late minimizes the
+  conflict window. Keep `BACKLOG`/`VERIFICATION` edits to one tight block — that's where fast-main collides.
 - `git add -A && git commit` with a clear, technical message ending in the harness session link.
 - `git push -u origin claude/app-loops-debug-hukhfz` (retry up to 4× with backoff on network errors).
-- Open a PR into `main` (use a PR template if one exists; describe only the diff).
-- **Nudge CI:** `git commit --allow-empty -m "Nudge CI" && git push` — the required `build` check
-  often doesn't auto-start on automation-opened PRs; the nudge fires the real check.
-- Enable auto-merge. Do NOT report the nudge as a blocker — it's expected.
-- Only stop short of live for a HARD blocker (merge conflict, red required check, protection
-  rejecting the merge) — report *that* plainly, don't ask permission.
+- Open a PR into `main` (use a PR template if one exists; describe only the diff). Enable auto-merge.
+
+### 4b. Ship & babysit the PR — DO NOT fire-and-forget (learned on PR #379)
+A PR does NOT merge itself here. Two recurring stalls, both self-fixable — drive the PR to
+`merged: true` yourself:
+- **The required `build` check often never starts.** Automation-token pushes (PR-open + a *single*
+  nudge) frequently don't trigger the `pull_request` workflow — the cohort's PRs have needed **two**
+  `Nudge CI` commits. So: push an empty nudge (`git commit --allow-empty -m "Nudge CI" && git push`),
+  then **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch /
+  `pull_request_read get_status`). If none after the next poll, **nudge again** (≥2). Never assume.
+- **Merge conflicts with fast-moving `main`** (`mergeable_state: dirty`/`behind`) — usually in
+  `BACKLOG*.md`/`VERIFICATION*.md`. Resolve: `git fetch origin main && git merge origin/main`, keep
+  BOTH sides' done-entries (renumber only if you minted a NEW B#/V# that main also took), re-run the
+  quality gate, push.
+- **Poll cadence:** while a PR is open and unmerged, schedule the next check at **~150s** (cache-aware,
+  matches CI timescale) — NOT 20 min. Webhooks do NOT deliver CI-success / merge / conflict
+  transitions, so always re-fetch fresh PR state each poll. Loop: re-fetch → fix dirty → re-nudge if
+  no run → wait → repeat until `merged: true`. Only THEN start the next item.
+- Only stop short of live for a TRUE hard blocker (a red `build` after a real fix, branch protection
+  rejecting the merge) — report *that* plainly; the nudge/conflict dance is NOT a blocker.
 
 ### 5. Bookkeeping
 - Move the shipped item's whole block from `BACKLOG.md` → `BACKLOG-DONE.md`.
