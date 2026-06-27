@@ -54,7 +54,7 @@ import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -8213,85 +8213,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(swThick(selEl))} min={1} onCommit={(n) => setSidewalkWidth(selEl, n)} /></Field>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
-                  ) : (
-                    <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
-                    </>
-                  )}
-                  {!isDockZone(selEl) && (
-                  <Field label="Rotation (°)">
-                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
-                      onCommit={(deg) => rotateSelTo(deg)}
-                      onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
-                  </Field>
-                  )}
-                  {selEl.type === "building" && (
-                    <Field label="Docks">
-                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
-                        <option value="single">Single-load</option>
-                        <option value="cross">Cross-dock</option>
-                        <option value="none">No docks</option>
-                      </select>
-                    </Field>
-                  )}
-                  {/* B198 — clear height + slab, auto-assigned by sf with an optional override
-                      (also editable in the print Options flyout, B199; printed in the table, B197). */}
-                  {isBuilding(selEl) && (() => {
-                    const sf = buildingSqft(selEl);
-                    const p = effectiveBuildingProps(selEl, sf, buildingRules);
-                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
-                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
-                    return (
-                      <>
-                        <Field label="Clear height (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={p.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
-                            {p.clearHeight.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-                        <Field label="Slab (in)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={p.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
-                            {p.slab.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-                      </>
-                    );
-                  })()}
-                  {selEl.type === "building" && !selEl.dogEar && (() => {
-                    // B229 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
-                    // car parking, and the visually-distinct bump-outs footprint modifier),
-                    // then the active dock-face zones listed in outward order with inline depths
-                    // + the LIFO "−". The footprint/dock-doors summary stays at the bottom (below).
+                  ) : isBuilding(selEl) ? (() => {
+                    // B548 + B549 — grouped building inspector. Four concept groups (Footprint ·
+                    // Loading · Structure · Placement); headers build hierarchy by weight + size +
+                    // uppercase tracking, never by fading (house rule). Footprint dimensions are
+                    // dock-relative (B548): Length runs ALONG the dock wall (dock doors array on it),
+                    // Depth PERPENDICULAR to it (dock face → rear; dock-wall → dock-wall for cross-dock),
+                    // via footprintAxes/footprintLength/footprintDepth — never a hardcoded X/Y axis, so
+                    // they stay correct when docks move walls. resizeSelEl drives the mapped physical edge.
                     const b = selEl;
+                    const ax = footprintAxes(b);
+                    const sf = buildingSqft(b);
+                    const props = effectiveBuildingProps(b, sf, buildingRules);
                     const { dockSides } = dockSidesOf(b);
                     const noDock = dockSides.length === 0;
-                    const level = dockStackLevel(b);          // shallowest dock side
-                    const hasBumps = els.some((x) => x.attachedTo === b.id && x.dogEar);
+                    const level = dockStackLevel(b);
+                    const bumpN = els.filter((x) => x.attachedTo === b.id && x.dogEar).length;
+                    const carN = carEndsSides(b).filter((s) => empSideSidewalk(b, s) || empSidePark(b, s)).length;
+                    const grpHdr = (t) => <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.ink, margin: "15px 0 8px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>{t}</div>;
+                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
+                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
                     const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
-                    // Uniform square +/− buttons so every control row lines up (B242 — the owner asked
-                    // for "+ and − next to each other" at a consistent size).
-                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
-                    // One control row: label (+ sub) on the left, "＋" and (optionally) "−" on the right.
-                    const ctlRow = (label, sub, { onAdd, addOn, addTitle, onRem = null, remOn = false, remTitle = "" }) => (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, color: PAL.ink }}>{label}</div>
-                          {sub && <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.3 }}>{sub}</div>}
-                        </div>
-                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={sq(addOn, false)}>＋</button>
-                        {onRem !== null && <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={sq(remOn, true)}>－</button>}
+                    // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
+                    // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
+                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
+                        <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={stepBtn(remOn, true)}>－</button>
+                        <span style={{ minWidth: 14, textAlign: "center", fontSize: 12, fontFamily: "ui-monospace, monospace", color: count ? PAL.ink : PAL.muted }}>{count}</span>
+                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
-                    // B495 — "Add layer ▾": the fast ＋ keeps the preset; this picks a specific outward
-                    // layer (road / landscape buffer / sidewalk / parking) and applies it to every side
-                    // in the group. Auto-hides when the group offers nothing (e.g. no court stack yet).
                     const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
                     const layerChooserRow = (label, groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
@@ -8302,7 +8256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</div>
                             <button title="Pick a specific outward layer to add" onClick={() => setLayerMenu(open ? null : groupKey)}
-                              style={{ ...sq(true, false), width: "auto", padding: "0 8px", fontSize: 11.5, fontWeight: 600 }}>Add layer ▾</button>
+                              style={{ ...layerChip, fontWeight: 600 }}>Add layer ▾</button>
                           </div>
                           {open && (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -8317,26 +8271,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                     };
                     return (
-                      <div style={{ marginTop: 4 }}>
-                        <div style={muteHdr}>Dock features</div>
-                        {ctlRow("Dock zones", "court → trailer parking → buffer", {
+                      <>
+                        {grpHdr("Footprint")}
+                        <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
+                        <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
+
+                        {grpHdr("Loading")}
+                        <Field label="Docks">
+                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={b.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
+                            <option value="single">Single-load</option>
+                            <option value="cross">Cross-dock</option>
+                            <option value="none">No docks</option>
+                          </select>
+                        </Field>
+                        {featRow("Dock zones", level, {
                           onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
-                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone",
+                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone — truck court → trailer parking → buffer",
                           onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
                         })}
-                        {ctlRow("Car parking", "sidewalk + rows, non-dock sides", {
+                        {featRow("Car parking", carN, {
                           onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0,
-                          addTitle: "Build out the non-dock sides: sidewalk, then parking rows (one more each click)",
+                          addTitle: "Build out the non-dock sides — sidewalk, then parking rows (one more each click)",
                           onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
                         })}
-                        {ctlRow("Bump-outs", `footprint modifier · ${DOGEAR_W}′×${DOGEAR_D}′ corners`, {
-                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: "Add dock-corner bump-outs",
-                          onRem: hasBumps ? () => removeAllDogEars(b) : null, remOn: hasBumps, remTitle: "Remove all bump-outs",
+                        {featRow("Bump-outs", bumpN, {
+                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: `Add dock-corner bump-outs · ${DOGEAR_W}′×${DOGEAR_D}′ corners`,
+                          onRem: () => removeAllDogEars(b), remOn: bumpN > 0, remTitle: "Remove all bump-outs",
                         })}
                         {layerChooserRow("Behind the dock stack", "dock", dockSides)}
                         {layerChooserRow("Rear / non-dock sides", "nondock", carEndsSides(b))}
                         {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
-                        {/* active dock-face zones, outward order, inline editable depth */}
                         {level > 0 && (
                           <div style={{ marginTop: 9 }}>
                             <div style={muteHdr}>Zone depths · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
@@ -8349,9 +8313,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             ))}
                           </div>
                         )}
-                      </div>
+
+                        {grpHdr("Structure")}
+                        <Field label="Clear height (ft)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                            {props.clearHeight.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+                        <Field label="Slab (in)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                            {props.slab.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+
+                        {grpHdr("Placement")}
+                        <Field label="Rotation (°)">
+                          <RotationStepper value={b.rot || 0} disabled={!!b.locked} disabledReason="Unlock this element to rotate it"
+                            onCommit={(deg) => rotateSelTo(deg)}
+                            onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
+                        </Field>
+                      </>
                     );
-                  })()}
+                  })() : (
+                    <>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                    </>
+                  )}
+                  {!isDockZone(selEl) && !isBuilding(selEl) && (
+                  <Field label="Rotation (°)">
+                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
+                      onCommit={(deg) => rotateSelTo(deg)}
+                      onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
+                  </Field>
+                  )}
+                  {/* Dog-ear bump-outs (type "building" but `dogEar`) keep their standalone Docks
+                      control here; a REAL building's Docks lives in the grouped inspector above. */}
+                  {selEl.type === "building" && selEl.dogEar && (
+                    <Field label="Docks">
+                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
+                        <option value="single">Single-load</option>
+                        <option value="cross">Cross-dock</option>
+                        <option value="none">No docks</option>
+                      </select>
+                    </Field>
+                  )}
+                  {/* B549 — Clear height/Slab (now under Structure) and the dock-features build-out
+                      (now under Loading) render inside the grouped building inspector above; only the
+                      dog-ear path keeps its standalone Docks control. */}
                   {selEl.type === "parking" && (() => {
                     const pc = cfgOf(selEl);
                     return (
@@ -8432,7 +8447,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
-                      const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
+                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B548)
                       const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
                       return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
                     })()}
