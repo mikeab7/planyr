@@ -56,7 +56,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
-import { addedAreaLabelPoint } from "./lib/pondGeom.js";
+import { addedAreaLabelPoint, pondContours, smoothRing, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
 import { buildSheetFurnitureSvg, screenFurniturePlates } from "./lib/sheetFurniture.js";
 import { normalizeRules, effectiveBuildingProps, fmtClearHeight, fmtSlab } from "./lib/buildingProps.js";
@@ -5371,6 +5371,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         else { const s = addA >= 0 ? "+" : "−", m = Math.abs(addA); lines.push(`${s}${f2(m / SQFT_PER_ACRE)} ac · ${s}${f0(m)} sf`); }
       } else {
         lines = ["Detention Pond", `${f2(area / SQFT_PER_ACRE)} ac · ${f0(area)} sf`];
+        // Stage-storage line, seated on the pond with its name (rides the same LOD/collision
+        // pool). Same detentionStorage() the side panel reads, so the two can never disagree.
+        // Gated on the contours toggle (default on) AND the same zoom floor as the depth-ring
+        // overlay (detailLabelVisible on the pond's smaller plan dimension), so the storage line
+        // declutters and reveals exactly when the rings do.
+        if (el.det?.contours !== false) {
+          const pminFt = poly
+            ? (() => { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of el.points) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } return Math.min(hi - lo, hi2 - lo2); })()
+            : Math.min(el.w, el.h);
+          if (detailLabelVisible(pminFt, view.ppf)) {
+            const d = el.det || {};
+            const r = detentionStorage(poly ? el.points : elCorners(el), d.depth ?? 8, d.freeboard ?? 1, d.slope ?? 3);
+            if (r.vol > 0) lines.push(`Holds ${f2(r.vol / SQFT_PER_ACRE)} ac-ft · ${f1(r.dw)}′ deep`);
+          }
+        }
       }
     } else {
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
@@ -8478,6 +8493,40 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <Field label="Total depth (ft)"><NumInput style={numInput} value={depth} min={1} onCommit={(n) => setDet({ depth: n })} /></Field>
                     <Field label="Freeboard (ft)"><NumInput style={numInput} value={fb} min={0} onCommit={(n) => setDet({ freeboard: n })} /></Field>
                     <Field label="Side slope (n:1 H:V)"><NumInput style={numInput} value={slope} min={1} onCommit={(n) => setDet({ slope: n })} /></Field>
+                    {/* Stage contours on the plan — depth rings inside the basin. Default ON
+                        (only `false` is ever stored to hide). Interval + top-of-bank elevation
+                        only show when contours are on (progressive disclosure). */}
+                    {(() => {
+                      const on = det.contours !== false;
+                      return (
+                        <div style={{ marginTop: 6 }}>
+                          <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.ink, cursor: "pointer", alignItems: "center" }} title="Draw depth rings (like a topographic map) inside the pond, and seat the stored volume on it">
+                            <input type="checkbox" checked={on} onChange={(e) => setDet({ contours: e.target.checked ? true : false })} /> Show stage contours on plan
+                          </label>
+                          {on && (
+                            <div style={{ marginTop: 6 }}>
+                              <Field label="Contour interval (ft)">
+                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <NumInput style={{ ...numInput, width: 56 }} value={det.contourInterval ?? autoContourInterval(depth)} min={0.5} onCommit={(n) => setDet({ contourInterval: Math.max(0.5, n) })} />
+                                  {det.contourInterval != null && (
+                                    <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Back to the smart automatic spacing" onClick={() => setDet({ contourInterval: null })}>Auto</button>
+                                  )}
+                                </span>
+                              </Field>
+                              <Field label="Top-of-bank elev. (ft)">
+                                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <NumInput style={{ ...numInput, width: 64 }} value={det.tobElev ?? ""} placeholder="optional" onCommit={(n) => setDet({ tobElev: Number.isFinite(n) ? n : null })} />
+                                  {det.tobElev != null && (
+                                    <button style={{ ...chip, padding: "2px 8px", fontSize: 10.5 }} title="Clear — label rings by depth instead of elevation" onClick={() => setDet({ tobElev: null })}>Clear</button>
+                                  )}
+                                </span>
+                              </Field>
+                              <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Set the top-of-bank elevation to label rings as real elevations (e.g. 96.0) instead of depths (−2′).</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {det.availDepth != null && (
                       <div style={{ fontSize: 10.5, color: PAL.info, marginTop: 2, lineHeight: 1.4 }}>LiDAR available depth ≈ {f1(det.availDepth)}′ (screening only).</div>
                     )}
@@ -9420,6 +9469,74 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   );
 }
 
+/* Stage-contour overlay for a detention pond (the "topographic" depth rings inside the
+   basin). Smoothed depth rings, the water-surface and bottom emphasized, each labelled by
+   real elevation (when a top-of-bank elevation is set) or depth below top. DISPLAY-ONLY:
+   the rings/areas come from pondContours (true offset geometry); smoothRing is cosmetic.
+   Default-on (det.contours !== false); zoom-gated so a site overview stays clean; rings
+   whose offset is sub-pixel are skipped (B149 anti-flicker). Points are world feet → f2p;
+   the caller counter-rotates this group for a rotated rect pond. Returns [] when nothing
+   to draw. */
+function pondContourEls(el, f2p, ppf, keyPfx = "") {
+  if (el.type !== "pond") return [];
+  const det = el.det || {};
+  if (det.contours === false) return []; // owner toggled off (default on)
+  const ring = el.points ? el.points : elCorners(el); // world feet, top of bank
+  if (!ring || ring.length < 3) return [];
+  // Zoom gate (B149): reveal only once the basin reads on screen; reuses the detail LOD floor.
+  let minFt;
+  if (el.points) { let lo = Infinity, hi = -Infinity, lo2 = Infinity, hi2 = -Infinity; for (const p of ring) { lo = Math.min(lo, p.x); hi = Math.max(hi, p.x); lo2 = Math.min(lo2, p.y); hi2 = Math.max(hi2, p.y); } minFt = Math.min(hi - lo, hi2 - lo2); }
+  else minFt = Math.min(el.w, el.h);
+  if (!detailLabelVisible(minFt, ppf)) return [];
+  const cont = pondContours(ring, det, offsetPolygon);
+  const slope = cont.meta.slope;
+  const toPath = (r) => r.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z";
+  const out = [];
+  // Rings — outer (down=0) is the drawn edge already; skip sub-pixel offsets (anti-flicker).
+  cont.levels.forEach((lv, idx) => {
+    if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
+    const d = toPath(smoothRing(lv.ring));
+    if (lv.isWater) {
+      out.push(<path key={`${keyPfx}wf${idx}`} d={d} fill="#3E7C8C" fillOpacity={0.16} stroke="none" pointerEvents="none" />);
+      out.push(<path key={`${keyPfx}w${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={2} opacity={0.95} pointerEvents="none" data-contour="water" />);
+    } else if (lv.isBottom) {
+      out.push(<path key={`${keyPfx}b${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={1.75} strokeDasharray="4 3" opacity={0.9} pointerEvents="none" data-contour="bottom" />);
+    } else {
+      out.push(<path key={`${keyPfx}c${idx}`} d={d} fill="none" stroke="#2C5D6B" strokeWidth={0.75} opacity={0.5} pointerEvents="none" data-contour="line" />);
+    }
+  });
+  // Labels — only the two callouts that matter: the water surface (anchored to the top of its
+  // ring) and the basin floor (anchored to the bottom), so they frame the centred pond name
+  // instead of stacking on it. Real elevation when a datum is set, else depth below top of bank.
+  cont.levels.forEach((lv, idx) => {
+    if (lv.down <= 0 || slope * lv.down * ppf < 2) return;
+    if (!lv.isWater && !lv.isBottom) return;
+    const lp = contourLabelPoint(lv.ring, lv.isBottom ? "bottom" : "top");
+    if (!lp) return;
+    const q = f2p(lp);
+    const lead = lv.isWater ? "WS " : "Floor ";
+    const txt = lv.elev != null ? `${lead}${f1(lv.elev)}` : `${lead}−${f1(lv.down)}′`;
+    out.push(
+      <text key={`${keyPfx}t${idx}`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
+        fontSize={9} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36"
+        stroke="#fff" strokeWidth={2.6} paintOrder="stroke" pointerEvents="none"
+        data-contour-label={lv.isWater ? "water" : "bottom"}
+        style={{ fontWeight: 700 }}>{txt}</text>,
+    );
+  });
+  // Over-taper: side slopes meet before full depth — on-canvas echo of the panel warning.
+  if (cont.collapsedAt != null) {
+    const q = f2p(centroid(ring));
+    out.push(
+      <text key={`${keyPfx}xt`} x={q.x} y={q.y} textAnchor="middle" dominantBaseline="middle"
+        fontSize={9} fontFamily="Inter, system-ui, sans-serif" fill="#0E2E36" stroke="#fff"
+        strokeWidth={2.75} paintOrder="stroke" pointerEvents="none" data-contour="collapsed"
+        style={{ fontWeight: 700 }}>✕ slopes meet</text>,
+    );
+  }
+  return out;
+}
+
 /* element renderer working in PIXEL space (points pre-transformed by f2p).
    We draw the rect via the rotated group around the element's pixel center. */
 function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEls, startDimMove, editDimWidth, onElContext, selStroke) {
@@ -9462,6 +9579,7 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
         {texFill && <path d={dPath} fill={texFill} stroke="none" pointerEvents="none" />}
         <path d={dPath} fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
         {ghostPath && ghostEl("ghost")}
+        {el.type === "pond" && pondContourEls(el, f2p, f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x, "pc")}
       </g>
     );
   }
@@ -9483,6 +9601,9 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // Counter-rotate the baseline ghost: its ring is already in world feet, but this
   // branch's group rotates everything by el.rot — undo that so the ghost lands true.
   if (ghostPath) parts.push(<g key="ghost" transform={`rotate(${-el.rot} ${c.x} ${c.y})`}>{ghostEl("g")}</g>);
+  // Stage contours: built from elCorners (world feet, rotation baked in), so counter-rotate
+  // this branch's el.rot group — same trick as the ghost — to land them true on the basin.
+  if (el.type === "pond") parts.push(<g key="pondc" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`}>{pondContourEls(el, f2p, ppf, "pc")}</g>);
 
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));

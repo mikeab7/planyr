@@ -78,3 +78,113 @@ export function addedAreaLabelPoint(expanded, baseline, opts = {}) {
   const best = r && r.d >= c.d ? r : c;
   return { x: best.x, y: best.y };
 }
+
+// ---------------------------------------------------------------------------
+// Stage contour lines (the "topographic" depth rings drawn inside a detention
+// pond). A pond is drawn TOP-OF-BANK and tapers inward at `slope`:1, so the ring
+// at depth `down` below the top is exactly offsetPolygon(ring, slope*down) — the
+// same construction detentionStorage() already uses for its stage areas. We REUSE
+// that (offsetPolygon is injected so this file stays React/DOM-free and testable).
+// Pure: world-feet in, world-feet out. Screening geometry, not survey.
+// ---------------------------------------------------------------------------
+
+// Signed (shoelace) area of a ring — sign encodes winding, used for the over-taper
+// guard; |value| is the plan area. Inlined here to keep this module dependency-free.
+const ringSignedArea = (r) => { let a = 0; for (let i = 0, m = r.length; i < m; i++) { const p = r[i], q = r[(i + 1) % m]; a += p.x * q.y - q.x * p.y; } return a / 2; };
+const ringCentroidAvg = (r) => { let x = 0, y = 0; for (const p of r) { x += p.x; y += p.y; } return { x: x / r.length, y: y / r.length }; };
+
+// Smart contour interval (ft): aim for ~4–6 rings across the basin depth so a shallow
+// pond gets 1-ft lines and a deep one doesn't crowd. User-overridable via det.contourInterval.
+export function autoContourInterval(depth) {
+  const d = depth > 0 ? depth : 8;
+  if (d <= 6) return 1;
+  if (d <= 12) return 2;
+  return 3;
+}
+
+// Chaikin corner-cutting on a CLOSED ring: each pass replaces every edge A→B with two
+// points at 1/4 and 3/4, so corners round off and the curve stays inside the original.
+// DISPLAY-ONLY — a pond reads smooth/natural instead of a faceted polygon. The stored
+// geometry and every area/volume number keep using the true (un-smoothed) rings.
+export function smoothRing(pts, iterations = 2) {
+  if (!Array.isArray(pts) || pts.length < 3) return pts;
+  let ring = pts;
+  for (let it = 0; it < iterations; it++) {
+    const out = [], n = ring.length;
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], b = ring[(i + 1) % n];
+      out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+      out.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+    }
+    ring = out;
+  }
+  return ring;
+}
+
+// Build the stack of stage contours for a pond footprint `ring` (top-of-bank, world feet).
+// Returns levels top→bottom; each level's `ring` is the TRUE offset polygon (smooth it at
+// draw time, never here). Stops cleanly when the side slopes meet before full depth
+// (collapsedAt), mirroring detentionStorage's aBottom===0 guard. `offsetPolygon` is injected.
+export function pondContours(ring, det = {}, offsetPolygon, opts = {}) {
+  const depth = det.depth != null ? det.depth : 8;
+  const freeboard = det.freeboard != null ? det.freeboard : 1;
+  const slope = det.slope != null ? det.slope : 3;
+  const interval = Math.max(0.5, det.contourInterval || autoContourInterval(depth));
+  const tobElev = det.tobElev;
+  const hasElev = tobElev != null && isFinite(tobElev);
+  const EPS = 0.05;
+  const out = { levels: [], collapsedAt: null, meta: { depth, freeboard, slope, interval } };
+  if (!Array.isArray(ring) || ring.length < 3 || typeof offsetPolygon !== "function") return out;
+
+  // Depths below top to draw: the interval grid, plus the water surface and the bottom
+  // always (they carry the emphasis), de-duped within EPS so they don't double a grid line.
+  const downs = [0];
+  for (let d = interval; d < depth - EPS; d += interval) downs.push(d);
+  if (freeboard > EPS && freeboard < depth - EPS) downs.push(freeboard);
+  downs.push(depth);
+  downs.sort((a, b) => a - b);
+  const uniq = [];
+  for (const d of downs) { if (d < -EPS) continue; if (!uniq.length || d - uniq[uniq.length - 1] > EPS) uniq.push(d); }
+
+  const ringSgn = ringSignedArea(ring);
+  const elevOf = (down) => (hasElev ? tobElev - down : undefined);
+  for (const down of uniq) {
+    if (down <= EPS) {
+      out.levels.push({ down: 0, ring, area: Math.abs(ringSgn), isWater: freeboard <= EPS, isBottom: depth <= EPS, elev: elevOf(0) });
+      continue;
+    }
+    const r = offsetPolygon(ring, slope * down);
+    // Over-taper guard (same as detentionStorage): null, inverted winding, or zero area
+    // means the basin tapered PAST a point at this depth → stop, emit nothing deeper.
+    if (!r || ringSgn === 0 || ringSignedArea(r) * ringSgn <= 0) { out.collapsedAt = down; break; }
+    out.levels.push({
+      down,
+      ring: r,
+      area: Math.abs(ringSignedArea(r)),
+      isWater: Math.abs(down - freeboard) <= EPS,
+      isBottom: Math.abs(down - depth) <= EPS,
+      elev: elevOf(down),
+    });
+  }
+  return out;
+}
+
+// Where to seat a contour's depth/elevation label: the ring's extreme vertex on the chosen
+// side (top/bottom/left/right), nudged a hair inward so it sits just inside the line. Anchoring
+// the water ring to the TOP and the bottom ring to the BOTTOM keeps the two callouts apart and
+// reads intuitively (water surface high, floor low), clear of the centred pond name. Returns
+// {x,y} (world feet) or null.
+export function contourLabelPoint(contourRing, anchor = "top") {
+  if (!Array.isArray(contourRing) || contourRing.length < 3) return null;
+  const c = ringCentroidAvg(contourRing);
+  let best = contourRing[0];
+  for (const p of contourRing) {
+    if (anchor === "bottom") { if (p.y > best.y) best = p; }
+    else if (anchor === "left") { if (p.x < best.x) best = p; }
+    else if (anchor === "right") { if (p.x > best.x) best = p; }
+    else if (p.y < best.y) best = p; // "top" (default)
+  }
+  const dx = c.x - best.x, dy = c.y - best.y, L = Math.hypot(dx, dy) || 1;
+  const n = Math.min(10, L * 0.4);
+  return { x: best.x + (dx / L) * n, y: best.y + (dy / L) * n };
+}
