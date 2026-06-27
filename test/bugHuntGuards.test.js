@@ -27,6 +27,36 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/ls\.stale \? "var\(--warn-text\)"/);                 // tokenized stale stamp
   });
 
+  it("B522: the Mapillary proxy clamps a no-body upstream status instead of forwarding it", () => {
+    const src = read("../functions/api/mapillary/[[path]].js");
+    expect(src).toMatch(/resp\.status !== 204 && resp\.status !== 304/);
+  });
+
+  it("B523: the /api/file proxy clamps a no-body upstream status", () => {
+    const src = read("../functions/api/file.js");
+    expect(src).toMatch(/resp\.status !== 204 && resp\.status !== 304/);
+  });
+
+  it("B525: the ProjectBreadcrumb cloud-warn row uses theme tokens, not hardcoded amber hex", () => {
+    const src = read("../src/shared/ui/ProjectBreadcrumb.jsx");
+    expect(src).not.toMatch(/#fef3c7|#92400e/);
+    expect(src).toMatch(/color: "var\(--warn-text\)"/);
+  });
+
+  it("B526: ToolRail uses theme tokens, not a permanently-dark hardcoded chrome", () => {
+    const src = read("../src/shared/ui/ToolRail.jsx");
+    expect(src).not.toMatch(/#191613|#ece7db|#9b9482|#2e2a23/);
+    expect(src).toMatch(/CHROME = "var\(--surface-raised\)"/);
+  });
+
+  it("B527: the Project Files drawer themes its panel + controls (no white slab / invisible text in dark mode)", () => {
+    const src = read("../src/workspaces/doc-review/components/ProjectFilesDrawer.jsx");
+    expect(src).not.toMatch(/background: "#fff"/);                              // panel/control backgrounds were hardcoded white
+    expect(src).not.toMatch(/#92400e|#2c2a26|#4b5563|#6b7280|#b45309|#fffbeb/); // hardcoded light text / cream-box hexes
+    expect(src).toMatch(/paper: "var\(--surface-raised\)"/);                    // PAL is token-backed
+    expect(src).toMatch(/color: "var\(--warn-text\)"/);                         // amber labels themed
+  });
+
   it("B517: the TxRRC well/pipeline overlay no longer points at the retired Harris-clipped host", () => {
     const src = read("../src/workspaces/site-planner/lib/layers.js");
     expect(src).not.toMatch(/gis\.hctx\.net\/arcgishcpid\/rest\/services\/TXRRC/); // retired, ~99.8% incomplete outside Harris

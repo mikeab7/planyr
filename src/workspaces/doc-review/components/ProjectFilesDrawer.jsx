@@ -45,10 +45,12 @@ import {
 
 const PAL = { paper: "var(--surface-raised)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)" };
 const MINI_BTN = { flex: "none", fontSize: 10, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: 5, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: PAL.ink, padding: "2px 8px" };
+// B527: theme tokens so the tags read in both light AND dark mode (the drawer used to be a
+// hardcoded white slab — invisible light-on-light text once the chrome flips dark).
 const CLASS_TAG = {
-  [DOC_CLASS.SPATIAL]: { label: "spatial", color: "#15803d" },
-  [DOC_CLASS.REFERENCE]: { label: "reference", color: "#6b6557" },
-  [DOC_CLASS.BOTH]: { label: "spatial + reference", color: "#1d4ed8" },
+  [DOC_CLASS.SPATIAL]: { label: "spatial", color: "var(--success-text)" },
+  [DOC_CLASS.REFERENCE]: { label: "reference", color: "var(--text-tertiary)" },
+  [DOC_CLASS.BOTH]: { label: "spatial + reference", color: "var(--status-active)" },
 };
 const fmtDate = (f) => { const s = f.docDate || f.updatedAt; try { return s ? new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; } catch (_) { return ""; } };
 
@@ -225,23 +227,23 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
     <div style={{ position: "absolute", inset: 0, zIndex: 70, display: "flex" }}
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)" }} />
-      <div onPaste={onPaste} style={{ position: "relative", width: 400, maxWidth: "88%", height: "100%", background: "#fff", borderRight: `1px solid ${PAL.line}`, boxShadow: "4px 0 24px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+      <div onPaste={onPaste} style={{ position: "relative", width: 400, maxWidth: "88%", height: "100%", background: PAL.paper, borderRight: `1px solid ${PAL.line}`, boxShadow: "4px 0 24px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
         {/* header */}
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1px solid ${PAL.line}` }}>
           <div style={{ fontSize: 14, fontWeight: 800, color: PAL.ink, flex: 1 }}>Project Files</div>
           {busy && <span style={{ fontSize: 11, color: PAL.muted }}>…</span>}
-          <button onClick={refresh} title="Refresh" style={{ border: `1px solid ${PAL.line}`, background: "#fff", borderRadius: 6, cursor: "pointer", fontSize: 12, padding: "3px 7px", color: PAL.ink }}>↻</button>
+          <button onClick={refresh} title="Refresh" style={{ border: `1px solid ${PAL.line}`, background: PAL.paper, borderRadius: 6, cursor: "pointer", fontSize: 12, padding: "3px 7px", color: PAL.ink }}>↻</button>
           <button onClick={onClose} title="Close" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 18, lineHeight: 1, color: PAL.muted }}>×</button>
         </div>
 
         {!signedIn ? (
-          <div style={{ fontSize: 12, color: "#b45309", padding: 14, lineHeight: 1.5 }}>Sign in (in the Site Planner workspace) to browse your project files.</div>
+          <div style={{ fontSize: 12, color: "var(--warn-text)", padding: 14, lineHeight: 1.5 }}>Sign in (in the Site Planner workspace) to browse your project files.</div>
         ) : (
           <>
             {/* project + scope */}
             <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: `1px solid ${PAL.line}` }}>
               <select value={activeProject || ""} onChange={(e) => setActiveProject(e.target.value || null)}
-                style={{ flex: 1, fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, padding: "4px 6px", color: PAL.ink, background: "#fff" }}>
+                style={{ flex: 1, fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, padding: "4px 6px", color: PAL.ink, background: PAL.paper }}>
                 <option value="">All projects</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -261,7 +263,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                 <button key={v.id} onClick={() => setView(v.id)}
                   title={v.scope === "global" ? "Spans all projects" : "Filtered to the selected project"}
                   style={{ fontSize: 11, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 999, padding: "3px 9px",
-                    border: `1px solid ${view === v.id ? PAL.accent : PAL.line}`, background: view === v.id ? PAL.accent : "#fff", color: view === v.id ? "#fff" : PAL.ink }}>
+                    border: `1px solid ${view === v.id ? PAL.accent : PAL.line}`, background: view === v.id ? PAL.accent : PAL.paper, color: view === v.id ? "var(--on-accent)" : PAL.ink }}>
                   {v.label}
                 </button>
               ))}
@@ -272,7 +274,7 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
             <div onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDropTarget(true); }} onDragLeave={() => setDropTarget(false)} onDrop={drop}
               style={{ flex: "none", margin: "8px 12px", padding: "10px", borderRadius: 8, textAlign: "center", fontSize: 11.5, lineHeight: 1.4, cursor: "pointer",
-                border: `2px dashed ${dropTarget ? PAL.accent : PAL.line}`, background: dropTarget ? "#fbf3ee" : "#faf8f3", color: PAL.muted }}>
+                border: `2px dashed ${dropTarget ? PAL.accent : PAL.line}`, background: "var(--surface-page)", color: PAL.muted }}>
               {indexProvider && indexProvider.autofileReady
                 ? <>Drop, paste, or click — each PDF&apos;s title block is read and it files itself into the right project &amp; discipline.<div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine. Anything it can&apos;t confidently match goes to the holding area for a one-click confirm.</div></>
                 : <>Drop, paste, or click to add PDFs {activeProject ? `to "${projName(activeProject)}"` : "(they’ll go to the holding area)"}.<div style={{ fontSize: 10, marginTop: 2 }}>Several at once is fine.</div></>}
@@ -302,19 +304,19 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
                             <div style={{ fontSize: 10, color: PAL.muted, display: "flex", gap: 7, alignItems: "center" }}>
                               <span>{fmtDate(f)}</span>
                               <span style={{ color: tag.color, fontWeight: 600 }}>{tag.label}</span>
-                              <span style={{ fontWeight: 600, color: onMap ? "#15803d" : PAL.muted }}>{onMap ? "● on map" : "○ filed"}</span>
+                              <span style={{ fontWeight: 600, color: onMap ? "var(--success-text)" : PAL.muted }}>{onMap ? "● on map" : "○ filed"}</span>
                             </div>
                           </div>
                           {isSpatial(f) && <button onClick={() => planPlacement(f)} title="Place this drawing on the map (auto-placement cascade)"
-                            style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, padding: "3px 7px" }}>Place on map</button>}
+                            style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: `1px solid ${PAL.line}`, background: PAL.paper, color: PAL.ink, padding: "3px 7px" }}>Place on map</button>}
                           {pendingDel === f.id ? (
                             <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, color: PAL.muted }}>
                               <span>Delete?</span>
-                              <button onClick={(e) => { e.stopPropagation(); del(f.id); }} title="Confirm delete" style={{ border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2, fontWeight: 700 }}>✓</button>
+                              <button onClick={(e) => { e.stopPropagation(); del(f.id); }} title="Confirm delete" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2, fontWeight: 700 }}>✓</button>
                               <button onClick={(e) => { e.stopPropagation(); setPendingDel(null); }} title="Cancel" style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>✕</button>
                             </span>
                           ) : (
-                            <button onClick={(e) => { e.stopPropagation(); setPendingDel(f.id); }} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "#b3361b", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
+                            <button onClick={(e) => { e.stopPropagation(); setPendingDel(f.id); }} title="Delete" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 3 }}>×</button>
                           )}
                         </div>
                         {f.unfiled && <RefileRow projects={projects} value={refileSel[f.id]} onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />}
@@ -335,9 +337,9 @@ export default function ProjectFilesDrawer({ open, onClose, onOpenReview, onPlac
 
               {/* needs-filing holding area */}
               {unfiled.length > 0 && view !== "needs-filing" && (
-                <div style={{ marginTop: 8, padding: "8px", borderRadius: 8, border: `1px dashed #d6a64a`, background: "#fffbeb" }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>⚠ Needs filing · {unfiled.length}</div>
-                  <div style={{ fontSize: 10.5, color: "#92400e", lineHeight: 1.4 }}>Low-confidence / no-match files. Pick a project + discipline on each to file it — open the “Needs filing” view to triage them together.</div>
+                <div style={{ marginTop: 8, padding: "8px", borderRadius: 8, border: `1px dashed var(--warn-text)`, background: "var(--surface-page)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "var(--warn-text)", marginBottom: 4 }}>⚠ Needs filing · {unfiled.length}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4 }}>Low-confidence / no-match files. Pick a project + discipline on each to file it — open the “Needs filing” view to triage them together.</div>
                 </div>
               )}
             </div>
@@ -433,10 +435,10 @@ function ShareControl({ project, onChanged }) {
  * a label. Never auto-guesses — a misfiled drawing is worse than an unfiled one. */
 function RefileRow({ projects, value = {}, onChange, onFile }) {
   const ready = !!value.projectId;
-  const ctl = { fontSize: 10.5, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 5, padding: "2px 4px", color: PAL.ink, background: "#fff" };
+  const ctl = { fontSize: 10.5, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 5, padding: "2px 4px", color: PAL.ink, background: PAL.paper };
   return (
     <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6, paddingTop: 6, borderTop: `1px solid ${PAL.line}` }}>
-      <span style={{ fontSize: 10, color: "#92400e", fontWeight: 700, flex: "none" }}>File to:</span>
+      <span style={{ fontSize: 10, color: "var(--warn-text)", fontWeight: 700, flex: "none" }}>File to:</span>
       <select value={value.projectId || ""} onChange={(e) => onChange({ ...value, projectId: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 0 }}>
         <option value="">Project…</option>
         {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -445,7 +447,7 @@ function RefileRow({ projects, value = {}, onChange, onFile }) {
         {DISCIPLINES.map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
       <button onClick={onFile} disabled={!ready} title={ready ? "File this document" : "Pick a project first"}
-        style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: ready ? "pointer" : "default", borderRadius: 6, border: `1px solid ${ready ? "#15803d" : PAL.line}`, background: ready ? "#15803d" : "#eee", color: ready ? "#fff" : PAL.muted, padding: "2px 9px" }}>File</button>
+        style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: ready ? "pointer" : "default", borderRadius: 6, border: `1px solid ${ready ? "#15803d" : PAL.line}`, background: ready ? "#15803d" : "var(--surface-page)", color: ready ? "#fff" : PAL.muted, padding: "2px 9px" }}>File</button>
     </div>
   );
 }
@@ -455,11 +457,11 @@ function RefileRow({ projects, value = {}, onChange, onFile }) {
 function PlacePlan({ plan, onGo, onDismiss }) {
   const auto = plan.confident;
   return (
-    <div style={{ marginTop: 6, padding: "7px 8px", borderRadius: 6, background: "#f3f6f4", border: "1px solid #d7e3dc", fontSize: 11, color: "#2c2a26" }}>
+    <div style={{ marginTop: 6, padding: "7px 8px", borderRadius: 6, background: "var(--surface-page)", border: "1px solid var(--border-default)", fontSize: 11, color: "var(--text-primary)" }}>
       <div style={{ fontWeight: 700, marginBottom: 2 }}>{auto ? "Auto-placement" : "Manual placement"}: {plan.label}</div>
-      <div style={{ color: "#4b5563", lineHeight: 1.4 }}>{plan.reason}</div>
+      <div style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{plan.reason}</div>
       {plan.skipped.length > 0 && (
-        <ul style={{ margin: "4px 0 0", paddingLeft: 16, color: "#6b7280" }}>
+        <ul style={{ margin: "4px 0 0", paddingLeft: 16, color: "var(--text-tertiary)" }}>
           {plan.skipped.map((s) => <li key={s.method}>{s.label}: {s.reason}</li>)}
         </ul>
       )}
@@ -467,7 +469,7 @@ function PlacePlan({ plan, onGo, onDismiss }) {
         <button onClick={onGo} style={{ fontSize: 11, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: 6, border: "1px solid #15803d", background: "#15803d", color: "#fff", padding: "3px 9px" }}>
           {plan.method === METHOD.MANUAL ? "Open & calibrate" : "Place"}
         </button>
-        <button onClick={onDismiss} style={{ fontSize: 11, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid #d7e3dc", background: "#fff", color: "#4b5563", padding: "3px 9px" }}>Cancel</button>
+        <button onClick={onDismiss} style={{ fontSize: 11, fontFamily: "inherit", cursor: "pointer", borderRadius: 6, border: "1px solid var(--border-default)", background: PAL.paper, color: "var(--text-secondary)", padding: "3px 9px" }}>Cancel</button>
       </div>
     </div>
   );
@@ -515,14 +517,14 @@ function QueueRow({ item, recent = false, onRetry, onTriage, onDismiss }) {
   const S = QUEUE_STATUS;
   const meta = ({
     [S.PROCESSING]: { color: PAL.muted, label: "Filing…" },
-    [S.DONE]: { icon: "✓", color: "#15803d", label: item.target ? `Filed · ${item.target}` : "Filed" },
-    [S.NEEDS_FILING]: { icon: "⚠", color: "#92400e", label: "Needs filing — pick a project" },
-    [S.FAILED]: { icon: "⚠", color: "#b3361b", label: item.error || "Failed" },
-    [S.REJECTED]: { icon: "⦸", color: "#b3361b", label: item.error || "Unsupported file" },
+    [S.DONE]: { icon: "✓", color: "var(--success-text)", label: item.target ? `Filed · ${item.target}` : "Filed" },
+    [S.NEEDS_FILING]: { icon: "⚠", color: "var(--warn-text)", label: "Needs filing — pick a project" },
+    [S.FAILED]: { icon: "⚠", color: "var(--danger-text)", label: item.error || "Failed" },
+    [S.REJECTED]: { icon: "⦸", color: "var(--danger-text)", label: item.error || "Unsupported file" },
   })[item.status] || { icon: "•", color: PAL.muted, label: item.status };
   return (
     <div className={`pf-queue-row${recent ? " pf-queue-recent" : ""}`}
-      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 6, border: `1px solid ${PAL.line}`, background: recent ? "#faf9f5" : "#fff", opacity: recent ? 0.92 : 1 }}>
+      style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 6, border: `1px solid ${PAL.line}`, background: recent ? "var(--surface-page)" : PAL.paper, opacity: recent ? 0.92 : 1 }}>
       <span style={{ flex: "none", width: 14, textAlign: "center", color: meta.color, fontSize: 12, lineHeight: 1 }}>
         {item.status === S.PROCESSING
           ? <span style={{ display: "inline-block", width: 10, height: 10, border: `2px solid ${PAL.line}`, borderTopColor: PAL.muted, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
@@ -536,7 +538,7 @@ function QueueRow({ item, recent = false, onRetry, onTriage, onDismiss }) {
       </div>
       {item.status === S.FAILED && <button onClick={onRetry} style={MINI_BTN}>Retry</button>}
       {item.status === S.NEEDS_FILING && <button onClick={onTriage} style={MINI_BTN}>Triage</button>}
-      {item.status === S.REJECTED && <button onClick={onDismiss} title="Dismiss" style={{ ...MINI_BTN, fontSize: 13, lineHeight: 1, color: "#b3361b", padding: "0 6px" }}>×</button>}
+      {item.status === S.REJECTED && <button onClick={onDismiss} title="Dismiss" style={{ ...MINI_BTN, fontSize: 13, lineHeight: 1, color: "var(--danger-text)", padding: "0 6px" }}>×</button>}
     </div>
   );
 }

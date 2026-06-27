@@ -1,5 +1,29 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 4 (B522–B527 fixed; B528–B532 filed): a 4th 6-lens Workflow (edge-functions/
+     concurrency/theme-contrast/a11y/overlay-stitch/module-loader). 12 findings adversarially
+     confirmed; the 6 mechanical/low-risk ones shipped this lap (incl. B527 drawer theming), the
+     remaining 5 larger/riskier ones filed (2 HIGH save-race fixes B528/B529 + an a11y group
+     B530–B532 for dedicated careful laps). overlay-stitch came back clean. -->
+
+### B522 — Mapillary edge proxy crashed (uncaught 500) on a no-body upstream status (204/304) `[Edge / GIS]` (bug) — MED  *(bug-hunt round 4, 2026-06-27; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1725 tests · build green.** `functions/api/mapillary/[[path]].js` forwarded the upstream status verbatim into `new Response(JSON.stringify(...), {status})`; a 204/304 (body forbidden) throws a TypeError → uncaught platform 500, the exact hard error this graceful proxy promises never to emit. **Fix:** clamp a no-body/out-of-range status to 502 before responding (honest "Mapillary HTTP N" message kept). Anti-drift guard in `test/bugHuntGuards.test.js`.
+
+### B523 — /api/file edge proxy crashed on a no-body upstream status (204/304) `[Edge / Doc Review]` (bug) — low  *(bug-hunt round 4; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1725 tests · build green.** Same class as B522 in `functions/api/file.js` (dormant-gated behind `DOC_FILING_URL`). **Fix:** clamp the forwarded status to 502 for a no-body/empty-body upstream (a 200-with-empty-body no longer reports a self-contradicting "ok:false … HTTP 200"). Anti-drift guard added.
+
+### B524 — Library workspace had no loader skin → generic "Loading…" caption `[Shell / loader]` (bug) — low  *(bug-hunt round 4; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1725 tests (+1) · build green.** `LOADER_SKINS` had no `library` entry, so the shipped Library workspace fell back to the generic gantt skin + "Loading…". **Fix:** added a `library` skin ("Opening library…"). Test in `test/moduleLoaderTheme.test.js`.
+
+### B525 — ProjectBreadcrumb cloud-unreachable warn row hardcoded a light-amber box (light slab in dark mode) `[Shared / theming]` (bug) — low  *(bug-hunt round 4; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1725 tests · build green.** The warn row inside the token-themed breadcrumb dropdown hardcoded `#fef3c7`/`#92400e`, so it read as a light slab in dark mode (B341 trap). **Fix:** repointed to `var(--surface-page)` + `var(--warn-text)` border/text. Anti-drift guard added.
+
+### B526 — ToolRail was permanently dark regardless of theme (dark slab between light chrome in light mode) `[Shared / theming]` (bug) — MED  *(bug-hunt round 4; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1725 tests · build green.** The Doc Review tool rail hardcoded `#191613`/`#ece7db`/`#9b9482` + dark border/divider, so in light theme it was a dark slab sandwiched between light chrome — the eye-strain case B318 forbids. **Fix:** repointed CHROME/INK/MUTED + border + divider to theme tokens (`--surface-raised`/`--text-primary`/`--text-secondary`/`--border-default`); the active-button text stays near-black on the light amber module accent (correct in both themes). Anti-drift guard added. **⏳ Light + dark eyeball of the rail → V162.**
+
+### B527 — Project Files drawer rendered a white slab with invisible text in dark mode `[Doc Review / theming]` (bug) — HIGH (visible)  *(bug-hunt round 4, 2026-06-27; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · tests green · build green.** `ProjectFilesDrawer.jsx` already had a token-backed `PAL`, but ~14 scattered spots hardcoded light hexes — the drawer panel + refresh/select/place/refile/queue-row backgrounds at `#fff`, the drop-zone/needs-filing/place-plan boxes at light creams (`#faf8f3`/`#fffbeb`/`#f3f6f4`/`#faf9f5`), and light text (`#92400e`/`#b45309`/`#2c2a26`/`#4b5563`/`#6b7280`). In dark mode the panel stayed white while `--text-primary` went light → **white-on-white invisible content**; the B341 trap at full scale. **Fix:** repointed every background to `var(--surface-raised)`/`var(--surface-page)`, amber labels to `var(--warn-text)`, danger ×/fail to `var(--danger-text)`, success/on-map/spatial to `var(--success-text)`, the "both" tag to `var(--status-active)`, and chip-on-accent text to `var(--on-accent)`. Solid-green action buttons (File/Place) keep white-on-green — readable in both themes (green doesn't theme). Anti-drift guard in `test/bugHuntGuards.test.js`. **⏳ Light + dark eyeball of the open drawer → V162.**
+
 <!-- Bug-hunt ROUND 3 (B517–B521): a 3rd 6-lens Workflow (markup-engine/pdf-ocr/print-export/
      mobile/calculators/request-builders), each finding adversarially confirmed; all fixed same lap.
      Two lenses (pdf-ocr, calculators) came back CLEAN — correctly reported, nothing invented. -->

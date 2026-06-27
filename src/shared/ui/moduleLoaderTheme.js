@@ -14,6 +14,7 @@ export const LOADER_SKINS = {
   "site-planner": { kind: "site",  label: "Drawing site plan…" },
   "scheduler":    { kind: "gantt", label: "Assembling schedule…" },
   "doc-review":   { kind: "gantt", label: "Loading review…" },
+  "library":      { kind: "gantt", label: "Opening library…" },  // B524: was hitting the generic "Loading…" fallback
 };
 
 const FALLBACK = "#e8590c";
