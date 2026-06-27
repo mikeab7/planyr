@@ -559,9 +559,9 @@ was never clicked" quietly ships broken.
   rotate-to-15°. **Shift-drag still bonds to a neighbour** (the green +) regardless of the toggle.
 - **If it fails:** none critical (no data risk) — log ❌ here with what looked wrong.
 
-### V11 — Phone layout (B113) + "Cloud off" affordance (B111) ⏳
-- **Why ⏳:** verified headless at 390×844 (`planner-mobile.png`, `planner-mobile-tools.png`,
-  `planner-mobile-panel.png`) but real touch + rotation want a live click-through.
+### V11 — Phone layout (B113) + "Cloud off" affordance (B111) + header scroll-not-clip (B485) ⏳ physical-device touch/rotation owed; headless ✅
+- **✅ FIX SHIPPED 2026-06-27 (B485, PR #376; renumbered from a provisional B481 a concurrent `main` took) — the shared header now scrolls sideways instead of clipping.** Driving this item under REAL mobile emulation (iPhone-13, which the Cowork `resize_window` tool couldn't produce) exposed a genuine defect the prior 390×844 screenshots missed: the two-row `AppHeader` overran the phone width and **clipped its controls** (the project/plan switcher, the save/settings/auth badges, and the whole Row-2 toolbar — only "…cels" + "File ▾" survived), the opposite of this test's own spec ("scroll sideways, not wrap"). The B113 phone work had fixed the planner *body* but never the shared header. Fixed in `AppHeader.jsx` via `useNarrow()` (matchMedia `max-width:760px`): each header row now `overflow-x:auto` + zones at natural width (no clip), the brand drops to the mark on phone, Schedule's center-slot Row-2 switches wrap→scroll; all `narrow ?`-gated so **desktop is byte-identical**. Verified: lint 0 · full test suite green · build green · new headless **`ui-audit/verify-phone-layout.mjs`** (real iPhone-13 emulation) **10/10, stable 3×**, with a regression guard that FAILS pre-fix (clip, `maxRowOverflow=0`) and PASSES post-fix (scroll, `360px`); phone Site/Review/Schedule + desktop shots all clean. Re-verified after merging the latest `main`.
+- **⏳ Why still ⏳ (physical device only):** the headless run proves the layout/scroll on an emulated phone; **real-finger touch + rotation to landscape and back** still want an actual handheld (the sandbox has no touch device and can't rotate). Everything below is otherwise headless-confirmed.
 - **Steps (B113, on a phone or a ~390px-wide window):** open a site in the planner. The canvas
   should fill the width (not a sliver). Tap the orange **"✎ Tools"** button (bottom-right) → the tool
   palette **slides in from the right**; pick a tool → it **auto-closes** so you can draw; tap the dim
