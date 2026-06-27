@@ -1,5 +1,11 @@
 ## ✅ Done
 
+<!-- ROUND 11 (scheduler hardening) — the focused B550 lap (filed in round 10): break parentId cycles
+     at the data-load boundary so the Scheduler's tree-walks can't hang the tab on corrupt data. -->
+
+### B550 — Scheduler: a parentId cycle in loaded data could hang the tab (recursive tree-walks) `[Scheduler / robustness]` (bug — hardening)  *(filed round 10; fixed round 11, 2026-06-27)*
+`[x]` **DONE + verified. lint 0 · 1782 tests · JSX parse OK · build green.** `public/sequence/index.html` has many recursive parent→child tree-walks. **Sharpened analysis vs the original filing:** `sortByVisualOrder`'s `walk(null)` actually CANNOT loop on a cycle — a cyclic node's parent chain never reaches `null`, so it's unreachable from the null-root walk (it's just orphaned). The genuine hang is the **arbitrary-root** walks — `getSubtreeIds` (outdent) and the per-op `walk()` closures (delete/indent/insert) — which START at a specific node that can itself be inside a cycle (e.g. `1→3→2→1`), infinite-looping. **Fix (one place protects all):** a cycle-break pass at the data-load boundary in `normalizeIds` — for each task, walk its ancestor chain with a `seen` Set; if it loops, null that task's `parentId` (degrade to a root). After load the in-memory data is acyclic, so EVERY downstream walk terminates. The UI already prevents *creating* a cycle live, so the load path was the real exposure. Deliberately did NOT add a `visited` guard to `sortByVisualOrder` — it can't loop on a cycle anyway, and the guard would have changed duplicate-id handling (dropping a dup → data-loss regression). Faithful copies in `ui-audit/stress/scheduler-engine.mjs`; tests in `test/schedulerEngine.test.js` (3-task cycle broken, valid hierarchy unchanged, arbitrary-root-walk safety) + anti-drift guard. No persistence migration (load-time normalize, lossless — a cyclic task just becomes top-level).
+
 <!-- Bug-hunt ROUND 10 (B551/B552 fixed; B550 filed): a 7th 6-lens Workflow (scheduler-logic /
      keydown-in-input / geometry-correctness / event-binding / import-parse / shared-markup). 8 raw →
      7 confirmed; 2 clean live bugs shipped, the scheduler cycle-hang class filed (B550, defensive +
