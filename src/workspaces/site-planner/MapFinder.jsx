@@ -230,6 +230,7 @@ const OWNER_RE = /^(owner|own_?name|owner_?name|name|owner1)$/i;
 export default function MapFinder({ visible, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onRenameSite, onSharedChange, onUseParcels, onSkip }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
+  const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   const sitesLayerRef = useRef(null); // saved-site footprints
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
@@ -862,17 +863,21 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
      info card. Reuses the SAME identify/select pipeline as a click. Distinguishes
      "couldn't reach the parcel service" (unavailable) from "no parcel at this point"
      (none) — they mean different things and must read differently. */
-  const selectParcelAt = async (latlng, label) => {
+  const selectParcelAt = async (latlng, label, tok) => {
+    // B545: when called from a search, `tok` is that search's generation; a newer search makes
+    // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
+    const live = () => tok == null || tok === addrTokRef.current;
     const { candidates, realPrimaries } = resolveCandidates(latlng);
-    if (!candidates.length) { setParcelInfo({ status: "unavailable", label }); return; }
+    if (!candidates.length) { if (live()) setParcelInfo({ status: "unavailable", label }); return; }
     let res;
     try {
       res = await identifyParcelEager(candidates, latlng.lng, latlng.lat, {
         onSettled: (sources) => sources.forEach((s) => recordSourceResult(s.county, s.ok)), // feed the circuit breaker
       });
     } catch (_) {
-      setParcelInfo({ status: "unavailable", label }); return;
+      if (live()) setParcelInfo({ status: "unavailable", label }); return;
     }
+    if (!live()) return; // a newer search superseded this one — don't add a stale parcel or info
     if (!res.hits.length) {
       // Nothing matched: if NO service even responded, the source is unavailable;
       // if one answered with no parcel, the point is genuinely empty (a road/ROW).
@@ -895,18 +900,20 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   const goAddress = async () => {
     const q = addr.trim();
     if (!q) return;
+    const tok = ++addrTokRef.current; // B545: claim this search's generation; guard every async setState below
     setBusy(true); setErr(""); setParcelInfo(null);
     try {
       const center = mapRef.current ? mapRef.current.getCenter() : null;
       const hit = await geocodeAddress(q, center);
+      if (tok !== addrTokRef.current) return; // a newer search started — drop this stale result
       if (hit && hit.error) { setErr(hit.error); return; } // B540: service unreachable ≠ not found
       if (!hit) { setErr("Couldn't find that address — add the city or ZIP, or just pan the map to it."); return; }
       mapRef.current.flyTo([hit.lat, hit.lon], 18, { duration: 0.75 });
-      await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label); // NEW-2: select + surface parcel info
+      await selectParcelAt({ lat: hit.lat, lng: hit.lon }, hit.label, tok); // NEW-2: select + surface parcel info
     } catch (_) {
-      setErr("Address search is unavailable right now — pan/zoom the map to your site instead.");
+      if (tok === addrTokRef.current) setErr("Address search is unavailable right now — pan/zoom the map to your site instead.");
     } finally {
-      setBusy(false);
+      if (tok === addrTokRef.current) setBusy(false);
     }
   };
 

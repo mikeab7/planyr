@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V165 — B545: rapid address searches don't clobber each other (request-token) ✅ unit/anti-drift here; ⏳ runtime check owed
+- **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** MapFinder's address search (`goAddress`/`selectParcelAt`) now carries a generation token (`addrTokRef`) so a slow earlier search can't land after a newer one and surface the wrong parcel/info or clear the busy flag mid-search. (Round-9 also shipped B544 PDF blob revoke — no visible change — and B546/B547 Stitcher non-finite display guards, which only show on corrupt/degenerate data and are covered by the anti-drift guards.)
+- **✅ Verified here (no browser).** Anti-drift guards in `test/bugHuntGuards.test.js` (B544–B547); lint 0 · 1772 tests · build green.
+- **⏳ Why pending (timing-dependent, hard to drive headless).** On the map "Find a site" box, type an address + Enter, then immediately type a DIFFERENT address + Enter before the first resolves; confirm the panel ends on the SECOND address's parcel (the first never overwrites it) and the busy spinner clears correctly.
+- Cadence: once after ship.
+
 ### V164 — B528/B529: per-id write serialization stops a tab false-conflicting against itself ✅ unit-proven here; ⏳ signed-in runtime confirm owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** A shared per-id write serializer (`src/shared/cloud/serializeWrites.js`) now wraps both `reviewStore.upsertReview` (B528) and `cloudSync.cloudUpsert` (B529), so a debounced autosave and a near-simultaneous visibility/unmount/manual flush for the SAME id no longer race the optimistic-concurrency `version` into a false "saved elsewhere" that locks out autosave.
 - **✅ Verified here (no browser).** `test/serializeWrites.test.js` (6 tests): same-key ordering, cross-key independence, value pass-through, rejection isolation, the exact bug model (serialized → both writes succeed; naïve → one false-conflicts), and that a GENUINE stale version still conflicts (guard not weakened). lint 0 · 1752 tests · build green. Anti-drift guards confirm both stores call the serializer.

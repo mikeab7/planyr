@@ -1,5 +1,24 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 9 (B544–B547 fixed): a 6th 6-lens Workflow (resource-lifecycle / stale-response /
+     empty-collection / number-display / export-safety / effect-correctness). 7 raw → 6 adversarially
+     confirmed; 4 shipped this lap. TWO were REJECTED on my own re-read: a FileBrowser "await refresh()"
+     (its reqRef already guards stale state — a micro-opt, not a defect) and a DocReview boot-effect dep
+     add (the effect is intentionally run-once via a `booted` ref, so the dep change is a no-op AND would
+     be harmful if the guard were ever removed — re-resuming on nav is exactly what the code warns against). -->
+
+### B544 — PDF export leaked a blob URL via an 8-second revoke timer `[Site Planner / export]` (bug — resource leak) — low  *(bug-hunt round 9, 2026-06-27; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1772 tests · build green.** The Download-PDF path created an object URL and revoked it on an 8s `setTimeout`, so rapid re-exports (or navigating away) accumulated blob URLs in memory. **Fix:** revoke immediately after the synthetic `click()`, matching the proven PNG-export path in the same file (which already revokes inline). Anti-drift guard added.
+
+### B545 — MapFinder address search had no request-token → a slow result clobbered a newer search `[Site Planner / map]` (bug — stale response) — MED  *(bug-hunt round 9; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1772 tests · build green.** `goAddress`/`selectParcelAt` awaited geocode + parcel-identify with no generation guard, so two quick searches raced: a slow first could land after the second, setting `parcelInfo` (and ADDING a parcel) for the wrong address, and its `finally` cleared the shared busy flag mid-second-search. **Fix:** an `addrTokRef` generation counter — `goAddress` claims a token and drops its result if a newer search started; `selectParcelAt` takes the token and neither applies info NOR adds the (stale) parcel once superseded. Reuses the codebase's existing cancelled-flag pattern. **⏳ Rapid-search runtime check → V165.**
+
+### B546 — Stitcher calibration could display a non-finite scale ("1\" ≈ ∞'") `[Doc Review / Stitcher]` (bug — number display) — MED  *(bug-hunt round 9; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1772 tests · build green.** The composite-scale readout gated on `ftPerUnit ?`, but `Infinity`/`NaN` are truthy, so a corrupt loaded `ftPerUnit` (or a future bad calibration) would render "Scale set · 1\" ≈ ∞'". **Fix:** `Number.isFinite(ftPerUnit) && ftPerUnit` on both the color and the text; plus a belt-and-suspenders `u >= 1` guard in `commitCalibrate` so a near-zero span can never produce `Infinity` (mirrors `doCalibrate`, also catches NaN). Anti-drift guard added.
+
+### B547 — Stitcher takeoff rollup could show "NaN ac · NaN sf · NaN ft" `[Doc Review / Stitcher]` (bug — number display) — MED  *(bug-hunt round 9; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1772 tests · build green.** The stitched-takeoff totals rendered `totals.areaSf`/`totals.distFt` unguarded; one degenerate measure (NaN from malformed/loaded geometry) propagates through the reduce and shows "NaN" for the whole rollup. **Fix:** `Number.isFinite` guard on each total, falling back to "—" (matches the per-measure display's conditional). Anti-drift guard added.
+
 <!-- ROUND 8 (UX honesty) — cleared the last two small round-5 filed items: geocoder error
      distinction (B540) + cloud-badge popover persistence (B541). -->
 
