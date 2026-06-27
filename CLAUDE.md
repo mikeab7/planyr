@@ -181,6 +181,15 @@ server/                   # placeholder README only — NOT built or deployed; b
   build, it passes in ~40s, and the armed auto-merge then completes on its own with zero owner
   involvement. This is a known, self-serviceable hiccup — **do the nudge automatically as part
   of shipping; do NOT report it as a blocker.** (Learned 2026-06-22 on PR #274.)
+  **⚠ One nudge is often NOT enough, and a PR never merges itself — BABYSIT it to `merged:true`
+  (learned 2026-06-27 on PR #379).** Automation-token pushes (PR-open + a single nudge) frequently
+  still don't fire the `pull_request` build — recent PRs have needed **two** `Nudge CI` commits — so
+  after nudging, **verify a run actually appeared** (`actions_list list_workflow_runs` for the branch
+  / `pull_request_read get_status`) and **nudge again** if not. Separately, `main` moves fast (many
+  concurrent sessions) so a PR often goes `mergeable_state:dirty` on `BACKLOG*.md`/`VERIFICATION*.md`
+  — resolve by merging `origin/main` in (keep both sides' done-entries; renumber only a genuinely
+  colliding new B#/V#), re-run the gate, push. **Poll every ~150s while a PR is open** (webhooks do
+  NOT deliver CI-success / merge / conflict transitions — always re-fetch), never on a 20-min idle tick.
 - **Deploy = Cloudflare Pages (production), serving planyr.io.** Because the suite is one
   app with an in-app workspace switcher, "seeing both live" is one URL — you switch tabs
   inside it. (The old GitHub Pages deploy was retired — see "Retire the old GitHub Pages
