@@ -173,7 +173,7 @@ function mostCommon(arr) {
 export function buildFilingPlan(split, totalPages) {
   const sets = (split && split.standaloneSets) || [];
   const dominantDisc = split && split.dominant && split.dominant.discipline;
-  const allSeen = ((split && split.sets) || []).reduce((m, s) => Math.max(m, ...s.pageNums), 0);
+  const allSeen = ((split && split.sets) || []).reduce((m, s) => Math.max(m, ...((s && s.pageNums) || [])), 0); // B537: a set missing pageNums must degrade to 0, not throw "not iterable"
   const total = totalPages || allSeen || 0;
 
   if (!split || !split.multiDiscipline || sets.length < 2) {
@@ -184,8 +184,8 @@ export function buildFilingPlan(split, totalPages) {
   }
 
   const claimed = new Set();
-  for (const s of sets) for (const n of s.pageNums) claimed.add(n);
-  const entries = sets.map((s) => ({ discipline: s.discipline, item: s.item || s.discipline, pageNums: [...s.pageNums], primary: s.discipline === dominantDisc }));
+  for (const s of sets) for (const n of ((s && s.pageNums) || [])) claimed.add(n); // B537: tolerate a set missing pageNums
+  const entries = sets.map((s) => ({ discipline: s.discipline, item: s.item || s.discipline, pageNums: [...((s && s.pageNums) || [])], primary: s.discipline === dominantDisc }));
   // Leftover pages → the dominant (or the first) entry.
   const home = entries.find((e) => e.primary) || entries[0];
   for (let p = 1; p <= total; p++) if (!claimed.has(p)) home.pageNums.push(p);

@@ -703,7 +703,9 @@ export default function DocReview({
         const rec = reconcile(await loadReview(lastSingle), readDraft(uid, lastSingle));
         if (rec && rec.kind === "single" && !wrongProject(rec)) await loadSingleReview(rec);
       }
-    })();
+    })().catch(() => {}); // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
+    // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via finally,
+    // so swallowing here just falls to the empty state (the intended behavior per the comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

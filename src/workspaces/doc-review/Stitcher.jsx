@@ -245,8 +245,13 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     setBusy(true); setNotice("");
     try {
       const built = [];
+      const renderFailed = []; // B536: pages whose raster threw (corrupt page / worker crash)
       for (const pg of group.pages) {
-        const img = await renderPageToImage(pdf.doc, pg.pageNum, 2);
+        let img;
+        // B536: a single failed page-render used to throw past the loop, so the whole group-drop
+        // silently did NOTHING (no sheets, no message). Skip the bad page and report it instead.
+        try { img = await renderPageToImage(pdf.doc, pg.pageNum, 2); }
+        catch (_) { renderFailed.push(pg.sheetNumber || ("p" + pg.pageNum)); continue; }
         const da = pg.drawingArea && pg.drawingArea.w ? pg.drawingArea : { x: 0, y: 0, w: img.baseW, h: img.baseH };
         built.push({
           id: uid(), srcId: pdf.srcId, pageNum: pg.pageNum,
@@ -256,6 +261,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           detailRefs: pg.detailRefs || [], detailAnchors: pg.detailAnchors || [], notes: pg.notes || [],
         });
       }
+      // B536: every page failed to render → nothing to place. Tell the user (re-drop to retry)
+      // rather than leaving the drop looking like it did nothing.
+      if (!built.length) { setNotice(`Couldn’t render ${renderFailed.length === 1 ? "the page" : `any of the ${group.pages.length} pages`} — re-drop the file to retry.`); return; }
       const placeInput = built.map((s) => ({ id: s.id, sheetNumber: s.sheetNumber, drawingArea: s.drawingArea, matchLines: s.matchLines, baseW: s.baseW, baseH: s.baseH }));
       const auto = autoPlaceGroup(placeInput);
       let placements = auto.placements; const unplaced = auto.unplaced;
@@ -300,9 +308,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       // Auto-calibrate the composite from the group's stated scale, once (B339).
       let calMsg = "";
       if (!ftPerUnit && crop) { const cal = groupCalibration(group.pages); if (cal) { setFtPerUnit(cal.ftPerUnit); calMsg = ` · scale ${cal.label || "set"} from sheet`; } }
+      const failMsg = renderFailed.length ? ` · ${renderFailed.length} page${renderFailed.length > 1 ? "s" : ""} couldn’t render (re-drop to retry)` : ""; // B536
       setNotice(unplaced.length
-        ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.`
-        : built.length > 1 ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.` : "");
+        ? `Auto-stitched ${placedSheets.length} of ${built.length} sheets${calMsg} — ${unplaced.length} need a quick manual Align.${failMsg}`
+        : (built.length > 1 || failMsg) ? `Auto-stitched ${placedSheets.length} sheets${calMsg}.${failMsg}` : "");
     } finally { setBusy(false); }
   };
 
@@ -556,7 +565,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
       if (!sid) return;
       const rec = reconcile(await loadReview(sid), readDraft(await currentUid(), sid));
       if (rec && rec.kind === "stitch") { loadedId.current = rec.id; await loadStitch(rec); }
-    })();
+    })().catch(() => {}); // B534: a resume failure (Drive/Storage/parse) must not be an unhandled
+    // rejection — loadStitch owns its own busy via finally, so swallowing here just falls to the
+    // empty stitcher instead of leaving a half-started boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

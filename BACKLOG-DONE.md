@@ -1,5 +1,35 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 5 (B533–B539 fixed; B540–B541 filed): a 5th 6-lens Workflow (units-geometry/
+     async-errors/parse-robust/react-correctness/coords-projection/storage-migration). 13 raw → 11
+     adversarially-confirmed real; the 7 clean crash-safety/correctness ones shipped this lap, 2
+     medium ones filed (B540 geocode contract, B541 badge popover). TWO confirmed findings were
+     REJECTED on my own re-read: a LayerPanel "missing cleanup" (the implicit arrow-return ALREADY
+     provides React's cleanup — no-op fix) and an arcgis feetToLatLng param-order "fix" (a cosmetic
+     refactor across 8 coordinate call sites — pure flip-the-map risk for zero functional gain;
+     working coordinate code is not churned for style). -->
+
+### B533 — 3DEP elevation converted metres with the international foot, not the US survey foot `[Site Planner / units]` (bug) — low  *(bug-hunt round 5, 2026-06-27; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** `elevation.js` used `M_TO_FT = 3.280839895` (international foot) while the whole project — EPSG:2278 State Plane, `FT_PER_M` in `shared/coordinates` (B57b) — is US survey feet (3937/1200). A ~0.0002% drift (~0.66 ft per 100 m), low-impact today (elevation is transient/screening-only) but inconsistent with every other foot in the app and a latent error if a ditch invert is ever persisted. **Fix:** `M_TO_FT = 3937 / 1200`. Anti-drift guard in `test/bugHuntGuards.test.js`.
+
+### B534 — Stitcher boot-resume IIFE had no rejection handler → unhandled promise on a resume failure `[Doc Review / Stitcher]` (bug) — MED  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** The mount effect that resumes the last stitch session ran an async IIFE with no `.catch`; a throw from `loadReview`/`currentUid`/`reconcile`/`loadStitch` was an unhandled rejection. **Fix:** `.catch(() => {})` on the IIFE — `loadStitch` owns its own `busy` via `finally`, so swallowing falls cleanly to the empty stitcher instead of a half-started boot. Anti-drift guard added.
+
+### B535 — DocReview boot-resume IIFE had no rejection handler → unhandled promise `[Doc Review]` (bug) — MED  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** Same class as B534 in `DocReview.jsx`: the boot-resume IIFE guarded only the localStorage reads; `currentUid`/`loadReview`/`reconcile`/`loadSingleReview` awaited outside any catch. **Fix:** `.catch(() => {})` — `loadSingleReview` owns its own "Opening…" overlay via `finally`, so a resume failure falls to the empty state (the documented intended behavior). Anti-drift guard added.
+
+### B536 — Stitcher addGroup: one failed page-render silently aborted the WHOLE group-drop (no sheets, no message) `[Doc Review / Stitcher]` (bug) — MED  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** `renderPageToImage` inside addGroup's page loop had no per-page guard; a single corrupt page threw past the loop (the `finally` cleared `busy`, so not a stuck spinner — but `setPlaced` never ran, so a drop of N pages produced NOTHING with no explanation). **Fix:** per-page try/catch collects `renderFailed`, skips the bad page, and the notice now reports "N page(s) couldn't render (re-drop to retry)" — or, if every page failed, an explicit "couldn't render … re-drop" instead of a silent no-op. Anti-drift guard added.
+
+### B537 — buildFilingPlan crashed ("not iterable") on a set missing pageNums `[Doc Review / auto-filing]` (bug) — MED  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests (+2) · build green.** `disciplineSplit.buildFilingPlan` spread `...s.pageNums` in three places (the `allSeen` reduce + the `claimed`/`entries` build) with no guard; a malformed `decision.sets` entry lacking `pageNums` threw and crashed filing. **Fix:** `...((s && s.pageNums) || [])` at all three sites → a missing array degrades to empty, not a throw. Behavioral tests in `test/disciplineSplit.test.js` (single + multi-discipline malformed input → no throw).
+
+### B538 — sheetScale fracToNum allowed a zero denominator → Infinity/NaN `[Doc Review / scale]` (bug) — low  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** `fracToNum` divided user-supplied callout text without a zero-denominator guard ("5/0" → Infinity, "0/0" → NaN). Downstream `parseSheetScale` range checks neutralize it today, but the helper should not leak non-finite values. **Fix:** return 0 when the denominator is 0 (both mixed and plain fraction branches). Anti-drift guard added.
+
+### B539 — currentAccessToken: one corrupt auth-token blob aborted the whole scan → signed-in user looked signed-out to the keepalive push `[Auth / Storage]` (bug) — MED  *(bug-hunt round 5; fixed same lap)*
+`[x]` **DONE + verified. lint 0 · 1733 tests · build green.** `supabase.currentAccessToken` wrapped the WHOLE key-scan loop in one try/catch, so a single corrupt/truncated `sb-*-auth-token` blob threw at `JSON.parse` and returned null — missing any later valid session (the B452 keepalive unload-flush would then push as anonymous → a contributing factor to "edits not saved"). **Fix:** parse each entry inside its own try/catch so a bad key is skipped and the scan continues. (The agent's first-pass fix — a type-check after JSON.parse — was rejected: the throw happens AT JSON.parse, before any check; only a per-iteration try works.) Anti-drift guard added.
+
 <!-- Bug-hunt ROUND 4 (B522–B527 fixed; B528–B532 filed): a 4th 6-lens Workflow (edge-functions/
      concurrency/theme-contrast/a11y/overlay-stitch/module-loader). 12 findings adversarially
      confirmed; the 6 mechanical/low-risk ones shipped this lap (incl. B527 drawer theming), the

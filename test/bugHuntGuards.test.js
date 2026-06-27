@@ -63,6 +63,36 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/gis\.rrc\.texas\.gov\/server\/rest\/services\/rrc_public/); // authoritative statewide RRC service
   });
 
+  it("B533: 3DEP elevation converts metres with the US survey foot, not the international foot", () => {
+    const src = read("../src/workspaces/site-planner/lib/elevation.js");
+    expect(src).not.toMatch(/M_TO_FT = 3\.280839895/);   // the international-foot constant
+    expect(src).toMatch(/M_TO_FT = 3937 \/ 1200/);        // US survey foot, matching the EPSG:2278 spine
+  });
+
+  it("B534/B535: the Doc Review boot-resume IIFEs handle their own rejection (no unhandled promise)", () => {
+    const stitch = read("../src/workspaces/doc-review/Stitcher.jsx");
+    const dr = read("../src/workspaces/doc-review/DocReview.jsx");
+    expect(stitch).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\); \/\/ B534/);
+    expect(dr).toMatch(/\}\)\(\)\.catch\(\(\) => \{\}\); \/\/ B535/);
+  });
+
+  it("B536: addGroup skips a failed page render and reports it (no silent group-drop abort)", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/renderFailed/);
+    expect(src).toMatch(/catch \(_\) \{ renderFailed\.push/);
+  });
+
+  it("B538: fracToNum guards a zero denominator (no Infinity/NaN leak)", () => {
+    const src = read("../src/shared/files/sheetScale.js");
+    expect(src).toMatch(/d === 0 \? 0 :/);
+  });
+
+  it("B539: currentAccessToken parses each auth-token entry inside its own try (a corrupt one doesn't abort the scan)", () => {
+    const src = read("../src/workspaces/site-planner/lib/supabase.js");
+    // the JSON.parse now lives inside a nested try whose catch continues the loop
+    expect(src).toMatch(/corrupt entry — skip and keep scanning/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
