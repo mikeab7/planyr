@@ -9,6 +9,16 @@
 --
 -- SECURITY DEFINER so the helper can scan doc_reviews regardless of the storage policy context;
 -- it still only returns true for reviews shared with a team the CALLER is in (is_team_member).
+--
+-- SECURITY FIX (B491 — cross-user PDF read): the candidate object path MUST belong to the review's
+-- OWNER. `data->sources[].storageKey` is attacker-writable (a user fully controls the `data` jsonb on
+-- their OWN rows), so without binding the path to the row owner an attacker could create a review they
+-- own, share it with a team they're on, and list ANOTHER user's storage path (`<victim_uid>/…`) in
+-- sources — the helper would then match their own shared review and serve the victim's private PDF
+-- (a confused-deputy IDOR across the private `doc-review-files` bucket). Requiring the path's first
+-- segment (the uploader uid) to equal `r.user_id` means a fabricated source can only ever resolve to
+-- the attacker's OWN files, while a legitimately-shared review still resolves (its real sources are
+-- written under its owner's uid). This is the same uid-segment check the own-folder policies use.
 create or replace function public.can_read_shared_review_file(p_name text)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
@@ -16,6 +26,7 @@ returns boolean language sql stable security definer set search_path = public as
     from public.doc_reviews r
     where r.team_id is not null
       and public.is_team_member(r.team_id)
+      and (storage.foldername(p_name))[1] = r.user_id::text   -- path must belong to THIS review's owner
       and exists (
         select 1 from jsonb_array_elements(coalesce(r.data->'sources','[]'::jsonb)) s
         where s->>'storageKey' = p_name
