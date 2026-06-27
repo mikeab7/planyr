@@ -14,6 +14,20 @@ _Last updated: 2026-06-27._
 - [ ] **Scheduler backend (B408, decision-gated).** Decide whether to consolidate the embedded Scheduler onto the
       main Supabase project (one backend) or keep it on its own. Claude can't proceed on this until he chooses.
 
+### ❓ From the improve loop (2026-06-27)
+- [ ] **Landscaping in the yield numbers (B553).** A deep audit of the yield/takeoff math (building SF, coverage %,
+      parking ratios, acreage, impervious %, detention volume) came back **clean — no wrong calculations.** One
+      judgment call surfaced: drawn **landscaping** (green buffer strips) currently counts as pervious "open/green"
+      space and isn't broken out on its own line. Options: **(a, recommended)** add a "Landscaped SF" line to the
+      breakdown but keep it pervious (impervious %, coverage, detention all unchanged); **(b)** leave as-is (lumped
+      into open/green — numbers already correct); **(c)** count it as impervious (unusual — landscaping is normally
+      pervious for stormwater, so this would raise impervious % and affect detention sizing). Default until he says:
+      **(b) leave as-is** (the numbers are correct today). Claude implements (a) on request — it's a small additive change.
+- [ ] **Loop direction.** ~27 fixes shipped across 8 hunt rounds + a clean yield audit; the easy-bug pool is thinning.
+      Pick one: **(a)** keep the loop hunting (deeper/focused laps); **(b)** pivot to a roadmap feature (e.g. GIS layer
+      caching — the documented Track-1 next item); **(c)** wind the loop down for now. Default until he says: **(a) keep
+      hunting** at a focused, lower-cadence pace.
+
 ## Run this SQL (one-click in Supabase) — closes Team-sharing security gaps
 > **All for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (just re-run the whole file). These
 > matter ONLY once you actually start inviting teammates — no teams are live yet, so nothing is exposed today —
