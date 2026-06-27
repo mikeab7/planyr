@@ -22,6 +22,38 @@ Single source of truth for bugs and feature requests. Repo: `planyr` (product: *
 
 ## 🔲 Open
 
+<!-- Bug-hunt batch 2026-06-27 (B501–B509): surfaced by a 6-hunter Workflow over the real
+     codebase, each finding adversarially confirmed (verify + refute agents) as a genuine,
+     low-risk defect before filing. B510 (Dimension label) was fixed + shipped the same lap
+     — B500 was taken by a concurrent pond-grading fix, so the Dimension item is B510. -->
+
+### B501 — Scheduler: deleting a task never recomputes parent roll-ups / cascade → stale summary dates `[Schedule]` (bug) — HIGH  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` `deleteTask`/`deleteTasks` (`public/sequence/index.html` ~L3919/L3705) call `renumberTasks(tasks.filter(...))` with NO recompute — every other structural handler (indent/outdent/paste/move) wraps with `recomputeAfterStructureChange = rollupParentDates(cascadeDates(...))` (the exact class B487 fixed). A deleted child leaves the parent summary bar/row showing a span for work that's gone until an unrelated edit re-triggers a rollup. **Fix:** wrap both filtered arrays with `recomputeAfterStructureChange(...)` before renumber (already exists ~L752). Add an engine unit test in `ui-audit/stress/scheduler-engine.mjs` + `test/schedulerEngine.test.js`.
+
+### B502 — Scheduler: InlineDate strips the year → silently rewrites a non-current-year date to this year on commit `[Schedule]` (bug) — MED, data corruption  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` `InlineDate` (`public/sequence/index.html` ~L2222) renders month/day only (drops the year); on commit `parseFlexDate` defaults a missing year to the current year, so just opening + Enter/blur mutates a `2025-…` date to `2026-…`. Every other date editor seeds with `toShortDate` (M/D/YY). **Fix:** seed the display with `toShortDate(value)` (keeps the year, reads back losslessly). One-line change.
+
+### B503 — Scheduler: MasterView `fmtDate` lacks the malformed-date guard `fmtD` got in B489 → can render NaN/NaN/yy `[Schedule]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` The dashboard's inline `fmtDate` (`public/sequence/index.html` ~L8248) splits on `-` with no presence check, unlike the hardened module-level `fmtD` (B489). A non-ISO value renders `NaN/NaN/26`. **Fix:** add `if (!y||!m||!d) return ""` (or reuse `fmtD`).
+
+### B504 — Site Planner: truck-court paving double-subtracts a corner bump-out footprint → yield understates impervious/coverage `[Site Planner / yield]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` Since B492, `relayoutSide` trims a same-side truck court IN to the clear face (court `w` already excludes the bump), but the yield loop (`SitePlanner.jsx` ~L4608–4614) STILL subtracts the bump's full footprint from `paving` (stale comment "a dog-ear sits inside its truck court footprint"). Net: paving/impervious understated by the bump area (~3300 sf default), `open` overstated by the same. Only fires with a building that has both a same-side court AND a corner bump-out. **Fix:** remove the now-spurious L4608–4614 de-double-count block. Verify against pondGeom/area conventions.
+
+### B505 — Doc Review: Stitcher `loadStitch()` rejection is unhandled → noise + permanently-stuck `pendingStitch` `[Doc Review / stitch]` (bug) — MED  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` `loadStitch()` (`Stitcher.jsx` ~L492) is try/finally with no catch and awaits PDF/Drive/Storage I/O that can reject; the caller `loadStitch(loadReq).then(() => onConsumeLoad())` (~L543) has no `.catch`, so a corrupt/partial PDF surfaces an unhandled rejection AND `onConsumeLoad()` never runs → the load stays half-consumed (`loadedId.current` already set, effect won't re-fire). Sibling `.then`s in the file already end with `.catch(() => {})`. **Fix:** add `.catch(() => onConsumeLoad && onConsumeLoad())` (or a try/catch that sets the error banner).
+
+### B506 — Site Planner: device-full autosave `pushModelToCloud().then` has no `.catch` → stuck "saving" badge `[Site Planner / Persistence]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` In the B473 device-storage-full autosave branch (`SitePlanner.jsx` ~L1555) the `.then` sets `saving` first but has no `.catch`; the degrade path awaits a raw `supabase…upsert` that can reject on a transport error, leaving the badge spinning forever (the watchdog is on a different push path). **Fix:** append `.catch(() => { setSaveStatus("unsaved"); setSavedToCloudOnly(false); setCloudSaveFailed(true); })`.
+
+### B507 — Site Planner: manual "Save now" device-full `pushModelToCloud().then` has no `.catch` → stuck banner `[Site Planner / Persistence]` (bug) — low  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` Same class in the manual Save-now handler (`SitePlanner.jsx` ~L4919): a rejected cloud push leaves "Saving to your account…" on screen and never trips the loud failed state. **Fix:** append `.catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); })`. (Pairs with B506.)
+
+### B508 — Site Planner: LayerPanel relevance control hardcodes warm-dark hex instead of theme tokens (B341 trap) `[Site Planner / theming]` (bug) — MED  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` The Relevance (Show all/Dim/Hide) active segment (`components/LayerPanel.jsx` ~L164) uses `background:"#3b3a36"`/`color:"#fbfaf6"`, and the stale-age stamp (~L84) uses `"#b45309"` — both hardcoded, despite the file's own header rule to use theme tokens (the dark active fill barely separates from the dark frosted panel in dark mode; `contrast-audit.mjs` can't see inline hex). **Fix:** repoint to tokens (`var(--hover-menu)`/`var(--accent)`+`--on-accent`; `var(--warn-text)` for the stamp). No layout change.
+
+### B509 — Markup: PropertyPanel number/range/enum/color controls have no accessible name `[Shared / Markup / a11y]` (bug) — MED  *(bug-hunt 2026-06-27, adversarially confirmed)*
+`[ ]` In `src/shared/markup/PropertyPanel.jsx` non-bool rows render the caption as a detached `<div>` (~L106) with no `<label>`/`htmlFor`/`aria-label`, so NumberControl/RangeControl/EnumControl/ColorControl expose no accessible name (only Bool/Color wrap a `<label>`). Affects every editable markup property in both workspaces. **Fix:** thread the schema `label` (already in scope ~L98) into each control as `aria-label` (or wrap in a `<label>`).
+
 ### B498 — Dog-ear bump-outs don't re-anchor on host resize → overlap the building `[Site Planner / Site Model]` (bug)  *(owner-found 2026-06-26 on planyr.io reading the live element model, provisional "NEW-6"; minted **B498** = highest real B# across both files (B497) + 1; branch `claude/dog-ear-resize-overlap-v4yvit`)*
 `[x]` **Fixed + headless-verified this session (model-layer self-heal on load). *Moves to BACKLOG-DONE on merge.***
 - **Repro (Jacintoport `smqdxst8pf3g`, Building 1):** host building `e8984` was widened ~27′ (to 328.49′) AFTER its two right-side corner bump-outs (`e8986`/`e8987`, `dogEar{side:"right"}`) were placed flush to the old 301.5′ edge. The bumps never re-anchored, so each froze at `cx 4.19` — inner edge `−25.81`, **13.5′ INSIDE** the host's current right edge (`−12.32`), straddling the truck-court seam. The truck-court child *did* re-anchor; only the dog-ears were skipped (a B362-era gap — dog-ear re-anchoring was added to the live `refitChildren` path AFTER this host was widened).
