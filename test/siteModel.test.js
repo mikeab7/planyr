@@ -30,6 +30,20 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
     expect(parcelDrawingsOf(m, "p1").map((d) => d.id)).toEqual(["d1"]);
   });
 
+  // schema v9 — cross-module schedule link hint (additive, mirror of the schedule record).
+  it("scheduleProjectId/Name: defaults to null and survives a create→migrate round-trip", () => {
+    const fresh = createSiteModel();
+    expect(fresh.scheduleProjectId).toBeNull();
+    expect(fresh.scheduleProjectName).toBeNull();
+    const linked = createSiteModel({ id: "p1", scheduleProjectId: 7, scheduleProjectName: "Pappadoupolos" });
+    expect(linked.scheduleProjectId).toBe(7);
+    expect(linked.scheduleProjectName).toBe("Pappadoupolos");
+    // migrate is idempotent + lossless: the hint isn't dropped on re-normalize
+    const round = migrate(linked);
+    expect(round.scheduleProjectId).toBe(7);
+    expect(round.scheduleProjectName).toBe("Pappadoupolos");
+  });
+
   // B7/B8 lifecycle status defaulting — single source of truth, easy to regress.
   it("status: a brand-new record => pursuit; a pre-feature (older version) record => active", () => {
     expect(createSiteModel().status).toBe("pursuit");

@@ -375,6 +375,16 @@ export default function ProjectBreadcrumb({
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
                           {p.name}
                         </span>
+                        {/* Cross-module connectedness (schema v9): a project that has a linked
+                            schedule shows a small calendar chip, so the connection is visible at a
+                            glance in the switcher. Site is implicit (every project IS a site). */}
+                        {p.scheduleProjectId != null && (
+                          <span
+                            title="Has a linked schedule"
+                            aria-label="Has a linked schedule"
+                            style={{ flex: "none", fontSize: 10.5, opacity: 0.85 }}
+                          >📅</span>
+                        )}
                       </button>
                       <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, paddingRight: 7 }}>
                         {canManage && active ? (
