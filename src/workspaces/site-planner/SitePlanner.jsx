@@ -1575,7 +1575,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               if (r && r.conflict) { setCloudConflict(true); reportClientEvent("save-suppressed", "device full AND cloud push hit a conflict — routed to conflict UI", { id: siteId }); }
               else { setCloudSaveFailed(true); reportClientEvent("save-both-failed", "device storage full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
             }
-          });
+          }).catch(() => { setSaveStatus("unsaved"); setSavedToCloudOnly(false); setCloudSaveFailed(true); });  // B506: a rejected cloud push must not strand the badge on "saving"
         }
       } else if (okSave) { setSaveStatus("saved"); setCloudSaveFailed(false); }
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
@@ -4929,7 +4929,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setSaveNowMsg("");
         if (r && r.ok) { setLocalSaveFailed(false); setSavedToCloudOnly(true); }
         else { setLocalSaveFailed(true); setSavedToCloudOnly(false); reportClientEvent("save-both-failed", "Save now: device full AND cloud push failed", { id: siteId, error: (r && r.error) || "" }); }
-      });
+      }).catch(() => { setSaveNowMsg(""); setLocalSaveFailed(true); setSavedToCloudOnly(false); });  // B507: a rejected push must clear the transient banner + surface the honest failure
     } else { setLocalSaveFailed(true); setSavedToCloudOnly(false); }
   };
   // Version history (automatic local backups, B126): open the dialog with this plan's

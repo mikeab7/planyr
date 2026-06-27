@@ -540,7 +540,10 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   useEffect(() => {
     if (!loadReq || loadReq.id === loadedId.current) return;
     loadedId.current = loadReq.id;
-    loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad());
+    // B505: a load error (corrupt/partial PDF, Drive/Storage byte error) must still CONSUME
+    // the request — else the rejection is unhandled AND pendingStitch never clears (loadedId
+    // is already set, so the effect won't re-fire), leaving the load permanently half-done.
+    loadStitch(loadReq).then(() => onConsumeLoad && onConsumeLoad()).catch(() => onConsumeLoad && onConsumeLoad());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadReq]);
   // Otherwise resume the last stitch session on mount (e.g. toggling back from single).
