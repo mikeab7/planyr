@@ -143,6 +143,10 @@ const ICON_PATHS = {
   mellipse: <ellipse cx="8" cy="8" rx="6" ry="4.4" />,
   mpolygon: <path d="M8 2.4 L13.4 6.2 L11.3 12.6 L4.7 12.6 L2.6 6.2 Z" />,
   mpolyline: <path d="M2.5 11 L6 5.5 L9 9 L13.5 3.5" />,
+  // B543 — deed/title launcher glyph: a document page (folded corner) over a few
+  // text lines, signalling "read a deed / title commitment". Same currentColor
+  // stroke style (no fill) as the other tool glyphs.
+  deed: <><path d="M4.5 2 H9 L12 5 V13 a1 1 0 0 1-1 1 H4.5 a1 1 0 0 1-1-1 V3 a1 1 0 0 1 1-1 Z" /><path d="M9 2 V5 H12" /><path d="M5.6 8 H10 M5.6 10.2 H10 M5.6 12.2 H8.4" /></>,
 };
 const ToolIcon = ({ id, size = 15 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -6438,8 +6442,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
             <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
             <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-            <div style={{ height: 1, background: PAL.panelLine, margin: "5px 4px" }} />
-            <button style={menuItem(false)} title="Read a deed/title block to plot a metes-and-bounds boundary" onClick={() => { setExportMenu(false); setTitleErr(""); setTitleOpen(true); }}>Title reader / metes &amp; bounds…</button>
           </AnchoredMenu>
         </div>
       </div>
@@ -7702,6 +7704,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </AnchoredMenu>
           </div>
+
+          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
+              metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
+              it never gets the active-tool highlight and never calls selectTool (which
+              would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
+              the scrim first so the zIndex:3000 modal isn't shown over a dimmed rail. */}
+          <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
+            data-testid="tool-deed"
+            title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
+            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
+            <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
+          </button>
 
           {railHdr("Site elements")}
 
