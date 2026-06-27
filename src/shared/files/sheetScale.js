@@ -21,10 +21,12 @@
 // "1 1/2" → 1.5, "3/16" → 0.1875, "1" → 1. Tolerant of spaces around the slash.
 function fracToNum(s) {
   s = String(s).trim();
+  // B538: guard a zero denominator so a malformed callout ("5/0", "0/0") returns 0 rather than
+  // leaking Infinity/NaN downstream (parseSheetScale's range checks catch it, but don't rely on that).
   const mixed = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
-  if (mixed) return +mixed[1] + +mixed[2] / +mixed[3];
+  if (mixed) { const d = +mixed[3]; return d === 0 ? 0 : +mixed[1] + +mixed[2] / d; }
   const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
-  if (frac) return +frac[1] / +frac[2];
+  if (frac) { const d = +frac[2]; return d === 0 ? 0 : +frac[1] / d; }
   return +s || 0;
 }
 
