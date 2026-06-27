@@ -306,7 +306,8 @@ export default function ProjectBreadcrumb({
 
         {atRisk(saveState) && (
           <div style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 9px", marginBottom: 4,
-            borderRadius: 7, background: "#fef3c7", color: "#92400e", fontSize: 11.5, lineHeight: 1.4 }}>
+            borderRadius: 7, background: "var(--surface-page)", border: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.4 }}>
+            {/* B525: token-themed warn row (was a hardcoded light-amber box that became a light slab in dark mode) */}
             <span aria-hidden>⚠</span>
             <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync next time you edit or close this tab.</span>
           </div>
