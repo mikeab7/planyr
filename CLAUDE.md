@@ -471,7 +471,9 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
     **data layer (`reviewStore`/`autofiling`/`fileIndex`) stays in `doc-review/lib`** (project-scoped,
     canvas-independent) and Library imports it cross-workspace — no new backend/tables/keys. So pre-B496
     text below that calls `FileBrowser` "the Document Review landing surface" now means the **Library**
-    tab. The Site Planner's slide-over `ProjectFilesDrawer` (in-context map peek) is unchanged.
+    tab. **(B542 update:)** the Site Planner's old slide-over `ProjectFilesDrawer` + its row-1
+    **🗂 Files** button were **removed as redundant** once the Library tab shipped — `ProjectFilesDrawer.jsx`
+    is deleted and the Library tab is the one and only file browser now.
 - **Private by default.** Any future sharing or shared workspaces default to private;
   sharing is always a deliberate, explicit act — never automatic.
 - **No admin / cross-user data access.** Deliberately omitted, for customer trust and
