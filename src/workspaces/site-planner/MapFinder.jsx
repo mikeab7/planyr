@@ -258,9 +258,27 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   // (B167) The idle "Drag to move the map" first-run bubble was removed entirely per owner
   // request — the map loads with no instructional overlay. Only the contextual selection
   // guidance and the error toast remain in the bottom-left slot (see B21/B105).
+  // Phone-width responsive mode (mirrors the planner's B113 ≤760px breakpoint). On a phone
+  // the desktop layout's three top panels (search pill, sites list, layers) sit side-by-side
+  // and overlap — covering the "Select parcels" button — so narrow mode reflows them into a
+  // full-width search bar with the two side panels collapsed to taps below it.
+  const [narrow, setNarrow] = useState(() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia("(max-width: 760px)"); } catch (_) { return undefined; }
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.addEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
   // Sites panel: collapsible (persisted) + per-row hover-reveal of the crosshair/delete actions (B106).
-  const [sitesPanelOpen, setSitesPanelOpen] = useState(() => { try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; } });
+  // On a phone it defaults CLOSED (owner request) so the map isn't buried under the list on open.
+  const [sitesPanelOpen, setSitesPanelOpen] = useState(() => {
+    try { if (window.matchMedia("(max-width: 760px)").matches) return false; } catch (_) {}
+    try { return localStorage.getItem("planarfit:sitesPanelClosed:v1") !== "1"; } catch (_) { return true; }
+  });
   const toggleSitesPanel = () => setSitesPanelOpen((v) => { const n = !v; try { localStorage.setItem("planarfit:sitesPanelClosed:v1", n ? "0" : "1"); } catch (_) {} return n; });
+  // Layers/imagery panel: on a phone it collapses to a tap (default closed) so it stops
+  // covering the search bar; desktop keeps it always-open as before.
+  const [layersPanelOpen, setLayersPanelOpen] = useState(() => { try { return !window.matchMedia("(max-width: 760px)").matches; } catch (_) { return true; } });
   const [hoverRow, setHoverRow] = useState(null);
   const [viewCounty, setViewCounty] = useState("harris"); // jurisdiction for the Layers panel — follows the map's current area (B13)
   const [confirmDel, setConfirmDel] = useState(null); // site pending delete confirmation
@@ -350,7 +368,12 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
   /* create the map once */
   useEffect(() => {
     const cfg = COUNTIES_MAP.harris; // default landing view (no pre-picked county)
-    const map = L.map(elRef.current, { zoomControl: true, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
+    // Phone: the full-width search bar now owns the top-left, so move the +/- zoom control
+    // to the bottom-left (clear there) instead of leaving it half-hidden behind the bar.
+    // Desktop is unchanged (top-left, where the Your-sites panel sits over it as before).
+    const phone = (() => { try { return window.matchMedia("(max-width: 760px)").matches; } catch (_) { return false; } })();
+    const map = L.map(elRef.current, { zoomControl: false, minZoom: 8, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
+    L.control.zoom({ position: phone ? "bottomleft" : "topleft" }).addTo(map);
     mapRef.current = map;
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
@@ -1008,26 +1031,29 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         <div ref={elRef} style={{ position: "absolute", inset: 0 }} />
 
-        {/* ── Combined site bar — floating pill at top-center ── */}
+        {/* ── Combined site bar — floating pill at top-center (full-width bar on a phone) ── */}
         <div style={{
-          position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 1000,
+          position: "absolute", zIndex: narrow ? 1100 : 1000,
           display: "flex", alignItems: "center",
           background: PAL.chrome,
           borderRadius: 99,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
           padding: "0 6px",
           height: 42,
-          maxWidth: "calc(100% - 540px)",
-          minWidth: 300,
+          // Phone: a full-width bar pinned to the top so the side panels (now below it) can't
+          // cover the search input or the Select-parcels button. Desktop: centered pill.
+          ...(narrow
+            ? { top: 8, left: 8, right: 8, transform: "none", maxWidth: "none", minWidth: 0 }
+            : { top: 14, left: "50%", transform: "translateX(-50%)", maxWidth: "calc(100% - 540px)", minWidth: 300 }),
         }}>
           {/* Address search */}
           <input
             style={{
-              flex: 1, minWidth: 140, maxWidth: 300, height: "100%",
+              flex: 1, minWidth: narrow ? 60 : 140, maxWidth: 300, height: "100%",
               padding: "0 10px", background: "transparent", border: "none", outline: "none",
               color: PAL.chromeInk, fontSize: 13, fontFamily: "inherit",
             }}
-            placeholder="Find a site — address or place…"
+            placeholder={narrow ? "Find a site…" : "Find a site — address or place…"}
             value={addr}
             onChange={(e) => setAddr(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !busy) goAddress(); }}
@@ -1127,7 +1153,10 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
             facts), none (centered, but no parcel at that point), and unavailable
             (couldn't reach the parcel service) — the last two read differently. */}
         {parcelInfo && (
-          <div style={{ position: "absolute", top: 64, left: "50%", transform: "translateX(-50%)", zIndex: 1001, width: 348, maxWidth: "calc(100% - 540px)", background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 22px rgba(28,25,20,0.22)", overflow: "hidden" }}>
+          <div style={{ position: "absolute", zIndex: narrow ? 1090 : 1001, background: PAL.panelBg, border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 6px 22px rgba(28,25,20,0.22)", overflow: "hidden",
+            ...(narrow
+              ? { top: 58, left: 8, right: 8, transform: "none", width: "auto", maxWidth: "none" }
+              : { top: 64, left: "50%", transform: "translateX(-50%)", width: 348, maxWidth: "calc(100% - 540px)" }) }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: parcelInfo.status === "found" ? `1px solid ${PAL.panelLine}` : "none" }}>
               <span style={{ flex: "none", fontSize: 13 }}>{parcelInfo.status === "found" ? "📍" : parcelInfo.status === "none" ? "○" : "⚠"}</span>
               <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: parcelInfo.status === "unavailable" ? PAL.accent : PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1171,9 +1200,14 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
 
         {/* saved sites */}
         {sites.length > 0 && (
-          <div style={{ position: "absolute", top: 10, left: 10, zIndex: 1000, width: 232, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden" }}>
+          <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 10, boxShadow: "0 4px 18px rgba(28,25,20,0.14)", overflow: "hidden",
+            // Phone: drop below the full-width search bar; a slim tap when closed, a wider
+            // overlay (above the layers panel) when the user opens it.
+            ...(narrow
+              ? { top: 60, left: 8, zIndex: 1060, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188 }
+              : { top: 10, left: 10, zIndex: 1000, width: 232 }) }}>
             {/* collapsible header (B106): click to fold the panel to a slim bar; state persists per device */}
-            <button onClick={toggleSitesPanel} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
+            <button onClick={() => { if (narrow && !sitesPanelOpen) setLayersPanelOpen(false); toggleSitesPanel(); }} title={sitesPanelOpen ? "Collapse the sites panel" : "Expand the sites panel"}
               style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
                 fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: "9px 12px" }}>
               <span style={{ fontSize: 8, lineHeight: 1, transform: sitesPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
@@ -1238,8 +1272,21 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
           </div>
         )}
 
-        {/* imagery + labels + overlay layers control */}
-        <div style={{ position: "absolute", top: 10, right: 10, zIndex: 1000, background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", width: 228 }}>
+        {/* imagery + labels + overlay layers control — on a phone this collapses to a tap
+            (default closed) so it stops covering the search bar / Select-parcels button. */}
+        <div style={{ position: "absolute", background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, padding: narrow && !layersPanelOpen ? 0 : "6px 9px 8px", fontSize: 12, color: PAL.ink, boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+          ...(narrow
+            ? { top: 60, right: 8, zIndex: 1055, width: layersPanelOpen ? "min(300px, calc(100vw - 16px))" : "auto" }
+            : { top: 10, right: 10, zIndex: 1000, width: 228 }) }}>
+          {narrow && (
+            <button onClick={() => setLayersPanelOpen((o) => { const n = !o; if (narrow && n) setSitesPanelOpen(false); return n; })} title={layersPanelOpen ? "Collapse layers" : "Imagery & layers"}
+              style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, padding: layersPanelOpen ? "0 0 6px" : "8px 11px" }}>
+              <span style={{ fontSize: 8, lineHeight: 1, transform: layersPanelOpen ? "none" : "rotate(-90deg)", display: "inline-block" }}>▼</span>
+              <span style={{ flex: 1, textAlign: "left" }}>Imagery &amp; layers</span>
+            </button>
+          )}
+          {(!narrow || layersPanelOpen) && (<>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <span style={{ color: PAL.muted }}>Imagery</span>
             <select style={{ ...field, padding: "4px 6px", fontSize: 12, flex: 1 }} value={basemap} onChange={(e) => setBasemap(e.target.value)}>
@@ -1259,6 +1306,7 @@ export default function MapFinder({ visible, overlays, setOverlays, layerStatus 
                 follows the site's own county once one is opened in the planner. */}
             <LayerPanel overlays={overlays} setOverlays={setOverlays} county={viewCounty} layerStatus={layerStatus} coverage={coverage} />
           </div>
+          </>)}
         </div>
 
         {/* error toast (bottom-left) — surfaced only when there's an error */}

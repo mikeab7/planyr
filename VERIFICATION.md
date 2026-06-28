@@ -60,6 +60,12 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V168 — B554: mobile Safari pinch no longer pops the tab overview; map-finder reflow ✅ headless reflow 6/6 here; ⏳ real iOS Safari pinch owed
+- **What changed (2026-06-28, branch `claude/mobile-safari-pinch-menu-3gon8x`).** (1) `index.html` now cancels Safari's `gesturestart`/`gesturechange`/`gestureend` and sets `maximum-scale=1, user-scalable=no` so a two-finger pinch on the page no longer zooms the document or pops the "show all tabs" overview (the in-app map/planner pinch uses touch/pointer events, untouched). (2) `MapFinder.jsx` gained a phone (≤760px) reflow: the search pill becomes a full-width top bar, the "Your sites" panel defaults **closed** + drops below it, the imagery/layers panel collapses to a tap, and the +/- zoom control moves bottom-left — so the **Select parcels** button is no longer covered by the side panels.
+- **✅ Verified here (headless, logged-out, 390×844).** `ui-audit/verify-mobile-mapfinder.mjs` 6/6: Select-parcels visible + on-screen + top element at its center (not covered); Your-sites collapsed by default with its tap-to-open header present; search bar clears the layers chip. Desktop layout re-checked unchanged. lint 0 · build green.
+- **⏳ Why pending (the pinch fix needs a real iOS device — `gesture*` events are Safari/iOS-only, not fired by desktop headless Chromium).** On an actual iPhone/iPad in Safari, open planyr.io → Site map: pinch on the page and confirm it does **not** zoom the page or open the tab grid; confirm the map still pinch-zooms; confirm Select parcels is fully tappable and the left "Your sites" panel starts closed.
+- Cadence: once after ship.
+
 ### V167 — B551: Stitcher releases pointer capture on a mid-pan blur (no frozen grab cursor) ✅ unit/anti-drift here; ⏳ runtime check owed
 - **What changed (2026-06-27, branch `claude/app-loops-debug-hukhfz`).** The Stitcher's blur/visibility pan-abort now passes the in-flight `pointerId` to `abortGesture`, so it actually releases pointer capture (it previously called it with no id → capture held → frozen grab cursor + swallowed clicks until refocus).
 - **✅ Verified here (no browser).** Anti-drift guard in `test/bugHuntGuards.test.js` (B548); lint 0 · 1774 tests · build green.

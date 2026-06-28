@@ -2,7 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Mobile pinch fix: on iOS Safari a two-finger pinch on the page zooms the whole
+         document and, at minimum scale, pops the "show all tabs" overview — hijacking the
+         gesture the user meant for the map/planner. The map (Leaflet) and the planner canvas
+         drive their OWN pinch-zoom through touch/pointer events, which are SEPARATE from
+         Safari's gesture* events, so cancelling these here stops the browser's page-zoom and
+         tab-overview without touching in-app zoom. Runs before React so it covers first paint. -->
+    <script>
+      (function () {
+        var stop = function (e) { e.preventDefault(); };
+        document.addEventListener("gesturestart", stop, { passive: false });
+        document.addEventListener("gesturechange", stop, { passive: false });
+        document.addEventListener("gestureend", stop, { passive: false });
+      })();
+    </script>
     <!-- Pre-paint theme resolve (B274): set data-theme BEFORE first paint / before
          index.css applies, so the page never flashes the wrong theme. Mirrors
          ThemeProvider's resolve logic; localStorage is the source of truth. -->
