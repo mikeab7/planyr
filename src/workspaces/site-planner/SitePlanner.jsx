@@ -1797,7 +1797,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Bluebeam-style left rail: selecting something opens its menu (element →
   // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
+  // On a phone (narrow) the left menu is a full overlay that BURIES the canvas, so a
+  // tap must NOT force it open (owner request 2026-06-28) — tapping just selects (the
+  // handles appear) and the user opens Properties from the Element tab when they want
+  // it. If a panel is already open we still keep its content synced to the selection.
   useEffect(() => {
+    if (narrow && !leftPanel) return; // phone + panel closed → select only, don't pop the overlay
     if (sel?.kind === "el" || sel?.kind === "callout" || sel?.kind === "markup") setLeftPanel("props");
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1813,16 +1818,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // The left menu opening/closing resizes the canvas; pan to compensate so the
   // drawing doesn't jump sideways (e.g. on the first element click of a session).
-  const prevPanelOpen = useRef(!!leftPanel);
+  // Only the DESKTOP left panel resizes the canvas (it's an in-flow flex child); the phone
+  // panel OVERLAYS (position:absolute) and resizes nothing — so the drawing should be shifted
+  // by one panel width ONLY while the desktop panel is open, never on a phone (B556). We track
+  // the exact compensation currently applied and reconcile to the desired value whenever the
+  // panel opens/closes OR the screen crosses the phone breakpoint (rotation) — reversing the
+  // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
+  const panelShiftRef = useRef(0);
   useEffect(() => {
-    const open = !!leftPanel;
-    if (open !== prevPanelOpen.current) {
-      const delta = leftWidth + 6; // panel width + drag handle
-      setView((v) => ({ ...v, offX: v.offX + (open ? -delta : delta) }));
-      prevPanelOpen.current = open;
+    const want = (!!leftPanel && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left
+    if (want !== panelShiftRef.current) {
+      const delta = want - panelShiftRef.current;
+      panelShiftRef.current = want;
+      setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel]);
+  }, [leftPanel, narrow]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
