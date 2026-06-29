@@ -164,7 +164,7 @@ export default function Shell() {
           onClick={() => setAcctOpen((o) => !o)}
           aria-haspopup="menu"
           aria-expanded={acctOpen}
-          title={`Signed in as ${user.email}`}
+          title={`Signed in as ${user?.email || "(no email)"}`}
           style={pill}
         >
           <span style={avatar(true)}>{profileApi.initial}</span>
@@ -186,7 +186,7 @@ export default function Shell() {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</div>
               {profileApi.org && <div style={{ fontSize: 11.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileApi.org}</div>}
-              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email || ""}</div>
             </div>
           </div>
           <div style={acctDivider} />

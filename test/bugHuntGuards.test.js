@@ -121,6 +121,105 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/serializeSiteWrite\(model\.id, \(\) => cloudUpsertCore\(uid, model\)\)/);
   });
 
+  it("B540: geocodeAddress distinguishes 'unreachable' from 'not found' (returns { error } vs null)", () => {
+    const src = read("../src/workspaces/site-planner/lib/geocode.js");
+    expect(src).toMatch(/reachedAny/);
+    expect(src).toMatch(/return reachedAny \? null : \{ error:/);
+    // both callers handle the { error } shape
+    expect(read("../src/workspaces/site-planner/MapFinder.jsx")).toMatch(/hit && hit\.error/);
+    expect(read("../src/workspaces/site-planner/SitePlanner.jsx")).toMatch(/hit && hit\.error/);
+  });
+
+  it("B541: CloudSyncBadge boundary resets via resetKey, not a remount key (popover survives state churn)", () => {
+    const src = read("../src/shared/ui/CloudSyncBadge.jsx");
+    expect(src).not.toMatch(/<CloudBadgeBoundary key=/);     // no longer remounted on every state change
+    expect(src).toMatch(/resetKey=\{String\(state/);          // passes a reset signal instead
+    expect(src).toMatch(/prevProps\.resetKey !== this\.props\.resetKey/); // and clears a crash on its change
+  });
+
+  it("B544: PDF export revokes its blob URL immediately (no 8s leak window)", () => {
+    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    expect(src).not.toMatch(/setTimeout\(\(\) => URL\.revokeObjectURL\(aEl\.href\), 8000\)/);
+    expect(src).toMatch(/URL\.revokeObjectURL\(aEl\.href\); \/\/ B544/);
+  });
+
+  it("B545: MapFinder address search is guarded by a request-token (no stale-response clobber)", () => {
+    const src = read("../src/workspaces/site-planner/MapFinder.jsx");
+    expect(src).toMatch(/addrTokRef = useRef\(0\)/);
+    expect(src).toMatch(/const tok = \+\+addrTokRef\.current/);
+    expect(src).toMatch(/if \(tok !== addrTokRef\.current\) return/);
+  });
+
+  it("B546: Stitcher calibration display guards a non-finite ftPerUnit + commitCalibrate rejects u<1", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/Number\.isFinite\(ftPerUnit\) && ftPerUnit/);
+    expect(src).toMatch(/if \(!\(u >= 1\)\)/);
+  });
+
+  it("B547: Stitcher takeoff totals guard against a NaN/Infinity rollup", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/Number\.isFinite\(totals\.areaSf\)/);
+    expect(src).toMatch(/Number\.isFinite\(totals\.distFt\)/);
+  });
+
+  it("B551: Stitcher releases pointer capture on a blur/visibility abort (passes the pointerId)", () => {
+    const src = read("../src/workspaces/doc-review/Stitcher.jsx");
+    expect(src).toMatch(/panY: view\.panY, pointerId: e\.pointerId/);          // pan stores the pointerId
+    expect(src).toMatch(/if \(drag\.current\) abortGesture\(drag\.current\.pointerId\)/); // recover passes it
+  });
+
+  it("B552: pendingLegacyCount delegates to pendingLegacySites (count == list == import)", () => {
+    const src = read("../src/workspaces/site-planner/lib/storage.js");
+    expect(src).toMatch(/return pendingLegacySites\(uid\)\.length/);
+    expect(src).not.toMatch(/for \(const \[id, rec\] of Object\.entries\(legacy\)\)/); // the old over-counting loop is gone
+  });
+
+  it("B557: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
+    expect(read("../src/app/Shell.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
+    expect(read("../src/workspaces/site-planner/components/AuthPanel.jsx")).toMatch(/\{user\?\.email \|\| "\(no email\)"\}/);
+  });
+
+  it("B557: layers.js clears the feature-retry timer on removal + guards the cache-age fetch", () => {
+    const src = read("../src/workspaces/site-planner/lib/layers.js");
+    expect(src).toMatch(/lyr\.onRemove = function \(map\) \{ clearTimeout\(timer\)/); // retry timer cleanup
+    expect(src).toMatch(/typeof m\.ts === "number" && lyr && lyr\._map/);             // stale-callback guard
+  });
+
+  it("B557: LayerPanel group + reveal toggles announce aria-expanded", () => {
+    const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
+    expect(src).toMatch(/aria-expanded=\{!collapsed\[g\]\}/);
+    expect(src).toMatch(/aria-expanded=\{!!revealHidden\[groupKey\]\}/);
+  });
+
+  it("B557: ProjectBreadcrumb manage menu has role=menu + menuitem", () => {
+    const src = read("../src/shared/ui/ProjectBreadcrumb.jsx");
+    expect(src).toMatch(/role="menu" aria-label="Project actions"/);
+    expect((src.match(/role="menuitem"/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("B559: timestamp comparisons coerce via toMs (newer-wins merge + legacy-prune are type-safe)", () => {
+    const sm = read("../src/workspaces/site-planner/lib/siteModel.js");
+    expect(sm).toMatch(/export const toMs = /);
+    expect(sm).toMatch(/toMs\(A\.updatedAt\) >= toMs\(B\.updatedAt\)/);
+    const st = read("../src/workspaces/site-planner/lib/storage.js");
+    expect(st).toMatch(/toMs\(cloudMap\[id\]\.updatedAt\) >= toMs\(legacy\[id\] && legacy\[id\]\.updatedAt\)/);
+  });
+
+  it("B562: importLegacyIntoCloud compares timestamps via toMs (third sibling of B559)", () => {
+    const st = read("../src/workspaces/site-planner/lib/storage.js");
+    // the legacy-import skip guard must coerce both sides so an ISO-string updatedAt can't NaN the compare
+    expect(st).toMatch(/toMs\(existing\.updatedAt\) >= toMs\(local\.updatedAt\)/);
+    // and the raw, type-unsafe form must be gone from that path
+    expect(st).not.toMatch(/\(existing\.updatedAt \|\| 0\) >= \(local\.updatedAt \|\| 0\)/);
+  });
+
+  it("B563: version restore re-applies parcelDrawings (its own persistence path) so it isn't a mixed-version restore", () => {
+    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the restore sequence must durably restore the version's parcelDrawings (via persistDrawings,
+    // which both sets state AND saves — a bare setParcelDrawings would not persist)
+    expect(sp).toMatch(/persistDrawings\(v\.parcelDrawings \|\| \[\]\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}

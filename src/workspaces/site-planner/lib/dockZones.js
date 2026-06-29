@@ -148,17 +148,34 @@ export function dockSidesFor(el) {
   return { dside: longSides[1], dockSides: longSides };
 }
 
-// The building's DEPTH (feet): its footprint extent perpendicular to the dock face — dock
-// wall → dock wall (cross) / dock wall → rear wall (single), which both reduce to the span
-// across the dock-normal axis. Read off `dockSidesFor`, NEVER off an attached site element,
-// so a 135′ truck court can't masquerade as the building's depth (NEW-2/B417). For a
-// rectangle this equals the shorter side (the dock always rides the long walls), but we
-// derive it from the dock axis so intent is explicit and robust to the dock metadata.
-export function footprintDepth(el) {
+// Which raw footprint axis ("w" | "h") runs PERPENDICULAR to the dock face (the DEPTH axis) and
+// which runs ALONG it (the LENGTH axis). Read off `dockSidesFor`, NEVER hardcoded to X/Y, so it
+// tracks the dock metadata — a building whose docks move walls keeps depth perpendicular to the
+// face and length parallel to it. For a rectangle depth = the short axis and length = the long
+// axis (the dock always rides the long walls), but we derive it from the dock axis so intent is
+// explicit and robust. PURE — the single source of truth shared by the canvas, the massing panel
+// and the dock-door readout (B548).
+export function footprintAxes(el) {
   const { dockSides, dside } = dockSidesFor(el);
   const side = dockSides[0] || dside;                 // a dock side (or the implied one when dock=none)
-  const horizWall = side === "top" || side === "bottom"; // docks on a horizontal wall → depth is the vertical (h) span
-  return horizWall ? el.h : el.w;
+  const horizWall = side === "top" || side === "bottom"; // horizontal dock wall → outward normal is vertical
+  // depth runs along the outward normal: vertical (h) for a horizontal wall, horizontal (w) for a vertical wall
+  return horizWall ? { depth: "h", length: "w" } : { depth: "w", length: "h" };
+}
+
+// The building's DEPTH (feet): its footprint extent perpendicular to the dock face — dock
+// wall → dock wall (cross) / dock wall → rear wall (single), which both reduce to the span
+// across the dock-normal axis. So a 135′ truck court (an attached site element) can't masquerade
+// as the building's depth (NEW-2/B417). For a rectangle this equals the shorter side.
+export function footprintDepth(el) {
+  return el[footprintAxes(el).depth];
+}
+
+// The building's LENGTH (feet): its footprint extent PARALLEL to the dock face — the wall the
+// dock doors array along (B548). The dock-axis counterpart of footprintDepth; for a rectangle
+// this is the longer side, derived from the dock axis so it stays correct as docks move walls.
+export function footprintLength(el) {
+  return el[footprintAxes(el).length];
 }
 
 // IDs of dock-zone stack members (truck court → trailer parking → buffer) sitting on a side

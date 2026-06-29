@@ -8,8 +8,8 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -140,7 +140,7 @@ export function pruneMigratedLegacy(cloudMap) {
     // work was deleted before the migration modal could ever surface it). Mirror the inverse
     // of pendingLegacyCount's predicate so reclaimed duplicates still get cleaned up.
     for (const id of Object.keys(legacy)) {
-      if (cloudMap[id] && (cloudMap[id].updatedAt || 0) >= ((legacy[id] && legacy[id].updatedAt) || 0)) { delete legacy[id]; dropped++; }
+      if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
     }
     if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
   } catch (_) {}
@@ -177,7 +177,7 @@ export async function importLegacyIntoCloud(uid) {
     const local = createSiteModel(legacy[id]);
     if (!local.id) { skipped++; continue; }
     const existing = cloud[local.id];
-    if (existing && (existing.updatedAt || 0) >= (local.updatedAt || 0)) { skipped++; continue; } // cloud already same/newer
+    if (existing && toMs(existing.updatedAt) >= toMs(local.updatedAt)) { skipped++; continue; } // cloud already same/newer (B562: toMs so an ISO-string updatedAt can't NaN the compare and copy an older local over a newer cloud)
     cloud[local.id] = local;                  // stage into the cloud cache so it's visible right away
     const r = await cloudUpsert(uid, local);  // and persist to Supabase
     if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit
@@ -190,16 +190,11 @@ export async function importLegacyIntoCloud(uid) {
 // cloud cache — i.e. would be brought in by importLegacyIntoCloud. 0 when logged out.
 export function pendingLegacyCount(uid) {
   if (!uid) return 0;
-  let legacy = {}, cloud = {};
-  try { legacy = JSON.parse(localStorage.getItem(SITES_KEY)) || {}; } catch (_) {}
-  try { cloud = JSON.parse(localStorage.getItem(cloudKey(uid))) || {}; } catch (_) {}
-  let n = 0;
-  for (const [id, rec] of Object.entries(legacy)) {
-    const cur = cloud[id];
-    const lAt = (rec && rec.updatedAt) || 0;
-    if (!cur || (cur.updatedAt || 0) < lAt) n++;
-  }
-  return n;
+  // B552: delegate to pendingLegacySites so the COUNT can't disagree with the LIST or with what
+  // importLegacyIntoCloud actually copies. The old raw-key loop counted records with a missing/
+  // falsy normalized id (which import skips), so the badge could read "3 pending" while only 2
+  // imported (the B128 symptom). pendingLegacySites already normalizes (migrate) + drops !id.
+  return pendingLegacySites(uid).length;
 }
 
 // Returns the list of on-device (legacy) sites that are not yet in (or are newer than)
@@ -317,6 +312,10 @@ export async function reconcileSiteFromCloud(id) {
   if (!activeUser || !id) return null;
   return fetchSiteForReconcile(activeUser, id);
 }
+// B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
+// (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
+// isn't falsely rejected as a cross-session conflict. Per-tab + cloud-independent (safe logged out).
+export { noteLocalContent };
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.

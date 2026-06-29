@@ -150,6 +150,15 @@ export class CloudBadgeBoundary extends Component {
   constructor(props) { super(props); this.state = { crashed: false }; }
   static getDerivedStateFromError() { return { crashed: true }; }
   componentDidCatch() { /* swallow — the visible fallback below IS the report */ }
+  // B541: clear a transient crash when the inputs change WITHOUT remounting the boundary. The
+  // parent used to force recovery by keying the boundary on `state`, but that remounted the whole
+  // badge on every benign save-cycle transition (synced↔saving) and discarded the inner Badge's
+  // open popover. Now the parent passes a `resetKey`; we reset here on its change, so the popover
+  // survives state transitions (the Badge's own effect still closes it when leaving an actionable
+  // state) while crash-recovery is fully preserved.
+  componentDidUpdate(prevProps) {
+    if (this.state.crashed && prevProps.resetKey !== this.props.resetKey) this.setState({ crashed: false });
+  }
   render() {
     if (this.state.crashed) {
       return (
@@ -166,12 +175,13 @@ export class CloudBadgeBoundary extends Component {
 }
 
 export default function CloudSyncBadge({ state, onRetry, detail }) {
-  // Key the boundary on the state so a CHANGE remounts it — a transient render crash
-  // clears once the inputs change instead of wedging the badge blank forever. This also
-  // makes the badge survive module/project switches cleanly: it always reflects the live
-  // state it's handed, never a stale cached one.
+  // B541: pass the state as `resetKey` (NOT as a remount `key`). The boundary clears a transient
+  // crash when resetKey changes (full crash-recovery, every state change), but it is NOT remounted,
+  // so the inner Badge keeps its popover open across state transitions instead of being slammed
+  // shut on every benign save-cycle tick. The Badge always renders the live `state` prop, so it's
+  // never stale; its own effect closes the popover when the state stops being actionable.
   return (
-    <CloudBadgeBoundary key={String(state ?? "none")}>
+    <CloudBadgeBoundary resetKey={String(state ?? "none")}>
       <Badge state={state} onRetry={onRetry} detail={detail} />
     </CloudBadgeBoundary>
   );

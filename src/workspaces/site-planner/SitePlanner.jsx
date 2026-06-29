@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, noteLocalContent } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
@@ -55,7 +55,7 @@ import { buildingNumbers, isBuilding, roadTravelWidth, bondedChildRot } from "./
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -847,14 +847,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
-  const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -1061,11 +1060,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [underlay]);
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
+  // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
+  // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
+  // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
+  // "another session" conflict — deleting a building drops the building AND its bonded children
+  // (dog-ears / sidewalks / parking) in one shot, always clearing the ≥2 bar, which is exactly the
+  // phantom "Take over editing" re-prompt the owner hit (a MOVE keeps the item count, so it never
+  // tripped); (2) mergeSiteContent would RESURRECT the deleted item from the cloud / another copy on
+  // reload or take-over. Ids are never reused (fresh uid() per add), so tombstoning by id is safe.
+  const tombstone = (ids) => {
+    const add = (Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === "string");
+    if (!add.length) return;
+    setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
+  };
   const deleteDrawing = (id) => {
     const gone = parcelDrawings.find((d) => d.id === id);
     if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
     if (gone && gone.idbKey) idbDelete(gone.idbKey); // B474 review (#13) — evict the cached raster from IndexedDB too, no orphan
     persistDrawings(parcelDrawings.filter((d) => d.id !== id));
+    tombstone(id); // B556 — a deleted parcel-drawing stays deleted across reload/merge and never trips the thin-clobber guard
     if (openDrawingId === id) setOpenDrawingId(null);
   };
   const overlayFileRef = useRef(null);
@@ -1376,61 +1389,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
-  const pointersRef = useRef(new Map()); // live touch pointers → svg-relative {x,y} (B331)
-  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
-  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence (B331)
-  // Viewport-relative screen point for the pinch midpoint math (the SVG fills the canvas wrapper).
-  const vpPoint = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
-  // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
-  const applyPinch = () => {
-    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
-    // between scheduling this update and React running the updater, so reading pinchRef.current
-    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
-    const p = pinchRef.current;
-    if (!p || pointersRef.current.size < 2) return;
-    const [a, b] = [...pointersRef.current.values()];
-    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / p.dist;
-    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, p.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
-    pinchRef.current = { mid, dist };
+  const pointersRef = useRef(new Map()); // (vestigial — kept for abortGesture's clear; pinch is native-touch now)
+  const pinchRef = useRef(null);         // (vestigial)
+  const touchPinchedRef = useRef(false); // (vestigial)
+  // ── Two-finger pinch via NATIVE touch events (B555). The planner used to run pinch off
+  // POINTER events, which iOS Safari handles unreliably for multi-touch — it often fires a
+  // spurious `pointercancel` on the first finger the instant a second lands, which killed the
+  // pinch mid-gesture and let a one-finger pan fight it (the "super buggy" report). Native
+  // `touch` events carry ALL active touches in `e.touches` every frame and don't suffer that,
+  // so they're the robust path on iOS. The canvas already sets `touch-action: none`, so the
+  // browser's own pinch-zoom/scroll is suppressed and React's (passive) touch handlers need no
+  // preventDefault. Updates are throttled to one per animation frame so a heavy plan doesn't
+  // re-render on every raw touchmove (the other half of the jank).
+  const touchCountRef = useRef(0);       // # of fingers currently down (gates the pointer handlers)
+  const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
+  const pinchRafRef = useRef(0);         // pending rAF id (0 = none)
+  const pinchNextRef = useRef(null);     // latest { mid, dist } awaiting the next frame
+  const touchPt = (t) => { const r = svgRef.current.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+  const flushPinch = () => {
+    pinchRafRef.current = 0;
+    const nx = pinchNextRef.current, base = pinch2Ref.current;
+    if (!nx || !base) return;
+    const factor = nx.dist / base.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, base.mid, nx.mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    pinch2Ref.current = nx; // re-baseline so the next frame is incremental
   };
-  // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
-  // first two), else end it. Called on every finger add/remove so a 3rd finger or a partial lift
-  // re-anchors instead of zoom-jumping off a stale pair. (B331)
-  const reseedPinch = () => {
-    const pts = [...pointersRef.current.values()];
-    pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
+  const onTouchStartPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length < 2) return;
+    const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+    pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    pinchNextRef.current = null;
+    // The 1st finger landed a beat earlier and may have begun a one-finger pan; tear it down so
+    // the pinch starts clean, and restore the view if that pan had already nudged it (no jump-in).
+    const d = drag.current;
+    if (d && d.mode === "pan" && d.ox != null) setView((v) => ({ ...v, offX: d.ox, offY: d.oy }));
+    if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
+    capturePidRef.current = null; cancelActiveMove(); drag.current = null;
+    setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
   };
-  // Pinch runs on the CAPTURE phase so a touch landing on a parcel/building (which has its own
-  // pointer handler) is still caught. Gated on pointerType==='touch' — mouse/trackpad never enter.
-  // A 2nd touch starts the pinch (stopPropagation so the bg/element handlers don't also fire) and
-  // tears down the 1st finger's in-progress drag (revert a half-move, B315); a 3rd+ finger is
-  // absorbed (no draw/pan). (B331)
-  const onPinchDown = (e) => {
-    if (e.pointerType !== "touch") return;
-    pointersRef.current.set(e.pointerId, vpPoint(e));
-    if (pointersRef.current.size >= 2) {
-      e.stopPropagation();
-      reseedPinch();
-      touchPinchedRef.current = true;
-      if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
-      capturePidRef.current = null; cancelActiveMove(); drag.current = null;
-      setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
+  const onTouchMovePinch = (e) => {
+    if (!pinch2Ref.current || e.touches.length < 2) return;
+    const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+    pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
+  };
+  const onTouchEndPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length >= 2) { // a 3rd finger lifted — re-baseline to the remaining pair, no jump
+      const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+      pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      return;
     }
-  };
-  const onPinchMove = (e) => {
-    if (!pinchRef.current || e.pointerType !== "touch") return;
-    e.stopPropagation();
-    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
-    applyPinch();
-  };
-  const onPinchUp = (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPinchedRef.current) e.stopPropagation(); // suppress the bubble handlers for the whole pinch sequence
-    pointersRef.current.delete(e.pointerId);
-    reseedPinch(); // re-baseline (or end) the pinch to whatever fingers remain — a lift never jumps
-    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    pinch2Ref.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
   };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
@@ -1686,6 +1698,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    // B556 — an undo/redo (or a cancelled drag) is a DELIBERATE local restore; if it shrinks the plan
+    // (e.g. undo of a building add, which removed building + parking + sidewalk at once) tell the
+    // thin-clobber baseline this is authoritative so the resulting push isn't mistaken for a stale
+    // cross-session clobber and falsely re-shown as "changed in another session".
+    if (siteId) noteLocalContent(siteId, s);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
@@ -1805,7 +1822,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   // Bluebeam-style left rail: selecting something opens its menu (element →
   // Properties, parcel → Parcel). Otherwise the rail stays collapsed.
+  // On a phone (narrow) the left menu is a full overlay that BURIES the canvas, so a
+  // tap must NOT force it open (owner request 2026-06-28) — tapping just selects (the
+  // handles appear) and the user opens Properties from the Element tab when they want
+  // it. If a panel is already open we still keep its content synced to the selection.
   useEffect(() => {
+    if (narrow && !leftPanel) return; // phone + panel closed → select only, don't pop the overlay
     if (sel?.kind === "el" || sel?.kind === "callout" || sel?.kind === "markup") setLeftPanel("props");
     else if (sel?.kind === "parcel") setLeftPanel("parcel");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1821,16 +1843,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel?.kind, sel?.id]);
   // The left menu opening/closing resizes the canvas; pan to compensate so the
   // drawing doesn't jump sideways (e.g. on the first element click of a session).
-  const prevPanelOpen = useRef(!!leftPanel);
+  // Only the DESKTOP left panel resizes the canvas (it's an in-flow flex child); the phone
+  // panel OVERLAYS (position:absolute) and resizes nothing — so the drawing should be shifted
+  // by one panel width ONLY while the desktop panel is open, never on a phone (B556). We track
+  // the exact compensation currently applied and reconcile to the desired value whenever the
+  // panel opens/closes OR the screen crosses the phone breakpoint (rotation) — reversing the
+  // EXACT delta we applied, so a mid-open rotation can never leave a residual sideways offset.
+  const panelShiftRef = useRef(0);
   useEffect(() => {
-    const open = !!leftPanel;
-    if (open !== prevPanelOpen.current) {
-      const delta = leftWidth + 6; // panel width + drag handle
-      setView((v) => ({ ...v, offX: v.offX + (open ? -delta : delta) }));
-      prevPanelOpen.current = open;
+    const want = (!!leftPanel && !narrow) ? (leftWidth + 6) : 0; // px the drawing should be shifted left
+    if (want !== panelShiftRef.current) {
+      const delta = want - panelShiftRef.current;
+      panelShiftRef.current = want;
+      setView((v) => ({ ...v, offX: v.offX - delta }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leftPanel]);
+  }, [leftPanel, narrow]);
   // Remember the left menu width between sessions.
   useEffect(() => { try { localStorage.setItem("planarfit:leftWidth", String(leftWidth)); } catch (_) {} }, [leftWidth]);
   useEffect(() => { try { localStorage.setItem("planarfit:parkingRows", parkingRows); localStorage.setItem("planarfit:roadWidth", roadWidth); localStorage.setItem("planarfit:measureMode", measureMode); localStorage.setItem("planarfit:easeMode", easeMode); localStorage.setItem("planarfit:easeType", easeType); localStorage.setItem("planarfit:easeWidth", String(easeWidth)); } catch (_) {} }, [parkingRows, roadWidth, measureMode, easeMode, easeType, easeWidth]);
@@ -1886,7 +1914,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarquee(null);
     setMkRect(null);
     setDraftRect(null);
-    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // clear any two-finger pinch (B331)
+    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // (vestigial)
+    // Also drop any in-flight native-touch pinch so a blur/visibility loss mid-gesture can't strand it (B555).
+    touchCountRef.current = 0; pinch2Ref.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
   };
   // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
   // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
@@ -1964,18 +1995,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const elIds = new Set();
       multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      // B556 — tombstone exactly what the filter removes (selected els, their bonded children, and markups).
+      const removedEls = stateRef.current.els.filter((e) => elIds.has(e.id) || elIds.has(e.attachedTo)).map((e) => e.id);
       setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
       setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
       setMulti([]); setSel(null);
+      tombstone([...removedEls, ...mkIds]);
       return;
     }
     if (!sel) return;
     pushHistory();
-    if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
+    // B556 — every branch that drops a drawn item leaves a tombstone (measures are index-keyed with no
+    // stable id and a lone measure delete can't reach the thin-clobber ≥2 bar, so they're left as-is).
+    if (sel.kind === "el") {
+      const removed = stateRef.current.els.filter((e) => e.id === sel.id || e.attachedTo === sel.id).map((e) => e.id);
+      setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
+      tombstone(removed); // a building drops with its bonded children — tombstone all of them
+    }
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
-    else if (sel.kind === "callout") setCallouts((a) => a.filter((c) => c.id !== sel.id));
-    else if (sel.kind === "markup") setMarkups((a) => a.filter((m) => m.id !== sel.id));
-    else setParcels((a) => a.filter((p) => p.id !== sel.id));
+    else if (sel.kind === "callout") { setCallouts((a) => a.filter((c) => c.id !== sel.id)); tombstone(sel.id); }
+    else if (sel.kind === "markup") { setMarkups((a) => a.filter((m) => m.id !== sel.id)); tombstone(sel.id); }
+    else { setParcels((a) => a.filter((p) => p.id !== sel.id)); tombstone(sel.id); }
     setSel(null);
   };
   // Arrow-nudge the selection (1′, or 10′ with Shift) — group when multi-selected.
@@ -2134,6 +2174,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    if (touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (B555)
     capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
     altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
@@ -2801,6 +2842,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   const onMove = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
     lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
@@ -3079,6 +3121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { x0, y0, x1, y1 };
   };
   const onUp = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
     const d = drag.current;
     if (d && d.mode === "marquee") {
       const mx0 = Math.min(d.a.x, marquee?.b.x ?? d.a.x), mx1 = Math.max(d.a.x, marquee?.b.x ?? d.a.x);
@@ -3164,7 +3207,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const b = els.find((x) => x.id === d.id);
       if (b && b.type === "building" && !b.dogEar) {
         const strandedIds = strandedZoneIds(els, b);
-        if (strandedIds.length) setEls((a) => a.filter((x) => !strandedIds.includes(x.id)));
+        if (strandedIds.length) { setEls((a) => a.filter((x) => !strandedIds.includes(x.id))); tombstone(strandedIds); } // B556 — tombstone the pruned apron so it stays gone + doesn't trip the thin-clobber guard
       }
     }
     drag.current = null;
@@ -4824,6 +4867,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setAddrBusy(true); setIdentifyRes({ busy: true, geo: true });
     try {
       const hit = await geocodeAddress(q, { lat: origin.lat, lng: origin.lon });
+      if (hit && hit.error) { setIdentifyRes({ error: hit.error }); return; } // B540: service unreachable ≠ not found
       if (!hit) { setIdentifyRes({ error: `Couldn't find "${q}" — try a fuller street address.` }); return; }
       const [fp] = lngLatRingToFeet([[hit.lon, hit.lat]], origin.lon, origin.lat);
       setAddrQuery("");
@@ -4907,7 +4951,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
-  const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
+  const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
   // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
   // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
@@ -4963,6 +5007,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
+    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
+    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
+    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
+    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
+    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    persistDrawings(v.parcelDrawings || []);
+    // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
+    // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
+    if (siteId) noteLocalContent(siteId, v);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
@@ -5202,7 +5256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         aEl.download = `${fileName}.pdf`;
         aEl.click();
         mark("downloaded");
-        setTimeout(() => URL.revokeObjectURL(aEl.href), 8000);
+        URL.revokeObjectURL(aEl.href); // B544: revoke now (matches the PNG path L5112) — the 8s timer leaked a blob URL per export on rapid re-export / navigation
       } finally { URL.revokeObjectURL(url); }
     } catch (_) {
       // A CORS-tainted canvas (the aerial basemap) is the usual culprit; surfaced, not silent (B50).
@@ -6356,48 +6410,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
     return out;
   })();
-  // One representative per site (location), current site first, for the Site ▾ menu.
-  const siteReps = (() => {
-    const seen = new Set(), out = [];
-    (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
-    return out.sort((a, b) => (planGroup(a) === groupId ? -1 : planGroup(b) === groupId ? 1 : 0));
-  })();
-
   // ── AppHeader slot content ───────────────────────────────────────────────────
-  const plannerCenterContent = (
-    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      {/* The "‹ Map" back button was removed (B205): the Row-1 breadcrumb's "Map" crumb
-          (homeLabel="Map" → onBackToMap) now does the same job, so this was a second "Map". */}
-      <div ref={siteAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(12.5, PAL.chromeInk, 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
-        <AnchoredMenu open={siteMenu} onClose={() => setSiteMenu(false)} anchorRef={siteAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
-          <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
-          {siteReps.map((s) => {
-            const cur = planGroup(s) === groupId;
-            return (
-              <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
-                <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
-                  {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                </span>
-              </button>
-            );
-          })}
-          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
-          </div>
-        </AnchoredMenu>
-      </div>
-      <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
-      <div ref={planAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
+  // The project name now lives in exactly ONE place — the Row-1 breadcrumb
+  // (Map / 🔒 <Site> ▾). The old standalone center "Site ▾ › Plan ▾" group duplicated
+  // that project name, so the Site switcher was removed; only this PLAN switcher
+  // remains, handed to the breadcrumb as a trailing crumb (planSlot) so the header reads
+  // Map / 🔒 <Site> ▾ / <Plan> ▾ — project, then its plan right beside it.
+  const plannerPlanCrumb = (
+    <div ref={planAnchor} style={{ position: "relative", flex: "none" }}>
+      {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
+          segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
+      <button
+        className="dbtn"
+        style={{
+          display: "flex", alignItems: "center", gap: 5, flex: "none",
+          height: 24, padding: "0 8px", borderRadius: 6, border: "none",
+          background: "transparent", cursor: "pointer", fontFamily: "inherit",
+          fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
+          maxWidth: 200, whiteSpace: "nowrap",
+        }}
+        onClick={() => setPlanMenu((o) => !o)}
+        title="Switch or rename plan"
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+      </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
@@ -6442,8 +6478,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
         </AnchoredMenu>
-      </div>
-    </span>
+    </div>
   );
 
   // The Row-1 save indicator is now the shared, app-wide CloudSyncBadge (NEW-1) — a
@@ -6513,6 +6548,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
     if (target) handleOpenSite(target.id);
   };
+  // The breadcrumb is now the ONLY project control (the center "Site ▾" was removed), so its
+  // rename has to do everything the old inline Site-name editor did. For the CURRENT project
+  // route through commitSiteLabel so the Row-1 header label updates live; any other project
+  // renames its site group directly. Both ultimately call renameSiteGroup. (header consolidation)
+  const renameProjectFromHeader = (id, name) => {
+    if (id === groupId) commitSiteLabel(name);
+    else onRenameSite?.(id, name);
+  };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
     const cloudActive = isCloudActive();
@@ -6540,12 +6583,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}
+        onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={cloudConflict ? undefined : retryCloudSave}
         saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
-        centerContent={plannerCenterContent}
+        centerContent={null}
+        planSlot={plannerPlanCrumb}
         authControl={authControl}
         accountActive={accountActive}
         toolbarContent={plannerToolbar}
@@ -6649,13 +6694,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
-            // Capture phase runs BOTH the vertex-edit handlers (mouse/single-touch) and the two-finger
-            // pinch (B331) — merged into one prop each so neither silently overwrites the other. The pinch
-            // wins once it engages (touch + 2 fingers set pinchRef); otherwise vertex editing runs as before.
-            onPointerDownCapture={(e) => { onPinchDown(e); if (!pinchRef.current) onCanvasVtxDownCapture(e); }}
+            // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a
+            // 2-finger gesture is live (touchCountRef ≥ 2) the pointer-driven vertex edit / pan / draw
+            // handlers all bail, so the pinch owns the gesture and nothing fights it.
+            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={onTouchEndPinch}
+            onPointerDownCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
-            onPointerMoveCapture={(e) => { onPinchMove(e); if (!pinchRef.current) onCanvasVtxMoveCapture(e); }}
-            onPointerUpCapture={onPinchUp} onPointerCancelCapture={onPinchUp}
+            onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
@@ -7755,7 +7800,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-              {/* B563 — a front door to the existing metes-and-bounds plotter from the
+              {/* B565 — a front door to the existing metes-and-bounds plotter from the
                   Boundary group (complements the row-1 "Deed / Title…" launcher, B543).
                   Reuses the same modal/parser — no second copy. */}
               <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / paste a legal description to plot a boundary from its bearings & distances"
@@ -8276,85 +8321,39 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(swThick(selEl))} min={1} onCommit={(n) => setSidewalkWidth(selEl, n)} /></Field>
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
-                  ) : (
-                    <>
-                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
-                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
-                    </>
-                  )}
-                  {!isDockZone(selEl) && (
-                  <Field label="Rotation (°)">
-                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
-                      onCommit={(deg) => rotateSelTo(deg)}
-                      onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
-                  </Field>
-                  )}
-                  {selEl.type === "building" && (
-                    <Field label="Docks">
-                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
-                        <option value="single">Single-load</option>
-                        <option value="cross">Cross-dock</option>
-                        <option value="none">No docks</option>
-                      </select>
-                    </Field>
-                  )}
-                  {/* B198 — clear height + slab, auto-assigned by sf with an optional override
-                      (also editable in the print Options flyout, B199; printed in the table, B197). */}
-                  {isBuilding(selEl) && (() => {
-                    const sf = buildingSqft(selEl);
-                    const p = effectiveBuildingProps(selEl, sf, buildingRules);
-                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
-                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
-                    return (
-                      <>
-                        <Field label="Clear height (ft)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={p.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
-                            {p.clearHeight.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-                        <Field label="Slab (in)">
-                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={p.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
-                            {p.slab.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-                      </>
-                    );
-                  })()}
-                  {selEl.type === "building" && !selEl.dogEar && (() => {
-                    // B229 — Dock features panel: add-controls on TOP (dock-zone stack +/−,
-                    // car parking, and the visually-distinct bump-outs footprint modifier),
-                    // then the active dock-face zones listed in outward order with inline depths
-                    // + the LIFO "−". The footprint/dock-doors summary stays at the bottom (below).
+                  ) : isBuilding(selEl) ? (() => {
+                    // B548 + B549 — grouped building inspector. Four concept groups (Footprint ·
+                    // Loading · Structure · Placement); headers build hierarchy by weight + size +
+                    // uppercase tracking, never by fading (house rule). Footprint dimensions are
+                    // dock-relative (B548): Length runs ALONG the dock wall (dock doors array on it),
+                    // Depth PERPENDICULAR to it (dock face → rear; dock-wall → dock-wall for cross-dock),
+                    // via footprintAxes/footprintLength/footprintDepth — never a hardcoded X/Y axis, so
+                    // they stay correct when docks move walls. resizeSelEl drives the mapped physical edge.
                     const b = selEl;
+                    const ax = footprintAxes(b);
+                    const sf = buildingSqft(b);
+                    const props = effectiveBuildingProps(b, sf, buildingRules);
                     const { dockSides } = dockSidesOf(b);
                     const noDock = dockSides.length === 0;
-                    const level = dockStackLevel(b);          // shallowest dock side
-                    const hasBumps = els.some((x) => x.attachedTo === b.id && x.dogEar);
+                    const level = dockStackLevel(b);
+                    const bumpN = els.filter((x) => x.attachedTo === b.id && x.dogEar).length;
+                    const carN = carEndsSides(b).filter((s) => empSideSidewalk(b, s) || empSidePark(b, s)).length;
+                    const grpHdr = (t) => <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.ink, margin: "15px 0 8px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>{t}</div>;
+                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
+                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
                     const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
                     const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
-                    // Uniform square +/− buttons so every control row lines up (B242 — the owner asked
-                    // for "+ and − next to each other" at a consistent size).
-                    const sq = (on, danger) => ({ width: 30, height: 28, padding: 0, display: "grid", placeItems: "center", fontSize: 16, lineHeight: 1, fontWeight: 700, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
-                    // One control row: label (+ sub) on the left, "＋" and (optionally) "−" on the right.
-                    const ctlRow = (label, sub, { onAdd, addOn, addTitle, onRem = null, remOn = false, remTitle = "" }) => (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, color: PAL.ink }}>{label}</div>
-                          {sub && <div style={{ fontSize: 10, color: PAL.muted, lineHeight: 1.3 }}>{sub}</div>}
-                        </div>
-                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={sq(addOn, false)}>＋</button>
-                        {onRem !== null && <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={sq(remOn, true)}>－</button>}
+                    // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
+                    // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
+                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
+                    const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
+                        <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={stepBtn(remOn, true)}>－</button>
+                        <span style={{ minWidth: 14, textAlign: "center", fontSize: 12, fontFamily: "ui-monospace, monospace", color: count ? PAL.ink : PAL.muted }}>{count}</span>
+                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
                       </div>
                     );
-                    // B495 — "Add layer ▾": the fast ＋ keeps the preset; this picks a specific outward
-                    // layer (road / landscape buffer / sidewalk / parking) and applies it to every side
-                    // in the group. Auto-hides when the group offers nothing (e.g. no court stack yet).
                     const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
                     const layerChooserRow = (label, groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
@@ -8365,7 +8364,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</div>
                             <button title="Pick a specific outward layer to add" onClick={() => setLayerMenu(open ? null : groupKey)}
-                              style={{ ...sq(true, false), width: "auto", padding: "0 8px", fontSize: 11.5, fontWeight: 600 }}>Add layer ▾</button>
+                              style={{ ...layerChip, fontWeight: 600 }}>Add layer ▾</button>
                           </div>
                           {open && (
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
@@ -8380,26 +8379,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       );
                     };
                     return (
-                      <div style={{ marginTop: 4 }}>
-                        <div style={muteHdr}>Dock features</div>
-                        {ctlRow("Dock zones", "court → trailer parking → buffer", {
+                      <>
+                        {grpHdr("Footprint")}
+                        <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
+                        <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
+
+                        {grpHdr("Loading")}
+                        <Field label="Docks">
+                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={b.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
+                            <option value="single">Single-load</option>
+                            <option value="cross">Cross-dock</option>
+                            <option value="none">No docks</option>
+                          </select>
+                        </Field>
+                        {featRow("Dock zones", level, {
                           onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
-                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone",
+                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone — truck court → trailer parking → buffer",
                           onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
                         })}
-                        {ctlRow("Car parking", "sidewalk + rows, non-dock sides", {
+                        {featRow("Car parking", carN, {
                           onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0,
-                          addTitle: "Build out the non-dock sides: sidewalk, then parking rows (one more each click)",
+                          addTitle: "Build out the non-dock sides — sidewalk, then parking rows (one more each click)",
                           onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
                         })}
-                        {ctlRow("Bump-outs", `footprint modifier · ${DOGEAR_W}′×${DOGEAR_D}′ corners`, {
-                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: "Add dock-corner bump-outs",
-                          onRem: hasBumps ? () => removeAllDogEars(b) : null, remOn: hasBumps, remTitle: "Remove all bump-outs",
+                        {featRow("Bump-outs", bumpN, {
+                          onAdd: () => addDogEars(b), addOn: !noDock, addTitle: `Add dock-corner bump-outs · ${DOGEAR_W}′×${DOGEAR_D}′ corners`,
+                          onRem: () => removeAllDogEars(b), remOn: bumpN > 0, remTitle: "Remove all bump-outs",
                         })}
                         {layerChooserRow("Behind the dock stack", "dock", dockSides)}
                         {layerChooserRow("Rear / non-dock sides", "nondock", carEndsSides(b))}
                         {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
-                        {/* active dock-face zones, outward order, inline editable depth */}
                         {level > 0 && (
                           <div style={{ marginTop: 9 }}>
                             <div style={muteHdr}>Zone depths · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
@@ -8412,9 +8421,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             ))}
                           </div>
                         )}
-                      </div>
+
+                        {grpHdr("Structure")}
+                        <Field label="Clear height (ft)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                            {props.clearHeight.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+                        <Field label="Slab (in)">
+                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                            {props.slab.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : <span style={autoTag}>auto</span>}
+                          </span>
+                        </Field>
+
+                        {grpHdr("Placement")}
+                        <Field label="Rotation (°)">
+                          <RotationStepper value={b.rot || 0} disabled={!!b.locked} disabledReason="Unlock this element to rotate it"
+                            onCommit={(deg) => rotateSelTo(deg)}
+                            onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
+                        </Field>
+                      </>
                     );
-                  })()}
+                  })() : (
+                    <>
+                      <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(selEl.w)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ w: n })} /></Field>
+                      <Field label={selEl.type === "pond" ? "Length (ft)" : "Depth (ft)"}><NumInput style={numInput} value={Math.round(selEl.h)} min={1} max={MAX_DIM} onCommit={(n) => resizeSelEl({ h: n })} /></Field>
+                    </>
+                  )}
+                  {!isDockZone(selEl) && !isBuilding(selEl) && (
+                  <Field label="Rotation (°)">
+                    <RotationStepper value={selEl.rot || 0} disabled={!!selEl.locked} disabledReason="Unlock this element to rotate it"
+                      onCommit={(deg) => rotateSelTo(deg)}
+                      onStep={(d) => rotateSelTo(normalizeDeg((selEl.rot || 0) + d))} />
+                  </Field>
+                  )}
+                  {/* Dog-ear bump-outs (type "building" but `dogEar`) keep their standalone Docks
+                      control here; a REAL building's Docks lives in the grouped inspector above. */}
+                  {selEl.type === "building" && selEl.dogEar && (
+                    <Field label="Docks">
+                      <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={selEl.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
+                        <option value="single">Single-load</option>
+                        <option value="cross">Cross-dock</option>
+                        <option value="none">No docks</option>
+                      </select>
+                    </Field>
+                  )}
+                  {/* B549 — Clear height/Slab (now under Structure) and the dock-features build-out
+                      (now under Loading) render inside the grouped building inspector above; only the
+                      dog-ear path keeps its standalone Docks control. */}
                   {selEl.type === "parking" && (() => {
                     const pc = cfgOf(selEl);
                     return (
@@ -8495,7 +8555,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       const dock = selEl.dock || "single";
-                      const per = Math.floor(Math.max(selEl.w, selEl.h) / 12);
+                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B548)
                       const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
                       return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
                     })()}

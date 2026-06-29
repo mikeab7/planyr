@@ -3129,7 +3129,18 @@ function App() {
           // Blank durations ("") become 0 on load — new tasks now start at 0d,
           // and this sweeps any legacy empty values so the grid never shows a
           // bare "d" again. Runs automatically, same as ID renumbering.
-          const tasks = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+          const tasks0 = (Array.isArray(proj.tasks) ? proj.tasks : []).filter(t => t && typeof t === "object").map(t => (t.duration === "" || t.duration == null) ? {...t, duration: 0} : t);
+          // B550: break any parentId cycle on load so NO downstream tree-walk (indent/outdent/delete/
+          // insert/sort) can infinite-loop and hang the tab. Walk each task's ancestor chain; if it
+          // loops back on itself (corrupt data / a past bug), orphan that task (parentId → null). On
+          // clean data no chain loops, so this is a no-op. (The UI prevents creating a cycle live; this
+          // guards the persisted-data path — see also the sortByVisualOrder guard.)
+          const byId = {}; tasks0.forEach(t => { byId[t.id] = t; });
+          const tasks = tasks0.map(t => {
+            const seen = new Set([t.id]); let p = t.parentId;
+            while (p != null && byId[p]) { if (seen.has(p)) return {...t, parentId: null}; seen.add(p); p = byId[p].parentId; }
+            return t;
+          });
           projects[pid] = {...proj, tasks: renumberTasks(sortByVisualOrder(tasks))};
         });
         // Resync the next-task-id counters: renumbering compacts ids to 1..n,
@@ -4468,7 +4479,14 @@ function App() {
         // (group_id). No link yet → leave state untouched; the shell shows the resolution panel.
         setData(d => {
           const match = Object.values(d.projects || {}).find(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
-          return match ? { ...d, section: "projects", aPid: match.id } : d;
+          if (!match) return d;
+          // No-op if that schedule is ALREADY active in the projects section — return the same
+          // state object so React doesn't re-run the auto-save effect. The shell re-posts this on
+          // every switch; without the guard a burst of identical carry-ins fired a burst of saves
+          // that tripped the optimistic-save guard against this tab's own write (the false "newer
+          // version saved on another device" banner, B560).
+          if (d.aPid === match.id && (d.section ?? "projects") === "projects") return d;
+          return { ...d, section: "projects", aPid: match.id };
         });
       } else if (m.type === "planar:nav-link" && m.id != null) {
         // Set (m.siteId present) or clear (m.siteId null) the link on an existing schedule.
