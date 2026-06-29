@@ -435,12 +435,14 @@ export default function ProjectBreadcrumb({
       {menuFor && createPortal(
         <>
           <div
+            role="presentation"
             onClick={() => setMenuFor(null)}
             onContextMenu={(e) => { e.preventDefault(); setMenuFor(null); }}
             style={{ position: "fixed", inset: 0, zIndex: 5000 }}
           />
           <div
             data-testid="project-manage-menu"
+            role="menu" aria-label="Project actions" /* B557 */
             style={{
               ...panel, position: "fixed", zIndex: 5001, minWidth: 180, padding: 5,
               left: Math.min(menuFor.x, window.innerWidth - 196),
@@ -452,6 +454,7 @@ export default function ProjectBreadcrumb({
                 {canRename && (
                   <button
                     data-testid="project-rename"
+                    role="menuitem"
                     onClick={() => startRename(menuFor)}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -463,6 +466,7 @@ export default function ProjectBreadcrumb({
                 {canDelete && (
                   <button
                     data-testid="project-delete"
+                    role="menuitem"
                     onClick={() => setMenuFor((m) => ({ ...m, confirm: true }))}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover-ghost)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
