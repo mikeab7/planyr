@@ -197,6 +197,14 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect((src.match(/role="menuitem"/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
+  it("B559: timestamp comparisons coerce via toMs (newer-wins merge + legacy-prune are type-safe)", () => {
+    const sm = read("../src/workspaces/site-planner/lib/siteModel.js");
+    expect(sm).toMatch(/export const toMs = /);
+    expect(sm).toMatch(/toMs\(A\.updatedAt\) >= toMs\(B\.updatedAt\)/);
+    const st = read("../src/workspaces/site-planner/lib/storage.js");
+    expect(st).toMatch(/toMs\(cloudMap\[id\]\.updatedAt\) >= toMs\(legacy\[id\] && legacy\[id\]\.updatedAt\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
