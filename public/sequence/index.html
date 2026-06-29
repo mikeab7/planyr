@@ -1142,6 +1142,9 @@ const colLabel = c => COL_LABELS[c.k] || c.l || c.k;
 // would make the blue selection outline vanish). `visIdxs` = master indices of the visible
 // columns, display order. Mirrors stepVisibleColByIdx in
 // src/workspaces/scheduler/lib/gridColNav.js (unit-tested) — keep the two in sync.
+// NOTE: every caller passes dir = +1 or -1; the off-table snap below collapses dir<=0 into
+// the backward walk. The module's distinct dir===0 closest-by-distance case is NOT needed
+// here — that "selected column got hidden" snap is handled by the GridView effect instead.
 function stepVisibleColIdx(visIdxs, curIdx, dir) {
   if (!visIdxs || !visIdxs.length) return curIdx;
   const pos = visIdxs.indexOf(curIdx);
