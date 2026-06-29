@@ -4479,7 +4479,14 @@ function App() {
         // (group_id). No link yet → leave state untouched; the shell shows the resolution panel.
         setData(d => {
           const match = Object.values(d.projects || {}).find(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId);
-          return match ? { ...d, section: "projects", aPid: match.id } : d;
+          if (!match) return d;
+          // No-op if that schedule is ALREADY active in the projects section — return the same
+          // state object so React doesn't re-run the auto-save effect. The shell re-posts this on
+          // every switch; without the guard a burst of identical carry-ins fired a burst of saves
+          // that tripped the optimistic-save guard against this tab's own write (the false "newer
+          // version saved on another device" banner, B560).
+          if (d.aPid === match.id && (d.section ?? "projects") === "projects") return d;
+          return { ...d, section: "projects", aPid: match.id };
         });
       } else if (m.type === "planar:nav-link" && m.id != null) {
         // Set (m.siteId present) or clear (m.siteId null) the link on an existing schedule.
