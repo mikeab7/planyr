@@ -8,72 +8,230 @@
  * Handles the common Texas forms:
  *   "THENCE N 45°30'00" E, 150.00 feet"   "S 12-15 W 1234.5 ft"
  *   "N 0° E 100'"   "S 89°59'59" W, 250.00 varas"
+ *   plus whole spelled-out survey descriptions ("North 87°04'16" East, … for a
+ *   total distance of 1773.49 feet;"), curve courses, and SAVE-AND-EXCEPT tracts.
  * Quadrant (NE/SE/SW/NW) bearings only — the dominant convention in TX deeds.
  * Distances in feet (default) or Texas varas (1 vara = 33⅓ in = 2.77778 ft).
  */
 
 export const VARA_FT = 100 / 36; // Texas vara = 33 1/3 inches = 2.77778 ft
 
-// One call: quadrant1, degrees, [minutes], [seconds], quadrant2, then a distance
-// value + unit somewhere just after it (skip filler like "a distance of").
-const CALL_RE = new RegExp(
-  "([NS])\\s*([0-9]{1,3})\\s*(?:[°ºo*:d-]|deg(?:rees)?|\\s)?\\s*" + // quadrant + degrees (incl. dash-DMS "12-15")
-  "([0-9]{1,2})?\\s*(?:['’′:m-]|min(?:utes)?)?\\s*" +             // minutes
-  "([0-9]{1,2}(?:\\.[0-9]+)?)?\\s*(?:[\"”″s]|sec(?:onds)?)?\\s*" + // seconds
-  "([EW])" +                                                      // quadrant2
-  "[^0-9NSEW]{0,18}?" +                                           // filler (", a distance of")
-  "([0-9]{1,3}(?:,[0-9]{3})*(?:\\.[0-9]+)?)\\s*" +                // distance value
-  "(feet|foot|ft\\.?|'|varas?|vrs?\\.?|vr\\.?)",                  // unit
-  "gi"
-);
+const fmtDist = (ft) => `${ft.toFixed(2).replace(/\.00$/, "")}′`;
 
-/* Parse a legal description into structured calls.
- * Returns [{ bearing:"N45°30'00\"E", deg, az, distFt, raw }]. `az` is azimuth in
- * degrees clockwise from north; `distFt` is the distance converted to feet. */
-// Curve-call indicators near a match → the matched bearing/distance is the CHORD of
-// an arc, not a straight leg. We keep the chord but flag it `curve:true` (B25).
-const CURVE_RE = /(curv|radius|\barc\b|\bdelta\b|radial|chord\s+bears?|central\s+angle)/i;
+/* ── Real-deed metes-and-bounds parser ───────────────────────────────────────
+ * Built to read a whole surveyed legal description (Word/PDF/pasted), not just a
+ * tidy "N 45 E, 150 ft" string. It copes with how Texas surveys are actually
+ * written:
+ *   • spelled-out bearings ("North 87°04'16" East") as well as "N 87°04'16" E";
+ *   • a governing leg distance that sits a PARAGRAPH away from its bearing
+ *     ("…for a total distance of 1773.49 feet") with intervening "passing at X"
+ *     waypoints and "(0.14 feet left)" offset notes that are NOT the leg length;
+ *   • curve courses given as a chord ("a long chord bearing N69°56'26" W, 17.15
+ *     feet") with radius / central angle / arc length;
+ *   • multiple tracts — a main boundary plus "SAVE AND EXCEPT" exception tracts,
+ *     each possibly located by a "COMMENCING" tie traverse.
+ * Misclosure-tolerant by design: it returns whatever it can read; the caller
+ * decides closure and shows the gap honestly. */
 
-export function parseCalls(text) {
-  if (!text) return [];
+// A quadrant bearing: N/North … E/East, with optional DMS (dash-DMS "12-15" too).
+const BEARING_SRC =
+  "(N(?:orth)?|S(?:outh)?)\\s*([0-9]{1,3})\\s*(?:[°ºo*:d-]|deg(?:rees)?|\\s)?\\s*" + // quadrant + degrees
+  "([0-9]{1,2})?\\s*(?:['’′:m-]|min(?:utes)?)?\\s*" +                                // minutes
+  "([0-9]{1,2}(?:\\.[0-9]+)?)?\\s*(?:[\"”″s]|sec(?:onds)?)?\\s*" +                    // seconds
+  "(E(?:ast)?|W(?:est)?)";                                                           // quadrant2
+const BEARING_RE = new RegExp(BEARING_SRC, "gi");
+// A distance value + unit. The trailing (?![0-9]) stops a bearing's minute tick
+// ("13'45") from being misread as "13 feet".
+const DIST_SRC = "([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(feet|foot|ft\\.?|'|varas?|vrs?\\.?|vr\\.?)(?![0-9])";
+
+// Quadrant bearing → azimuth (deg clockwise from north). null if degrees > 90
+// (a quadrant bearing can't exceed 90° — a bogus "N 145 E" is rejected, B26).
+function bearingToAz(q1, dd, mm, ss, q2) {
+  if ((mm && +mm >= 60) || (ss && +ss >= 60)) return null; // malformed DMS (minutes/seconds must be < 60)
+  const deg = (+dd) + (mm ? +mm / 60 : 0) + (ss ? +ss / 3600 : 0);
+  if (deg > 90) return null;
+  const A = q1[0].toUpperCase(), B = q2[0].toUpperCase();
+  let az;
+  if (A === "N" && B === "E") az = deg;
+  else if (A === "S" && B === "E") az = 180 - deg;
+  else if (A === "S" && B === "W") az = 180 + deg;
+  else az = 360 - deg; // N..W
+  return { deg, az, A, B };
+}
+
+const distVal = (numStr, unit) => {
+  const v = parseFloat(String(numStr).replace(/,/g, "")) * (unit[0].toLowerCase() === "v" ? VARA_FT : 1);
+  return isFinite(v) && v > 0 ? v : null;
+};
+
+function mkCall({ A, B, dd, mm, ss, deg, az, distFt, curve, curveMeta, raw }) {
+  const mins = mm ? `${mm}'` : "", secs = ss ? `${ss}"` : "";
+  return {
+    bearing: `${A}${dd}°${mins}${secs}${B}`,
+    deg, az, distFt, curve: !!curve, curveMeta: curveMeta || null,
+    label: `${A} ${dd}°${mm ? ` ${mm}'` : ""}${ss ? ` ${ss}"` : ""} ${B}  ${fmtDist(distFt)}`,
+    raw: String(raw || "").trim().replace(/\s+/g, " ").slice(0, 140),
+  };
+}
+
+// The governing leg length within a course's text AFTER its bearing: prefer a
+// distance introduced by "…distance of X" or one that ends the leg ("X feet to a
+// corner"); skip "passing at X" waypoints, "(… feet …)" offset notes (already
+// stripped), and monument tie calls ("…bears … , X feet").
+function governingDist(after) {
+  const D = new RegExp(DIST_SRC, "gi");
+  let m, leg = null, fallback = null;
+  while ((m = D.exec(after))) {
+    const v = distVal(m[1], m[2]);
+    if (v == null) continue;
+    const pre = after.slice(Math.max(0, m.index - 26), m.index).toLowerCase();
+    const post = after.slice(m.index + m[0].length, m.index + m[0].length + 8).toLowerCase();
+    const passing = /passing/.test(pre);
+    const tie = /\bbears?\b/.test(pre);
+    const legEnd = /^[\s,;]*to\b/.test(post);
+    const distOf = /distance\s+of\s*$/.test(pre.replace(/\s+/g, " "));
+    // last leg-end / "distance of" wins — but a "passing at X" waypoint or a
+    // monument tie ("…bears …, X feet to a found rod") can also be followed by
+    // "to", so the leg-end rule must exclude those too (not just the fallback).
+    if ((legEnd && !passing && !tie) || distOf) leg = v;
+    if (!passing && !tie) fallback = v;   // else the last plain distance
+  }
+  return leg != null ? leg : fallback;
+}
+
+const num = (s) => { const v = parseFloat(String(s).replace(/,/g, "")); return isFinite(v) ? v : null; };
+function numAfter(text, re) {
+  const i = text.search(re);
+  if (i < 0) return null;
+  const m = text.slice(i).match(/([0-9][0-9,]*(?:\.[0-9]+)?)/);
+  return m ? num(m[1]) : null;
+}
+function dmsAfter(text, re) {
+  const i = text.search(re);
+  if (i < 0) return null;
+  const m = text.slice(i, i + 70).match(/([0-9]{1,3})\s*[°ºo*:d]\s*([0-9]{1,2})?\s*['’′:m]?\s*([0-9]{1,2}(?:\.[0-9]+)?)?/);
+  if (!m) return null;
+  return (+m[1]) + (m[2] ? +m[2] / 60 : 0) + (m[3] ? +m[3] / 3600 : 0);
+}
+
+// A straight course: first bearing + its governing distance.
+function parseStraightCourse(clean) {
+  BEARING_RE.lastIndex = 0;
+  const b = BEARING_RE.exec(clean);
+  if (!b) return null;
+  const ba = bearingToAz(b[1], b[2], b[3], b[4], b[5]);
+  if (!ba) return null;
+  const distFt = governingDist(clean.slice(b.index + b[0].length));
+  if (distFt == null) return null;
+  return mkCall({ A: ba.A, B: ba.B, dd: b[2], mm: b[3], ss: b[4], deg: ba.deg, az: ba.az, distFt, curve: false, raw: clean });
+}
+
+// A curve course: use the long-chord bearing + chord distance as the straight
+// approximation, and keep radius / central angle / arc length / turn alongside.
+// Allow a few filler words between "chord" and the bearing — "long chord bearing
+// N…", "chord which bears N…", "chord of said curve bears N…", "chord bearing of N…".
+const CHORD_RE = new RegExp("chord\\s+(?:\\w+\\s+){0,3}?(?:bearing|bears?|of)?\\s*" + BEARING_SRC + "\\s*[, ]\\s*" + DIST_SRC, "i");
+const curveMetaOf = (clean) => ({
+  radiusFt: numAfter(clean, /radius\s+of\s+/i),
+  arcFt: numAfter(clean, /arc\s+(?:length|distance)\s+of\s+/i),
+  centralAngleDeg: dmsAfter(clean, /(?:central\s+angle|delta)\s*(?:of\s+)?/i),
+  turn: /curve\s+to\s+the\s+right/i.test(clean) ? "R" : /curve\s+to\s+the\s+left/i.test(clean) ? "L" : "",
+});
+function parseCurveCourse(clean) {
+  const meta = curveMetaOf(clean);
+  const c = CHORD_RE.exec(clean);
+  if (c) {
+    const ba = bearingToAz(c[1], c[2], c[3], c[4], c[5]);
+    const distFt = distVal(c[6], c[7]);
+    if (ba && distFt != null) {
+      return mkCall({ A: ba.A, B: ba.B, dd: c[2], mm: c[3], ss: c[4], deg: ba.deg, az: ba.az, distFt, curve: true, curveMeta: meta, raw: clean });
+    }
+  }
+  // No readable chord clause — fall back to the first bearing + governing distance,
+  // but still FLAG it a curve (and keep the arc meta) so the UI warns to verify.
+  const s = parseStraightCourse(clean);
+  if (s) { s.curve = true; s.curveMeta = meta; }
+  return s;
+}
+
+const isCurveCourse = (clean) => /\bradius\s+of\s+[0-9]/i.test(clean) || /\balong\s+the\s+arc\b/i.test(clean);
+
+function parseCourse(seg) {
+  const clean = seg.replace(/\([^()]*\)/g, " "); // drop offset notes / volume refs
+  return isCurveCourse(clean) ? parseCurveCourse(clean) : parseStraightCourse(clean);
+}
+
+const normalize = (text) => String(text).replace(/^﻿/, "").replace(/[   ]/g, " ");
+
+// Split a tract's text into courses. Each THENCE leg and each sub-course in a
+// "the following N courses and distances:" list is its own segment — surveys put
+// them on their own line/sentence, so splitting on THENCE + line breaks isolates
+// each course (a blob with no line breaks still splits on THENCE).
+function coursesOf(text) {
   const out = [];
-  const src = String(text).replace(/ /g, " ");
-  let m;
-  CALL_RE.lastIndex = 0;
-  while ((m = CALL_RE.exec(src))) {
-    const [, q1, dd, mm, ss, q2, distRaw, unitRaw] = m;
-    const deg = (+dd) + (mm ? +mm / 60 : 0) + (ss ? +ss / 3600 : 0);
-    if (deg > 90) continue; // a quadrant bearing can't exceed 90° — skip a bogus call ("N 145 E") rather than plot a wrong direction (B26)
-    const Q1 = q1.toUpperCase(), Q2 = q2.toUpperCase();
-    // quadrant bearing → azimuth (clockwise from north)
-    let az;
-    if (Q1 === "N" && Q2 === "E") az = deg;
-    else if (Q1 === "S" && Q2 === "E") az = 180 - deg;
-    else if (Q1 === "S" && Q2 === "W") az = 180 + deg;
-    else az = 360 - deg; // N..W
-    const unit = unitRaw.toLowerCase();
-    const isVara = unit.startsWith("v");
-    const distFt = parseFloat(distRaw.replace(/,/g, "")) * (isVara ? VARA_FT : 1);
-    if (!isFinite(distFt) || distFt <= 0) continue;
-    // Is this the chord of a curve? Look only within the current clause (since the
-    // last ";" / "." / "THENCE") so a previous curve doesn't taint a later straight leg (B25).
-    const before = src.slice(0, m.index), lc = before.toLowerCase();
-    const clauseStart = Math.max(before.lastIndexOf(";"), before.lastIndexOf("."), lc.lastIndexOf("thence"));
-    const ctx = src.slice(clauseStart >= 0 ? clauseStart : Math.max(0, m.index - 120), m.index);
-    const curve = CURVE_RE.test(ctx);
-    const mins = mm ? `${mm}'` : "";
-    const secs = ss ? `${ss}"` : "";
-    out.push({
-      bearing: `${Q1}${dd}°${mins}${secs}${Q2}`,
-      deg, az, distFt, isVara, curve,
-      label: `${Q1} ${dd}°${mm ? ` ${mm}'` : ""}${ss ? ` ${ss}"` : ""} ${Q2}  ${fmtDist(distFt)}`,
-      raw: m[0].trim(),
-    });
+  for (const seg of text.split(/\bTHENCE\b|[\r\n]+/i)) {
+    if (!seg || seg.length < 4) continue;
+    const c = parseCourse(seg);
+    if (c) out.push(c);
   }
   return out;
 }
 
-const fmtDist = (ft) => `${ft.toFixed(2).replace(/\.00$/, "")}′`;
+/* Parse a legal description into its tracts. The first tract is the main
+ * `boundary`; each "SAVE AND EXCEPT" tract is an `except` (a hole). An exception
+ * located by a "COMMENCING" tie keeps that tie's courses separately (so the
+ * caller can place the hole relative to the main POB). Returns
+ *   [{ role:"boundary"|"except", label, calls:[…], tie:[…] }]. */
+export function parseTracts(text) {
+  if (!text) return [];
+  const norm = normalize(text);
+  // Cut at a REAL "SAVE AND EXCEPT" tract header only — an uppercase phrase at a
+  // line start that is actually followed by a new tract (a COMMENCING/BEGINNING
+  // course within the next breath). This rejects both lower-case prose
+  // ("…save and except a 12.584 acre tract…") and an upper-case phrase used in
+  // prose with no tract after it (which would otherwise steal the boundary's
+  // remaining legs into a phantom exception).
+  const HDR = /(?:\r?\n)[ \t]*SAVE\s+(?:AND|&)\s+EXCEPT\b/g;
+  const cand = [];
+  let hm;
+  while ((hm = HDR.exec(norm))) cand.push(hm.index);
+  // A candidate is a REAL exception header iff its segment (to the next candidate
+  // or the end) actually starts a new traverse — a "COMMENCING" or "BEGINNING at"
+  // — not merely the phrase used in prose ("…BEGINNING," / "POINT OF BEGINNING"
+  // closings don't count), which would otherwise steal the boundary's own legs.
+  const cuts = [0];
+  for (let k = 0; k < cand.length; k++) {
+    const segEnd = k + 1 < cand.length ? cand[k + 1] : norm.length;
+    if (/\bCOMMENCING\b|\bBEGINNING\s+at\b/i.test(norm.slice(cand[k], segEnd))) cuts.push(cand[k]);
+  }
+  cuts.push(norm.length);
+  const tracts = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const piece = norm.slice(cuts[i], cuts[i + 1]);
+    let body = piece, tie = [];
+    if (/\bCOMMENCING\b/i.test(piece)) {
+      const pobIdx = piece.search(/POINT\s+OF\s+BEGINNING/i);
+      if (pobIdx >= 0) { tie = coursesOf(piece.slice(0, pobIdx)); body = piece.slice(pobIdx); }
+    }
+    const calls = coursesOf(body);
+    if (!calls.length) continue;
+    // Label from a real heading ("Tract 1 – 94.91 Acres") or the stated acreage —
+    // never a stray "tract 6 & 7" from body prose.
+    const hdr = piece.match(/(?:^|\n)[ \t]*(Tract\s+\d[^\n]*?(?:[–-]|Acre)[^\n]{0,30})/i);
+    const acre = piece.match(/([0-9]+(?:\.[0-9]+)?)\s*acre/i);
+    const label = (hdr ? hdr[1].trim() : null) || (acre ? `${acre[1]} acres` : (i === 0 ? "Boundary" : `Exception ${i}`));
+    tracts.push({ role: i === 0 ? "boundary" : "except", label, calls, tie });
+  }
+  return tracts;
+}
+
+/* Back-compatible: the flat call list for the MAIN boundary tract. Existing
+ * callers (single-tract paste, the preview, the simple plot) keep working; a
+ * multi-tract deed plots its main boundary by default. */
+export function parseCalls(text) {
+  const tracts = parseTracts(text);
+  return tracts.length ? tracts[0].calls : [];
+}
 
 /* Dead-reckon the calls from a POB into a path of feet points (planner frame:
  * +y is south, so north subtracts y). Returns [{x,y}, ...] incl. the POB. */
@@ -95,7 +253,7 @@ export function pathCloses(pts, tol) {
   if (pts.length < 4) return false;
   let perim = 0;
   for (let i = 1; i < pts.length; i++) perim += dist2(pts[i - 1], pts[i]);
-  const t = tol ?? Math.max(5, perim * 0.02); // honest closure: drop the 25-ft absolute floor that let a small lot "close" with 25 ft of misclosure (B26)
+  const t = tol ?? Math.min(Math.max(5, perim * 0.005), 50); // ≤0.5% of run, capped at 50 ft — keeps the 5-ft floor for small lots (B26) but stays honest on a big rural tract (2% of a 10k-ft perimeter was ~200 ft, masking real misclosure)
   return dist2(pts[0], pts[pts.length - 1]) <= t;
 }
 

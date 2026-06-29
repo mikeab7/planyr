@@ -20,7 +20,7 @@ function ColorControl({ value, label, onChange }) {
   const hex = (value && /^#[0-9a-fA-F]{3,8}$/.test(value)) ? value : "#000000";
   // <input type="color"> fires `input` live as you move through the palette but `change` only when
   // the dialog closes — so wire `onInput` (flagged live) for instant recolor, `onChange` as the
-  // committed value. The host coalesces the live burst into one undo frame. (B565)
+  // committed value. The host coalesces the live burst into one undo frame. (B567)
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
       <input type="color" value={hex} aria-label={label}
