@@ -5173,11 +5173,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           const nw = printStrokeWidth(parseFloat(node.style.strokeWidth), sheetScale);
           if (Number.isFinite(nw)) node.style.strokeWidth = `${Number(nw.toFixed(3))}px`;
         }
-        // Keep dashes proportional to the now-thinner strokes.
+        // Keep dashes proportional to the now-thinner strokes. Filter out any token
+        // that doesn't parse (a stray/trailing separator) so we never emit "NaN".
         const da = node.getAttribute && node.getAttribute("stroke-dasharray");
         if (da && /[\d.]/.test(da) && cur != null && cur !== "") {
           const f = parseFloat(cur) > 0 ? printStrokeWidth(parseFloat(cur), sheetScale) / parseFloat(cur) : 1;
-          if (Number.isFinite(f) && f > 0) node.setAttribute("stroke-dasharray", da.trim().split(/[\s,]+/).map((n) => Number((parseFloat(n) * f).toFixed(2))).join(" "));
+          if (Number.isFinite(f) && f > 0) {
+            const scaled = da.trim().split(/[\s,]+/).map((n) => parseFloat(n) * f).filter((v) => Number.isFinite(v)).map((v) => Number(v.toFixed(2)));
+            if (scaled.length) node.setAttribute("stroke-dasharray", scaled.join(" "));
+          }
         }
       });
     }
