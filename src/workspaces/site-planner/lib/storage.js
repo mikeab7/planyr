@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -312,6 +312,10 @@ export async function reconcileSiteFromCloud(id) {
   if (!activeUser || !id) return null;
   return fetchSiteForReconcile(activeUser, id);
 }
+// B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
+// (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
+// isn't falsely rejected as a cross-session conflict. Per-tab + cloud-independent (safe logged out).
+export { noteLocalContent };
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.
