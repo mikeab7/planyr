@@ -1062,7 +1062,13 @@ const SEED = {
 // Renumber all tasks by array position (1-based) and fix all ID references
 const renumberTasks = (tasks) => {
   const map = {};
-  tasks.forEach((t, i) => { map[t.id] = i + 1; });
+  // B568: first-occurrence wins. If corrupt/legacy data carries DUPLICATE task ids (the app once
+  // minted dupes before addTask switched to maxId+1, and normalizeIds does NOT dedup before this
+  // remap), the LAST occurrence used to overwrite the map — so a parent/predecessor reference to a
+  // duplicated id resolved to the stray copy lower in visual order instead of the original task,
+  // silently scrambling the dependency graph on load. Guard makes the remap deterministic +
+  // original-wins; no change for clean unique-id data (every other caller passes unique ids).
+  tasks.forEach((t, i) => { if (!(t.id in map)) map[t.id] = i + 1; });
   return tasks.map((t, i) => ({
     ...t,
     id: i + 1,
