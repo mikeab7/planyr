@@ -446,7 +446,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // per-maintainer colors survive AND newly fetched tiles keep them. A flat-styled
             // layer just merges the new opacity.
             lyr.setOpacity = typeof cfg.styleFn === "function"
-              ? (oo) => { try { lyr.setStyle((f) => cfg.styleFn(f && f.properties, oo)); } catch (_) {} }
+              ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
               : (oo) => { try { lyr.setStyle({ opacity: oo }); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County

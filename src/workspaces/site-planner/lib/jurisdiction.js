@@ -191,7 +191,7 @@ export const ROAD_AUTHORITY_LEGEND = [
   { label: "City", color: ROAD_AUTHORITY_COLORS["City"] },
   { label: "County", color: ROAD_AUTHORITY_COLORS["County"] },
   { label: "State (TxDOT)", color: ROAD_AUTHORITY_COLORS["State (TxDOT)"] },
-  { label: "Toll / managed lane", color: ROAD_AUTHORITY_COLORS["Toll / managed-lane authority"] },
+  { label: "Toll / managed-lane authority", color: ROAD_AUTHORITY_COLORS["Toll / managed-lane authority"] },
   { label: "Federal", color: ROAD_AUTHORITY_COLORS["Federal"] },
   { label: "Unknown", color: ROAD_AUTHORITY_COLORS["Unknown"], dash: true },
 ];
@@ -489,19 +489,23 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   });
   if (!ring) rows.sort((a, b) => (a.distMeters ?? Infinity) - (b.distMeters ?? Infinity));
   // Merge segments of the SAME road into one row. Key = the road's name when known (so
-  // a multi-segment "Greens Rd" collapses to one), else its route id, else its authority.
+  // a multi-segment "Greens Rd" collapses to one), else its route id. When a segment has
+  // NEITHER (rare — both STE_NAM/HWY/TOLL and RIA_RTE_ID absent), it keys per-segment
+  // (seg:<idx>) so two physically distinct unnamed roads sharing a maintainer stay
+  // SEPARATE rows rather than collapsing into one (which would undercount fronting roads).
   // Frontage length sums across merged segments; the highest road class (lowest F_SYSTEM)
-  // wins; name/route/authority follow the LONGEST contributing segment.
+  // wins; name/route/authority follow the LONGEST contributing segment (strict > so a
+  // later equal/zero-length segment never displaces the first — the nearest, in point mode).
   const byKey = new Map();
-  for (const row of rows) {
-    const key = (row.name && row.name.toLowerCase()) || row.route || ("auth:" + row.authority.label);
+  rows.forEach((row, idx) => {
+    const key = (row.name && row.name.toLowerCase()) || row.route || ("seg:" + idx);
     const cur = byKey.get(key);
-    if (!cur) { byKey.set(key, { ...row, _maxSeg: row.lengthM }); continue; }
+    if (!cur) { byKey.set(key, { ...row, _maxSeg: row.lengthM }); return; }
     cur.lengthM += row.lengthM;
     if (row.funcClass != null && (cur.funcClass == null || Number(row.funcClass) < Number(cur.funcClass))) cur.funcClass = row.funcClass;
-    if (row.lengthM >= (cur._maxSeg || 0)) { cur._maxSeg = row.lengthM; cur.authority = row.authority; cur.route = row.route; if (row.name) cur.name = row.name; }
+    if (row.lengthM > (cur._maxSeg || 0)) { cur._maxSeg = row.lengthM; cur.authority = row.authority; if (row.route != null) cur.route = row.route; if (row.name) cur.name = row.name; }
     if (row.distMeters != null && (cur.distMeters == null || row.distMeters < cur.distMeters)) cur.distMeters = row.distMeters;
-  }
+  });
   const roads = Array.from(byKey.values()).map((x) => { delete x._maxSeg; return x; });
   // Frontage mode: order by abutment length desc, then by road class (arterial before local).
   if (ring) roads.sort((a, b) => (b.lengthM - a.lengthM) || ((Number(a.funcClass) || 99) - (Number(b.funcClass) || 99)));

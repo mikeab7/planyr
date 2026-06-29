@@ -411,7 +411,9 @@ describe("roadAuthorityStyle (NEW-2/B5264) — per-feature color reuses roadAuth
     expect(s.opacity).toBe(0.9); // opacity carries through; hierarchy is via dash, not a faded line
   });
   it("the palette never reuses a locked status/module/brand hex", () => {
-    const locked = new Set(["#D85A30", "#378ADD", "#BA7517", "#888780", "#1D9E75", "#7F77DD", "#EF9F27"].map((h) => h.toLowerCase()));
+    // project-status (coral/blue/amber/grays) + ALL four module accents (Site/Schedule/
+    // Review/Library) + brand + the alert reds — the full locked set the road palette must avoid.
+    const locked = new Set(["#D85A30", "#378ADD", "#BA7517", "#888780", "#1D9E75", "#7F77DD", "#EF9F27", "#0E7490", "#E24B4A", "#F2706F"].map((h) => h.toLowerCase()));
     for (const hex of Object.values(ROAD_AUTHORITY_COLORS)) expect(locked.has(String(hex).toLowerCase())).toBe(false);
     expect(ROAD_AUTHORITY_LEGEND.find((l) => l.label === "Unknown").dash).toBe(true);
   });
