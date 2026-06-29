@@ -102,7 +102,7 @@ export function parseScaleNote(text) {
   return null;
 }
 
-/* --- Bluebeam-style "page distance = real distance" scale entry (B566–B570) ---------------
+/* --- Bluebeam-style "page distance = real distance" scale entry (B568–B572) ---------------
  * The page→real ratio is the single source of truth: a scale is fully described by a distance
  * measured ON THE PAGE equalling a distance in the REAL world. From that we derive feet-per-inch
  * (`realFt / pageIn`) and hand it to the existing `applyOverlayScale`/`ftPerPointForScale` path,
