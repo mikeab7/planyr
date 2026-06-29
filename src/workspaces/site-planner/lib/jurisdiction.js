@@ -62,7 +62,10 @@ export const JURISDICTION_SOURCES = {
   road: {
     id: "road", role: "road", label: "Road maintenance authority", kind: "line",
     url: GIS_SOURCES.road.serviceUrl,
-    fields: { route: "RIA_RTE_ID", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
+    // route = inventory id; name = local-street name (STE_NAM); hwy = coded on-system route
+    // (HWY, e.g. "SL0008"); toll = toll-facility name; system = HSYS; authority = maint code;
+    // funcClass = FHWA functional class (B94 per-road rows: name + class for the row + tie-break).
+    fields: { route: "RIA_RTE_ID", name: "STE_NAM", hwy: "HWY", toll: "TOLL_NM", system: "HSYS", authority: "RDWAY_MAINT_AGCY", funcClass: "F_SYSTEM" },
     tolMeters: 40,
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "TxDOT Roadway Inventory",
@@ -161,6 +164,68 @@ export function roadAuthority(maintCode, hsys) {
   if (h) return { code, label: h.label, onSystem: h.onSystem, basis: "hsys" };
   if (hsys && ON_SYSTEM_HSYS.has(hsys)) return { code, label: "State (TxDOT)", onSystem: true, basis: "hsys" };
   return { code, label: "Unknown", onSystem: null, basis: "unknown" };
+}
+
+// ---------------------------------------------------------------------------
+// Road-authority MAP overlay palette + per-feature style (NEW-2 / B5264).
+// A NEW categorical palette, deliberately NOT drawn from the locked palettes
+// (project-status coral/blue/amber/grays, module accents Site #1D9E75 /
+// Schedule #7F77DD / Review #EF9F27 / brand #D85A30) — each maintainer gets a
+// distinct hue. Unknown is a legible neutral gray, dashed (distinguished by
+// pattern, never by fading — hierarchy via weight, not opacity). The style is
+// keyed off roadAuthority() — the SAME decode the identify + the card use — so
+// the colored line can never drift from the authority the card reports.
+// ---------------------------------------------------------------------------
+export const ROAD_AUTHORITY_COLORS = {
+  "City": "#C2185B",                          // raspberry
+  "County": "#6A1B9A",                        // purple
+  "State (TxDOT)": "#00838F",                 // dark cyan
+  "Toll / managed-lane authority": "#283593", // indigo
+  "Federal": "#827717",                       // olive
+  "Unknown": "#546E7A",                       // blue-gray (drawn dashed)
+};
+
+// Legend rows for the Layers panel (shown when the overlay is on). `dash` flags the
+// neutral Unknown stroke. Pure data — LayerPanel renders the swatches.
+export const ROAD_AUTHORITY_LEGEND = [
+  { label: "City", color: ROAD_AUTHORITY_COLORS["City"] },
+  { label: "County", color: ROAD_AUTHORITY_COLORS["County"] },
+  { label: "State (TxDOT)", color: ROAD_AUTHORITY_COLORS["State (TxDOT)"] },
+  { label: "Toll / managed lane", color: ROAD_AUTHORITY_COLORS["Toll / managed-lane authority"] },
+  { label: "Federal", color: ROAD_AUTHORITY_COLORS["Federal"] },
+  { label: "Unknown", color: ROAD_AUTHORITY_COLORS["Unknown"], dash: true },
+];
+
+/* Leaflet path style for one roadway-inventory feature, colored by maintainer.
+ * `props` is the feature's attributes (RDWAY_MAINT_AGCY + HSYS). Pure — returns a
+ * plain style object; layers.js wires it onto the esri-leaflet featureLayer. */
+export function roadAuthorityStyle(props, opacity = 0.95) {
+  const a = roadAuthority(props && props.RDWAY_MAINT_AGCY, props && props.HSYS);
+  const color = ROAD_AUTHORITY_COLORS[a.label] || ROAD_AUTHORITY_COLORS.Unknown;
+  const isUnknown = a.label === "Unknown";
+  const style = { color, weight: isUnknown ? 2.5 : 3, opacity, fillOpacity: 0 };
+  if (isUnknown) style.dashArray = "5,5"; // neutral Unknown distinguished by pattern, not by fading
+  return style;
+}
+
+// Friendly road name from a roadway-inventory row's normalized fields. Local streets
+// carry STE_NAM ("ATRIUM DR" → "Atrium Dr"); on-system highways carry a coded HWY
+// ("SL0008" → "SL 8"); toll facilities may carry a TOLL_NM. Returns null when nothing
+// names it — a bare numeric RIA_RTE_ID is an internal inventory id, never shown as a
+// name (so an unnamed road merges/labels by id instead of a meaningless number). Pure.
+export function formatHighway(hwy) {
+  const s = String(hwy == null ? "" : hwy).trim().toUpperCase();
+  if (!s) return null;
+  const m = s.match(/^([A-Z]{1,3})0*(\d+)([A-Z].*)?$/);
+  if (!m) return s;
+  return `${m[1]} ${m[2]}${m[3] ? " " + m[3].trim() : ""}`;
+}
+export function roadDisplayName(n) {
+  const ste = n && n.name != null ? String(n.name).trim().replace(/\s+/g, " ") : "";
+  if (ste) return titleCase(ste);
+  if (n && n.hwy) { const h = formatHighway(n.hwy); if (h) return h; }
+  if (n && n.toll) { const t = String(n.toll).trim(); if (t) return titleCase(t); }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +365,23 @@ export function polylineDistMeters(geometry, lng, lat) {
   return best;
 }
 
+/* Total length (metres) of an ArcGIS polyline's paths, via the same local
+ * equirectangular projection about a reference latitude. Used to order fronting
+ * roads by abutment (longest first). Pure; 0 for missing geometry. */
+export function polylineLengthMeters(geometry, lat = 0) {
+  const paths = geometry && geometry.paths;
+  if (!paths || !paths.length) return 0;
+  const mx = M_PER_DEG_LAT * Math.cos((lat * Math.PI) / 180);
+  let total = 0;
+  for (const path of paths) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const [ax, ay] = path[i], [bx, by] = path[i + 1];
+      total += Math.hypot((bx - ax) * mx, (by - ay) * M_PER_DEG_LAT);
+    }
+  }
+  return total;
+}
+
 const uniq = (a) => Array.from(new Set(a));
 // Honest, taxonomy-based error text (B366) — a transient 503 reads "temporarily
 // unavailable," never the misleading blanket "network or CORS."
@@ -379,9 +461,14 @@ export async function countyAtPoint(lng, lat, opts = {}) {
 //   • click (lng,lat)      → the NEAREST segment within tolerance.
 //   • parcel frontage (ring)→ EVERY distinct road fronting the parcel (a lot can
 //     front a state highway + a county road + a city street, each a different
-//     permitting desk), deduped by route.
-// Returns { roads[], nearest|null, authorities[] (distinct labels), ... } — or an
-// honest empty/unknown when nothing mapped is within tolerance (never a guess).
+//     permitting desk).
+// A site usually fronts SEVERAL roads, and each can have a different maintainer, so
+// the result is a per-road list: multiple inventory segments of the SAME road merge
+// into one row (no "Greens Rd" listed three times), ordered by frontage length
+// (longest abutment first), tie-broken by road class (arterial before local). Each
+// row carries name + route + authority + class. Returns { roads[], nearest|null,
+// authorities[] (distinct labels), ... } — or an honest empty/unknown when nothing
+// mapped is within tolerance (never a guess; the honest-unknown rule applies per road).
 // ---------------------------------------------------------------------------
 export async function identifyRoadAuthority(lng, lat, opts = {}) {
   const src = JURISDICTION_SOURCES.road;
@@ -389,26 +476,42 @@ export async function identifyRoadAuthority(lng, lat, opts = {}) {
   opts.onStatus && opts.onStatus("road", "loading");
   const q = identifySource(src, ring ? { ring } : { lng, lat }, opts);
   const r = await q.fresh;
-  // Normalize each segment → its authority. Point mode orders by distance to the
-  // click (nearest wins); frontage mode keeps the server's parcel+tolerance set.
+  // Normalize each segment → its name + authority + frontage length. Point mode also
+  // measures distance to the click (nearest wins); frontage mode measures abutment length.
   const rows = r.items.map((it) => {
     const n = normalizeFeature(src, it.attrs);
     return {
-      route: n.route, system: n.system, funcClass: n.funcClass,
+      route: n.route, name: roadDisplayName(n), system: n.system, funcClass: n.funcClass,
       authority: roadAuthority(n.authority, n.system),
       distMeters: ring ? null : Math.round(polylineDistMeters(it.geometry, lng, lat)),
+      lengthM: polylineLengthMeters(it.geometry, lat),
     };
   });
   if (!ring) rows.sort((a, b) => (a.distMeters ?? Infinity) - (b.distMeters ?? Infinity));
-  const seen = new Set(), roads = [];
-  for (const row of rows) { const k = row.route ?? JSON.stringify(row.authority); if (!seen.has(k)) { seen.add(k); roads.push(row); } }
+  // Merge segments of the SAME road into one row. Key = the road's name when known (so
+  // a multi-segment "Greens Rd" collapses to one), else its route id, else its authority.
+  // Frontage length sums across merged segments; the highest road class (lowest F_SYSTEM)
+  // wins; name/route/authority follow the LONGEST contributing segment.
+  const byKey = new Map();
+  for (const row of rows) {
+    const key = (row.name && row.name.toLowerCase()) || row.route || ("auth:" + row.authority.label);
+    const cur = byKey.get(key);
+    if (!cur) { byKey.set(key, { ...row, _maxSeg: row.lengthM }); continue; }
+    cur.lengthM += row.lengthM;
+    if (row.funcClass != null && (cur.funcClass == null || Number(row.funcClass) < Number(cur.funcClass))) cur.funcClass = row.funcClass;
+    if (row.lengthM >= (cur._maxSeg || 0)) { cur._maxSeg = row.lengthM; cur.authority = row.authority; cur.route = row.route; if (row.name) cur.name = row.name; }
+    if (row.distMeters != null && (cur.distMeters == null || row.distMeters < cur.distMeters)) cur.distMeters = row.distMeters;
+  }
+  const roads = Array.from(byKey.values()).map((x) => { delete x._maxSeg; return x; });
+  // Frontage mode: order by abutment length desc, then by road class (arterial before local).
+  if (ring) roads.sort((a, b) => (b.lengthM - a.lengthM) || ((Number(a.funcClass) || 99) - (Number(b.funcClass) || 99)));
   const nearest = !ring && roads.length ? roads[0] : null;
   const authorities = uniq(roads.map((x) => x.authority.label));
   const state = roads.length ? "loaded" : r.error ? "failed" : "empty";
   opts.onStatus && opts.onStatus("road", state, r.error ? humanize(r.error) : null, { ts: r.ts, stale: q.stale });
   return {
-    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts,
+    roads, nearest, authorities, ageMs: r.ageMs, ts: r.ts, tolMeters: src.tolMeters,
     error: r.error ? humanize(r.error) : null,
-    note: roads.length ? src.note : r.error ? humanize(r.error) : `No mapped road within ${src.tolMeters} m — maintenance authority unknown.`,
+    note: roads.length ? src.note : r.error ? humanize(r.error) : `No roads matched within ${src.tolMeters} m — screening only.`,
   };
 }

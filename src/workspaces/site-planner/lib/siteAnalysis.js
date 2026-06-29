@@ -485,12 +485,46 @@ export function buildJurisdictionFinding(j) {
   };
 }
 
+// FHWA functional class (F_SYSTEM) → a plain label for the per-road detail line.
+const ROAD_FUNC_CLASS = { 1: "Interstate", 2: "Freeway/expressway", 3: "Principal arterial", 4: "Minor arterial", 5: "Major collector", 6: "Minor collector", 7: "Local" };
+const funcClassLabel = (c) => ROAD_FUNC_CLASS[Number(c)] || null;
+
+// A fronting road's display name: its real name, else its (internal) route id, else
+// "Unnamed road" — never a blank cell.
+const roadRowName = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed road");
+
+/* Road authority finding (B94, per-road). A site usually fronts several roads, each
+ * possibly maintained by a different desk (City / County / State-TxDOT / toll / private /
+ * unknown), so this is a PER-ROAD list, not one collapsed value:
+ *   • a header roll-up — "Maintained by <X> (all roads)" when every road shares one
+ *     authority, else "Mixed — N roads";
+ *   • one row per fronting road — "<road name> → <authority>" (route + class in the
+ *     expandable detail; a bare numeric inventory id isn't shown as the row's value).
+ * Rows arrive already ordered longest-frontage-first from identifyRoadAuthority. Any
+ * road that can't be classified shows an explicit "Unknown" (never a guess). With no
+ * roads matched it reads the honest zero-match note, not a blank. Carries `mapLayer` so
+ * the card gets a "◍ Map" toggle (B190) → the color-coded road overlay (NEW-2/B5264). */
 export function buildRoadFinding(road) {
+  const roads = Array.isArray(road.roads) ? road.roads : [];
+  const haveRoads = roads.length > 0;
+  const authorities = uniq(roads.map((r) => (r.authority && r.authority.label) || "Unknown"));
+  const rollup = !haveRoads ? null
+    : authorities.length === 1 ? `${authorities[0]} (all roads)` : `Mixed — ${roads.length} roads`;
+  const rows = haveRoads
+    ? [["Maintained by", rollup, road.ageMs ?? null],
+       ...roads.map((r) => [roadRowName(r), (r.authority && r.authority.label) || "Unknown", null])]
+    : null;
+  const detail = haveRoads
+    ? roads.map((r) => [roadRowName(r), "— " + ((r.authority && r.authority.label) || "Unknown"),
+        funcClassLabel(r.funcClass) ? `· ${funcClassLabel(r.funcClass)}` : "",
+        r.route ? `· route ${r.route}` : ""].filter(Boolean).join(" "))
+    : [];
   return {
     id: "road", category: "Road authority", label: "Who maintains the fronting road(s)",
-    status: road.authorities && road.authorities.length ? "info" : "unknown",
-    summary: null, detail: [],
-    rows: [["Maintained by", road.authorities && road.authorities.length ? road.authorities.join(" · ") + (road.nearest?.route ? ` (${road.nearest.route})` : "") : "unknown", road.ageMs]],
+    status: haveRoads ? "info" : "unknown",
+    summary: haveRoads ? null : (road.error || road.note || "No roads matched — screening only."),
+    detail, rows,
+    mapLayer: "jur_road_authority", // NEW-2/B5264: lifts the B190 suppression — the card gets a "◍ Map" toggle
     sourceName: "TxDOT Roadway Inventory", ageMs: road.ageMs ?? null, ts: road.ts ?? null,
     error: road.error || null, caveat: road.note || "Local-road coverage is patchy — an honest \"unknown\" beats a wrong guess.", verified: true,
   };

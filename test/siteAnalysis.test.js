@@ -365,9 +365,33 @@ describe("derived jurisdiction findings", () => {
     expect(f.summary).toMatch(/Katy/);
     expect(f.summary).toMatch(/zoning likely/i);
   });
-  it("buildRoadFinding: unknown when no authority", () => {
-    expect(buildRoadFinding({ authorities: [] }).status).toBe("unknown");
-    expect(buildRoadFinding({ authorities: ["County"], nearest: { route: "CR 123" } }).rows[0][1]).toMatch(/County.*CR 123/);
+  it("buildRoadFinding: unknown + honest note when no roads matched", () => {
+    expect(buildRoadFinding({ roads: [] }).status).toBe("unknown");
+    expect(buildRoadFinding({ roads: [], note: "No roads matched within 40 m — screening only." }).summary).toMatch(/no roads matched/i);
+    expect(buildRoadFinding({ roads: [] }).rows).toBeNull();
+  });
+  it("buildRoadFinding: per-road rows, mixed roll-up, map toggle (B94 + B5264)", () => {
+    const f = buildRoadFinding({ ageMs: 500, roads: [
+      { name: "IH 45", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 },
+      { name: "Greens Rd", route: "g1", authority: { label: "City" }, funcClass: 4 },
+    ] });
+    expect(f.status).toBe("info");
+    expect(f.mapLayer).toBe("jur_road_authority"); // lifts B190 suppression → the card gets a "◍ Map" toggle
+    expect(f.rows[0]).toEqual(["Maintained by", "Mixed — 2 roads", 500]);
+    expect(f.rows[1][0]).toBe("IH 45");
+    expect(f.rows[1][1]).toBe("State (TxDOT)");
+    expect(f.detail[0]).toMatch(/IH 45.*State \(TxDOT\).*Interstate.*route h1/);
+  });
+  it("buildRoadFinding: one authority across every road rolls up to 'all roads'", () => {
+    const f = buildRoadFinding({ roads: [
+      { name: "IH 45", authority: { label: "State (TxDOT)" } },
+      { name: "Frontage Rd", authority: { label: "State (TxDOT)" } },
+    ] });
+    expect(f.rows[0][1]).toBe("State (TxDOT) (all roads)");
+  });
+  it("buildRoadFinding: an unclassified road shows explicit Unknown, never a guess", () => {
+    const f = buildRoadFinding({ roads: [{ name: "Mystery Ln", authority: { label: "Unknown" } }] });
+    expect(f.rows[1]).toEqual(["Mystery Ln", "Unknown", null]);
   });
 });
 
@@ -389,13 +413,15 @@ describe("runSiteAnalysis — orchestration", () => {
       county: ["Harris"], city: ["Houston"], etj: [], unincorporated: false, straddle: false,
       ages: { county: 1000 }, sources: [],
     });
-    const identifyRoadAuthority = async () => ({ authorities: ["State (TxDOT)"], nearest: { route: "IH 10" }, ageMs: 500, note: "ok" });
+    const identifyRoadAuthority = async () => ({ roads: [{ name: "IH 10", route: "h1", authority: { label: "State (TxDOT)" }, funcClass: 1 }], authorities: ["State (TxDOT)"], ageMs: 500, note: "ok" });
     const { findings } = await runSiteAnalysis([SQUARE], { cache, fetchJson, identifyJurisdiction, identifyRoadAuthority });
     const ids = findings.map((f) => f.id);
     expect(ids).toEqual(["flood", "wetlands", "pipelines", "oilgas", "contamination", "jurisdiction", "road", "zoning"]);
     expect(findings.find((f) => f.id === "flood").status).toBe("present");
     expect(findings.find((f) => f.id === "zoning").summary).toMatch(/NO zoning/i);
-    expect(findings.find((f) => f.id === "road").rows[0][1]).toMatch(/TxDOT.*IH 10/);
+    const road = findings.find((f) => f.id === "road");
+    expect(road.rows[0][1]).toMatch(/TxDOT.*all roads/); // single-authority roll-up
+    expect(road.rows[1]).toEqual(["IH 10", "State (TxDOT)", null]); // per-road row
   });
   it("survives a jurisdiction-engine throw (keeps arcgis findings, no zoning crash)", async () => {
     const cache = freshCache();

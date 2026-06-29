@@ -120,6 +120,19 @@ export default function LayerPanel({ overlays, setOverlays, county, layerStatus 
             {ls.msg || meta.label}
           </div>
         )}
+        {/* NEW-2/B5264: categorical legend for a per-feature-colored overlay (road
+            authority) — shown only while the layer is on, so the colors on the map are
+            named. Unknown is drawn dashed (a neutral, never a faded line). */}
+        {st.on && cfg.legend && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 10px", margin: "4px 0 1px 22px" }}>
+            {cfg.legend.map((lg) => (
+              <span key={lg.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: INK }}>
+                <span style={{ width: 16, height: 0, flex: "none", borderTop: `3px ${lg.dash ? "dashed" : "solid"} ${lg.color}` }} />
+                {lg.label}
+              </span>
+            ))}
+          </div>
+        )}
         {st.on && cfg.note && (
           <div style={{ fontSize: 10.5, color: MUTED, lineHeight: 1.4, marginTop: 2 }}>{cfg.note}</div>
         )}
