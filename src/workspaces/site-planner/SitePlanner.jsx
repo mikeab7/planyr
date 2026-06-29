@@ -296,6 +296,9 @@ const measMode = (m) => m.mode || "line";
 // move-only — they carry derived geometry that hand-editing would desync.
 const MK_VERTEX_KINDS = ["line", "polyline", "polygon"];
 const MK_BOX_KINDS = ["rect", "ellipse"];
+// Width (screen px) of the transparent fat hit-stroke under open-path markups (line/polyline),
+// so they grab within ~6px on either side at any zoom — matching a polyline's forgiving feel (B155).
+const MK_HIT_PX = 12;
 const mkPts = (m) => (m.kind === "line" ? [m.a, m.b] : (m.pts || []));
 const setMkPts = (m, pts) => (m.kind === "line" ? { ...m, a: pts[0], b: pts[1] } : { ...m, pts });
 const mkMinPts = (m) => (m.kind === "polygon" ? 3 : 2);
@@ -2450,7 +2453,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   // Resolved style for a callout (defaults + per-callout overrides).
-  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 8, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
+  // padX default is more generous than padY (B566): equal 8/8 padding read as cramped on the
+  // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
+  const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
   const beginEditCallout = (id) => { const c = callouts.find((x) => x.id === id); if (!c) return; setSel({ kind: "callout", id }); setEditCallout({ id, text: c.text || "" }); }; // no history on open — pushed on commit only if the text changed (B32)
   const commitEditCallout = () => {
@@ -6397,6 +6402,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const curStyle = selEl ? elStyle(selEl, settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
+
+  /* ---- live color picking (B567) ----
+   * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
+   * `input` continuously as you click/drag through swatches. Wiring `onInput` makes the selected
+   * object recolor the INSTANT you click a color, instead of waiting for the dialog to close.
+   * To keep one-step undo, push exactly ONE history frame per picking session — lazily on the first
+   * change, reset on focus — so the live mutators below must NOT push their own (they'd flood undo
+   * with a frame per swatch). `livePick(apply)` spreads onto the <input>; `apply` is a no-history
+   * mutator. pickSnapRef survives re-renders (only one color input can be active at a time). */
+  const pickSnapRef = useRef(false);
+  const livePick = (apply) => ({
+    onFocus: () => { pickSnapRef.current = false; },
+    onInput:  (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+    onChange: (e) => { if (!pickSnapRef.current) { pushHistory(); pickSnapRef.current = true; } apply(e.target.value); },
+  });
+  const liveMarkup    = (patch) => { setMarkups((a) => a.map((m) => (selMarkup && m.id === selMarkup.id ? { ...m, ...patch } : m))); setMkStyle((s) => ({ ...s, ...patch })); };
+  const liveCallout   = (patch) => { if (selCallout) setCallout(selCallout.id, patch); };
+  const liveTypeStyle = (type, patch) => setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } }));
   // Make the selected element's current colors the default for its type.
   const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
   // Drop the selected element's per-element overrides (back to the type default).
@@ -6911,8 +6934,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {markups.map((m) => {
                 const isSel = sel?.kind === "markup" && sel.id === m.id;
                 const sw = (m.weight ?? 2), da = dashArray(m.dash, sw);
-                const stroke = isSel ? PAL.accent : m.stroke;
-                const common = { stroke, strokeWidth: sw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
+                const stroke = isSel ? PAL.accent : m.stroke; // semantic markups (encumbrance) keep the accent selection tint
+                // Neutral markups (line/polyline/polygon/rect/ellipse) render their REAL stroke color
+                // even when selected (WYSIWYG) so a live color-picker change is visible immediately
+                // instead of being hidden under the accent tint; selection is cued by the grips plus a
+                // faint width bump. (B567 — matches the shared MarkupRenderer's deliberate choice.)
+                const nStroke = m.stroke;
+                const nsw = sw + (isSel ? 1 : 0);
+                const common = { stroke: nStroke, strokeWidth: nsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
                 // Closed shapes (rect/ellipse/polygon) get an always-on pointer target so the WHOLE
                 // body selects + drags, not just the painted border. pointerEvents:"all" makes the
                 // interior a hit target even when the shape is UNFILLED (fill:"none" is otherwise dead
@@ -6989,8 +7018,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </g>
                   );
                 }
-                if (m.kind === "line") { const a = f2p(m.a), b = f2p(m.b); return <line key={m.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...common} />; }
-                if (m.kind === "polyline") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polyline key={m.id} points={s} {...common} />; }
+                // Open paths (line/polyline) carry a transparent FAT hit-stroke (~6px each side at
+                // any zoom — f2p already projects feet→screen px) so they grab as forgivingly as a
+                // closed shape's interior, instead of forcing a pixel-perfect landing on the 2px
+                // visible line. Without this a Line was far harder to select than a Polyline. The
+                // visible stroke is pointer-inert; the fat companion carries the select/drag handler.
+                // Reuses the B420 technique; closes the open-path tranche of B155.
+                if (m.kind === "line") {
+                  const a = f2p(m.a), b = f2p(m.b);
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" pointerEvents="stroke" />
+                      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} fill="none" pointerEvents="none" />
+                    </g>
+                  );
+                }
+                if (m.kind === "polyline") {
+                  const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  return (
+                    <g key={m.id} style={common.style} onPointerDown={common.onPointerDown}>
+                      <polyline points={s} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={MK_HIT_PX} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" />
+                      <polyline points={s} fill="none" stroke={nStroke} strokeWidth={nsw} strokeDasharray={da} pointerEvents="none" />
+                    </g>
+                  );
+                }
                 if (m.kind === "polygon") { const s = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" "); return <polygon key={m.id} points={s} {...common} {...fillProps} />; }
                 const c = f2p({ x: m.cx, y: m.cy }), w = m.w * view.ppf, h = m.h * view.ppf;
                 if (m.kind === "ellipse") return <ellipse key={m.id} cx={c.x} cy={c.y} rx={w / 2} ry={h / 2} transform={`rotate(${m.rot || 0} ${c.x} ${c.y})`} {...common} {...fillProps} />;
@@ -8197,7 +8248,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               <div data-testid="property-panel">
               <Section title={`Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`}>
-                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} onChange={(e) => setSelMarkup({ stroke: e.target.value })} style={swatch} /></Field>
+                <Field label="Line color"><input type="color" value={toHex6(selMarkup.stroke)} {...livePick((v) => liveMarkup({ stroke: v }))} style={swatch} /></Field>
                 <Field label="Line weight"><NumInput style={numInput} value={selMarkup.weight ?? 2} min={0.5} onCommit={(n) => setSelMarkup({ weight: n })} /></Field>
                 <Field label="Dash">
                   <select style={{ ...numInput, width: 100, fontFamily: "inherit" }} value={selMarkup.dash || "solid"} onChange={(e) => setSelMarkup({ dash: e.target.value })}>
@@ -8205,7 +8256,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </select>
                 </Field>
                 {closed && <>
-                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} onChange={(e) => setSelMarkup({ fill: e.target.value })} style={swatch} /></Field>
+                  <Field label="Fill color"><input type="color" value={toHex6(selMarkup.fill)} {...livePick((v) => liveMarkup({ fill: v }))} style={swatch} /></Field>
                   <Field label="Fill opacity"><input type="range" min={0} max={1} step={0.05} value={selMarkup.fillOpacity ?? 0} onChange={(e) => setSelMarkup({ fillOpacity: +e.target.value })} /></Field>
                 </>}
                 {MK_BOX_KINDS.includes(selMarkup.kind) && <>
@@ -8244,9 +8295,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {/* row 1: size · text color · fill */}
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
                   <NumInput style={{ ...numInput, width: 52 }} value={cs.size} min={6} max={96} onCommit={(n) => setSelCallout({ size: n })} />
-                  <input type="color" title="Text" value={toHex6(cs.color)} onChange={(e) => setSelCallout({ color: e.target.value })} style={swatch} />
-                  <input type="color" title="Fill" value={toHex6(cs.fill)} onChange={(e) => setSelCallout({ fill: e.target.value })} style={swatch} />
-                  <input type="color" title="Line" value={toHex6(cs.stroke)} onChange={(e) => setSelCallout({ stroke: e.target.value })} style={swatch} />
+                  <input type="color" title="Text" value={toHex6(cs.color)} {...livePick((v) => liveCallout({ color: v }))} style={swatch} />
+                  <input type="color" title="Fill" value={toHex6(cs.fill)} {...livePick((v) => liveCallout({ fill: v }))} style={swatch} />
+                  <input type="color" title="Line" value={toHex6(cs.stroke)} {...livePick((v) => liveCallout({ stroke: v }))} style={swatch} />
                 </div>
                 {/* row 2: B / I / U · align L C R */}
                 <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
@@ -8572,6 +8623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
+                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B567: no-history sibling for live color picking
                 // --- Expand this pond (B139): baseline + steppers; both steppers and free
                 // drag feed the one Existing→Proposed readout. Baseline freezes the original
                 // footprint + depth/slope so the delta is apples-to-apples. ---
@@ -8715,13 +8767,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Existing basin</span>
                               <input type="color" value={toHex6(det.existFill ?? curStyle?.fill ?? "#5B97A5")}
-                                onChange={(e) => setDet({ existFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ existFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: 11.5, color: PAL.muted }}>Added area</span>
                               <input type="color" value={toHex6(det.addFill ?? POND_ADD_FILL_DEFAULT)}
-                                onChange={(e) => setDet({ addFill: e.target.value })}
+                                {...livePick((v) => setDetLive({ addFill: v }))}
                                 style={{ width: 30, height: 22, padding: 0, border: `1px solid #ddd6c5`, borderRadius: 5, cursor: "pointer" }} />
                             </div>
                           </div>
@@ -8743,12 +8795,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <Section title="Properties">
               <Field label="Fill color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.fill)} onChange={(e) => { pushHistory(); setSelEl({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.fill)} {...livePick((v) => setSelEl({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Line color">
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="color" value={toHex6(curStyle.stroke)} onChange={(e) => { pushHistory(); setSelEl({ stroke: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" value={toHex6(curStyle.stroke)} {...livePick((v) => setSelEl({ stroke: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </span>
               </Field>
               <Field label="Fill opacity">
@@ -9077,7 +9129,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </Field>
                   <Field label="Fill color">
                     <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input type="color" value={toHex6(selParcel.fill)} onChange={(e) => { pushHistory(); setSelParcel({ fill: e.target.value }); }} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                      <input type="color" value={toHex6(selParcel.fill)} {...livePick((v) => setSelParcel({ fill: v }))} style={{ width: 34, height: 26, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                     </span>
                   </Field>
                 </>
@@ -9197,8 +9249,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               return (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                   <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{TYPE[k].label.split(" / ")[0]}</span>
-                  <input type="color" title="Fill" value={toHex6(st.fill)} onChange={(e) => setTypeStyle(k, { fill: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
-                  <input type="color" title="Line" value={toHex6(st.stroke)} onChange={(e) => setTypeStyle(k, { stroke: e.target.value })} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Fill" value={toHex6(st.fill)} {...livePick((v) => liveTypeStyle(k, { fill: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
+                  <input type="color" title="Line" value={toHex6(st.stroke)} {...livePick((v) => liveTypeStyle(k, { stroke: v }))} style={{ width: 30, height: 24, padding: 0, border: `1px solid var(--border-default)`, borderRadius: 6, background: "var(--surface-raised)", cursor: "pointer" }} />
                 </div>
               );
             })}
