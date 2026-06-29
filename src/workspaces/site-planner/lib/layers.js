@@ -46,7 +46,7 @@ function reportCacheAge(lyr, k, onStatus) {
     const metaUrl = u + (u.indexOf("?") === -1 ? "?" : "&") + "meta=1";
     fetch(metaUrl)
       .then((r) => (r && r.ok ? r.json() : null))
-      .then((m) => { if (m && m.cached && typeof m.ts === "number" && lyr && lyr._map) onStatus && onStatus(k, "loaded", null, { ts: m.ts, stale: !!m.stale }); }) // B556: lyr._map guard — don't report age on a since-removed layer
+      .then((m) => { if (m && m.cached && typeof m.ts === "number" && lyr && lyr._map) onStatus && onStatus(k, "loaded", null, { ts: m.ts, stale: !!m.stale }); }) // B557: lyr._map guard — don't report age on a since-removed layer
       .catch(() => {});
   } catch (_) { /* age is optional */ }
 }
@@ -349,7 +349,7 @@ export async function probeService(url) {
  * up; a successful 'load' resets the counter. */
 export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   let tries = 0, timer = null;
-  // B556: clear a pending retry timer when the layer is removed (toggled off), so a backoff
+  // B557: clear a pending retry timer when the layer is removed (toggled off), so a backoff
   // setTimeout can't fire refresh() on a detached layer. Wrap onRemove (Leaflet calls it on
   // map.removeLayer) and chain the original. Matches the evidenceLayers.js onRemove cleanup pattern.
   const origOnRemove = lyr.onRemove;

@@ -174,24 +174,24 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).not.toMatch(/for \(const \[id, rec\] of Object\.entries\(legacy\)\)/); // the old over-counting loop is gone
   });
 
-  it("B556: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
+  it("B557: account email renders are null-guarded (no 'undefined' in the pill/profile)", () => {
     expect(read("../src/app/Shell.jsx")).toMatch(/Signed in as \$\{user\?\.email \|\| "\(no email\)"\}/);
     expect(read("../src/workspaces/site-planner/components/AuthPanel.jsx")).toMatch(/\{user\?\.email \|\| "\(no email\)"\}/);
   });
 
-  it("B556: layers.js clears the feature-retry timer on removal + guards the cache-age fetch", () => {
+  it("B557: layers.js clears the feature-retry timer on removal + guards the cache-age fetch", () => {
     const src = read("../src/workspaces/site-planner/lib/layers.js");
     expect(src).toMatch(/lyr\.onRemove = function \(map\) \{ clearTimeout\(timer\)/); // retry timer cleanup
     expect(src).toMatch(/typeof m\.ts === "number" && lyr && lyr\._map/);             // stale-callback guard
   });
 
-  it("B556: LayerPanel group + reveal toggles announce aria-expanded", () => {
+  it("B557: LayerPanel group + reveal toggles announce aria-expanded", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
     expect(src).toMatch(/aria-expanded=\{!collapsed\[g\]\}/);
     expect(src).toMatch(/aria-expanded=\{!!revealHidden\[groupKey\]\}/);
   });
 
-  it("B556: ProjectBreadcrumb manage menu has role=menu + menuitem", () => {
+  it("B557: ProjectBreadcrumb manage menu has role=menu + menuitem", () => {
     const src = read("../src/shared/ui/ProjectBreadcrumb.jsx");
     expect(src).toMatch(/role="menu" aria-label="Project actions"/);
     expect((src.match(/role="menuitem"/g) || []).length).toBeGreaterThanOrEqual(2);

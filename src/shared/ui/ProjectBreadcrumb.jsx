@@ -442,7 +442,7 @@ export default function ProjectBreadcrumb({
           />
           <div
             data-testid="project-manage-menu"
-            role="menu" aria-label="Project actions" /* B556 */
+            role="menu" aria-label="Project actions" /* B557 */
             style={{
               ...panel, position: "fixed", zIndex: 5001, minWidth: 180, padding: 5,
               left: Math.min(menuFor.x, window.innerWidth - 196),
