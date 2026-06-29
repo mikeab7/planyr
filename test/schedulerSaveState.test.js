@@ -1,4 +1,4 @@
-/* B562 — the Schedule workspace replaces its floppy-disk "Save" button with the shared,
+/* B565 — the Schedule workspace replaces its floppy-disk "Save" button with the shared,
  * app-wide cloud sync badge (same component + Row-1 top-right slot as the Site Planner).
  * scheduleSaveState() maps the embedded Gantt app's reported toolbar.saveStatus onto the
  * badge's normalized vocabulary. The crash-severity invariant we lock here: a failed cloud

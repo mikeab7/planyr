@@ -1,4 +1,4 @@
-/* B562 — map the embedded scheduler's reported toolbar save-state into the shared
+/* B565 — map the embedded scheduler's reported toolbar save-state into the shared
  * CloudSyncBadge's normalized vocabulary, so the Schedule workspace shows the SAME
  * top-right cloud sync indicator as the Site Planner (instead of a separate floppy-disk
  * "Save" button). Pure + unit-locked (test/schedulerSaveState.test.js): the crash-severity

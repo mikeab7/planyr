@@ -205,6 +205,21 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(st).toMatch(/toMs\(cloudMap\[id\]\.updatedAt\) >= toMs\(legacy\[id\] && legacy\[id\]\.updatedAt\)/);
   });
 
+  it("B562: importLegacyIntoCloud compares timestamps via toMs (third sibling of B559)", () => {
+    const st = read("../src/workspaces/site-planner/lib/storage.js");
+    // the legacy-import skip guard must coerce both sides so an ISO-string updatedAt can't NaN the compare
+    expect(st).toMatch(/toMs\(existing\.updatedAt\) >= toMs\(local\.updatedAt\)/);
+    // and the raw, type-unsafe form must be gone from that path
+    expect(st).not.toMatch(/\(existing\.updatedAt \|\| 0\) >= \(local\.updatedAt \|\| 0\)/);
+  });
+
+  it("B563: version restore re-applies parcelDrawings (its own persistence path) so it isn't a mixed-version restore", () => {
+    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the restore sequence must durably restore the version's parcelDrawings (via persistDrawings,
+    // which both sets state AND saves — a bare setParcelDrawings would not persist)
+    expect(sp).toMatch(/persistDrawings\(v\.parcelDrawings \|\| \[\]\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
