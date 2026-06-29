@@ -44,7 +44,8 @@ import { apprRows, apprAll, apprVal, findAttr } from "./lib/appraisal.js";
 import { makeParcelLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, toHex6, byZ } from "./lib/planStyle.js";
-import { parseCalls, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { parseTracts, callsToPath, pathCloses, misclosure, bufferPolyline, ringsOverlap } from "./lib/metesAndBounds.js";
+import { readDeedFile } from "../../shared/files/docxText.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip } from "./lib/easements.js";
 import { edgeRuns, runSetbackValue } from "./lib/edgeRuns.js";
 import { readTitlePDF, fileToBase64, getKey, setKey } from "./lib/titleReader.js";
@@ -790,7 +791,7 @@ const EyeOffIcon = () => (
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
   </svg>
 );
-// Lock / Unlock / Remove icons — inline SVG (B564) so the overlay header buttons share the eye
+// Lock / Unlock / Remove icons — inline SVG (B566) so the overlay header buttons share the eye
 // icon's exact metrics instead of mixing emoji (🔒/✕) whose glyph boxes never matched.
 const LockIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -807,7 +808,7 @@ const XIcon = () => (
     <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
   </svg>
 );
-// Compact number formatting for the scale picker (B564–B568). trimNum: a field value without
+// Compact number formatting for the scale picker (B566–B570). trimNum: a field value without
 // trailing-zero noise (0.125 → "0.125", 1 → "1"). fmtScaleNum: the "1″=X′" readout (integer when
 // near-integer, else one decimal — so an architectural 3/4″=1′ shows 1.3, not a misleading 1).
 const trimNum = (n) => String(Math.round(n * 1000) / 1000);
@@ -966,7 +967,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
-  // Transient editor state for the ONE expanded overlay row (B565 opacity field draft + B566 scale
+  // Transient editor state for the ONE expanded overlay row (B567 opacity field draft + B568 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
   const [ovEdit, setOvEdit] = useState(null);           // { id, opacityText?, scaleMode?, page?, pageUnit?, real?, realUnit? } | null
@@ -1153,7 +1154,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [excChecked, setExcChecked] = useState({});  // exception index → ticked
   const [mbText, setMbText] = useState("");          // legal description to plot
   const [mbWidth, setMbWidth] = useState(20);        // corridor width (ft) for open traverses
-  const [pobMode, setPobMode] = useState(null);      // { calls } awaiting a POB click on the canvas
+  const [pobMode, setPobMode] = useState(null);      // { tracts } awaiting a POB click on the canvas
+  const [deedBusy, setDeedBusy] = useState(false);   // reading a dropped deed file
+  const [deedErr, setDeedErr] = useState("");        // deed-file read error
+  const [deedName, setDeedName] = useState("");      // last-read deed file name
+  const [deedDrag, setDeedDrag] = useState(false);   // drop-zone hover state
+  const deedFileRef = useRef(null);
+  const deedReqRef = useRef(0);                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
@@ -6066,7 +6073,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
-  // One shared square icon-button (B564) — identical width/height/padding/hit-target for the overlay
+  // One shared square icon-button (B566) — identical width/height/padding/hit-target for the overlay
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
   const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
@@ -6093,57 +6100,109 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // --- Title reader + metes-and-bounds plotting ---
   const elRingOf = (el) => (el.points ? el.points : elCorners(el));
 
-  // Parse the legal description and arm POB placement (the user then clicks the
-  // canvas to anchor the point of beginning).
-  const startPlotMetes = (asEasement = false) => {
-    const calls = parseCalls(mbText);
-    if (!calls.length) { setTitleErr("No bearing/distance calls found. Paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
-    setTitleErr("");
-    setPobMode({ calls, asEasement });
-    setTitleOpen(false);
-    setSel(null); setTool("select");
-    flashWarn(`Click the point of beginning — ${calls.length} call${calls.length > 1 ? "s" : ""} ready${asEasement ? " (easement)" : ""}.`, 0);
+  // Read a dropped/selected deed file (.docx / .txt) into the plotter textarea so
+  // the user can "just drop in the files" instead of pasting. Parses on the way in
+  // to give an immediate honest read-out (calls found, or why not).
+  const readDeed = async (file) => {
+    if (!file) return;
+    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight read
+    setDeedErr(""); setDeedBusy(true); setDeedName(file.name || "");
+    try {
+      const text = await readDeedFile(file);
+      if (deedReqRef.current !== myReq) return;
+      setMbText(text);
+      const found = parseTracts(text).reduce((s, t) => s + t.calls.length, 0);
+      if (!found) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
+    } catch (e) {
+      if (deedReqRef.current !== myReq) return;
+      setDeedErr((e && e.message) || "Couldn't read that file.");
+    } finally {
+      if (deedReqRef.current === myReq) setDeedBusy(false);
+    }
   };
 
-  // Drop the POB at `pob` (feet), build the encumbrance, warn on overlaps.
-  const anchorEncumbrance = (pob) => {
-    const { calls, asEasement } = pobMode;
-    if (!calls || !calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+  // Parse the legal description and arm POB placement (the user then clicks the
+  // canvas to anchor the point of beginning). Multi-tract aware: the first tract
+  // is the boundary; each SAVE-AND-EXCEPT tract is plotted as a hole positioned
+  // from its commencing tie relative to the SAME point of beginning.
+  const startPlotMetes = (asEasement = false) => {
+    const tracts = parseTracts(mbText);
+    const main = tracts[0];
+    if (!main || !main.calls.length) { setTitleErr("No bearing/distance calls found. Drop a deed (.docx) or paste a metes-and-bounds description (e.g. “THENCE N 45°30′ E, 150.00 feet”)."); return; }
+    setTitleErr("");
+    setPobMode({ tracts, asEasement });
+    setTitleOpen(false);
+    setSel(null); setTool("select");
+    const ex = tracts.length - 1;
+    flashWarn(`Click the point of beginning — ${main.calls.length} call${main.calls.length > 1 ? "s" : ""} ready${ex > 0 ? ` (+${ex} save-and-except)` : ""}${asEasement ? " (easement)" : ""}.`, 0);
+  };
+
+  // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
+  // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
+  // carries the gap (shown honestly) rather than being redrawn as a corridor.
+  const buildEncumbranceMarkup = (calls, pob, { label, except }) => {
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
-    // NEW-2 — reuse the M&B parser to spawn a first-class Easement (mode B for a closed
-    // tract; a corridor strip for an open traverse), attributes editable afterward.
+    const ring = closed ? path.slice(0, -1) : path;
+    if (ring.length < 3) return null;
+    return {
+      mk: {
+        id: uid(), kind: "encumbrance",
+        pts: ring, centerline: path, closed,
+        calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
+        label,
+        // exception holes read in a muted dashed red so they're clearly "carved out"
+        stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
+        fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
+      },
+      ring, closed, gap: misclosure(path),
+    };
+  };
+
+  // Drop the POB at `pob` (feet), build the encumbrance(s), warn on overlaps.
+  const anchorEncumbrance = (pob) => {
+    const { tracts, asEasement } = pobMode;
+    const main = tracts && tracts[0];
+    if (!main || !main.calls.length) { flashWarn("No bearings were recognized in that description — check the metes-and-bounds format.", 7000); setPobMode(null); return; }
+    // NEW-2 — Easement path spawns a first-class Easement from the MAIN tract.
     if (asEasement) {
+      const path = callsToPath(main.calls, pob);
+      const closed = pathCloses(path);
       const mk = closed
         ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
-    const ring = closed ? path.slice(0, -1) : bufferPolyline(path, mbWidth);
-    if (!ring || ring.length < 3) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
-    const gap = misclosure(path);
-    const mk = {
-      id: uid(), kind: "encumbrance",
-      pts: ring, centerline: path, closed,
-      calls: calls.map((c) => ({ label: c.label, az: c.az, distFt: c.distFt })),
-      label: closed ? "Tract / easement" : "Easement corridor",
-      stroke: "#7c3aed", fill: "#7c3aed", fillOpacity: 0.14, weight: 2, dash: "solid",
-    };
+    const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary" });
+    if (!built) { flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
+    // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
+    const exMarks = [];
+    for (const t of tracts.slice(1)) {
+      if (!t.calls.length) continue;
+      const exPob = t.tie && t.tie.length ? callsToPath(t.tie, pob)[t.tie.length] : pob;
+      const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true });
+      if (eb) exMarks.push(eb.mk);
+    }
     pushHistory();
-    setMarkups((a) => [...a, mk]);
-    setSel({ kind: "markup", id: mk.id });
+    setMarkups((a) => [...a, built.mk, ...exMarks]);
+    setSel({ kind: "markup", id: built.mk.id });
     setPobMode(null);
-    // overlap check against buildings + paving
-    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(ring, elRingOf(e)));
-    const closeNote = closed && gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "";
+    // overlap check against buildings + paving (main ring only)
+    const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
+    const gap = built.gap;
+    const closeNote = !built.closed
+      ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
+      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
+    const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     if (hits.length) {
       const b = hits.filter((e) => e.type === "building").length, p = hits.length - b;
       const parts = [b && `${b} building${b > 1 ? "s" : ""}`, p && `${p} paving area${p > 1 ? "s" : ""}`].filter(Boolean).join(" and ");
-      flashWarn(`⚠ Encumbrance overlaps ${parts}.${closeNote}`, 9000);
+      flashWarn(`⚠ Boundary overlaps ${parts}.${closeNote}${exNote}`, 9000);
     } else {
-      flashWarn(`Encumbrance placed — no conflicts with buildings or paving.${closeNote}`, 9000);
+      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}`, 9000);
     }
   };
 
@@ -7772,6 +7831,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              {/* B565 — a front door to the existing metes-and-bounds plotter from the
+                  Boundary group (complements the row-1 "Deed / Title…" launcher, B543).
+                  Reuses the same modal/parser — no second copy. */}
+              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / paste a legal description to plot a boundary from its bearings & distances"
+                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>Plot from metes &amp; bounds…</button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
               <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
@@ -7788,7 +7852,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
             data-testid="tool-deed"
             title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
-            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
+            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
             <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
             <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
           </button>
@@ -8028,10 +8092,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const on = selOverlay === o.id;
                   return (
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                      {/* Filename gets its own full-width row (B568) and WRAPS instead of truncating, so a long
+                      {/* Filename gets its own full-width row (B570) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                      {/* Hide / lock / remove — one shared square icon style (B564) so the three render identically. */}
+                      {/* Hide / lock / remove — one shared square icon style (B566) so the three render identically. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                         <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
                         <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
@@ -8041,7 +8105,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
                           <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
                             <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
-                            {/* Numeric percent alongside the slider (B565), two-way bound. While typing we hold a
+                            {/* Numeric percent alongside the slider (B567), two-way bound. While typing we hold a
                                 raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
                                 on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
                             <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
@@ -8056,7 +8120,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
-                          {/* Numeric width — kept ONLY for image overlays (B567). A PDF carries a `sheet`
+                          {/* Numeric width — kept ONLY for image overlays (B569). A PDF carries a `sheet`
                               (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
                               a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
                               and this stays its one direct numeric size + ±10% nudge control. */}
@@ -8081,7 +8145,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
                           {o.sheet && (() => {
-                            // Bluebeam-style scale entry (B566): the page→real ratio is the single source of
+                            // Bluebeam-style scale entry (B568): the page→real ratio is the single source of
                             // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
                             // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
                             // NOT derived from the current size — so picking Custom always reveals the fields.
@@ -9336,9 +9400,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       )}
       {/* Title reader + metes-and-bounds modal */}
       {titleOpen && (() => {
-        const calls = parseCalls(mbText);
+        const tracts = parseTracts(mbText);
+        const calls = tracts[0] ? tracts[0].calls : [];
         const path = calls.length ? callsToPath(calls, { x: 0, y: 0 }) : [];
         const closes = pathCloses(path);
+        const gap = misclosure(path);
+        const exCount = Math.max(0, tracts.length - 1);
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface-raised)", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -9347,7 +9414,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <button className="gbtn" onClick={() => setTitleOpen(false)} style={{ ...chip }}>Close ✕</button>
             </div>
             <div style={{ fontSize: 11.5, color: PAL.muted, lineHeight: 1.5, marginBottom: 14 }}>
-              Upload a title commitment to pull its Schedule B exceptions into a checklist, then plot any metes-and-bounds easement on the plan.
+              Upload a title commitment to pull its Schedule B exceptions into a checklist, or <b>drop a deed / legal description (.docx)</b> below to read and plot its metes-and-bounds boundary.
             </div>
 
             {/* API key */}
@@ -9401,13 +9468,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* metes-and-bounds plotter */}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>2 · Plot a metes-and-bounds description</div>
+              {/* Drop a deed file (.docx / .txt) → read its text into the box below. */}
+              <input ref={deedFileRef} data-testid="deed-file-input" type="file" accept=".docx,.txt,.text,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" style={{ display: "none" }}
+                onChange={(e) => { readDeed(e.target.files?.[0]); e.target.value = ""; }} />
+              <div
+                onClick={() => !deedBusy && deedFileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
+                onDragLeave={() => setDeedDrag(false)}
+                onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeed(e.dataTransfer.files?.[0]); }}
+                style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
+                <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.docx) or text (.txt) — bearings, distances, curves, and save-and-except are read automatically.</div>
+                {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: "ui-monospace, monospace", wordBreak: "break-all" }}>📄 {deedName}</div>}
+              </div>
+              {deedErr && <div style={{ fontSize: 12, color: PAL.danger, marginBottom: 8, lineHeight: 1.45 }}>{deedErr}</div>}
               <textarea value={mbText} onChange={(e) => setMbText(e.target.value)} rows={5}
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: "ui-monospace, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
-                  {calls.length ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? "closes (tract)" : "open (corridor)"}` : "No calls parsed yet"}
+                  {calls.length
+                    ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? `closes${gap > 1 ? ` (misclosure ${gap.toFixed(1)}′)` : ""}` : `does NOT close — gap ${gap.toFixed(1)}′`}${exCount ? ` · +${exCount} save-and-except` : ""}`
+                    : "No calls parsed yet"}
                 </div>
+                {calls.length > 0 && !closes && (
+                  <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
+                    ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
+                  </div>
+                )}
                 {calls.some((c) => c.curve) && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ {calls.filter((c) => c.curve).length} curve(s) plotted as straight chords — verify against the survey.

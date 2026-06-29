@@ -47,13 +47,30 @@ describe("B543 — the old export-menu launcher is gone (relocated, not duplicat
     expect(src).not.toMatch(/Read a deed\/title block to plot/);
   });
 
-  it("opens the reader from exactly one place", () => {
+  it("opens the reader only from the intended launchers (rail + Boundary menu), never the export menu", () => {
     const opens = src.match(/setTitleOpen\(true\)/g) || [];
-    expect(opens.length).toBe(1);
+    expect(opens.length).toBe(2); // B543 row-1 "Deed / Title…" launcher + B565 Boundary-menu entry
+    expect(src).not.toMatch(/Title reader \/ metes/); // the old File ▾ export-menu item stays gone
   });
 
   it("Export PNG and Download PDF remain in the export menu", () => {
     expect(src).toMatch(/Export PNG/);
     expect(src).toMatch(/Download PDF \/ pick frame/);
+  });
+});
+
+describe("B565 — 'Plot from metes & bounds' in the Boundary ▾ menu", () => {
+  const btn = (src.match(/data-testid="boundary-menu-mb"[\s\S]{0,400}?<\/button>/) || [])[0];
+  it("the Boundary menu has the entry and it opens the existing modal", () => {
+    expect(btn).toBeTruthy();
+    expect(btn).toMatch(/Plot from metes/);
+    expect(btn).toMatch(/setTitleOpen\(true\)/);
+  });
+  it("it is a launcher (opens the modal), not a tool mode", () => {
+    expect(btn).not.toMatch(/selectTool/);
+  });
+  it("Draw new parcel and Split a parcel are both still present", () => {
+    expect(src).toMatch(/Draw new parcel/);
+    expect(src).toMatch(/Split a parcel/);
   });
 });
