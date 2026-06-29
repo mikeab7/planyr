@@ -8059,6 +8059,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
+                          {/* Numeric width — kept ONLY for image overlays (B563). A PDF carries a `sheet`
+                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
+                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
+                              and this stays its one direct numeric size + ±10% nudge control. */}
+                          {!o.sheet && (
+                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
+                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
+                              <span>ft</span>
+                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
+                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
+                            </label>
+                          )}
                           {o.pageCount > 1 && (
                             <div style={ovRow}><span style={{ width: 48 }}>Page</span>
                               <button style={chip} disabled={!overlayDocs.current.has(o.id) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
@@ -8080,12 +8092,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             const curFpi = scaleForFtPerPoint(o.ftPerPx);
                             const matched = overlayScalePreset(o);
                             const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
-                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
                             const pageUnit = ed?.pageUnit ?? "in";
-                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
                             const realUnit = ed?.realUnit ?? "ft";
+                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
+                            // the user never edited must re-apply its EXACT current value, never the rounded display
+                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
+                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
+                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
+                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
+                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
+                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
+                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
                             const commit = (next) => {
-                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageVal, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realVal, realUnit: next.realUnit ?? realUnit });
+                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
                               if (fpi) applyOverlayScale(o.id, fpi);
                             };
                             return (
@@ -8107,18 +8126,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                                 {selVal === "custom" && (
                                   <label style={ovRow} data-testid="overlay-scale-custom">
                                     <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value })}
-                                      onKeyDown={(e) => { if (e.key === "Enter") commit({ page: e.currentTarget.value }); }}
-                                      onBlur={(e) => commit({ page: e.currentTarget.value })} />
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
                                     <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
                                       onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
                                       {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                                     </select>
                                     <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
                                     <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value })}
-                                      onKeyDown={(e) => { if (e.key === "Enter") commit({ real: e.currentTarget.value }); }}
-                                      onBlur={(e) => commit({ real: e.currentTarget.value })} />
+                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
+                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
+                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
                                     <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
                                       onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
                                       {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}

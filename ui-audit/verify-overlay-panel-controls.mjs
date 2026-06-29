@@ -132,12 +132,66 @@ const cardText = await page.evaluate((nm) => {
   return card ? (card.innerText || "") : "";
 }, LONGNAME);
 const body = await panelText();
-check("B563 — the Width row is gone from the overlay card", !cardText.includes("Width"), "(no Width control)");
+check("B563 — the Width row is gone for a SHEET/PDF overlay (scale picker owns sizing)", !cardText.includes("Width"), "(no Width control)");
 check("B563 — the 'Reset rotation' button is gone", !cardText.includes("Reset rotation"));
 check("B563 — the 'Drag it to move' drop-hint tail is gone", !body.includes("Drag it to move"));
 check("B563 — the 'Sizing to the drawing scale comes next' parenthetical is gone", !body.includes("Sizing to the drawing scale comes next"));
 check("B563 — the 'Scale to the drawing — sizes the sheet' line is gone", !cardText.includes("Scale to the drawing"));
 check("B563 — core drop hint kept", body.includes("White paper is knocked out"));
+
+// ---- helper: boot a fresh context with a seeded site and expand its overlay row ----
+const cardTextFor = (p, nm) => p.evaluate((n) => {
+  const b = Array.from(document.querySelectorAll("button")).find((x) => (x.textContent || "").includes(n));
+  const card = b && b.parentElement;
+  return card ? (card.innerText || "") : "";
+}, nm);
+async function bootScenario(seedSite, expandMatch) {
+  const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
+  const key = Object.keys(seedSite)[0];
+  await c.addInitScript(`(()=>{try{localStorage.setItem('planarfit:sites:v1',JSON.stringify(${JSON.stringify(seedSite)}));localStorage.setItem('planarfit:currentSite:v1','${key}');}catch(e){}})();`);
+  const p = await c.newPage();
+  await p.goto(BASE, { waitUntil: "load" });
+  await p.waitForTimeout(1300);
+  try { await p.locator('[title="Overlay"]').first().click({ timeout: 4000 }); } catch (e) {}
+  await p.waitForTimeout(300);
+  await p.locator("button", { hasText: expandMatch }).first().click();
+  await p.waitForTimeout(300);
+  return { c, p };
+}
+
+// ---- B563 fix (review finding): an IMAGE overlay (sheet:null) KEEPS its numeric Width control ----
+// The scale picker is PDF-only (gated on o.sheet); removing Width for images would leave them with no
+// numeric size entry. So images must retain Width + the ±10% nudge.
+{
+  const imgOverlay = { ...overlay, id: "ovIMG", name: "site-aerial-photo.png", detectedScale: null, sheet: null };
+  const imgSite = { I: { ...site, id: "I", groupId: "I", name: "ImgPlan", sheetOverlays: [imgOverlay] } };
+  const { c, p } = await bootScenario(imgSite, "site-aerial-photo.png");
+  const ct = await cardTextFor(p, "site-aerial-photo.png");
+  check("B563 fix — image overlay (no sheet) KEEPS the numeric Width control", ct.includes("Width"));
+  check("B563 fix — image overlay shows NO scale preset picker (no physical inch)", await p.locator('[data-testid="overlay-scale-preset"]').count() === 0);
+  check("B563 fix — image overlay still has the opacity percent field", await p.locator('[data-testid="overlay-opacity-pct"]').count() === 1);
+  await p.screenshot({ path: OUT + "overlay-panel-image.png" });
+  await c.close();
+}
+
+// ---- B562 fix (review finding): an idle focus→blur on the custom REAL field must NOT quantize ----
+// Seed a sheet overlay at a non-round metric scale (1"=1m → 3.2808 ft/in); the custom row auto-shows with
+// the real field displaying the rounded "3.3". Focusing then blurring it WITHOUT editing must leave the
+// scale exactly where it was (per-field dirty guard) — pre-fix this re-committed "3.3" and drifted ~0.6%.
+{
+  const M = 3.280839895 / 72; // ftPerPx for 1"=1m ; width = imgW(2592)*M = 118.1' → "118′ wide"
+  const metricOverlay = { ...overlay, id: "ovM", name: "metric-scale-sheet.pdf", ftPerPx: M };
+  const metricSite = { M: { ...site, id: "M", groupId: "M", name: "MetricPlan", sheetOverlays: [metricOverlay] } };
+  const { c, p } = await bootScenario(metricSite, "metric-scale-sheet.pdf");
+  const widthOf = async () => { const m = (await p.evaluate(() => document.body.innerText)).match(/(\d+)′ wide/); return m ? m[1] : null; };
+  const before = await widthOf();
+  check("B562 fix — non-round metric scale renders ~118' wide before the idle blur", before === "118", `before=${before}`);
+  const realC = p.locator('[data-testid="overlay-scale-custom"] input').nth(1);
+  await realC.focus(); await p.waitForTimeout(100); await realC.blur(); await p.waitForTimeout(250);
+  const after = await widthOf();
+  check("B562 fix — idle focus+blur on the custom real field does NOT quantize the scale", before === after, `before=${before} after=${after}`);
+  await c.close();
+}
 
 await ctx.close();
 await browser.close();
