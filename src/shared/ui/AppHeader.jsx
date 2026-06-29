@@ -254,6 +254,10 @@ export default function AppHeader({
   currentProject = null,
   onSelectProject,
   onNewProject,
+  // Optional trailing breadcrumb crumb rendered right after the project crumb (e.g. the
+  // Site Planner's plan switcher). Keeps the project name in ONE place — the breadcrumb —
+  // while a workspace-specific sub-selector (the plan) sits beside it: Map / Project / Plan.
+  planSlot,
   saveState,
   // Cloud-sync badge (NEW-1): the workspace hands the badge an optional retry action and a
   // custom popover message (e.g. "reload to merge" for a conflict). Both are optional — the
@@ -378,6 +382,7 @@ export default function AppHeader({
                 projects={projects}
                 homeLabel={homeLabel}
                 cross={cross}
+                planSlot={planSlot}
               />
             </>
           )}
