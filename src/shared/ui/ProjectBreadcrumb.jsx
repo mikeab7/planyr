@@ -122,6 +122,10 @@ export default function ProjectBreadcrumb({
   // Cross-project mode (Work Item A): the file tree spans ALL of the user's projects, so
   // the project crumb reads "All projects" instead of a single name. Off by default.
   cross = false,
+  // Optional trailing crumb rendered right after the project crumb, with the SAME "/"
+  // separator as the crumbs above it. The Site Planner passes its plan switcher here so the
+  // project name stays in exactly one place and the plan sits beside it: Map / Project / Plan.
+  planSlot = null,
 }) {
   const controlled = Array.isArray(controlledProjects);
   const [open, setOpen] = useState(false);
@@ -288,6 +292,15 @@ export default function ProjectBreadcrumb({
         )}
         <span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
       </button>
+
+      {/* Trailing crumb (e.g. the Site Planner's plan switcher). Same "/" separator + crumb
+          geometry as the Map/project crumbs, so the three segments read as one breadcrumb. */}
+      {planSlot && (
+        <>
+          <span style={{ color: MUTED, opacity: 0.55, flex: "none", fontSize: 13, padding: "0 1px" }}>/</span>
+          {planSlot}
+        </>
+      )}
 
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}
         placement="below-left" width={304} gap={8} panelStyle={panel}>

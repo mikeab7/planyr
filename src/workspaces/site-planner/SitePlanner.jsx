@@ -790,7 +790,7 @@ const EyeOffIcon = () => (
     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
   </svg>
 );
-// Lock / Unlock / Remove icons — inline SVG (B560) so the overlay header buttons share the eye
+// Lock / Unlock / Remove icons — inline SVG (B564) so the overlay header buttons share the eye
 // icon's exact metrics instead of mixing emoji (🔒/✕) whose glyph boxes never matched.
 const LockIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -807,7 +807,7 @@ const XIcon = () => (
     <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
   </svg>
 );
-// Compact number formatting for the scale picker (B560–B564). trimNum: a field value without
+// Compact number formatting for the scale picker (B564–B568). trimNum: a field value without
 // trailing-zero noise (0.125 → "0.125", 1 → "1"). fmtScaleNum: the "1″=X′" readout (integer when
 // near-integer, else one decimal — so an architectural 3/4″=1′ shows 1.3, not a misleading 1).
 const trimNum = (n) => String(Math.round(n * 1000) / 1000);
@@ -868,14 +868,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
-  const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -967,7 +966,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // merged so a deletion isn't resurrected by a stale/cloud copy on reload, tab-sync, or device sync.
   const [deletedIds, setDeletedIds] = useState(() => restored?.deletedIds || []);
   const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
-  // Transient editor state for the ONE expanded overlay row (B561 opacity field draft + B562 scale
+  // Transient editor state for the ONE expanded overlay row (B565 opacity field draft + B566 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
   const [ovEdit, setOvEdit] = useState(null);           // { id, opacityText?, scaleMode?, page?, pageUnit?, real?, realUnit? } | null
@@ -4973,7 +4972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
-  const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
+  const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
   // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
   // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
@@ -5029,6 +5028,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
+    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
+    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
+    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
+    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
+    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    persistDrawings(v.parcelDrawings || []);
     // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
     // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
     if (siteId) noteLocalContent(siteId, v);
@@ -6060,7 +6066,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const chip = { padding: "6px 11px", fontSize: 12, borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontWeight: 500, boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const numInput = { width: 58, padding: "6px 9px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", border: `1px solid var(--border-default)`, borderRadius: 8, color: PAL.ink, background: "var(--surface-raised)" };
   const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
-  // One shared square icon-button (B560) — identical width/height/padding/hit-target for the overlay
+  // One shared square icon-button (B564) — identical width/height/padding/hit-target for the overlay
   // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
   const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: `1px solid var(--border-default)`, background: "var(--surface-raised)", color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: `1px solid var(--border-default)`, borderRadius: 4, background: "var(--surface-raised)", color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
@@ -6376,48 +6382,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
     return out;
   })();
-  // One representative per site (location), current site first, for the Site ▾ menu.
-  const siteReps = (() => {
-    const seen = new Set(), out = [];
-    (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
-    return out.sort((a, b) => (planGroup(a) === groupId ? -1 : planGroup(b) === groupId ? 1 : 0));
-  })();
-
   // ── AppHeader slot content ───────────────────────────────────────────────────
-  const plannerCenterContent = (
-    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      {/* The "‹ Map" back button was removed (B205): the Row-1 breadcrumb's "Map" crumb
-          (homeLabel="Map" → onBackToMap) now does the same job, so this was a second "Map". */}
-      <div ref={siteAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(12.5, PAL.chromeInk, 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
-        <AnchoredMenu open={siteMenu} onClose={() => setSiteMenu(false)} anchorRef={siteAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
-          <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
-          {siteReps.map((s) => {
-            const cur = planGroup(s) === groupId;
-            return (
-              <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
-                <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
-                  {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                </span>
-              </button>
-            );
-          })}
-          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
-          </div>
-        </AnchoredMenu>
-      </div>
-      <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
-      <div ref={planAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
+  // The project name now lives in exactly ONE place — the Row-1 breadcrumb
+  // (Map / 🔒 <Site> ▾). The old standalone center "Site ▾ › Plan ▾" group duplicated
+  // that project name, so the Site switcher was removed; only this PLAN switcher
+  // remains, handed to the breadcrumb as a trailing crumb (planSlot) so the header reads
+  // Map / 🔒 <Site> ▾ / <Plan> ▾ — project, then its plan right beside it.
+  const plannerPlanCrumb = (
+    <div ref={planAnchor} style={{ position: "relative", flex: "none" }}>
+      {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
+          segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
+      <button
+        className="dbtn"
+        style={{
+          display: "flex", alignItems: "center", gap: 5, flex: "none",
+          height: 24, padding: "0 8px", borderRadius: 6, border: "none",
+          background: "transparent", cursor: "pointer", fontFamily: "inherit",
+          fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
+          maxWidth: 200, whiteSpace: "nowrap",
+        }}
+        onClick={() => setPlanMenu((o) => !o)}
+        title="Switch or rename plan"
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+      </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
@@ -6462,8 +6450,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
         </AnchoredMenu>
-      </div>
-    </span>
+    </div>
   );
 
   // The Row-1 save indicator is now the shared, app-wide CloudSyncBadge (NEW-1) — a
@@ -6533,6 +6520,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
     if (target) handleOpenSite(target.id);
   };
+  // The breadcrumb is now the ONLY project control (the center "Site ▾" was removed), so its
+  // rename has to do everything the old inline Site-name editor did. For the CURRENT project
+  // route through commitSiteLabel so the Row-1 header label updates live; any other project
+  // renames its site group directly. Both ultimately call renameSiteGroup. (header consolidation)
+  const renameProjectFromHeader = (id, name) => {
+    if (id === groupId) commitSiteLabel(name);
+    else onRenameSite?.(id, name);
+  };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
     const cloudActive = isCloudActive();
@@ -6560,12 +6555,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}
+        onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={cloudConflict ? undefined : retryCloudSave}
         saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
-        centerContent={plannerCenterContent}
+        centerContent={null}
+        planSlot={plannerPlanCrumb}
         authControl={authControl}
         accountActive={accountActive}
         toolbarContent={plannerToolbar}
@@ -8031,10 +8028,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const on = selOverlay === o.id;
                   return (
                     <div key={o.id} style={{ border: `1px solid ${on ? PAL.accent : "#ddd6c5"}`, borderRadius: 9, padding: 9, background: "var(--surface-raised)" }}>
-                      {/* Filename gets its own full-width row (B564) and WRAPS instead of truncating, so a long
+                      {/* Filename gets its own full-width row (B568) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "#ddd6c5", color: on ? PAL.accent : PAL.ink }} title={`${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                      {/* Hide / lock / remove — one shared square icon style (B560) so the three render identically. */}
+                      {/* Hide / lock / remove — one shared square icon style (B564) so the three render identically. */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                         <button style={{ ...iconBtn, color: o.visible === false ? PAL.muted : PAL.ink }} title={o.visible === false ? "Show overlay" : "Hide overlay"} onClick={() => patchOverlay(o.id, { visible: o.visible === false })}>{o.visible === false ? <EyeOffIcon /> : <EyeIcon />}</button>
                         <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
@@ -8044,7 +8041,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
                           <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
                             <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} onChange={(e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); }} />
-                            {/* Numeric percent alongside the slider (B561), two-way bound. While typing we hold a
+                            {/* Numeric percent alongside the slider (B565), two-way bound. While typing we hold a
                                 raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
                                 on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
                             <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
@@ -8059,7 +8056,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
                               onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
                           </label>
-                          {/* Numeric width — kept ONLY for image overlays (B563). A PDF carries a `sheet`
+                          {/* Numeric width — kept ONLY for image overlays (B567). A PDF carries a `sheet`
                               (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
                               a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
                               and this stays its one direct numeric size + ±10% nudge control. */}
@@ -8084,7 +8081,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
                           </div>
                           {o.sheet && (() => {
-                            // Bluebeam-style scale entry (B562): the page→real ratio is the single source of
+                            // Bluebeam-style scale entry (B566): the page→real ratio is the single source of
                             // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
                             // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
                             // NOT derived from the current size — so picking Custom always reveals the fields.

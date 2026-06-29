@@ -177,7 +177,7 @@ export async function importLegacyIntoCloud(uid) {
     const local = createSiteModel(legacy[id]);
     if (!local.id) { skipped++; continue; }
     const existing = cloud[local.id];
-    if (existing && (existing.updatedAt || 0) >= (local.updatedAt || 0)) { skipped++; continue; } // cloud already same/newer
+    if (existing && toMs(existing.updatedAt) >= toMs(local.updatedAt)) { skipped++; continue; } // cloud already same/newer (B562: toMs so an ISO-string updatedAt can't NaN the compare and copy an older local over a newer cloud)
     cloud[local.id] = local;                  // stage into the cloud cache so it's visible right away
     const r = await cloudUpsert(uid, local);  // and persist to Supabase
     if (r && r.ok) copied++; else failed++;   // failed pushes stay cached and re-push on the next edit

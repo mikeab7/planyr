@@ -144,36 +144,62 @@ export default function Scheduler({
   // Project-aware header tabs (the cross-module payoff): when the route carries a Site Planner
   // project (group_id), ask the embedded app to activate the schedule linked to it. Fires once
   // the iframe is ready and whenever the routed project changes. No link yet → the embedded app
-  // ignores it and the resolution panel (below) offers create/link. Re-posting is harmless.
+  // ignores it and the resolution panel (below) offers create/link. The embedded handler no-ops
+  // when that schedule is already active, so re-posting is harmless (it can't trigger a save).
   useEffect(() => {
     if (!ready || projectId == null) return;
     post({ type: "planar:nav-select-by-site", siteId: projectId });
   }, [ready, projectId]);
 
-  // Keep the route's project in sync the other way: when the active schedule is linked to a site,
-  // push that site id up so switching to the Site/Review tabs lands on the SAME project. Only ever
-  // pushes a real link up — never clears — so viewing an unlinked schedule won't churn the route.
+  // Carry the project the OTHER way ONLY when the route has no project yet (projectId == null):
+  // adopt the iframe's active schedule's linked site into the empty route so the Site/Review tabs
+  // can follow. This is loop-free — once it sets projectId the guard makes it inert, so it can
+  // NEVER fight the carry-in effect above. (The first cut of this pushed up on EVERY nav-state,
+  // even when the route already carried a project — so arriving on site A while the iframe's
+  // last-active schedule was linked to site B made the two effects ping-pong the route A↔B, which
+  // flashed the whole screen + breadcrumb, B560.) A user switching schedules WITHIN the scheduler
+  // carries up via selectSchedule() below.
   useEffect(() => {
-    if (section !== "projects") return;
+    if (section !== "projects" || projectId != null) return;
     const cur = deriveCurrentProject(projects, activeId, section);
     const linked = cur && cur.linkedSiteId != null ? cur.linkedSiteId : null;
-    if (linked != null && linked !== projectId) { try { onProjectChange?.(linked); } catch (_) {} }
+    if (linked != null) { try { onProjectChange?.(linked); } catch (_) {} }
   }, [projects, activeId, section, projectId, onProjectChange]);
 
-  // On the Dashboard (reports) view no single project is "current" — the Dashboard
-  // crumb reads as current and the project crumb invites a pick. deriveCurrentProject
-  // (B380) never throws and never returns undefined, so the first-render-before-nav-
-  // state window resolves to null (empty/loader state) instead of dereferencing a
-  // not-yet-resolved record.
-  const currentProject = deriveCurrentProject(projects, activeId, section);
+  // Picking a schedule from the breadcrumb is a USER action: switch to it, and if it's linked to a
+  // site, carry that site into the route so the Site/Review tabs follow. One-shot (not a reactive
+  // effect), so it can't loop with the carry-in.
+  const selectSchedule = (id) => {
+    post({ type: "planar:nav-select", id });
+    const sch = projects.find((p) => p && p.id === id);
+    const linked = sch && sch.linkedSiteId != null ? sch.linkedSiteId : null;
+    if (linked != null && linked !== projectId) { try { onProjectChange?.(linked); } catch (_) {} }
+  };
 
-  // Resolution panel (suggest-and-confirm): the route points at a site that has NO linked
-  // schedule yet. Offer "create a schedule for this site" + linking an existing one (with a
-  // same-named suggestion). Gated on `ready` so it never flashes before the iframe reports in.
+  // Resolve the routed project's display NAME from the site list — NEVER the raw group_id (which
+  // reads as random letters/numbers). null when the list isn't warm yet; callers treat null as
+  // "not ready" and never surface or persist the id (B560).
   const routedSite = projectId != null ? (siteProjects.find((p) => p.id === projectId) || null) : null;
-  const routedSiteName = routedSite ? routedSite.name : projectId;
+  const routedSiteName = routedSite ? routedSite.name : null;
   const linkedSchedule = findBySiteId(projects, projectId);
-  const showLinkPanel = ready && projectId != null && !linkedSchedule;
+
+  // The breadcrumb's "current project". When the route carries a project, show THAT project — the
+  // schedule linked to it, or its name as last-known-good during the ~2 s iframe boot — never the
+  // iframe's transient active schedule (which may belong to a different project mid-carry-in: the
+  // B560 placeholder/flash). With no routed project, the iframe's active schedule IS the current.
+  let currentProject;
+  if (section === "reports") {
+    currentProject = null; // Dashboard: no single project is current
+  } else if (projectId != null) {
+    currentProject = linkedSchedule || (routedSiteName ? { id: projectId, name: routedSiteName } : null);
+  } else {
+    currentProject = deriveCurrentProject(projects, activeId, section);
+  }
+
+  // Resolution panel (suggest-and-confirm): the route points at a site that has NO linked schedule
+  // yet. Gated on `ready` AND a RESOLVED name, so it never flashes before the iframe reports in and
+  // never shows — or creates a schedule named — the raw group_id.
+  const showLinkPanel = ready && projectId != null && !linkedSchedule && !!routedSiteName;
   const suggestedMatch = showLinkPanel ? suggestNameMatch(routedSiteName, projects) : null;
 
   return (
@@ -189,7 +215,7 @@ export default function Scheduler({
         // overview; New project → add one in the scheduler.
         currentProject={currentProject}
         projects={projects}
-        onSelectProject={(id) => post({ type: "planar:nav-select", id })}
+        onSelectProject={selectSchedule}
         onDashboard={() => post({ type: "planar:nav-dashboard" })}
         onNewProject={() => post({ type: "planar:nav-new" })}
         // Rename/delete a SCHEDULE project (B440) — bridged to the embedded app's own hs-v1
