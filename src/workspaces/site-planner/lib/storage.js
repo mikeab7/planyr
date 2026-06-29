@@ -9,7 +9,7 @@
  * loadSite migrates on read, saveSite normalizes on write.
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
 /* Cloud backend (Phase 4). When a user is signed in, `activeUser` holds their id:
@@ -140,7 +140,7 @@ export function pruneMigratedLegacy(cloudMap) {
     // work was deleted before the migration modal could ever surface it). Mirror the inverse
     // of pendingLegacyCount's predicate so reclaimed duplicates still get cleaned up.
     for (const id of Object.keys(legacy)) {
-      if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B558: type-safe ts compare (ISO string vs ms)
+      if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
     }
     if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
   } catch (_) {}
@@ -312,6 +312,10 @@ export async function reconcileSiteFromCloud(id) {
   if (!activeUser || !id) return null;
   return fetchSiteForReconcile(activeUser, id);
 }
+// B556 — re-export so the planner can tell the thin-clobber baseline "this deliberately-restored
+// (possibly thinner) content is authoritative" after an undo/redo/version-restore, so the next push
+// isn't falsely rejected as a cross-session conflict. Per-tab + cloud-independent (safe logged out).
+export { noteLocalContent };
 // Synchronous best-effort cloud push for a forced reload (B452): a guarded keepalive
 // write that survives the navigation. Reads the freshly-saved local copy so the cloud
 // gets the very latest. No-op when logged out. Returns true if a request was dispatched.

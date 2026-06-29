@@ -150,7 +150,7 @@ describe("Site Model — schema, lifecycle status, selectors", () => {
 
 import { mergeSiteContent, toMs } from "../src/workspaces/site-planner/lib/siteModel.js";
 
-describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B558)", () => {
+describe("toMs + mergeSiteContent newer-wins is timestamp-type-safe (B559)", () => {
   it("toMs coerces an ISO string and a ms number to comparable ms", () => {
     expect(toMs(1718447000000)).toBe(1718447000000);
     expect(toMs("2025-06-15T10:30:00.000Z")).toBe(Date.parse("2025-06-15T10:30:00.000Z"));

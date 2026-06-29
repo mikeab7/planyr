@@ -52,7 +52,7 @@ const isLegacyRecord = (p) => typeof p.schemaVersion === "number" && p.schemaVer
 // Coerce every collection so one malformed record can't crash the planner on load.
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
-// B558: coerce a timestamp to milliseconds for comparison. `updatedAt` is normally a number
+// B559: coerce a timestamp to milliseconds for comparison. `updatedAt` is normally a number
 // (Date.now()), but createSiteModel keeps whatever it's given (p.updatedAt || Date.now()), so an
 // imported/legacy record can carry an ISO STRING — and `"2025-…" >= 1718…` is a silent false,
 // which would pick the OLDER copy as "newer" in a merge (data loss) or skip a legacy-prune.
@@ -262,7 +262,7 @@ function healSrc(chosen, other) {
 export function mergeSiteContent(a, b) {
   const A = createSiteModel(a || {});
   const B = createSiteModel(b || {});
-  const newer = toMs(A.updatedAt) >= toMs(B.updatedAt) ? A : B; // B558: type-safe (ISO string OR ms number)
+  const newer = toMs(A.updatedAt) >= toMs(B.updatedAt) ? A : B; // B559: type-safe (ISO string OR ms number)
   const older = newer === A ? B : A;
   // Union the tombstones from BOTH copies, then drop any tombstoned id from every unioned
   // collection so a deleted item can't be resurrected by the copy that still holds it.
