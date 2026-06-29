@@ -1,11 +1,23 @@
 ## ✅ Done
 
-### B567 — Scheduler: a duplicate task id silently scrambled the dependency graph on load (`renumberTasks` remap) `[Scheduler]` (bug — data integrity)  *(self-found 2026-06-29 by the improve loop's lap-6 hunt; minted **B567** = highest real B# across both files (B566) + 1 — renumbered twice as concurrent mains took B564 (deed reader) and B566 (Schedule cloud badge))*
-`[x]` **DONE + verified the same session. lint 0 · 1798 tests · build green · scheduler JSX transpile OK (`ui-audit/jsxcheck-sequence.mjs`).** `renumberTasks` built its old-id→new-id remap with `tasks.forEach((t,i) => { map[t.id] = i+1; })` — **last occurrence wins**.
+### B568 — Scheduler: a duplicate task id silently scrambled the dependency graph on load (`renumberTasks` remap) `[Scheduler]` (bug — data integrity)  *(self-found 2026-06-29 by the improve loop's lap-6 hunt; minted **B568** = highest real B# across both files (B567) + 1 — renumbered three times as concurrent mains took B564 (deed reader), B566 (cloud badge / callout padding) and B567 (live color picker))*
+`[x]` **DONE + verified the same session. lint 0 · 1830 tests · build green · scheduler JSX transpile OK (`ui-audit/jsxcheck-sequence.mjs`).** `renumberTasks` built its old-id→new-id remap with `tasks.forEach((t,i) => { map[t.id] = i+1; })` — **last occurrence wins**.
 - **Why it bites:** if a project's persisted tasks carry a **duplicate id** (the app once minted dup ids before `addTask` switched to `maxId+1`, and `normalizeIds` does NOT dedup before the remap — its B550 cycle-break uses a `byId` map but passes the full task array on to `renumberTasks(sortByVisualOrder(tasks))`), the second occurrence overwrote `map[id]`. A parent/predecessor reference to that id then remapped to the **stray copy lower in visual order** instead of the original task — silently corrupting the dependency graph on load (wrong cascade dates, dependencies pointing at the wrong task, no warning). The in-code comment at `addTask` already flagged this as a known risk ("a duplicate id poisons renumberTasks' remap table, scrambling parent links").
 - **Fix:** `if (!(t.id in map)) map[t.id] = i + 1;` — **first occurrence wins**, so a reference resolves to the original task in visual order. **No change for clean unique-id data** (every other caller already passes unique ids). Applied to BOTH the live source (`public/sequence/index.html`) and its verbatim test mirror (`ui-audit/stress/scheduler-engine.mjs`).
 - **Tests:** 2 behavioral (dup-id predecessor remaps to the first occurrence; clean data unaffected) + 1 anti-drift guard asserting the first-occurrence form exists in source AND mirror. `test/schedulerEngine.test.js`.
 - **Files:** `public/sequence/index.html`, `ui-audit/stress/scheduler-engine.mjs`, `test/schedulerEngine.test.js`. The scheduler can't boot headless (its own Supabase backend is unreachable in-sandbox), so the live signed-in confirmation that a real schedule's dependencies survive load is **VERIFICATION.md V175**.
+### B567 — Color pickers don't apply live; the color only updates after the picker closes `[Site Planner + Document Review / markup]` (bug)  *(owner-reported 2026-06-29, arrived as "NEW-3"; minted **B567** = highest real B# across both files (B565) + 1 — renumbered twice from a provisional B562 then B565 as concurrent `main`s took those IDs; branch `claude/markup-hit-area-color-picker-kfm284`)*
+`[x]` **DONE + verified. lint 0 · tests green · build green · headless ALL-PASS (`ui-audit/verify-markup-fixes.mjs`).** Repro: select any object → open its color control → click a swatch — the object did NOT recolor until you dismissed the picker. **Root cause:** every color control is a native `<input type="color">` wired to `onChange`, which in Chromium fires **only when the OS palette closes**; the live event while you click/drag swatches is `input`. So the canvas couldn't reflect the color until dismissal.
+- **Fix — wire the live `input` event, with single-step undo:**
+  - **Site Planner** (`SitePlanner.jsx`): a `livePick(apply)` helper spreads `onFocus`/`onInput`/`onChange` onto each of the **12** native color inputs (markup line/fill, callout text/fill/line, element fill/stroke, parcel fill, pond existing/added fill, the two "Element default colors"). `onInput` commits the color **live**. Undo stays one-step: exactly ONE history frame is pushed per picking **session** — lazily on the first change, reset on focus, via `pickSnapRef` (survives re-renders; only one input is active at a time) — so the live mutators (`liveMarkup`/`liveCallout`/`liveTypeStyle`/`setDetLive`, plus the already-history-free `setSelEl`/`setSelParcel`) must NOT push their own. The old inline `pushHistory()` in the element/parcel color handlers moved into `livePick`.
+  - **Document Review** (`PropertyPanel.jsx` `ColorControl` → `DocReview.jsx` `onPropChange`): the shared control now fires `onInput` (flagged `{live:true}`) for the live recolor and `onChange` (`{live:false}`) for the commit; the host coalesces a live burst into one undo frame keyed on the property (`colorSessionRef`).
+- **WYSIWYG follow-through (the half that would otherwise hide the fix):** a SELECTED neutral markup in the Site Planner used to repaint its stroke with the accent tint (`isSel ? PAL.accent : m.stroke`), which **masked** a live stroke-color change. Selected neutral markups (line/polyline/polygon/rect/ellipse) now render their **real** color (`nStroke`), cued by the existing grips + a faint width bump (`nsw = sw + 1`) — matching the shared `MarkupRenderer`'s deliberate choice. Semantic markups (encumbrance etc.) keep the accent tint. Verified headless: the selected line recolors to the picked color on `input` (before any close) and a single ⌘/Ctrl-Z reverts it.
+- **Left alone:** the ParcelDrawing swatch ROW already applies on click (fixed palette, not the native picker); range sliders already fire live. Guards in `test/bugHuntGuards.test.js`. All logged-out-verifiable — no auth/cloud surface, no V### pending.
+
+### B566 — Callout / text-box horizontal padding too tight by default `[Site Planner + Document Review / markup]` (bug)  *(owner-reported 2026-06-29, arrived as "NEW-2"; minted **B566** = highest real B# (B565) + 1 — renumbered twice from a provisional B561 then B564 as concurrent `main`s took those IDs; same branch as B567)*
+`[x]` **DONE + verified. lint 0 · tests green · build green · headless (`ui-audit/verify-markup-fixes.mjs`: new-default left/right inset 13.8px vs the old padX:8 box 4.3px).** Repro: a freshly placed Callout / Text box (a text box is a callout with `noLeader:true`) had too little left/right margin — text butted close to the side edges and looked cramped, while the equal top/bottom 8px read fine because the line-height cushions it.
+- **Fix:** in `SitePlanner.jsx` `calloutStyle`, the default **`padX` is now `?? 14`** (was `?? 8`); `padY` stays `?? 8` — horizontal a touch more generous than vertical (the natural label/chip look). padX resolves to screen px at default zoom (`padX * zk`, `zk = ppf/0.35`), so 14 reads as comfortable side breathing room. The per-callout **Padding X / Y** field stays user-editable; this only moves the default, so existing callouts with an explicit padX are untouched.
+- **Doc Review parity:** the shared `MarkupRenderer.jsx` callout used one `pad = 4` for both axes (~6px horizontal inset); split into `padX = 8, padY = 4` so its horizontal inset is likewise the more generous of the two.
 
 ### B565 — Surface the metes-and-bounds plotter as a first-class entry in the Boundary tool group `[Site Planner]` (feature)  *(owner-dropped 2026-06-29 as "NEW-1"; minted **B565** = highest real B# (B564) + 1 — renumbered from a provisional B563 that collided with main’s restore-correctness B563; branch `claude/deed-title-tool-rail-ldvtxe`)*
 `[x]` **DONE + verified. lint 0 · build green · headless (Boundary ▾ → Plot from metes & bounds → modal opens).** Adds a **"Plot from metes & bounds…"** item to the existing **Boundary ▾** `AnchoredMenu` in the right-side Tools rail, between "Draw new parcel" and "Split a parcel". It opens the EXISTING Title-reader / M&B modal (`setTitleOpen(true)`) — no second modal, no second parser, no curve-parsing change. Reuses the whole B564 flow (drop a deed *or* paste a legal description → `parseTracts` → plot in the EPSG:2278 real-feet frame, persisted through the existing save path). "Draw new parcel" (freehand) is kept untouched.
@@ -3502,3 +3514,46 @@ Original spec:
 - on cache-miss fetches the agency once (server-side → no CORS wall), serves it, stores in the background (`Planyr/giscache/` Drive folder, files named by `gisProxyCore.cacheKey`; create-then-delete-dupes),
 - and **FAILS OPEN** (302 → real upstream) on missing Drive creds / agency error / any unexpected error, so a layer can never break.
 Client (`layers.js`): raster layers route through the proxy by default (`gisProxyEnabled`, kill switch `VITE_GIS_PROXY=0`), with a **one-shot fall back to the direct agency URL** on `requesterror` so layers render even where the function isn't deployed (e.g. vite preview) — caching is a pure enhancement. Age badge: on `load`, `reportCacheAge` reads the proxy export URL + calls the `?meta=1` sidecar → existing onStatus `{ts,stale}` channel (the panel already renders "as of Xm ago"). `layerRequest.js` gained an opt-in `{proxy}` transport swap (still passes the full pinned sublayer set — the coverage hard-rule is untouched). `driveClient.findFile` added (one targeted lookup, newest-first). Reuses the live Drive creds (`GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`, server-side only) — no Supabase, no new secret. Tests: `gisProxyCore` 15 + `gisCacheHandler` 12 (in-memory Drive + fake fetch + clock: miss→fetch+serve+store, hit-fresh→no-fetch, hit-stale→serve+bg-refresh, fail-open 302s, meta age, origin/host guards). Full suite 1417 green, lint 0 errors, build green. **Live-verify pending (V129)** — sandbox can't reach planyr.io; on a signed-in browser confirm layers paint from the proxy + survive a simulated agency outage.
+
+---
+
+### B562 — Grid keyboard column nav steps onto hidden columns; cell selection outline disappears `[Schedule]` (bug) — ✅ DONE
+*(owner-reported 2026-06-29; fixed + verified same session)*
+
+**Symptom:** In the Schedule **Grid** view, on a project whose Columns chooser hides columns that sit
+*between* two visible ones (the reporter's layout hides Health/Status/Owner, which live immediately
+left of Cost in the master registry), clicking a Cost cell then pressing **ArrowLeft** made the blue
+cell-selection outline **vanish** for ~3 presses before it reappeared on Successor. Same defect on
+ArrowRight off Successor, on Tab / Shift+Tab, on Shift+Arrow range extension, and on Tab / Shift+Tab
+while editing a cell.
+
+**Root cause (`public/sequence/index.html`):** the cell cursor `selectedColIdx` is an index into the
+**master** column registry `COLS` (16 cols), but the grid renders only the project's **visible** columns
+in display order and draws the outline where `COLS.indexOf(c) === selectedColIdx`. Navigation stepped
+`selectedColIdx` by ±1 through the master registry (clamped only at 0 and the highest visible index),
+so it landed on hidden columns — which have no rendered cell, so no outline. The lower clamp
+`Math.max(0, i-1)` also targeted master index 0 (`id`), itself often hidden.
+
+**Fix:** every column move now walks the **visible columns in display order**, not raw `COLS` ±1.
+- New pure, unit-tested module `src/workspaces/scheduler/lib/gridColNav.js`
+  (`visibleColMasterIdxs` / `snapToVisible` / `stepVisibleColByIdx` / `stepVisibleCol`); the algorithm
+  is mirrored inline in `public/sequence/index.html` (`stepVisibleColIdx` + `visibleColIdxs` /
+  `stepGridCol`) because that standalone Babel page can't import from `src/`.
+- Routed through it: plain Arrow Left/Right, Tab/Shift+Tab, the Shift+Arrow range `c2`, and the three
+  in-cell editing Tab handlers (via a `tabStep` helper + a `colMasterIdxs` prop on `Cell`, replacing the
+  old end-only `maxColIdx`/`colCap` clamp). `lastGridColIdx` removed (superseded).
+- Cursor stays a master index (smallest blast radius — `COLS[selectedColIdx]` reads and the
+  `selectedColIdx === ci` render check keep working unchanged).
+- **Secondary (same root):** a GridView effect snaps `selectedColIdx` to the nearest visible column if
+  its column gets hidden via the Columns chooser (or the initial `id` column is hidden), so the outline
+  never silently vanishes on a layout change.
+- Also fixed the horizontal scroll-into-view calc, which summed *hidden* columns' widths (`COLS.slice`)
+  and could scroll to the wrong place — now measured from the rendered display order (`colOrder`).
+
+**Reference already correct:** the Dashboard table (`MasterView.handleTableKey`) indexes into
+`activeCols` directly (visible-column space) — the grid now matches that model.
+
+**Verified:** `test/gridColNav.test.js` (20 unit tests); full suite **1813** green; lint 0 errors;
+build green; headless `ui-audit/verify-grid-hidden-col-nav.mjs` **12/12** (seeds the hidden
+Health/Status/Owner layout, asserts ArrowLeft from Cost keeps the outline and lands on Successor, plus
+clamps, plain Tab, and in-cell Shift+Tab). → V173.
