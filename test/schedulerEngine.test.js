@@ -308,7 +308,7 @@ describe("B550 — a parentId cycle in loaded data can't hang the scheduler", ()
   });
 });
 
-describe("B564: renumberTasks resolves a duplicate id to the FIRST occurrence (original wins)", () => {
+describe("B567: renumberTasks resolves a duplicate id to the FIRST occurrence (original wins)", () => {
   it("a predecessor pointing at a duplicated id remaps to the first occurrence, not the last", () => {
     // Corrupt/legacy input: id=100 appears twice (the app once minted dup ids before addTask used
     // maxId+1). A third task depends on id=100. The original (first in visual order) is the true target.
@@ -338,7 +338,7 @@ describe("B564: renumberTasks resolves a duplicate id to the FIRST occurrence (o
 
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
-  it("B564: renumberTasks first-occurrence guard exists in BOTH source and the engine mirror", () => {
+  it("B567: renumberTasks first-occurrence guard exists in BOTH source and the engine mirror", () => {
     const mirror = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
     expect(src).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
     expect(mirror).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);

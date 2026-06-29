@@ -1062,7 +1062,7 @@ const SEED = {
 // Renumber all tasks by array position (1-based) and fix all ID references
 const renumberTasks = (tasks) => {
   const map = {};
-  // B564: first-occurrence wins. If corrupt/legacy data carries DUPLICATE task ids (the app once
+  // B567: first-occurrence wins. If corrupt/legacy data carries DUPLICATE task ids (the app once
   // minted dupes before addTask switched to maxId+1, and normalizeIds does NOT dedup before this
   // remap), the LAST occurrence used to overwrite the map — so a parent/predecessor reference to a
   // duplicated id resolved to the stray copy lower in visual order instead of the original task,
@@ -4553,6 +4553,11 @@ function App() {
       reviewCount: reviewRows.length,
       reviewOpen: !!reviewOpen,
       saveStatus, savePulse: !!savePulse, fileLinked: !!fileLinked,
+      // B566 — bridge the offline/cloud-unreachable condition up too, so the unified header
+      // cloud badge can show the honest amber "offline" state instead of a false-green "synced":
+      // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
+      // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
+      offlineFallback: !!offlineFallback,
       activePanel: settingsOpen ? "settings" : automationOpen ? "automation"
         : contactsOpen ? "contacts" : formatOpen ? "format" : historyOpen ? "history" : null,
     };
@@ -4563,7 +4568,7 @@ function App() {
       window.parent.postMessage({ source: "planar-seq", type: "planar:toolbar-state", ...state }, window.location.origin);
     } catch (_) {}
   }, [inShell, data, isMobile, ganttPPD, reviewRows, reviewOpen, saveStatus, savePulse, fileLinked,
-      settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
+      offlineFallback, settingsOpen, automationOpen, contactsOpen, formatOpen, historyOpen]);
 
   useEffect(() => {
     if (!inShell) return;
@@ -5122,7 +5127,7 @@ function App() {
         </div>
       </div>
 
-      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} />}
+      {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} />}
       {formatOpen      && <FormatPanel      data={data} setData={setData} onClose={()=>setFormatOpen(false)} />}
       {automationOpen  && <AutomationPanel  data={data} setData={setData} onClose={()=>setAutomationOpen(false)} />}
       {contactsOpen    && <ContactsPanel    data={data} setData={setData} onClose={()=>setContactsOpen(false)} />}
@@ -7646,7 +7651,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
 }
 
 // ── SettingsPanel ────────────────────────────────────────
-function SettingsPanel({data, setData, onClose}) {
+function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
   const s = data.settings || DEFAULT_SETTINGS;
   const upd = patch => setData(d => ({...d, settings:{...d.settings,...patch}}));
   const updHol = (k, v) => setData(d => {
@@ -7662,7 +7667,7 @@ function SettingsPanel({data, setData, onClose}) {
     return {...d, settings:{...d.settings, holidays}, projects: newProjects};
   });
   const pinCount = Object.values(data.projects || {}).reduce((n, p) => n + (p.tasks || []).filter(t => t.pinnedStart).length, 0);
-  const [open, setOpen] = useState({view: true, holidays: false, cf: false});
+  const [open, setOpen] = useState({view: true, holidays: false, cf: false, backup: false});
   const tog = k => setOpen(p => ({...p, [k]: !p[k]}));
   // Fix #10: close on Escape (consistent with other modals/pickers)
   useEffect(() => {
@@ -7821,6 +7826,34 @@ function SettingsPanel({data, setData, onClose}) {
             </button>
           </div>
         )}
+
+        {/* B566 — "Link a local backup file" moved here from the floppy Save button (the Save
+            control is now the unified cloud sync badge in the shell header). Cloud auto-save is
+            always on; this is the optional second copy, written to a local .html file on disk on
+            every save (Chrome/Edge File System Access API). */}
+        {typeof openFile === "function" && (<>
+          <SectionHdr id="backup" title="Local backup file" />
+          {open.backup && (
+            <div style={{paddingBottom:6}}>
+              <div style={{fontSize:11,color:"var(--mut)",lineHeight:1.5,marginBottom:8}}>
+                Your schedule <strong>auto-saves to the cloud</strong> automatically — this is optional.
+                Link a local <strong>.html</strong> file (Chrome or Edge) to ALSO keep a copy on this
+                computer, re-written on every save.
+              </div>
+              <button className="btn"
+                title={fileLinked ? "A local backup file is linked — click to choose a different file" : "Pick a local .html file to mirror every save into"}
+                style={{display:"flex",alignItems:"center",gap:6,fontSize:11,padding:"4px 11px",
+                  borderColor: fileLinked ? "#86efac" : "var(--bd2)", color: fileLinked ? "#16a34a" : "var(--txt)"}}
+                onClick={()=>{ openFile(); }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                </svg>
+                {fileLinked ? "Backup file linked ✓ — choose another" : "Link a local backup file…"}
+              </button>
+            </div>
+          )}
+        </>)}
       </div>
 
     </div>
