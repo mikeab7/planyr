@@ -108,7 +108,7 @@ describe("overlay scale — import sizing guard (chooseOverlayScale)", () => {
   });
 });
 
-describe("overlay scale — page-distance field parser (B568–B572)", () => {
+describe("overlay scale — page-distance field parser (B574–B578)", () => {
   it("reads plain decimals", () => {
     expect(parseDistanceInput("0.5")).toBeCloseTo(0.5, 9);
     expect(parseDistanceInput(".5")).toBeCloseTo(0.5, 9);
@@ -137,7 +137,7 @@ describe("overlay scale — page-distance field parser (B568–B572)", () => {
   });
 });
 
-describe("overlay scale — page=real pair → feet-per-inch (B568–B572)", () => {
+describe("overlay scale — page=real pair → feet-per-inch (B574–B578)", () => {
   it("0.5\" = 60' resolves to 120 ft/in (the impossible-before case)", () => {
     expect(feetPerInchFromPair({ pageVal: "0.5", pageUnit: "in", realVal: "60", realUnit: "ft" })).toBeCloseTo(120, 9);
     expect(feetPerInchFromPair({ pageVal: "1/2", pageUnit: "in", realVal: "60", realUnit: "ft" })).toBeCloseTo(120, 9);
@@ -160,7 +160,7 @@ describe("overlay scale — page=real pair → feet-per-inch (B568–B572)", () 
   });
 });
 
-describe("overlay scale — presets (B568–B572)", () => {
+describe("overlay scale — presets (B574–B578)", () => {
   it("every preset derives a positive feet-per-inch", () => {
     for (const p of SCALE_PRESETS) expect(feetPerInchForPreset(p)).toBeGreaterThan(0);
   });
