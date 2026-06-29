@@ -798,3 +798,18 @@ Harness `ui-audit/verify-scheduler-bugfixes.mjs` (serves `public/`, drives `/seq
 - **Added** 2026-06-23 · **Cadence** once (bug-fix acceptance) · **Last checked** 2026-06-23 ✅ (headless **Chromium**, built app, `vite preview`, logged-out — `ui-audit/verify-b149-sidewalk-lod.mjs`, **12/12 checks, 0 page errors**) · **Next check** — none (pure Site-Planner canvas LOD behaviour; no auth/cloud path, so logged-out coverage is fully representative).
 - **✅ Self-verified 2026-06-23 (the exact owner repro + the self-tuning reveal, asserted on the rendered SVG):** seeded a 600×400 building + a 5′ sidewalk + a 25′ landscape buffer + a 37′ paving pad. At **zoom-to-fit / site-overview** (ppf ≈ 0.47, a 5′ strip ≈ 2.3 px) the **"5′ Sidewalk"** + **"25′ Landscape"** width labels and the **"37′"** paving width dimension are **ABSENT**, while **"Building 1" + "240,000 sf"** PERSIST (overview tier untouched). Zooming in, each detail label reveals only once the feature it measures projects to ≥ `DETAIL_LABEL_MIN_PX` (30 px) — **self-tuning**: paving (37′) at ppf 0.92, landscape (25′) at 1.45, sidewalk (5′) at ~6 (with headroom below the planner's ppf-8 zoom cap). The building name/SF is present at **every** zoom step. Each step's presence is predicted from the measured ppf via the exact rule and compared to the DOM (near-threshold steps skipped for measurement slop).
 - **Why fully done logged-out:** the change is purely client-side SVG label visibility gated by `view.ppf` (`lib/labelLayout.js` `detailLabelVisible` + the `SitePlanner.jsx` sidewalk/landscape label skip + the `renderElPx` paving/road dim tier) — auth-independent. Also locked by unit tests (`test/labelLayout.test.js` — `detailLabelVisible`, threshold-agnostic) and the full suite (1286 green).
+
+---
+
+### V173 — Schedule grid keyboard column nav skips hidden columns (B562) — ✅ PASS (headless, 2026-06-29)
+**What:** Regression guard for the cell-selection outline vanishing when arrow/Tab nav stepped onto
+hidden columns. **Harness:** `ui-audit/verify-grid-hidden-col-nav.mjs` — serves `public/`, seeds a
+`colConfig` hiding Health/Status/Owner on the active project (the reporter's layout), drives the real
+keyboard.
+**Result:** **12/12** — board boots; only the 9 visible columns render; ArrowLeft from Cost keeps the
+outline and lands on Successor (the reported bug); continued Arrow Left/Right cross the hidden gap and
+clamp at the visible edges; plain Tab from Successor → Cost; in-cell Shift+Tab out of the Cost editor →
+Successor. **Logged-out / seeded data** — grid nav is not auth-gated, so nothing signed-in is pending.
+**Run:** `SEQ_VENDOR=<dir with react/react-dom/babel/supabase .js> node ui-audit/verify-grid-hidden-col-nav.mjs`
+— headless Chromium can't reach the React/Babel CDNs in the sandbox (node can), so pre-download the four
+libs and point `SEQ_VENDOR` at them. Nothing pending.
