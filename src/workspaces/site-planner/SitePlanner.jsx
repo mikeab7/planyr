@@ -846,14 +846,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [exportingPDF, setExportingPDF] = useState(false);  // NEW-1: PDF is being composed/rasterized (drives the "Preparing PDF…" indicator)
   const [printOptsOpen, setPrintOptsOpen] = useState(false); // print options flyout (B199): global rules + per-building overrides
   const printOptAnchor = useRef(null);
-  const [siteMenu, setSiteMenu] = useState(false);       // header Site ▾ dropdown open
   const [planMenu, setPlanMenu] = useState(false);       // header Plan ▾ dropdown open
   const [planDelArm, setPlanDelArm] = useState(null);    // B264: plan id whose inline "Delete?" confirm is showing
   // anchor refs for the portal-rendered dropdowns (B127) — each points at the menu's
   // trigger so AnchoredMenu can position the flyout against it (see AnchoredMenu.jsx).
   const boundaryAnchor = useRef(null), buildingAnchor = useRef(null), parkingAnchor = useRef(null),
     roadAnchor = useRef(null), measureAnchor = useRef(null), easeAnchor = useRef(null), easeTypeAnchor = useRef(null),
-    siteAnchor = useRef(null), planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
+    planAnchor = useRef(null), exportAnchor = useRef(null), addParcelAnchor = useRef(null);
   const [versionsOpen, setVersionsOpen] = useState(false); // version-history (automatic backups) dialog
   const [versionList, setVersionList] = useState([]);    // [{at, buildings, sig}] snapshots for this plan
   const [leftPanel, setLeftPanel] = useState(null);      // which left-rail menu is open: props|parcel|yield|aerial|standards|null
@@ -4917,7 +4916,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     flashWarn("You're now editing here — pulled in the latest and your changes are saving to the cloud.", 7000);
   };
-  const closeHdrMenus = () => { setSiteMenu(false); setPlanMenu(false); setPlanDelArm(null); };
+  const closeHdrMenus = () => { setPlanMenu(false); setPlanDelArm(null); };
   // B473 — explicit, VERIFIED "Save now": write the live canvas to the device, READ IT BACK to prove it
   // persisted, push to the cloud, and show a provable "Saved ✓ N items · time" (or a loud failure).
   // Gives the owner a guaranteed save + proof rather than trusting a silent autosave.
@@ -6314,48 +6313,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
     return out;
   })();
-  // One representative per site (location), current site first, for the Site ▾ menu.
-  const siteReps = (() => {
-    const seen = new Set(), out = [];
-    (sites || []).forEach((s) => { const g = planGroup(s); if (!seen.has(g)) { seen.add(g); out.push(s); } });
-    return out.sort((a, b) => (planGroup(a) === groupId ? -1 : planGroup(b) === groupId ? 1 : 0));
-  })();
-
   // ── AppHeader slot content ───────────────────────────────────────────────────
-  const plannerCenterContent = (
-    <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      {/* The "‹ Map" back button was removed (B205): the Row-1 breadcrumb's "Map" crumb
-          (homeLabel="Map" → onBackToMap) now does the same job, so this was a second "Map". */}
-      <div ref={siteAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(12.5, PAL.chromeInk, 600)} onClick={() => { setSiteMenu((o) => !o); setPlanMenu(false); }} title="Switch or rename site">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{siteLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
-        <AnchoredMenu open={siteMenu} onClose={() => setSiteMenu(false)} anchorRef={siteAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Site name</div>
-          <input value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} onBlur={(e) => commitSiteLabel(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} />
-          <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, margin: "11px 0 5px" }}>Switch site</div>
-          {siteReps.map((s) => {
-            const cur = planGroup(s) === groupId;
-            return (
-              <button key={s.id} style={menuItem(cur)} onClick={() => (cur ? setSiteMenu(false) : handleOpenSite(s.id))}>
-                <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.site || s.name || "Untitled site"}</span>
-                  {cur && <span style={{ color: PAL.accentText, fontSize: 10.5, fontWeight: 700, flex: "none" }}>current</span>}
-                </span>
-              </button>
-            );
-          })}
-          <div style={{ marginTop: 9, borderTop: `1px solid ${PAL.panelLine}`, paddingTop: 9 }}>
-            <button style={{ ...chip, width: "100%" }} onClick={handleNewSite}>＋ New blank site</button>
-          </div>
-        </AnchoredMenu>
-      </div>
-      <span style={{ color: PAL.chromeMuted, fontSize: 13 }}>›</span>
-      <div ref={planAnchor} style={{ position: "relative" }}>
-        <button className="dbtn" style={hdrTab(11.5, PAL.chromeMuted, 500)} onClick={() => { setPlanMenu((o) => !o); setSiteMenu(false); }} title="Switch or rename plan">
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
-        </button>
+  // The project name now lives in exactly ONE place — the Row-1 breadcrumb
+  // (Map / 🔒 <Site> ▾). The old standalone center "Site ▾ › Plan ▾" group duplicated
+  // that project name, so the Site switcher was removed; only this PLAN switcher
+  // remains, handed to the breadcrumb as a trailing crumb (planSlot) so the header reads
+  // Map / 🔒 <Site> ▾ / <Plan> ▾ — project, then its plan right beside it.
+  const plannerPlanCrumb = (
+    <div ref={planAnchor} style={{ position: "relative", flex: "none" }}>
+      {/* Styled to match the breadcrumb crumbs (height/padding/radius) so the three
+          segments share one hit-target geometry; hierarchy is by weight, not by fading. */}
+      <button
+        className="dbtn"
+        style={{
+          display: "flex", alignItems: "center", gap: 5, flex: "none",
+          height: 24, padding: "0 8px", borderRadius: 6, border: "none",
+          background: "transparent", cursor: "pointer", fontFamily: "inherit",
+          fontSize: 12.5, fontWeight: 500, color: "var(--chrome-text)",
+          maxWidth: 200, whiteSpace: "nowrap",
+        }}
+        onClick={() => setPlanMenu((o) => !o)}
+        title="Switch or rename plan"
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{planLabel}</span><span style={{ opacity: 0.6, fontSize: 11, flex: "none" }}>▾</span>
+      </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
           <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
@@ -6400,8 +6381,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <span aria-hidden style={{ flex: "none" }}>↺</span><span>Version history…</span>
           </button>
         </AnchoredMenu>
-      </div>
-    </span>
+    </div>
   );
 
   // The Row-1 save indicator is now the shared, app-wide CloudSyncBadge (NEW-1) — a
@@ -6471,6 +6451,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const target = (sites || []).find((s) => planGroup(s) === gid); // sites is newest-first
     if (target) handleOpenSite(target.id);
   };
+  // The breadcrumb is now the ONLY project control (the center "Site ▾" was removed), so its
+  // rename has to do everything the old inline Site-name editor did. For the CURRENT project
+  // route through commitSiteLabel so the Row-1 header label updates live; any other project
+  // renames its site group directly. Both ultimately call renameSiteGroup. (header consolidation)
+  const renameProjectFromHeader = (id, name) => {
+    if (id === groupId) commitSiteLabel(name);
+    else onRenameSite?.(id, name);
+  };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {
     const cloudActive = isCloudActive();
@@ -6498,12 +6486,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}
+        onRenameProject={renameProjectFromHeader}
         saveState={headerSaveState}
         // Conflict needs a reload, not a blind retry — so only offer "Retry now" for a plain
         // failed write; the conflict case gets its own explanation (the loud banner handles reload).
         onRetrySave={cloudConflict ? undefined : retryCloudSave}
         saveDetail={cloudConflict ? "This project was changed in another session. Reload to merge in the latest before saving — your edit is safe on this device." : undefined}
-        centerContent={plannerCenterContent}
+        centerContent={null}
+        planSlot={plannerPlanCrumb}
         authControl={authControl}
         accountActive={accountActive}
         toolbarContent={plannerToolbar}
