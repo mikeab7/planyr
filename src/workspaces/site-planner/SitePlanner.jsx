@@ -1119,6 +1119,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [deedName, setDeedName] = useState("");      // last-read deed file name
   const [deedDrag, setDeedDrag] = useState(false);   // drop-zone hover state
   const deedFileRef = useRef(null);
+  const deedReqRef = useRef(0);                       // in-flight read token (ignore a stale read)
   const [overlapWarn, setOverlapWarn] = useState(""); // transient warning after a plot
   // Single-owner warning toast (B56b): every non-empty warning goes through flashWarn,
   // which cancels any pending auto-clear first — so a stale timer from an earlier message
@@ -6019,16 +6020,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to give an immediate honest read-out (calls found, or why not).
   const readDeed = async (file) => {
     if (!file) return;
+    const myReq = ++deedReqRef.current; // a newer drop supersedes a slow in-flight read
     setDeedErr(""); setDeedBusy(true); setDeedName(file.name || "");
     try {
       const text = await readDeedFile(file);
+      if (deedReqRef.current !== myReq) return;
       setMbText(text);
       const found = parseTracts(text).reduce((s, t) => s + t.calls.length, 0);
       if (!found) setDeedErr("Read the file, but found no bearing/distance calls — is this a metes-and-bounds legal description?");
     } catch (e) {
+      if (deedReqRef.current !== myReq) return;
       setDeedErr((e && e.message) || "Couldn't read that file.");
     } finally {
-      setDeedBusy(false);
+      if (deedReqRef.current === myReq) setDeedBusy(false);
     }
   };
 
@@ -6084,6 +6088,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
     const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary" });
@@ -7750,6 +7755,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
+              {/* B563 — a front door to the existing metes-and-bounds plotter from the
+                  Boundary group (complements the row-1 "Deed / Title…" launcher, B543).
+                  Reuses the same modal/parser — no second copy. */}
+              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / paste a legal description to plot a boundary from its bearings & distances"
+                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>Plot from metes &amp; bounds…</button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
               <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
@@ -7766,7 +7776,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
             data-testid="tool-deed"
             title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
-            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setTitleOpen(true); }}>
+            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
             <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
             <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
           </button>

@@ -24,17 +24,23 @@ function findEOCD(dv) {
   const len = dv.byteLength;
   const min = Math.max(0, len - 22 - 0xffff);
   for (let i = len - 22; i >= min; i--) {
-    if (u32(dv, i) === EOCD_SIG) return i;
+    // A bare signature can also appear inside the comment/stored data — accept it
+    // only when the comment-length field is consistent with the file end.
+    if (u32(dv, i) === EOCD_SIG && i + 22 + u16(dv, i + 20) === len) return i;
   }
   return -1;
 }
 
 // Inflate raw DEFLATE bytes via the native stream API → Uint8Array.
 async function inflateRaw(bytes) {
-  const ds = new DecompressionStream("deflate-raw");
-  const stream = new Blob([bytes]).stream().pipeThrough(ds);
-  const buf = await new Response(stream).arrayBuffer();
-  return new Uint8Array(buf);
+  try {
+    const ds = new DecompressionStream("deflate-raw");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    const buf = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buf);
+  } catch {
+    throw new Error("Corrupt .docx (could not inflate word/document.xml).");
+  }
 }
 
 // Pull one named entry's raw bytes out of a ZIP ArrayBuffer (inflating if needed).
@@ -47,6 +53,7 @@ async function readZipEntry(arrayBuffer, wantName) {
   let p = u32(dv, eocd + 16); // central directory offset
   const dec = new TextDecoder("utf-8");
   for (let i = 0; i < count; i++) {
+    if (p + 46 > bytes.length) throw new Error("Corrupt .docx (truncated central directory).");
     if (u32(dv, p) !== CEN_SIG) break;
     const method = u16(dv, p + 10);
     const compSize = u32(dv, p + 20);
@@ -58,10 +65,12 @@ async function readZipEntry(arrayBuffer, wantName) {
     if (name === wantName) {
       // Jump to the local header to find where the data actually starts (its
       // name/extra lengths can differ from the central record's).
+      if (localOff + 30 > bytes.length) throw new Error("Corrupt .docx (bad local header offset).");
       if (u32(dv, localOff) !== LOC_SIG) throw new Error("Corrupt .docx (bad local header).");
       const lNameLen = u16(dv, localOff + 26);
       const lExtraLen = u16(dv, localOff + 28);
       const dataStart = localOff + 30 + lNameLen + lExtraLen;
+      if (dataStart + compSize > bytes.length) throw new Error("Corrupt .docx (truncated entry data).");
       const data = bytes.subarray(dataStart, dataStart + compSize);
       if (method === 0) return data;          // stored
       if (method === 8) return inflateRaw(data); // deflate
@@ -77,7 +86,8 @@ function decodeEntities(s) {
   return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, e) => {
     if (e[0] === "#") {
       const cp = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-      return Number.isFinite(cp) ? String.fromCodePoint(cp) : m;
+      // valid Unicode scalar value only (≤ 0x10FFFF, not a surrogate) — else leave as-is
+      return (cp >= 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff)) ? String.fromCodePoint(cp) : m;
     }
     return Object.prototype.hasOwnProperty.call(ENTITIES, e) ? ENTITIES[e] : m;
   });
@@ -101,7 +111,15 @@ export function documentXmlToText(xml) {
 
 /* Read a .docx (as an ArrayBuffer) into plain text. */
 export async function docxToText(arrayBuffer) {
-  const xmlBytes = await readZipEntry(arrayBuffer, "word/document.xml");
+  let xmlBytes;
+  try {
+    xmlBytes = await readZipEntry(arrayBuffer, "word/document.xml");
+  } catch (e) {
+    // Reframe any low-level ZIP/inflate fault (e.g. a DataView RangeError on a
+    // truncated file) into a friendly message; pass our own .docx errors through.
+    if (/docx|not found|unsupported|zip/i.test((e && e.message) || "")) throw e;
+    throw new Error("Couldn't read that .docx — it may be corrupt or not a Word file.");
+  }
   const xml = new TextDecoder("utf-8").decode(xmlBytes);
   return documentXmlToText(xml);
 }

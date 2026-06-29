@@ -66,6 +66,39 @@ describe("metes-and-bounds parser — real-deed forms", () => {
   });
 });
 
+/* Hardening from the adversarial review — the latent edge cases that didn't show
+ * up on the 5 clean sample deeds but would bite a messier one. */
+describe("metes-and-bounds parser — review hardening", () => {
+  it("a monument tie that ENDS in 'to' does not beat the real leg length", () => {
+    const c = parseCalls("THENCE North 0 East, a distance of 250.00 feet to a corner, from which a found rod bears North 45 East, 12.00 feet to a pipe;");
+    expect(c).toHaveLength(1);
+    expect(c[0].distFt).toBeCloseTo(250, 2); // not the tie's 12.00
+  });
+  it("rejects a bearing with minutes or seconds ≥ 60 as malformed", () => {
+    expect(parseCalls("N 45°99'00\" E 100 ft")).toHaveLength(0);
+    expect(parseCalls("N 45°00'75\" E 100 ft")).toHaveLength(0);
+  });
+  it("does NOT split on an upper-case 'SAVE AND EXCEPT' used in prose (no new traverse follows)", () => {
+    const text = "BEGINNING at a point;\nTHENCE North 0 East, 100 feet;\nSAVE AND EXCEPT all oil, gas and minerals therein;\nTHENCE South 0 West, 100 feet to the POINT OF BEGINNING.";
+    const t = parseTracts(text);
+    expect(t).toHaveLength(1);
+    expect(t[0].calls).toHaveLength(2);
+  });
+  it("reads a curve whose chord clause says 'which bears'", () => {
+    const c = parseCalls("THENCE along a curve to the left having a radius of 100.00 feet, a long chord which bears South 18°17'04\" East, 23.39 feet to a point;");
+    expect(c).toHaveLength(1);
+    expect(c[0].curve).toBe(true);
+    expect(c[0].bearing).toBe("S18°17'04\"E");
+    expect(c[0].distFt).toBeCloseTo(23.39, 2);
+  });
+  it("a real misclosure on a big tract reads as NOT closed (old 2% rule masked it)", () => {
+    // ~3960 ft of run, 40-ft gap (~1%): old tol (2% ≈ 79 ft) would falsely 'close'
+    // it; new tol (0.5% ≈ 20 ft, cap 50) correctly reports it open.
+    const calls = parseCalls("THENCE North 0 East 1000 ft; THENCE South 90 East 1000 ft; THENCE South 0 West 1000 ft; THENCE North 90 West 960 ft;");
+    expect(pathCloses(callsToPath(calls, { x: 0, y: 0 }))).toBe(false);
+  });
+});
+
 /* Full real-survey corpus, verified course-for-course against an independent
  * ground-truth transcription (the parser must keep reading every one). */
 const ORACLE = {

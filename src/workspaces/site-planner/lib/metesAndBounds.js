@@ -47,6 +47,7 @@ const DIST_SRC = "([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*(feet|foot|ft\\.?|'|varas?|vrs
 // Quadrant bearing → azimuth (deg clockwise from north). null if degrees > 90
 // (a quadrant bearing can't exceed 90° — a bogus "N 145 E" is rejected, B26).
 function bearingToAz(q1, dd, mm, ss, q2) {
+  if ((mm && +mm >= 60) || (ss && +ss >= 60)) return null; // malformed DMS (minutes/seconds must be < 60)
   const deg = (+dd) + (mm ? +mm / 60 : 0) + (ss ? +ss / 3600 : 0);
   if (deg > 90) return null;
   const A = q1[0].toUpperCase(), B = q2[0].toUpperCase();
@@ -89,7 +90,10 @@ function governingDist(after) {
     const tie = /\bbears?\b/.test(pre);
     const legEnd = /^[\s,;]*to\b/.test(post);
     const distOf = /distance\s+of\s*$/.test(pre.replace(/\s+/g, " "));
-    if (legEnd || distOf) leg = v;        // last leg-end / "distance of" wins
+    // last leg-end / "distance of" wins — but a "passing at X" waypoint or a
+    // monument tie ("…bears …, X feet to a found rod") can also be followed by
+    // "to", so the leg-end rule must exclude those too (not just the fallback).
+    if ((legEnd && !passing && !tie) || distOf) leg = v;
     if (!passing && !tie) fallback = v;   // else the last plain distance
   }
   return leg != null ? leg : fallback;
@@ -124,20 +128,30 @@ function parseStraightCourse(clean) {
 
 // A curve course: use the long-chord bearing + chord distance as the straight
 // approximation, and keep radius / central angle / arc length / turn alongside.
-const CHORD_RE = new RegExp("chord\\s+(?:bearing|bears?|of)?\\s*" + BEARING_SRC + "\\s*[, ]\\s*" + DIST_SRC, "i");
+// Allow a few filler words between "chord" and the bearing — "long chord bearing
+// N…", "chord which bears N…", "chord of said curve bears N…", "chord bearing of N…".
+const CHORD_RE = new RegExp("chord\\s+(?:\\w+\\s+){0,3}?(?:bearing|bears?|of)?\\s*" + BEARING_SRC + "\\s*[, ]\\s*" + DIST_SRC, "i");
+const curveMetaOf = (clean) => ({
+  radiusFt: numAfter(clean, /radius\s+of\s+/i),
+  arcFt: numAfter(clean, /arc\s+(?:length|distance)\s+of\s+/i),
+  centralAngleDeg: dmsAfter(clean, /(?:central\s+angle|delta)\s*(?:of\s+)?/i),
+  turn: /curve\s+to\s+the\s+right/i.test(clean) ? "R" : /curve\s+to\s+the\s+left/i.test(clean) ? "L" : "",
+});
 function parseCurveCourse(clean) {
+  const meta = curveMetaOf(clean);
   const c = CHORD_RE.exec(clean);
-  if (!c) return parseStraightCourse(clean); // a curve with no readable chord → best-effort straight
-  const ba = bearingToAz(c[1], c[2], c[3], c[4], c[5]);
-  const distFt = distVal(c[6], c[7]);
-  if (!ba || distFt == null) return null;
-  const curveMeta = {
-    radiusFt: numAfter(clean, /radius\s+of\s+/i),
-    arcFt: numAfter(clean, /arc\s+(?:length|distance)\s+of\s+/i),
-    centralAngleDeg: dmsAfter(clean, /(?:central\s+angle|delta)\s*(?:of\s+)?/i),
-    turn: /curve\s+to\s+the\s+right/i.test(clean) ? "R" : /curve\s+to\s+the\s+left/i.test(clean) ? "L" : "",
-  };
-  return mkCall({ A: ba.A, B: ba.B, dd: c[2], mm: c[3], ss: c[4], deg: ba.deg, az: ba.az, distFt, curve: true, curveMeta, raw: clean });
+  if (c) {
+    const ba = bearingToAz(c[1], c[2], c[3], c[4], c[5]);
+    const distFt = distVal(c[6], c[7]);
+    if (ba && distFt != null) {
+      return mkCall({ A: ba.A, B: ba.B, dd: c[2], mm: c[3], ss: c[4], deg: ba.deg, az: ba.az, distFt, curve: true, curveMeta: meta, raw: clean });
+    }
+  }
+  // No readable chord clause — fall back to the first bearing + governing distance,
+  // but still FLAG it a curve (and keep the arc meta) so the UI warns to verify.
+  const s = parseStraightCourse(clean);
+  if (s) { s.curve = true; s.curveMeta = meta; }
+  return s;
 }
 
 const isCurveCourse = (clean) => /\bradius\s+of\s+[0-9]/i.test(clean) || /\balong\s+the\s+arc\b/i.test(clean);
@@ -171,23 +185,43 @@ function coursesOf(text) {
 export function parseTracts(text) {
   if (!text) return [];
   const norm = normalize(text);
-  // Split only on a real tract header — an uppercase "SAVE AND EXCEPT" at line
-  // start — never the lower-case "save and except" inside a prose sentence.
-  const pieces = norm.split(/(?:\r?\n)[ \t]*SAVE\s+(?:AND|&)\s+EXCEPT\b/);
+  // Cut at a REAL "SAVE AND EXCEPT" tract header only — an uppercase phrase at a
+  // line start that is actually followed by a new tract (a COMMENCING/BEGINNING
+  // course within the next breath). This rejects both lower-case prose
+  // ("…save and except a 12.584 acre tract…") and an upper-case phrase used in
+  // prose with no tract after it (which would otherwise steal the boundary's
+  // remaining legs into a phantom exception).
+  const HDR = /(?:\r?\n)[ \t]*SAVE\s+(?:AND|&)\s+EXCEPT\b/g;
+  const cand = [];
+  let hm;
+  while ((hm = HDR.exec(norm))) cand.push(hm.index);
+  // A candidate is a REAL exception header iff its segment (to the next candidate
+  // or the end) actually starts a new traverse — a "COMMENCING" or "BEGINNING at"
+  // — not merely the phrase used in prose ("…BEGINNING," / "POINT OF BEGINNING"
+  // closings don't count), which would otherwise steal the boundary's own legs.
+  const cuts = [0];
+  for (let k = 0; k < cand.length; k++) {
+    const segEnd = k + 1 < cand.length ? cand[k + 1] : norm.length;
+    if (/\bCOMMENCING\b|\bBEGINNING\s+at\b/i.test(norm.slice(cand[k], segEnd))) cuts.push(cand[k]);
+  }
+  cuts.push(norm.length);
   const tracts = [];
-  pieces.forEach((piece, i) => {
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const piece = norm.slice(cuts[i], cuts[i + 1]);
     let body = piece, tie = [];
     if (/\bCOMMENCING\b/i.test(piece)) {
       const pobIdx = piece.search(/POINT\s+OF\s+BEGINNING/i);
       if (pobIdx >= 0) { tie = coursesOf(piece.slice(0, pobIdx)); body = piece.slice(pobIdx); }
     }
     const calls = coursesOf(body);
-    if (!calls.length) return;
+    if (!calls.length) continue;
+    // Label from a real heading ("Tract 1 – 94.91 Acres") or the stated acreage —
+    // never a stray "tract 6 & 7" from body prose.
+    const hdr = piece.match(/(?:^|\n)[ \t]*(Tract\s+\d[^\n]*?(?:[–-]|Acre)[^\n]{0,30})/i);
     const acre = piece.match(/([0-9]+(?:\.[0-9]+)?)\s*acre/i);
-    const label = (piece.match(/Tract\s+\d[^\n]{0,40}/i) || [])[0]?.trim()
-      || (acre ? `${acre[1]} acres` : (i === 0 ? "Boundary" : `Exception ${i}`));
+    const label = (hdr ? hdr[1].trim() : null) || (acre ? `${acre[1]} acres` : (i === 0 ? "Boundary" : `Exception ${i}`));
     tracts.push({ role: i === 0 ? "boundary" : "except", label, calls, tie });
-  });
+  }
   return tracts;
 }
 
@@ -219,7 +253,7 @@ export function pathCloses(pts, tol) {
   if (pts.length < 4) return false;
   let perim = 0;
   for (let i = 1; i < pts.length; i++) perim += dist2(pts[i - 1], pts[i]);
-  const t = tol ?? Math.max(5, perim * 0.02); // honest closure: drop the 25-ft absolute floor that let a small lot "close" with 25 ft of misclosure (B26)
+  const t = tol ?? Math.min(Math.max(5, perim * 0.005), 50); // ≤0.5% of run, capped at 50 ft — keeps the 5-ft floor for small lots (B26) but stays honest on a big rural tract (2% of a 10k-ft perimeter was ~200 ft, masking real misclosure)
   return dist2(pts[0], pts[pts.length - 1]) <= t;
 }
 
