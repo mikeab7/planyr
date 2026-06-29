@@ -3494,3 +3494,46 @@ Original spec:
 - on cache-miss fetches the agency once (server-side → no CORS wall), serves it, stores in the background (`Planyr/giscache/` Drive folder, files named by `gisProxyCore.cacheKey`; create-then-delete-dupes),
 - and **FAILS OPEN** (302 → real upstream) on missing Drive creds / agency error / any unexpected error, so a layer can never break.
 Client (`layers.js`): raster layers route through the proxy by default (`gisProxyEnabled`, kill switch `VITE_GIS_PROXY=0`), with a **one-shot fall back to the direct agency URL** on `requesterror` so layers render even where the function isn't deployed (e.g. vite preview) — caching is a pure enhancement. Age badge: on `load`, `reportCacheAge` reads the proxy export URL + calls the `?meta=1` sidecar → existing onStatus `{ts,stale}` channel (the panel already renders "as of Xm ago"). `layerRequest.js` gained an opt-in `{proxy}` transport swap (still passes the full pinned sublayer set — the coverage hard-rule is untouched). `driveClient.findFile` added (one targeted lookup, newest-first). Reuses the live Drive creds (`GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN`, server-side only) — no Supabase, no new secret. Tests: `gisProxyCore` 15 + `gisCacheHandler` 12 (in-memory Drive + fake fetch + clock: miss→fetch+serve+store, hit-fresh→no-fetch, hit-stale→serve+bg-refresh, fail-open 302s, meta age, origin/host guards). Full suite 1417 green, lint 0 errors, build green. **Live-verify pending (V129)** — sandbox can't reach planyr.io; on a signed-in browser confirm layers paint from the proxy + survive a simulated agency outage.
+
+---
+
+### B562 — Grid keyboard column nav steps onto hidden columns; cell selection outline disappears `[Schedule]` (bug) — ✅ DONE
+*(owner-reported 2026-06-29; fixed + verified same session)*
+
+**Symptom:** In the Schedule **Grid** view, on a project whose Columns chooser hides columns that sit
+*between* two visible ones (the reporter's layout hides Health/Status/Owner, which live immediately
+left of Cost in the master registry), clicking a Cost cell then pressing **ArrowLeft** made the blue
+cell-selection outline **vanish** for ~3 presses before it reappeared on Successor. Same defect on
+ArrowRight off Successor, on Tab / Shift+Tab, on Shift+Arrow range extension, and on Tab / Shift+Tab
+while editing a cell.
+
+**Root cause (`public/sequence/index.html`):** the cell cursor `selectedColIdx` is an index into the
+**master** column registry `COLS` (16 cols), but the grid renders only the project's **visible** columns
+in display order and draws the outline where `COLS.indexOf(c) === selectedColIdx`. Navigation stepped
+`selectedColIdx` by ±1 through the master registry (clamped only at 0 and the highest visible index),
+so it landed on hidden columns — which have no rendered cell, so no outline. The lower clamp
+`Math.max(0, i-1)` also targeted master index 0 (`id`), itself often hidden.
+
+**Fix:** every column move now walks the **visible columns in display order**, not raw `COLS` ±1.
+- New pure, unit-tested module `src/workspaces/scheduler/lib/gridColNav.js`
+  (`visibleColMasterIdxs` / `snapToVisible` / `stepVisibleColByIdx` / `stepVisibleCol`); the algorithm
+  is mirrored inline in `public/sequence/index.html` (`stepVisibleColIdx` + `visibleColIdxs` /
+  `stepGridCol`) because that standalone Babel page can't import from `src/`.
+- Routed through it: plain Arrow Left/Right, Tab/Shift+Tab, the Shift+Arrow range `c2`, and the three
+  in-cell editing Tab handlers (via a `tabStep` helper + a `colMasterIdxs` prop on `Cell`, replacing the
+  old end-only `maxColIdx`/`colCap` clamp). `lastGridColIdx` removed (superseded).
+- Cursor stays a master index (smallest blast radius — `COLS[selectedColIdx]` reads and the
+  `selectedColIdx === ci` render check keep working unchanged).
+- **Secondary (same root):** a GridView effect snaps `selectedColIdx` to the nearest visible column if
+  its column gets hidden via the Columns chooser (or the initial `id` column is hidden), so the outline
+  never silently vanishes on a layout change.
+- Also fixed the horizontal scroll-into-view calc, which summed *hidden* columns' widths (`COLS.slice`)
+  and could scroll to the wrong place — now measured from the rendered display order (`colOrder`).
+
+**Reference already correct:** the Dashboard table (`MasterView.handleTableKey`) indexes into
+`activeCols` directly (visible-column space) — the grid now matches that model.
+
+**Verified:** `test/gridColNav.test.js` (20 unit tests); full suite **1813** green; lint 0 errors;
+build green; headless `ui-audit/verify-grid-hidden-col-nav.mjs` **12/12** (seeds the hidden
+Health/Status/Owner layout, asserts ArrowLeft from Cost keeps the outline and lands on Successor, plus
+clamps, plain Tab, and in-cell Shift+Tab). → V173.

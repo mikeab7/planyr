@@ -1137,6 +1137,24 @@ const COL_LABELS = {id:"ID", name:"Task name", start:"Start", end:"Finish", dura
   budget:"Budget", actualCost:"Actual / Spend"};
 const colLabel = c => COL_LABELS[c.k] || c.l || c.k;
 
+// Keyboard column navigation steps through the VISIBLE columns in DISPLAY ORDER so the
+// cell cursor (a COLS/master index) never lands on a hidden, non-rendered column (which
+// would make the blue selection outline vanish). `visIdxs` = master indices of the visible
+// columns, display order. Mirrors stepVisibleColByIdx in
+// src/workspaces/scheduler/lib/gridColNav.js (unit-tested) — keep the two in sync.
+// NOTE: every caller passes dir = +1 or -1; the off-table snap below collapses dir<=0 into
+// the backward walk. The module's distinct dir===0 closest-by-distance case is NOT needed
+// here — that "selected column got hidden" snap is handled by the GridView effect instead.
+function stepVisibleColIdx(visIdxs, curIdx, dir) {
+  if (!visIdxs || !visIdxs.length) return curIdx;
+  const pos = visIdxs.indexOf(curIdx);
+  if (pos === -1) { // cursor off-table (hidden / initial id column) — snap onto the table toward dir
+    if (dir > 0) { const f = visIdxs.find(i => i > curIdx); return f !== undefined ? f : visIdxs[visIdxs.length - 1]; }
+    let b; visIdxs.forEach(i => { if (i < curIdx) b = i; }); return b !== undefined ? b : visIdxs[0];
+  }
+  return visIdxs[Math.max(0, Math.min(visIdxs.length - 1, pos + (dir > 0 ? 1 : -1)))];
+}
+
 // ── Task-complete celebration ("Ring & Spark" toast) ──────
 // A small toast rises from the bottom-center when a task transitions to
 // Complete: the green dot pops in, the check draws itself, a ring pulses
@@ -2934,14 +2952,22 @@ function App() {
   const [data,       setData]       = useState(null);
   const dataRef = useRef(null);
   useEffect(() => { dataRef.current = data; }, [data]);
-  // B212 — highest COLS index among the active project's VISIBLE columns. Keyboard column
-  // navigation clamps to this so the cursor can't wander into hidden (off-table) columns.
-  const lastGridColIdx = () => {
-    const d = dataRef.current; if (!d) return COLS.length - 1;
-    const vis = readGridCfg(d.projects?.[d.aPid], d).visible;
-    let m = 0; vis.forEach(k => { const i = COLS.findIndex(c => c.k === k); if (i > m) m = i; });
-    return m;
+  // B212 — keyboard column navigation walks the active project's VISIBLE columns in
+  // DISPLAY ORDER so the cell cursor (a COLS/master index) always lands on an on-screen
+  // column and never on a hidden one — a hidden column has no rendered cell, so the blue
+  // selection outline would otherwise vanish until the cursor wandered back into view.
+  // Algorithm is unit-tested in src/workspaces/scheduler/lib/gridColNav.js — keep in sync.
+  const visibleColIdxs = () => {
+    const d = dataRef.current;
+    const vis = readGridCfg(d && d.projects?.[d.aPid], d).visible; // column keys, display order
+    const idxs = [];
+    vis.forEach(k => { const i = COLS.findIndex(c => c.k === k); if (i >= 0) idxs.push(i); });
+    return idxs;
   };
+  // Step the cursor to the adjacent visible column (dir>0 right, dir<0 left), clamped at
+  // the first/last visible column. If the cursor sits off-table (its column was hidden, or
+  // the initial id column is hidden), snap onto the nearest visible column toward `dir`.
+  const stepGridCol = (curIdx, dir) => stepVisibleColIdx(visibleColIdxs(), curIdx, dir);
   const [successorPrompt, setSuccessorPrompt] = useState(null);
   const [notesCtx,   setNotesCtx]   = useState(null);
   const [isMobile,   setIsMobile]   = useState(() => typeof window!=='undefined' && window.innerWidth < 768);
@@ -3434,9 +3460,9 @@ function App() {
       if (e.key === "Tab" && !typing && selectedId !== null) {
         e.preventDefault();
         if (e.shiftKey) {
-          setSelectedColIdx(i => Math.max(0, i - 1));
+          setSelectedColIdx(i => stepGridCol(i, -1));
         } else {
-          setSelectedColIdx(i => Math.min(lastGridColIdx(), i + 1));
+          setSelectedColIdx(i => stepGridCol(i, +1));
         }
         setSelRange(null);
         return;
@@ -3453,8 +3479,8 @@ function App() {
             let {r1, r2, c1, c2} = cur;
             if (e.key === "ArrowDown")  r2 = Math.min(ftasks.length - 1, r2 + 1);
             if (e.key === "ArrowUp")    r2 = Math.max(0, r2 - 1);
-            if (e.key === "ArrowRight") c2 = Math.min(lastGridColIdx(), c2 + 1);
-            if (e.key === "ArrowLeft")  c2 = Math.max(0, c2 - 1);
+            if (e.key === "ArrowRight") c2 = stepGridCol(c2, +1);
+            if (e.key === "ArrowLeft")  c2 = stepGridCol(c2, -1);
             setSelRange({r1, r2, c1, c2});
           }
           return;
@@ -3566,13 +3592,13 @@ function App() {
         }
         if (e.key === "ArrowRight") {
           e.preventDefault();
-          setSelectedColIdx(i => Math.min(lastGridColIdx(), i + 1));
+          setSelectedColIdx(i => stepGridCol(i, +1));
           setSelRange(null);
           return;
         }
         if (e.key === "ArrowLeft") {
           e.preventDefault();
-          setSelectedColIdx(i => Math.max(0, i - 1));
+          setSelectedColIdx(i => stepGridCol(i, -1));
           setSelRange(null);
           return;
         }
@@ -6069,12 +6095,19 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       if (rowTop < visTop)            el.scrollTop = rowTop - TL_H;
       else if (rowBottom > visBottom) el.scrollTop = rowBottom - el.clientHeight;
     }
+    // Horizontal reveal: measure from the columns ACTUALLY rendered (the visible set in
+    // display order) — not COLS.slice, which would sum hidden columns' widths and scroll
+    // to the wrong place when columns are hidden or reordered.
     const cw = colWidthsRef.current || {};
-    const colLeft  = COLS.slice(0, selectedColIdx).reduce((s, c) => s + (cw[c.k] || c.w), 0);
-    const colRight = colLeft + (cw[COLS[selectedColIdx]?.k] || 0);
-    const visLeft  = el.scrollLeft, visRight = el.scrollLeft + el.clientWidth;
-    if (colLeft < visLeft)          el.scrollLeft = colLeft;
-    else if (colRight > visRight)   el.scrollLeft = colRight - el.clientWidth;
+    const selKey = COLS[selectedColIdx]?.k;
+    const dispPos = selKey ? colOrder.indexOf(selKey) : -1;
+    if (dispPos >= 0) {
+      const colLeft  = colOrder.slice(0, dispPos).reduce((s, k) => s + (cw[k] || COL_BY_K[k]?.w || 0), 0);
+      const colRight = colLeft + (cw[selKey] || COL_BY_K[selKey]?.w || 0);
+      const visLeft  = el.scrollLeft, visRight = el.scrollLeft + el.clientWidth;
+      if (colLeft < visLeft)          el.scrollLeft = colLeft;
+      else if (colRight > visRight)   el.scrollLeft = colRight - el.clientWidth;
+    }
   }, [selectedId, selectedColIdx, tasks]);
 
   // While reviewing, scroll the proposed/target row into view whenever the active target changes.
@@ -6196,7 +6229,23 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const orderedCols = colOrder.map(k => COL_BY_K[k]).filter(Boolean);
   const totalW = orderedCols.reduce((s, c) => s + widthOf(c.k), 0);
   const hiddenCols = COLS.filter(c => !colOrder.includes(c.k)); // available-but-not-shown
-  const maxColIdx = orderedCols.reduce((m, c) => Math.max(m, COLS.indexOf(c)), 0); // clamp Tab/arrow nav to visible cols
+  // Master (COLS) indices of the visible columns, in display order — drives in-cell Tab
+  // navigation through the SHOWN columns only (passed to Cell). Replaces the old maxColIdx
+  // clamp, which only bounded the ends and let Tab step onto hidden columns in between.
+  const colMasterIdxs = orderedCols.map(c => COLS.indexOf(c));
+
+  // If the selected column is no longer on screen — hidden via the Columns chooser, or the
+  // initial id column hidden in this layout — snap the cursor to the nearest visible column
+  // so the blue selection outline never silently disappears on a layout change.
+  useEffect(() => {
+    if (selectedId === null || !colMasterIdxs.length) return;
+    if (colMasterIdxs.includes(selectedColIdx)) return; // still visible — nothing to do
+    const target = colMasterIdxs.reduce(
+      (best, i) => (Math.abs(i - selectedColIdx) < Math.abs(best - selectedColIdx) ? i : best),
+      colMasterIdxs[0]);
+    if (target !== selectedColIdx) setSelectedColIdx(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colOrder, selectedColIdx, selectedId]);
 
   const [dragColKey, setDragColKey] = useState(null);
   const [dragOverKey, setDragOverKey] = useState(null);
@@ -6485,7 +6534,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                       const isPicker = c.k === "health" || c.k === "status";
                       if (c.e && c.t !== "notes" && !isPicker && !isParentDateLocked) setEdit({taskId: task.id, col: c.k});
                     }}>
-                    <Cell task={task} col={{...c, w:colWidths[c.k]}} maxColIdx={maxColIdx} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance}
+                    <Cell task={task} col={{...c, w:colWidths[c.k]}} colMasterIdxs={colMasterIdxs} edit={edit} setEdit={setEdit} commit={commit} commitAndAdvance={commitAndAdvance}
                       proj={proj} succMap={succMap} getTaskName={getTaskName}
                       setNotesCtx={setNotesCtx} projId={proj?.id} updateTask={updateTask}
                       editStartChar={edit?.taskId===task.id && edit?.col===c.k ? editStartChar : null}
@@ -6815,8 +6864,10 @@ function DepCell({items, renderLabel, renderName, s}) {
 }
 
 // ── Cell ─────────────────────────────────────────────────
-function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact}) {
-  const colCap = maxColIdx ?? (COLS.length - 1);   // B212 — Tab advances only through visible columns
+function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance, proj, succMap, getTaskName, setNotesCtx, projId, updateTask, editStartChar, isExpandedParent, dispHealth, setSelectedColIdx, contacts, addContact}) {
+  // B212 — Tab/Shift+Tab while editing advance only through VISIBLE columns (display order),
+  // skipping hidden ones, via the shared stepVisibleColIdx helper.
+  const tabStep = back => setSelectedColIdx(i => stepVisibleColIdx(colMasterIdxs, i, back ? -1 : +1));
   // Picker columns (health/status) are NEVER text-editable — their popover IS the editor.
   // If something accidentally sets edit to a picker column, ignore it (don't render as input).
   const isPickerCol = col.k === "health" || col.k === "status";
@@ -6839,7 +6890,7 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
             onKeyDown={e => {
               if (e.key === "Enter")  { e.nativeEvent.stopImmediatePropagation(); commitAndAdvance(task.id, col.k, e.target.value); return; }
               if (e.key === "Escape") { e.nativeEvent.stopImmediatePropagation(); setEdit(null); return; }
-              if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, col.k, e.target.value); setSelectedColIdx(i => e.shiftKey ? Math.max(0, i-1) : Math.min(colCap, i+1)); }
+              if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, col.k, e.target.value); tabStep(e.shiftKey); }
             }} />
         );
       }
@@ -6861,7 +6912,7 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
             onKeyDown={e => {
               if (e.key === "Enter")  { e.nativeEvent.stopImmediatePropagation(); commitAndAdvance(task.id, "name", e.target.value); return; }
               if (e.key === "Escape") { e.nativeEvent.stopImmediatePropagation(); setEdit(null); return; }
-              if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, "name", e.target.value); setSelectedColIdx(i => e.shiftKey ? Math.max(0, i-1) : Math.min(colCap, i+1)); }
+              if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, "name", e.target.value); tabStep(e.shiftKey); }
             }} />
         );
       }
@@ -6890,7 +6941,7 @@ function Cell({task, col, maxColIdx, edit, setEdit, commit, commitAndAdvance, pr
           onKeyDown={e => {
             if (e.key === "Enter")  { e.nativeEvent.stopImmediatePropagation(); commitAndAdvance(task.id, col.k, e.target.value); return; }
             if (e.key === "Escape") { e.nativeEvent.stopImmediatePropagation(); setEdit(null); return; }
-            if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, col.k, e.target.value); setSelectedColIdx(i => e.shiftKey ? Math.max(0, i-1) : Math.min(colCap, i+1)); }
+            if (e.key === "Tab")    { e.preventDefault(); e.nativeEvent.stopImmediatePropagation(); commit(task.id, col.k, e.target.value); tabStep(e.shiftKey); }
           }} />
       );
     }
