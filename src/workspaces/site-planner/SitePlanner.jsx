@@ -5000,6 +5000,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
+    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
+    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
+    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
+    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
+    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    persistDrawings(v.parcelDrawings || []);
     // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
     // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
     if (siteId) noteLocalContent(siteId, v);

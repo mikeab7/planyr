@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V173 — B563: version Restore brings back the parcel's attached drawings (not a mixed-version restore) ⏳ signed-in confirm owed
+- **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in** (cloud version history is unreachable headless).
+- **✅ Proven here (no browser):** lint 0 · tests green · build green; anti-drift guard `test/bugHuntGuards.test.js` (B563) asserts `restoreVersion` re-applies `persistDrawings(v.parcelDrawings || [])`.
+- **⏳ Why pending:** the version-history ring + cloud save are exercised through the signed-in save path the sandbox can't drive. **Signed-in steps on planyr.io:** open a site/plan → attach a drawing (PDF/image) to a parcel → make an edit so a version is saved → then change or remove the drawing → open **Version history** and **Restore** the earlier version → confirm the **earlier drawing set returns** (matches the rest of the restored canvas) and **survives a page reload** (i.e. it persisted, not just displayed). Also confirm no false "newer version saved on another device" banner fires right after the restore.
+
 ### V172 — B561: Site→Schedule switch is smooth — no flash/placeholder/raw-id, no false "newer version" banner ✅ headless 11/11; ⏳ signed-in confirm owed
 - **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (headless ✅) · **Next check** — on planyr.io, **signed in**.
 - **✅ Proven headless (`ui-audit/verify-cross-module-link.mjs` 11/11, logged-out):** arriving on a site whose linked schedule is NOT the iframe's currently-active one no longer ping-pongs the route (no flash) — the route stays on the routed site and the breadcrumb shows its name (never "Select a project", never the raw group_id); an unresolved/cold site never renders or creates a schedule named its id; picking a different linked schedule in the breadcrumb routes to that site. Plus lint 0 · 1793 unit tests · build green.
