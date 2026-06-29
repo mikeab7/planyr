@@ -101,24 +101,14 @@ function ExportMenu({ post }) {
   );
 }
 
-// Sticky tri-state save indicator (mirrors the embedded app): gray = saved, amber = saving /
-// retrying, green flash on each save, red = NOT reached the cloud. Click → retry/link-backup.
-function SaveButton({ toolbar, post }) {
-  const err = toolbar.saveStatus === "error";
-  const saving = toolbar.saveStatus === "saving";
-  const pulse = toolbar.savePulse && !err;
-  const title = err ? "Changes NOT saved to cloud — retrying automatically. Click to retry now."
-    : saving ? "Saving to cloud…"
-      : (pulse ? "Saved to cloud ✓" : "All changes saved to cloud") + (toolbar.fileLinked ? " · also writing to a linked file" : " — click to also back up to a local file");
-  const color = err ? "var(--warn-text)" : pulse ? ACCENT : saving ? "var(--warn-text)" : "var(--chrome-text)";
-  return (
-    <button onClick={() => post({ type: "planar:save" })} title={title} aria-label="Save status"
-      style={{ ...btn(false), gap: 5, color, borderColor: err ? "var(--warn-text)" : "var(--chrome-divider)" }}>
-      <Glyph size={13}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></Glyph>
-      {err && <span style={{ fontSize: 11 }}>Not saved</span>}
-    </button>
-  );
-}
+/* B562 — the floppy-disk SaveButton that used to live here was REMOVED. Save status now rides
+ * in the shared, app-wide cloud badge (CloudSyncBadge) in AppHeader's Row-1 top-right zone, the
+ * same place + component the Site Planner uses — so the indicator means the same thing across
+ * every workspace. Scheduler.jsx maps the embedded app's reported saveStatus (saved/saving/error,
+ * still emitted in planar:toolbar-state below) onto that badge via scheduleSaveState(); error-retry
+ * is the badge's "Retry now" → planar:save. The "link a local backup file" affordance the floppy
+ * also carried moved to the embedded app's Settings panel (reachable via the lifted ⚙), so nothing
+ * was lost. The embedded app stays the single source of truth for the actual cloud writes. */
 
 /* Center slot — the Grid/Split/Gantt view toggle + the review inbox (with its unread badge).
  * Always returns an element (never null) so AppHeader keeps its stable 3-zone Row-2 layout;
@@ -156,7 +146,6 @@ export function ScheduleActions({ toolbar, post }) {
         </div>
       )}
       <ExportMenu post={post} />
-      <SaveButton toolbar={toolbar} post={post} />
       <span style={{ width: 1, height: 20, background: "var(--chrome-divider)", flex: "none", margin: "0 2px" }} />
       <IconCmd title="Version history — browse & restore snapshots" cmd="planar:history" post={post} active={toolbar.activePanel === "history"}>
         <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /><polyline points="12 7 12 12 15 14" />
