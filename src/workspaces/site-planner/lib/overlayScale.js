@@ -18,7 +18,7 @@ export const ftPerPointForScale = (feetPerInch) => feetPerInch / POINTS_PER_INCH
 export const scaleForFtPerPoint = (ftPerPt) => ftPerPt * POINTS_PER_INCH;
 
 // Common civil engineer's scales (feet per inch) offered in the picker.
-export const COMMON_SCALES = [10, 20, 30, 40, 50, 60, 100, 200];
+export const COMMON_SCALES = [10, 20, 30, 40, 50, 60, 80, 100, 200];
 
 // How far an auto-applied scale may stray from the viewport before we distrust it.
 // A correctly-scaled sheet of the site you're looking at lands ~0.5–1.5× the viewport;
@@ -98,6 +98,100 @@ export function parseScaleNote(text) {
   for (const re of pats) {
     const m = text.match(re);
     if (m) { const s = +m[1]; if (s >= 10 && s <= 1000) return s; }
+  }
+  return null;
+}
+
+/* --- Bluebeam-style "page distance = real distance" scale entry (B560–B564) ---------------
+ * The page→real ratio is the single source of truth: a scale is fully described by a distance
+ * measured ON THE PAGE equalling a distance in the REAL world. From that we derive feet-per-inch
+ * (`realFt / pageIn`) and hand it to the existing `applyOverlayScale`/`ftPerPointForScale` path,
+ * so the internal ftPerPx model is untouched. This frees the picker from the old "1 inch = X feet"
+ * straitjacket — e.g. 1/2″ = 60′ (→ 120 ft/in) or an architectural 1/8″ = 1′-0″ (→ 8 ft/in) are now
+ * expressible. All pure + unit-tested. */
+
+// Page side is measured in inches; real side in feet. These are the only unit conversions.
+export const PAGE_UNIT_TO_IN = { in: 1, ft: 12 };
+export const REAL_UNIT_TO_FT = { ft: 1, in: 1 / 12, m: 3.280839895 };
+// Unit choices the picker offers (in/ft minimum; metres on the real side). Order = dropdown order.
+export const PAGE_UNITS = ["in", "ft"];
+export const REAL_UNITS = ["ft", "in", "m"];
+
+/* Parse a distance the user typed into the page/real field. Accepts a plain decimal ("0.5", ".5",
+ * "12"), a simple fraction ("1/2", "3/4"), or a mixed number ("1 1/2", "1-1/2"). Returns a positive
+ * Number, or null for blank / malformed / non-positive / divide-by-zero input. Conservative on
+ * purpose — anything it can't read confidently stays null so we never apply a garbage scale. */
+export function parseDistanceInput(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // mixed number: "1 1/2" or "1-1/2"
+  let m = s.match(/^(\d+)\s*[-\s]\s*(\d+)\s*\/\s*(\d+)$/);
+  if (m) {
+    const den = +m[3];
+    if (!(den > 0)) return null;
+    const v = +m[1] + +m[2] / den;
+    return v > 0 ? v : null;
+  }
+  // simple fraction: "1/2", "3/4", ".5/2"
+  m = s.match(/^(\d*\.?\d+)\s*\/\s*(\d*\.?\d+)$/);
+  if (m) {
+    const den = +m[2];
+    if (!(den > 0)) return null;
+    const v = +m[1] / den;
+    return v > 0 ? v : null;
+  }
+  // plain decimal
+  if (/^\d*\.?\d+$/.test(s)) {
+    const v = +s;
+    return v > 0 ? v : null;
+  }
+  return null;
+}
+
+/* feet-per-inch implied by a [page distance][unit] = [real distance][unit] pair — the single source
+ * of truth the picker feeds to applyOverlayScale. pageVal/realVal may be raw strings (parsed via
+ * parseDistanceInput) or numbers. Returns a positive feet-per-inch number, or null if either side is
+ * blank/invalid. */
+export function feetPerInchFromPair({ pageVal, pageUnit = "in", realVal, realUnit = "ft" }) {
+  const page = typeof pageVal === "number" ? pageVal : parseDistanceInput(pageVal);
+  const real = typeof realVal === "number" ? realVal : parseDistanceInput(realVal);
+  if (!(page > 0) || !(real > 0)) return null;
+  const pageIn = page * (PAGE_UNIT_TO_IN[pageUnit] ?? 1);
+  const realFt = real * (REAL_UNIT_TO_FT[realUnit] ?? 1);
+  if (!(pageIn > 0) || !(realFt > 0)) return null;
+  return realFt / pageIn;
+}
+
+/* Common engineering + architectural scale presets for the picker. Each carries its page/real pair
+ * so selecting a preset just populates the two fields; the implied feet-per-inch is derived
+ * (realFt / pageIn) via feetPerInchForPreset. */
+export const SCALE_PRESETS = [
+  { id: "eng-10",   group: "Engineering",   label: '1" = 10\'',     pageIn: 1,     realFt: 10 },
+  { id: "eng-20",   group: "Engineering",   label: '1" = 20\'',     pageIn: 1,     realFt: 20 },
+  { id: "eng-30",   group: "Engineering",   label: '1" = 30\'',     pageIn: 1,     realFt: 30 },
+  { id: "eng-40",   group: "Engineering",   label: '1" = 40\'',     pageIn: 1,     realFt: 40 },
+  { id: "eng-50",   group: "Engineering",   label: '1" = 50\'',     pageIn: 1,     realFt: 50 },
+  { id: "eng-60",   group: "Engineering",   label: '1" = 60\'',     pageIn: 1,     realFt: 60 },
+  { id: "eng-80",   group: "Engineering",   label: '1" = 80\'',     pageIn: 1,     realFt: 80 },
+  { id: "eng-100",  group: "Engineering",   label: '1" = 100\'',    pageIn: 1,     realFt: 100 },
+  { id: "arch-1-8", group: "Architectural", label: '1/8" = 1\'-0"', pageIn: 0.125, realFt: 1 },
+  { id: "arch-1-4", group: "Architectural", label: '1/4" = 1\'-0"', pageIn: 0.25,  realFt: 1 },
+  { id: "arch-1-2", group: "Architectural", label: '1/2" = 1\'-0"', pageIn: 0.5,   realFt: 1 },
+  { id: "arch-3-4", group: "Architectural", label: '3/4" = 1\'-0"', pageIn: 0.75,  realFt: 1 },
+  { id: "arch-1",   group: "Architectural", label: '1" = 1\'-0"',   pageIn: 1,     realFt: 1 },
+];
+
+export const feetPerInchForPreset = (p) => (p && p.pageIn > 0 ? p.realFt / p.pageIn : null);
+
+/* Round-trip a feet-per-inch value back to a preset id (so the picker shows the matching preset when
+ * the current size lands on one), within a small relative epsilon, else null → the panel shows
+ * "Custom" with the paired fields populated from the current size. */
+export function matchScalePreset(feetPerInch, eps = 1e-3) {
+  if (!(feetPerInch > 0)) return null;
+  for (const p of SCALE_PRESETS) {
+    const fpi = feetPerInchForPreset(p);
+    if (fpi > 0 && Math.abs(fpi - feetPerInch) <= eps * Math.max(1, feetPerInch)) return p;
   }
   return null;
 }

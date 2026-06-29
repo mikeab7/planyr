@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES, chooseOverlayScale,
+  parseDistanceInput, feetPerInchFromPair, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
 } from "../src/workspaces/site-planner/lib/overlayScale.js";
 
 const IN = 72; // points per inch
@@ -104,5 +105,86 @@ describe("overlay scale — import sizing guard (chooseOverlayScale)", () => {
     const r = chooseOverlayScale({ detectedScale: 30, sheetStd: true, imgW: 0, ppf: 0, screenW: 1000 });
     expect(Number.isFinite(r.ftPerPx)).toBe(true);
     expect(r.ftPerPx).toBeGreaterThan(0);
+  });
+});
+
+describe("overlay scale — page-distance field parser (B560–B564)", () => {
+  it("reads plain decimals", () => {
+    expect(parseDistanceInput("0.5")).toBeCloseTo(0.5, 9);
+    expect(parseDistanceInput(".5")).toBeCloseTo(0.5, 9);
+    expect(parseDistanceInput("12")).toBe(12);
+    expect(parseDistanceInput("  1.25 ")).toBeCloseTo(1.25, 9);
+  });
+  it("reads simple fractions", () => {
+    expect(parseDistanceInput("1/2")).toBeCloseTo(0.5, 9);
+    expect(parseDistanceInput("3/4")).toBeCloseTo(0.75, 9);
+    expect(parseDistanceInput("1 / 8")).toBeCloseTo(0.125, 9);
+  });
+  it("reads mixed numbers (space or hyphen)", () => {
+    expect(parseDistanceInput("1 1/2")).toBeCloseTo(1.5, 9);
+    expect(parseDistanceInput("1-1/2")).toBeCloseTo(1.5, 9);
+    expect(parseDistanceInput("2 3/4")).toBeCloseTo(2.75, 9);
+  });
+  it("rejects blank / malformed / non-positive / divide-by-zero", () => {
+    expect(parseDistanceInput("")).toBe(null);
+    expect(parseDistanceInput("   ")).toBe(null);
+    expect(parseDistanceInput(null)).toBe(null);
+    expect(parseDistanceInput("abc")).toBe(null);
+    expect(parseDistanceInput("0")).toBe(null);
+    expect(parseDistanceInput("-1")).toBe(null);
+    expect(parseDistanceInput("1/0")).toBe(null);
+    expect(parseDistanceInput("1/")).toBe(null);
+  });
+});
+
+describe("overlay scale — page=real pair → feet-per-inch (B560–B564)", () => {
+  it("0.5\" = 60' resolves to 120 ft/in (the impossible-before case)", () => {
+    expect(feetPerInchFromPair({ pageVal: "0.5", pageUnit: "in", realVal: "60", realUnit: "ft" })).toBeCloseTo(120, 9);
+    expect(feetPerInchFromPair({ pageVal: "1/2", pageUnit: "in", realVal: "60", realUnit: "ft" })).toBeCloseTo(120, 9);
+  });
+  it("1\" = 100' resolves to 100 ft/in (the classic engineer's scale)", () => {
+    expect(feetPerInchFromPair({ pageVal: 1, realVal: 100 })).toBeCloseTo(100, 9);
+  });
+  it("architectural 1/8\" = 1' resolves to 8 ft/in", () => {
+    expect(feetPerInchFromPair({ pageVal: "1/8", realVal: "1" })).toBeCloseTo(8, 9);
+  });
+  it("honors page units (ft) and real units (in, m)", () => {
+    expect(feetPerInchFromPair({ pageVal: 1, pageUnit: "ft", realVal: 100, realUnit: "ft" })).toBeCloseTo(100 / 12, 9);
+    expect(feetPerInchFromPair({ pageVal: 1, pageUnit: "in", realVal: 1, realUnit: "m" })).toBeCloseTo(3.280839895, 6);
+    expect(feetPerInchFromPair({ pageVal: 1, pageUnit: "in", realVal: 12, realUnit: "in" })).toBeCloseTo(1, 9);
+  });
+  it("returns null when either side is blank/invalid (no garbage scale)", () => {
+    expect(feetPerInchFromPair({ pageVal: "", realVal: "60" })).toBe(null);
+    expect(feetPerInchFromPair({ pageVal: "1", realVal: "abc" })).toBe(null);
+    expect(feetPerInchFromPair({ pageVal: "0", realVal: "60" })).toBe(null);
+  });
+});
+
+describe("overlay scale — presets (B560–B564)", () => {
+  it("every preset derives a positive feet-per-inch", () => {
+    for (const p of SCALE_PRESETS) expect(feetPerInchForPreset(p)).toBeGreaterThan(0);
+  });
+  it("engineering presets equal their stated feet-per-inch", () => {
+    expect(feetPerInchForPreset(SCALE_PRESETS.find((p) => p.id === "eng-30"))).toBeCloseTo(30, 9);
+    expect(feetPerInchForPreset(SCALE_PRESETS.find((p) => p.id === "eng-100"))).toBeCloseTo(100, 9);
+  });
+  it("architectural presets derive the right ratio", () => {
+    expect(feetPerInchForPreset(SCALE_PRESETS.find((p) => p.id === "arch-1-8"))).toBeCloseTo(8, 9);
+    expect(feetPerInchForPreset(SCALE_PRESETS.find((p) => p.id === "arch-3-4"))).toBeCloseTo(4 / 3, 9);
+  });
+  it("matchScalePreset round-trips a feet-per-inch back to its preset id", () => {
+    expect(matchScalePreset(30).id).toBe("eng-30");
+    expect(matchScalePreset(8).id).toBe("arch-1-8");
+    expect(matchScalePreset(4 / 3).id).toBe("arch-3-4");
+  });
+  it("matchScalePreset returns null for a value that is no preset (→ Custom)", () => {
+    expect(matchScalePreset(33)).toBe(null);
+    expect(matchScalePreset(120)).toBe(null);
+    expect(matchScalePreset(0)).toBe(null);
+  });
+  it("a preset's page/real pair feeds feetPerInchFromPair to the same value (consistency)", () => {
+    for (const p of SCALE_PRESETS) {
+      expect(feetPerInchFromPair({ pageVal: p.pageIn, realVal: p.realFt })).toBeCloseTo(feetPerInchForPreset(p), 9);
+    }
   });
 });
