@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, isCloudActive, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, noteLocalContent } from "./lib/storage.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
 import { registerFlush } from "../../app/flushRegistry.js";
 import { createEditorLock } from "../../shared/presence/editorLock.js";
@@ -1060,11 +1060,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [underlay]);
   const updateDrawingMarks = (id, markups) =>
     persistDrawings(parcelDrawings.map((d) => (d.id === id ? { ...d, markups, updatedAt: Date.now() } : d)));
+  // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
+  // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
+  // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
+  // "another session" conflict — deleting a building drops the building AND its bonded children
+  // (dog-ears / sidewalks / parking) in one shot, always clearing the ≥2 bar, which is exactly the
+  // phantom "Take over editing" re-prompt the owner hit (a MOVE keeps the item count, so it never
+  // tripped); (2) mergeSiteContent would RESURRECT the deleted item from the cloud / another copy on
+  // reload or take-over. Ids are never reused (fresh uid() per add), so tombstoning by id is safe.
+  const tombstone = (ids) => {
+    const add = (Array.isArray(ids) ? ids : [ids]).filter((x) => typeof x === "string");
+    if (!add.length) return;
+    setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
+  };
   const deleteDrawing = (id) => {
     const gone = parcelDrawings.find((d) => d.id === id);
     if (gone && gone.storageKey) deleteOverlayObject(gone.storageKey); // best-effort cloud cleanup (B67 2b)
     if (gone && gone.idbKey) idbDelete(gone.idbKey); // B474 review (#13) — evict the cached raster from IndexedDB too, no orphan
     persistDrawings(parcelDrawings.filter((d) => d.id !== id));
+    tombstone(id); // B556 — a deleted parcel-drawing stays deleted across reload/merge and never trips the thin-clobber guard
     if (openDrawingId === id) setOpenDrawingId(null);
   };
   const overlayFileRef = useRef(null);
@@ -1678,6 +1692,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pushHistory = () => { histRef.current.push(stateRef.current); touchHist(); };
   const applySnapshot = (s) => {
     setParcels(s.parcels); setEls(s.els); setMeasures(s.measures); setCallouts(s.callouts || []); setMarkups(s.markups || []); setUnderlay(s.underlay); setSheetOverlays(s.sheetOverlays || []); setDeletedIds(s.deletedIds || []);
+    // B556 — an undo/redo (or a cancelled drag) is a DELIBERATE local restore; if it shrinks the plan
+    // (e.g. undo of a building add, which removed building + parking + sidewalk at once) tell the
+    // thin-clobber baseline this is authoritative so the resulting push isn't mistaken for a stale
+    // cross-session clobber and falsely re-shown as "changed in another session".
+    if (siteId) noteLocalContent(siteId, s);
     setSel(null); setSplitPath([]); setTypeMenu(null);
   };
   const undo = () => { const prev = histRef.current.undo(stateRef.current); if (prev) { applySnapshot(prev); touchHist(); } };
@@ -1959,18 +1978,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const elIds = new Set();
       multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      // B556 — tombstone exactly what the filter removes (selected els, their bonded children, and markups).
+      const removedEls = stateRef.current.els.filter((e) => elIds.has(e.id) || elIds.has(e.attachedTo)).map((e) => e.id);
       setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
       setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
       setMulti([]); setSel(null);
+      tombstone([...removedEls, ...mkIds]);
       return;
     }
     if (!sel) return;
     pushHistory();
-    if (sel.kind === "el") setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
+    // B556 — every branch that drops a drawn item leaves a tombstone (measures are index-keyed with no
+    // stable id and a lone measure delete can't reach the thin-clobber ≥2 bar, so they're left as-is).
+    if (sel.kind === "el") {
+      const removed = stateRef.current.els.filter((e) => e.id === sel.id || e.attachedTo === sel.id).map((e) => e.id);
+      setEls((a) => a.filter((e) => e.id !== sel.id && e.attachedTo !== sel.id));
+      tombstone(removed); // a building drops with its bonded children — tombstone all of them
+    }
     else if (sel.kind === "measure") setMeasures((a) => a.filter((_, i) => i !== sel.i));
-    else if (sel.kind === "callout") setCallouts((a) => a.filter((c) => c.id !== sel.id));
-    else if (sel.kind === "markup") setMarkups((a) => a.filter((m) => m.id !== sel.id));
-    else setParcels((a) => a.filter((p) => p.id !== sel.id));
+    else if (sel.kind === "callout") { setCallouts((a) => a.filter((c) => c.id !== sel.id)); tombstone(sel.id); }
+    else if (sel.kind === "markup") { setMarkups((a) => a.filter((m) => m.id !== sel.id)); tombstone(sel.id); }
+    else { setParcels((a) => a.filter((p) => p.id !== sel.id)); tombstone(sel.id); }
     setSel(null);
   };
   // Arrow-nudge the selection (1′, or 10′ with Shift) — group when multi-selected.
@@ -3162,7 +3190,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const b = els.find((x) => x.id === d.id);
       if (b && b.type === "building" && !b.dogEar) {
         const strandedIds = strandedZoneIds(els, b);
-        if (strandedIds.length) setEls((a) => a.filter((x) => !strandedIds.includes(x.id)));
+        if (strandedIds.length) { setEls((a) => a.filter((x) => !strandedIds.includes(x.id))); tombstone(strandedIds); } // B556 — tombstone the pruned apron so it stays gone + doesn't trip the thin-clobber guard
       }
     }
     drag.current = null;
@@ -4962,6 +4990,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
+    // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
+    if (siteId) noteLocalContent(siteId, v);
     setSel(null); setMulti([]); setVersionsOpen(false);
   };
   const handleNewSite = () => { closeHdrMenus(); flushSite(); onNewSite?.(); };
