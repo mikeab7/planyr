@@ -8,7 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
-import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding } from "./siteModel.js";
+import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, noteLocalContent } from "./cloudSync.js";
 import { idbGet, idbPut, idbAvailable, idbDeleteByPrefix } from "./localDb.js";
 
@@ -140,7 +140,7 @@ export function pruneMigratedLegacy(cloudMap) {
     // work was deleted before the migration modal could ever surface it). Mirror the inverse
     // of pendingLegacyCount's predicate so reclaimed duplicates still get cleaned up.
     for (const id of Object.keys(legacy)) {
-      if (cloudMap[id] && (cloudMap[id].updatedAt || 0) >= ((legacy[id] && legacy[id].updatedAt) || 0)) { delete legacy[id]; dropped++; }
+      if (cloudMap[id] && toMs(cloudMap[id].updatedAt) >= toMs(legacy[id] && legacy[id].updatedAt)) { delete legacy[id]; dropped++; } // B559: type-safe ts compare (ISO string vs ms)
     }
     if (dropped) localStorage.setItem(SITES_KEY, JSON.stringify(legacy));
   } catch (_) {}
