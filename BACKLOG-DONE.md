@@ -1,5 +1,19 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 13 (B557 — lap 1 of 4 owner-requested laps): a 6-lens Workflow (print-export /
+     gis-builders / calculators / auth-profile / layer-status / a11y-2). 8 raw → 7 confirmed; all 7
+     clean low-risk fixes shipped as one umbrella. print-export, gis-builders, and calculators came
+     back CLEAN (no wrong output/requests/numbers — consistent with the round-12 yield audit).
+     Renumbered B556→B557 — a concurrent main took B556 for the mobile properties-panel fix below. -->
+
+### B557 — Round-13 robustness + accessibility batch (auth null-guards · layer-lifecycle cleanup · LayerPanel/menu ARIA) `[Site Planner / robustness + a11y]` (bug umbrella)  *(bug-hunt round 13, 2026-06-27; fixed same lap; renumbered from a provisional B556 a concurrent main took)*
+`[x]` **DONE + verified. lint 0 · 1786 tests · GIS audit OK · build green.** Seven small, confirmed, low-risk fixes from the lap-1 hunt:
+- **Auth email null-guards** — `Shell.jsx` (pill title + dropdown) and `AuthPanel.jsx` (Profile tab) rendered `user.email` unguarded → a missing email would show "undefined". Now `user?.email || "(no email)"`/`""`, matching the codebase's existing defensive pattern.
+- **Layer-lifecycle cleanup (`layers.js`)** — (HIGH) `attachFeatureRetry` scheduled a backoff `setTimeout(refresh)` never cleared when the layer toggled off → a timer fired `refresh()` on a detached layer; now `onRemove` clears it (Leaflet calls onRemove on `map.removeLayer`, chained to the original). `reportCacheAge`'s async cache-age fetch now checks `lyr._map` before `onStatus`, so it can't report age on a since-removed layer.
+- **LayerPanel ARIA** — the group collapse buttons (Map layers / Jurisdictions / Utility evidence) and the "Show N layers with no local data" reveal button gained `aria-expanded` + a descriptive `aria-label`.
+- **ProjectBreadcrumb manage menu** — the portal Rename/Delete menu gained `role="menu"`/`role="menuitem"` + the backdrop `role="presentation"`.
+- Anti-drift guards in `test/bugHuntGuards.test.js`. Pure-additive ARIA + defensive guards — no behavior change for the happy path.
+
 ### B556 — On a phone, tapping an element auto-opens the properties panel (buries the canvas) `[Site Planner / mobile]` (bug)  *(owner-found 2026-06-28 on iPhone; minted **B556** = highest real B# across both files (B555) + 1; branch `claude/mobile-safari-pinch-menu-3gon8x`)*
 `[x]` **DONE + verified. lint 0 · 1782 tests · build green · headless 2/2.** On a phone the left menu is a full overlay (`position:absolute`, ~320px, zIndex 1100) that buries the canvas, so the Bluebeam-style "select → open its inspector" auto-open was the wrong default there — a single tap to select an element/parcel covered the drawing. Two narrow-gated changes (≤760px, the existing `narrow` state; desktop unchanged):
   - **Auto-open gated (the fix).** The selection→panel effect now early-returns `if (narrow && !leftPanel)` — on a phone with the panel closed, tapping just **selects** (handles/rotation/resize controls still appear) and does NOT pop the overlay; the user opens Properties from the **Element** tab when they want it. If a panel is **already** open it still re-syncs to the new selection. One guard covers all selection kinds (`el`/`callout`/`markup`/`parcel`) — verified by the adversarial review (the per-handler `startMoveEl/Markup/Callout/Parcel` paths all route through this one effect).

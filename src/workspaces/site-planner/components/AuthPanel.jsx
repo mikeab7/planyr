@@ -100,7 +100,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
       ) : tab === "profile" ? (
         <div>
           <div style={{ fontSize: 12.5, color: PAL.muted }}>Signed in as</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user.email}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: PAL.ink, wordBreak: "break-all", margin: "1px 0 12px" }}>{user?.email || "(no email)"}</div>
           <div style={{ display: "flex", gap: 6 }}>
             <input autoComplete="given-name" placeholder="First name" value={first} onChange={edit(setFirst)} style={{ ...field, flex: 1, marginTop: 0 }} />
             <input autoComplete="family-name" placeholder="Last name" value={last} onChange={edit(setLast)} style={{ ...field, flex: 1, marginTop: 0 }} />
