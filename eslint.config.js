@@ -9,7 +9,10 @@ import reactHooks from "eslint-plugin-react-hooks";
  * the recommended *correctness* rules' essentials and leave stylistic rules off.
  */
 export default [
-  { ignores: ["dist/**", "node_modules/**"] },
+  // Never lint build output, deps, or vendored third-party libraries. The landing
+  // page's GSAP/Three.js are pre-minified UMD bundles — they reference globals
+  // (exports/define/__THREE_DEVTOOLS__) that trip no-undef and are not ours to fix.
+  { ignores: ["dist/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },

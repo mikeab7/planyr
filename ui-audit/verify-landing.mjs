@@ -19,7 +19,7 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
-const URL = BASE.replace(/\/$/, "") + "/landing/";
+const PAGE_URL = BASE.replace(/\/$/, "") + "/landing/";
 const OUT = new URL("./screens/landing/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
@@ -47,7 +47,7 @@ async function run() {
     ],
   });
 
-  const report = { url: URL, viewports: {}, errors: [], pageErrors: [], diagnostics: null };
+  const report = { url: PAGE_URL, viewports: {}, errors: [], pageErrors: [], diagnostics: null };
 
   for (const vp of VIEWPORTS) {
     const ctx = await browser.newContext({
@@ -62,7 +62,7 @@ async function run() {
     });
     page.on("pageerror", (e) => report.pageErrors.push(`[${vp.name}] ${e.message}`));
 
-    await page.goto(URL, { waitUntil: "load", timeout: 45000 });
+    await page.goto(PAGE_URL, { waitUntil: "load", timeout: 45000 });
     // Give GSAP/Three a beat to initialise, then read the page's own diagnostics hook.
     await sleep(1600);
     const diag = await page.evaluate(() => {
