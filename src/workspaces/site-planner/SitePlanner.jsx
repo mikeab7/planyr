@@ -6151,7 +6151,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const exMarks = [];
     for (const t of tracts.slice(1)) {
       if (!t.calls.length) continue;
-      const exPob = t.tie && t.tie.length ? callsToPath(t.tie, pob)[t.tie.length] : pob;
+      // the tie's END point locates the exception POB — take the LAST path point
+      // (a curved tie tessellates to many points, so don't index by call count).
+      const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
+      const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
       const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true });
       if (eb) exMarks.push(eb.mk);
     }
@@ -7797,14 +7800,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw or split a parcel boundary"><ToolIcon id="parcel" /> Boundary <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
+            <button className={`rbtn${["parcel", "split"].includes(tool) ? " on" : ""}`} style={rbtn(["parcel", "split"].includes(tool))} onClick={() => setToolMenu((o) => !o)} title="Draw, plot from a deed, or split a parcel"><ToolIcon id="parcel" /> Parcel <span style={{ marginLeft: "auto", opacity: 0.6 }}>▾</span></button>
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" width={248} panelStyle={menuPanel}>
               <button style={menuItem(tool === "parcel")} onClick={() => selectTool("parcel")}>Draw new parcel</button>
-              {/* B565 — a front door to the existing metes-and-bounds plotter from the
-                  Boundary group (complements the row-1 "Deed / Title…" launcher, B543).
-                  Reuses the same modal/parser — no second copy. */}
-              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / paste a legal description to plot a boundary from its bearings & distances"
-                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>Plot from metes &amp; bounds…</button>
+              {/* B567 — the Deed / Title (metes & bounds) tool lives HERE in the Parcel
+                  group, folded in from the old standalone rail launcher (B543). Opens the
+                  existing reader/plotter modal — no second modal, no parser fork. */}
+              <button data-testid="boundary-menu-mb" style={menuItem(false)} title="Read a deed / title commitment (or paste a legal description) to plot a parcel boundary from its metes & bounds"
+                onClick={() => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><ToolIcon id="deed" size={13} /> Deed / Title — metes &amp; bounds…</span>
+              </button>
               <button style={menuItem(tool === "split")} onClick={() => selectTool("split")}>Split a parcel</button>
               <div style={{ fontSize: 11, color: PAL.muted, padding: "7px 8px 2px", lineHeight: 1.5, borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4 }}>
                 <b style={{ color: PAL.ink }}>Merge:</b> in <b>Select</b>, <b>Shift-click</b> parcels to multi-select, then <b>Merge parcels</b> (right-click or the parcel panel).<br />
@@ -7812,19 +7817,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </AnchoredMenu>
           </div>
-
-          {/* B543 — Deed / Title launcher. A rail ENTRY, not a tool mode: it opens the
-              metes-and-bounds / Schedule B reader modal directly. Always rbtn(false) —
-              it never gets the active-tool highlight and never calls selectTool (which
-              would corrupt `tool` and reset drafts). On the phone overlay rail, dismiss
-              the scrim first so the zIndex:3000 modal isn't shown over a dimmed rail. */}
-          <button className="rbtn" style={{ ...rbtn(false), flexDirection: "column", alignItems: "flex-start", gap: 1 }}
-            data-testid="tool-deed"
-            title="Read a deed / title commitment to pull Schedule B exceptions and plot a metes-and-bounds boundary."
-            onClick={() => { if (narrow) setMobileTools(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 9, lineHeight: 1.15 }}><ToolIcon id="deed" /> Deed / Title…</span>
-            <span style={{ fontSize: 9, opacity: 0.6, paddingLeft: 24, lineHeight: 1.05 }}>Schedule B · metes &amp; bounds</span>
-          </button>
 
           {railHdr("Site elements")}
 
@@ -9397,11 +9389,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
                   </div>
                 )}
-                {calls.some((c) => c.curve) && (
-                  <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
-                    ⚠ {calls.filter((c) => c.curve).length} curve(s) plotted as straight chords — verify against the survey.
-                  </div>
-                )}
+                {calls.some((c) => c.curve) && (() => {
+                  const cv = calls.filter((c) => c.curve);
+                  const hasArc = (c) => c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0);
+                  const chord = cv.filter((c) => !hasArc(c)).length;
+                  return (
+                    <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
+                      ⚠ {cv.length} curve(s) reconstructed as true arcs{chord ? ` (${chord} drawn as a straight chord — no radius/angle stated)` : ""} — verify against the survey.
+                    </div>
+                  );
+                })()}
                 {calls.length > 0 && !closes && (
                   <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: PAL.muted }}>
                     Corridor width
@@ -9416,7 +9413,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 <div style={{ marginTop: 10, maxHeight: 130, overflowY: "auto", border: `1px solid ${PAL.panelLine}`, borderRadius: 8, fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>
                   {calls.map((c, i) => (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 10px", borderBottom: i < calls.length - 1 ? "1px solid #f3efe5" : "none", color: PAL.ink }}>
-                      <span>{i + 1}. {c.bearing}{c.curve ? " ⤿ (chord)" : ""}</span><span>{c.distFt.toFixed(2)}′</span>
+                      <span>{i + 1}. {c.bearing}{c.curve ? (c.curveMeta && (c.curveMeta.radiusFt > 0 || c.curveMeta.centralAngleDeg > 0) ? " ⤾ (arc)" : " ⤿ (chord)") : ""}</span><span>{c.distFt.toFixed(2)}′</span>
                     </div>
                   ))}
                 </div>

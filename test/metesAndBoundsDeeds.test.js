@@ -99,6 +99,37 @@ describe("metes-and-bounds parser — review hardening", () => {
   });
 });
 
+/* True-to-arc curve rendering (B566) — a curve course is tessellated into its real
+ * circular arc, not drawn as a straight chord. Frame: +x east, +y south. */
+describe("metes-and-bounds — curves render as true arcs", () => {
+  // chord due east 100 ft; R = 70.71, Δ = 90° → sagitta = R(1 - cos45°) ≈ 20.71 ft.
+  const curve = (turn) => ({ az: 90, distFt: 100, curve: true, curveMeta: { radiusFt: 70.71, centralAngleDeg: 90, turn } });
+
+  it("a curve is tessellated (many points) and still ends exactly at the chord endpoint", () => {
+    const path = callsToPath([curve("R")], { x: 0, y: 0 });
+    expect(path.length).toBeGreaterThan(3);
+    expect(path[0]).toEqual({ x: 0, y: 0 });
+    const last = path[path.length - 1];
+    expect(last.x).toBeCloseTo(100, 3);
+    expect(last.y).toBeCloseTo(0, 3);
+  });
+
+  it("a right-hand curve bulges to the traveller's right (north of an east chord)", () => {
+    const path = callsToPath([curve("R")], { x: 0, y: 0 });
+    expect(Math.min(...path.map((p) => p.y))).toBeCloseTo(-20.71, 1); // north = -y
+  });
+
+  it("a left-hand curve bulges the other way (south)", () => {
+    const path = callsToPath([curve("L")], { x: 0, y: 0 });
+    expect(Math.max(...path.map((p) => p.y))).toBeCloseTo(20.71, 1); // south = +y
+  });
+
+  it("falls back to a straight chord when no radius/angle is stated", () => {
+    const path = callsToPath([{ az: 90, distFt: 100, curve: true, curveMeta: { turn: "R" } }], { x: 0, y: 0 });
+    expect(path.length).toBe(2); // POB + chord endpoint only
+  });
+});
+
 /* Full real-survey corpus, verified course-for-course against an independent
  * ground-truth transcription (the parser must keep reading every one). */
 const ORACLE = {

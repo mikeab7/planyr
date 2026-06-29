@@ -2,75 +2,62 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/* B543 — the Deed / Title reader (Schedule B + metes-and-bounds) is a first-class
- * tool-rail launcher, not a menu item buried in the File ▾ (export) dropdown.
+/* Deed / Title (metes & bounds) tool placement — render-free anti-drift guard
+ * (same shape as bugHuntGuards.test.js). SitePlanner.jsx is edited by many
+ * concurrent sessions, so this fails loudly if a merge moves the tool back into the
+ * File ▾ export menu, drops its glyph, duplicates it, or turns the launcher into a
+ * tool mode (which would corrupt `tool`). No browser / auth / seeded site needed.
  *
- * SitePlanner.jsx is edited by many concurrent sessions, so this is a string-level
- * anti-drift guard (same shape as bugHuntGuards.test.js): it fails loudly if a merge
- * silently moves the launcher back into the export menu, drops the glyph, or — worst —
- * turns the launcher into a tool mode (which would corrupt `tool` and reset drafts).
- * It is a render-free check: no browser, no auth, no seeded site, runs in `npm test`. */
+ * History: B543 first lifted it out of the File menu into a standalone rail launcher;
+ * B567 then folded it INTO the Parcel (was "Boundary") tool group, where it lives now. */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
 
-// The deed launcher <button>…</button>, captured from its testid to its own close tag
-// (no nested <button>, so the first </button> is this element's).
-const deedButton = (src.match(/data-testid="tool-deed"[\s\S]{0,700}?<\/button>/) || [])[0];
+// The Deed/Title entry now lives in the Parcel ▾ menu, keyed by this testid.
+const deedBtn = (src.match(/data-testid="boundary-menu-mb"[\s\S]{0,500}?<\/button>/) || [])[0];
 
-describe("B543 — Deed / Title launcher lives in the tool rail", () => {
-  it("registers a rail launcher with data-testid='tool-deed'", () => {
-    expect(deedButton).toBeTruthy();
-  });
-
-  it("opens the metes-and-bounds / Schedule B reader modal on click", () => {
-    expect(deedButton).toMatch(/setTitleOpen\(true\)/); // opens the reader
-    expect(deedButton).toMatch(/setTitleErr\(""\)/);     // clears any stale error first
-    // On the phone overlay rail, dismiss the scrim so the z-index:3000 modal isn't
-    // shown over a dimmed rail.
-    expect(deedButton).toMatch(/setMobileTools\(false\)/);
+describe("B567 — Deed / Title (metes & bounds) tool lives in the Parcel menu", () => {
+  it("the Parcel menu has the Deed / Title entry and it opens the existing modal", () => {
+    expect(deedBtn).toBeTruthy();
+    expect(deedBtn).toMatch(/Deed \/ Title/);
+    expect(deedBtn).toMatch(/setTitleOpen\(true\)/);   // opens the reader/plotter
+    expect(deedBtn).toMatch(/setTitleErr\(""\)/);       // clears any stale error first
+    expect(deedBtn).toMatch(/setDeedErr\(""\)/);        // and stale deed state
   });
 
   it("renders the deed glyph (not a blank icon)", () => {
-    expect(deedButton).toMatch(/<ToolIcon id="deed"\s*\/>/);
-    expect(src).toMatch(/\bdeed:\s*<>/); // the ICON_PATHS entry exists
+    expect(deedBtn).toMatch(/<ToolIcon id="deed"/);
+    expect(src).toMatch(/\bdeed:\s*<>/); // the ICON_PATHS entry still exists
   });
 
-  it("is a launcher, not a tool mode (never selectTool, never active-styled)", () => {
-    expect(deedButton).not.toMatch(/selectTool/);
-    expect(deedButton).not.toMatch(/tool === "deed"/);
+  it("is a launcher (opens the modal), not a tool mode", () => {
+    expect(deedBtn).not.toMatch(/selectTool/);
+  });
+
+  it("the parcel group is labelled 'Parcel' (renamed from 'Boundary') and keeps Draw + Split", () => {
+    // the rail group button reads "Parcel ▾"
+    expect(src).toMatch(/<ToolIcon id="parcel" \/> Parcel /);
+    expect(src).toMatch(/Draw new parcel/);
+    expect(src).toMatch(/Split a parcel/);
+  });
+
+  it("the old standalone rail launcher is gone (folded into the menu)", () => {
+    expect(src).not.toMatch(/data-testid="tool-deed"/);
+  });
+
+  it("opens the reader from exactly one place (no duplicate launcher)", () => {
+    const opens = src.match(/setTitleOpen\(true\)/g) || [];
+    expect(opens.length).toBe(1);
   });
 });
 
-describe("B543 — the old export-menu launcher is gone (relocated, not duplicated)", () => {
-  it("the File ▾ / export menu no longer carries the title-reader item", () => {
+describe("the old File ▾ export-menu launcher stays gone", () => {
+  it("the export menu no longer carries the title-reader item", () => {
     expect(src).not.toMatch(/Title reader \/ metes/);
     expect(src).not.toMatch(/Read a deed\/title block to plot/);
   });
-
-  it("opens the reader only from the intended launchers (rail + Boundary menu), never the export menu", () => {
-    const opens = src.match(/setTitleOpen\(true\)/g) || [];
-    expect(opens.length).toBe(2); // B543 row-1 "Deed / Title…" launcher + B565 Boundary-menu entry
-    expect(src).not.toMatch(/Title reader \/ metes/); // the old File ▾ export-menu item stays gone
-  });
-
   it("Export PNG and Download PDF remain in the export menu", () => {
     expect(src).toMatch(/Export PNG/);
     expect(src).toMatch(/Download PDF \/ pick frame/);
-  });
-});
-
-describe("B565 — 'Plot from metes & bounds' in the Boundary ▾ menu", () => {
-  const btn = (src.match(/data-testid="boundary-menu-mb"[\s\S]{0,400}?<\/button>/) || [])[0];
-  it("the Boundary menu has the entry and it opens the existing modal", () => {
-    expect(btn).toBeTruthy();
-    expect(btn).toMatch(/Plot from metes/);
-    expect(btn).toMatch(/setTitleOpen\(true\)/);
-  });
-  it("it is a launcher (opens the modal), not a tool mode", () => {
-    expect(btn).not.toMatch(/selectTool/);
-  });
-  it("Draw new parcel and Split a parcel are both still present", () => {
-    expect(src).toMatch(/Draw new parcel/);
-    expect(src).toMatch(/Split a parcel/);
   });
 });
