@@ -2446,7 +2446,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Re-aim / move / retext callouts. Box & tip are stored in feet.
   const setCallout = (id, patch) => setCallouts((a) => a.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   // Resolved style for a callout (defaults + per-callout overrides).
-  // padX default is more generous than padY (B561): equal 8/8 padding read as cramped on the
+  // padX default is more generous than padY (B564): equal 8/8 padding read as cramped on the
   // sides because text butts closer to a vertical edge than to the line-height-cushioned top/bottom.
   const calloutStyle = (c) => ({ size: c.size || 13, color: c.color || "#1f2937", fill: c.fill || "#fffbe8", stroke: c.stroke || "#1f2937", align: c.align || "center", bold: !!c.bold, italic: !!c.italic, underline: !!c.underline, padX: c.padX ?? 14, padY: c.padY ?? 8, lineHeight: c.lineHeight ?? 1.3 });
   // Inline editing: a textarea overlays the box. Empty text removes the callout.
@@ -5005,6 +5005,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels(v.parcels); setEls(v.els); setMeasures(v.measures); setCallouts(v.callouts); setMarkups(v.markups);
     setUnderlay(v.underlay); setSheetOverlays(v.sheetOverlays); setDeletedIds(v.deletedIds || []);
+    // B563 — parcelDrawings rides its OWN persistence path (off the main autosave snapshot), so the
+    // restore above silently skipped it: the canvas kept the CURRENT drawings while every other
+    // collection reverted (a mixed-version state), and noteLocalContent(v) below then recorded v's
+    // drawings as the local baseline — so live ≠ baseline. The stored version DOES capture
+    // parcelDrawings (sigOf + snapshotVersion store the full model), so restore + durably persist
+    // them via persistDrawings (its saveSite-merge + cloud push), matching the other restored fields.
+    persistDrawings(v.parcelDrawings || []);
     // B556 — restoring an older (possibly thinner) version is a deliberate local restore; rebase the
     // thin-clobber baseline onto it so the next push isn't falsely rejected as a cross-session conflict.
     if (siteId) noteLocalContent(siteId, v);
@@ -6337,7 +6344,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
 
-  /* ---- live color picking (B562) ----
+  /* ---- live color picking (B565) ----
    * A native <input type="color"> fires `change` only when the OS palette CLOSES, but fires
    * `input` continuously as you click/drag through swatches. Wiring `onInput` makes the selected
    * object recolor the INSTANT you click a color, instead of waiting for the dialog to close.
@@ -6872,7 +6879,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // Neutral markups (line/polyline/polygon/rect/ellipse) render their REAL stroke color
                 // even when selected (WYSIWYG) so a live color-picker change is visible immediately
                 // instead of being hidden under the accent tint; selection is cued by the grips plus a
-                // faint width bump. (B562 — matches the shared MarkupRenderer's deliberate choice.)
+                // faint width bump. (B565 — matches the shared MarkupRenderer's deliberate choice.)
                 const nStroke = m.stroke;
                 const nsw = sw + (isSel ? 1 : 0);
                 const common = { stroke: nStroke, strokeWidth: nsw, strokeDasharray: da, fill: "none", style: { cursor: tool === "select" ? "move" : "crosshair" }, onPointerDown: (e) => startMoveMarkup(e, m.id) };
@@ -8552,7 +8559,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const ring = selEl.points ? selEl.points : elCorners(selEl);
                 const r = detentionStorage(ring, depth, fb, slope);
                 const setDet = (patch) => { pushHistory(); setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); };
-                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B562: no-history sibling for live color picking
+                const setDetLive = (patch) => setSelEl({ det: { depth, freeboard: fb, slope, ...det, ...patch } }); // B565: no-history sibling for live color picking
                 // --- Expand this pond (B139): baseline + steppers; both steppers and free
                 // drag feed the one Existing→Proposed readout. Baseline freezes the original
                 // footprint + depth/slope so the delta is apples-to-apples. ---

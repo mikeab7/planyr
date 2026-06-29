@@ -288,7 +288,7 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
     const fd        = readProp(m, "underline") ? "underline" : "none";
     const bgFill    = p.fill !== "none" ? p.fill : "#fff";
     const bgOpacity = p.fillOpacity > 0 ? p.fillOpacity : 1;
-    const padX = 8, padY = 4;   // horizontal a touch more generous than vertical (B561 parity)
+    const padX = 8, padY = 4;   // horizontal a touch more generous than vertical (B564 parity)
     const textW = Math.max(60, text.length * fs * 0.58 + padX * 2);
     const textH = fs + padY * 2;
     const leaderX = anchor.x;

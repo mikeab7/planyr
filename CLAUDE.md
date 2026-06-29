@@ -255,8 +255,12 @@ server/                   # placeholder README only — NOT built or deployed; b
   link; inbound `nav-select-by-site`/`nav-link`/`nav-create-linked`; outbound `link-changed`),
   `scheduler/lib/navState.js` (`findBySiteId`), `shared/projects/projectModel.js` (`suggestNameMatch`),
   `storage.js` (`setScheduleLink`/`scheduleLinkOf`), 📅 chip in `ProjectBreadcrumb.jsx`. Headless
-  `verify-cross-module-link.mjs` 4/4 (wrapper path); the live cross-iframe round-trip (Schedule's own
-  Supabase, unreachable in the sandbox) is **V152**.
+  `verify-cross-module-link.mjs` (wrapper path); the live cross-iframe round-trip (Schedule's own
+  Supabase, unreachable in the sandbox) is **V152**. **Follow-up fix B561** removed a Site→Schedule
+  switch regression (flashing/placeholder/raw-id/false-conflict) by making the route↔iframe sync
+  directional (the iframe→route push-up only adopts into an *empty* route; user picks carry up via a
+  one-shot `selectSchedule`), holding the routed name as last-known-good, never surfacing the raw
+  `group_id`, and no-opping the carry-in when the schedule is already active. Harness now 11/11; V172.
 
 ### Document Review — cloud persistence
 - Persists to the **existing Supabase backend** (reuses the anon client + auth session, no new

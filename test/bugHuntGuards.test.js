@@ -205,6 +205,21 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(st).toMatch(/toMs\(cloudMap\[id\]\.updatedAt\) >= toMs\(legacy\[id\] && legacy\[id\]\.updatedAt\)/);
   });
 
+  it("B562: importLegacyIntoCloud compares timestamps via toMs (third sibling of B559)", () => {
+    const st = read("../src/workspaces/site-planner/lib/storage.js");
+    // the legacy-import skip guard must coerce both sides so an ISO-string updatedAt can't NaN the compare
+    expect(st).toMatch(/toMs\(existing\.updatedAt\) >= toMs\(local\.updatedAt\)/);
+    // and the raw, type-unsafe form must be gone from that path
+    expect(st).not.toMatch(/\(existing\.updatedAt \|\| 0\) >= \(local\.updatedAt \|\| 0\)/);
+  });
+
+  it("B563: version restore re-applies parcelDrawings (its own persistence path) so it isn't a mixed-version restore", () => {
+    const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
+    // the restore sequence must durably restore the version's parcelDrawings (via persistDrawings,
+    // which both sets state AND saves — a bare setParcelDrawings would not persist)
+    expect(sp).toMatch(/persistDrawings\(v\.parcelDrawings \|\| \[\]\)/);
+  });
+
   it("B509: PropertyPanel threads the caption as aria-label to every control", () => {
     const src = read("../src/shared/markup/PropertyPanel.jsx");
     // each control receives label={label}
@@ -216,7 +231,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   });
 });
 
-describe("markup hit-area / callout padding / live color picker (B155 open-path tranche, B561, B562)", () => {
+describe("markup hit-area / callout padding / live color picker (B155 open-path tranche, B564, B565)", () => {
   it("B155: line + polyline markups carry a transparent FAT hit-stroke (not just the 2px visible line)", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(src).toMatch(/const MK_HIT_PX = 12;/);                                  // ~6px each side
@@ -226,7 +241,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).not.toMatch(/if \(m\.kind === "line"\) \{ const a = f2p\(m\.a\), b = f2p\(m\.b\); return <line key=\{m\.id\}[^>]*\{\.\.\.common\} \/>; \}/);
   });
 
-  it("B561: callout/text-box default horizontal padding is more generous than vertical", () => {
+  it("B564: callout/text-box default horizontal padding is more generous than vertical", () => {
     const sp = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(sp).toMatch(/padX: c\.padX \?\? 14, padY: c\.padY \?\? 8/);             // Site Planner default
     const mr = read("../src/shared/markup/MarkupRenderer.jsx");
@@ -234,7 +249,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(mr).toMatch(/text\.length \* fs \* 0\.58 \+ padX \* 2/);
   });
 
-  it("B562: every Site Planner color input picks live via livePick (onInput), with one-frame undo", () => {
+  it("B565: every Site Planner color input picks live via livePick (onInput), with one-frame undo", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
     expect(src).toMatch(/const livePick = \(apply\) =>/);
     expect(src).toMatch(/onInput:\s+\(e\) => \{ if \(!pickSnapRef\.current\) \{ pushHistory\(\); pickSnapRef\.current = true; \}/);
@@ -253,7 +268,7 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).toMatch(/const common = \{ stroke: nStroke, strokeWidth: nsw,/);
   });
 
-  it("B562: shared ColorControl fires live on input + Doc Review coalesces it to one undo frame", () => {
+  it("B565: shared ColorControl fires live on input + Doc Review coalesces it to one undo frame", () => {
     const pp = read("../src/shared/markup/PropertyPanel.jsx");
     expect(pp).toMatch(/onInput=\{\(e\) => onChange\(e\.target\.value, \{ live: true \}\)\}/);
     expect(pp).toMatch(/onChange=\{\(e\) => onChange\(e\.target\.value, \{ live: false \}\)\}/);

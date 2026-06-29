@@ -1,8 +1,8 @@
 /* Self-verification for the three owner-reported markup fixes:
  *   NEW-1 / B155 (open-path tranche): a Line markup grabs within ~6px of its body (fat hit-stroke),
  *                                     instead of forcing a pixel-perfect landing on the 2px stroke.
- *   NEW-2 / B561: a callout/text box has more generous horizontal padding by default.
- *   NEW-3 / B562: a native color picker applies LIVE (onInput) — the selected object recolors the
+ *   NEW-2 / B564: a callout/text box has more generous horizontal padding by default.
+ *   NEW-3 / B565: a native color picker applies LIVE (onInput) — the selected object recolors the
  *                 instant you click a swatch, not only when the dialog closes; one undo reverts it.
  *
  * All DOM/geometry-based, logged-out (no auth). Run with the preview server on :4173:
@@ -78,7 +78,7 @@ if (lineGeom) {
 }
 
 /* ---------------- NEW-3: color picker applies live (onInput) ---------------- */
-console.log("\n== NEW-3 (B562): a color picker recolors the selection live, one-step undo ==");
+console.log("\n== NEW-3 (B565): a color picker recolors the selection live, one-step undo ==");
 // Re-select the line so the 'Line color' picker is in the panel.
 await page.mouse.click(lineGeom.midX, lineGeom.midY + 4);
 await page.waitForTimeout(300);
@@ -117,7 +117,7 @@ const strokeAfterUndo = await page.evaluate(() => {
 ok("a single undo reverts the color to the original #c2410c", norm(strokeAfterUndo) === norm("#c2410c"));
 
 /* ---------------- NEW-2: callout horizontal padding more generous ---------------- */
-console.log("\n== NEW-2 (B561): callout/text box horizontal padding is more generous by default ==");
+console.log("\n== NEW-2 (B564): callout/text box horizontal padding is more generous by default ==");
 const pads = await page.evaluate(() => {
   // Each text box is <g><rect/><text>PADDING</text></g>. Measure left inset (text.left - rect.left)
   // for the new-default box vs the explicit padX:8 box; the new one must be wider-padded.
