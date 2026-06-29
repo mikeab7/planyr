@@ -1369,61 +1369,60 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
   const drag = useRef(null);
-  const pointersRef = useRef(new Map()); // live touch pointers → svg-relative {x,y} (B331)
-  const pinchRef = useRef(null);         // active two-finger pinch { mid, dist } (B331)
-  const touchPinchedRef = useRef(false); // a pinch occurred this touch sequence (B331)
-  // Viewport-relative screen point for the pinch midpoint math (the SVG fills the canvas wrapper).
-  const vpPoint = (e) => { const r = svgRef.current.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  // One frame of a two-finger pinch: zoom by the finger-distance ratio about the moving midpoint,
-  // mapping the planner's { ppf, offX, offY } through the shared engine. (B331)
-  const applyPinch = () => {
-    // Snapshot the pinch baseline locally: a finger can lift (reseedPinch → pinchRef.current=null)
-    // between scheduling this update and React running the updater, so reading pinchRef.current
-    // inside setView could hit null ("null is not an object … .mid" crash on mobile). (B331 fix)
-    const p = pinchRef.current;
-    if (!p || pointersRef.current.size < 2) return;
-    const [a, b] = [...pointersRef.current.values()];
-    const mid = midpoint(a, b), dist = Math.max(1, distance(a, b));
-    const factor = dist / p.dist;
-    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, p.mid, mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
-    pinchRef.current = { mid, dist };
+  const pointersRef = useRef(new Map()); // (vestigial — kept for abortGesture's clear; pinch is native-touch now)
+  const pinchRef = useRef(null);         // (vestigial)
+  const touchPinchedRef = useRef(false); // (vestigial)
+  // ── Two-finger pinch via NATIVE touch events (B555). The planner used to run pinch off
+  // POINTER events, which iOS Safari handles unreliably for multi-touch — it often fires a
+  // spurious `pointercancel` on the first finger the instant a second lands, which killed the
+  // pinch mid-gesture and let a one-finger pan fight it (the "super buggy" report). Native
+  // `touch` events carry ALL active touches in `e.touches` every frame and don't suffer that,
+  // so they're the robust path on iOS. The canvas already sets `touch-action: none`, so the
+  // browser's own pinch-zoom/scroll is suppressed and React's (passive) touch handlers need no
+  // preventDefault. Updates are throttled to one per animation frame so a heavy plan doesn't
+  // re-render on every raw touchmove (the other half of the jank).
+  const touchCountRef = useRef(0);       // # of fingers currently down (gates the pointer handlers)
+  const pinch2Ref = useRef(null);        // active baseline { mid, dist } (svg-relative) | null
+  const pinchRafRef = useRef(0);         // pending rAF id (0 = none)
+  const pinchNextRef = useRef(null);     // latest { mid, dist } awaiting the next frame
+  const touchPt = (t) => { const r = svgRef.current.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+  const flushPinch = () => {
+    pinchRafRef.current = 0;
+    const nx = pinchNextRef.current, base = pinch2Ref.current;
+    if (!nx || !base) return;
+    const factor = nx.dist / base.dist;
+    setView((v) => { const nv = pinchZoom({ scale: v.ppf, tx: v.offX, ty: v.offY }, base.mid, nx.mid, factor, 0.02, 8); return { ppf: nv.scale, offX: nv.tx, offY: nv.ty }; });
+    pinch2Ref.current = nx; // re-baseline so the next frame is incremental
   };
-  // (Re)baseline the pinch to whatever touch pointers remain: ≥2 → seed from the current pair (the
-  // first two), else end it. Called on every finger add/remove so a 3rd finger or a partial lift
-  // re-anchors instead of zoom-jumping off a stale pair. (B331)
-  const reseedPinch = () => {
-    const pts = [...pointersRef.current.values()];
-    pinchRef.current = pts.length >= 2 ? { mid: midpoint(pts[0], pts[1]), dist: Math.max(1, distance(pts[0], pts[1])) } : null;
+  const onTouchStartPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length < 2) return;
+    const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+    pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    pinchNextRef.current = null;
+    // The 1st finger landed a beat earlier and may have begun a one-finger pan; tear it down so
+    // the pinch starts clean, and restore the view if that pan had already nudged it (no jump-in).
+    const d = drag.current;
+    if (d && d.mode === "pan" && d.ox != null) setView((v) => ({ ...v, offX: d.ox, offY: d.oy }));
+    if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
+    capturePidRef.current = null; cancelActiveMove(); drag.current = null;
+    setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
   };
-  // Pinch runs on the CAPTURE phase so a touch landing on a parcel/building (which has its own
-  // pointer handler) is still caught. Gated on pointerType==='touch' — mouse/trackpad never enter.
-  // A 2nd touch starts the pinch (stopPropagation so the bg/element handlers don't also fire) and
-  // tears down the 1st finger's in-progress drag (revert a half-move, B315); a 3rd+ finger is
-  // absorbed (no draw/pan). (B331)
-  const onPinchDown = (e) => {
-    if (e.pointerType !== "touch") return;
-    pointersRef.current.set(e.pointerId, vpPoint(e));
-    if (pointersRef.current.size >= 2) {
-      e.stopPropagation();
-      reseedPinch();
-      touchPinchedRef.current = true;
-      if (capturePidRef.current != null && svgRef.current) { try { svgRef.current.releasePointerCapture(capturePidRef.current); } catch (_) {} }
-      capturePidRef.current = null; cancelActiveMove(); drag.current = null;
-      setPanning(false); setMarquee(null); setMkRect(null); setDraftRect(null);
+  const onTouchMovePinch = (e) => {
+    if (!pinch2Ref.current || e.touches.length < 2) return;
+    const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+    pinchNextRef.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+    if (!pinchRafRef.current) pinchRafRef.current = requestAnimationFrame(flushPinch);
+  };
+  const onTouchEndPinch = (e) => {
+    touchCountRef.current = e.touches.length;
+    if (e.touches.length >= 2) { // a 3rd finger lifted — re-baseline to the remaining pair, no jump
+      const a = touchPt(e.touches[0]), b = touchPt(e.touches[1]);
+      pinch2Ref.current = { mid: midpoint(a, b), dist: Math.max(1, distance(a, b)) };
+      return;
     }
-  };
-  const onPinchMove = (e) => {
-    if (!pinchRef.current || e.pointerType !== "touch") return;
-    e.stopPropagation();
-    if (pointersRef.current.has(e.pointerId)) pointersRef.current.set(e.pointerId, vpPoint(e));
-    applyPinch();
-  };
-  const onPinchUp = (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPinchedRef.current) e.stopPropagation(); // suppress the bubble handlers for the whole pinch sequence
-    pointersRef.current.delete(e.pointerId);
-    reseedPinch(); // re-baseline (or end) the pinch to whatever fingers remain — a lift never jumps
-    if (pointersRef.current.size === 0) touchPinchedRef.current = false;
+    pinch2Ref.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
   };
   const altSnapOffRef = useRef(false); // Alt held during a drag/placement → bypass snap for this one move (re-armed every pointer event)
   const clip = useRef(null); // copied element (for Ctrl+C / X / V)
@@ -1879,7 +1878,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setMarquee(null);
     setMkRect(null);
     setDraftRect(null);
-    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // clear any two-finger pinch (B331)
+    pointersRef.current.clear(); pinchRef.current = null; touchPinchedRef.current = false; // (vestigial)
+    // Also drop any in-flight native-touch pinch so a blur/visibility loss mid-gesture can't strand it (B555).
+    touchCountRef.current = 0; pinch2Ref.current = null; pinchNextRef.current = null;
+    if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = 0; }
   };
   // Recover whenever the window loses focus or the tab is hidden (alt-tab, an OS dialog, or a
   // debugger attaching — all of which can swallow the pointer-up / Space key-up the canvas was
@@ -2127,6 +2129,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const onBgDown = (e) => {
     if (e.button !== 0) return;
+    if (touchCountRef.current >= 2) return; // a two-finger pinch owns the gesture (B555)
     capturePidRef.current = e.pointerId; // remember the pointer so an interrupted gesture (pointercancel / blur) can still release capture (NEW-1)
     altSnapOffRef.current = !!e.altKey; // Alt at placement → drop free (no grid snap), matching the drag bypass
     const fp = p2f(e.clientX, e.clientY);
@@ -2794,6 +2797,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   const onMove = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
     altSnapOffRef.current = !!e.altKey; // hold Alt to bypass snap for this drag (re-armed each move); read by snap()/snapPt() below
     const fp = p2f(e.clientX, e.clientY);
     lastPtrFt.current = fp; // remember the live cursor in feet so a paste lands here (B417); ref-only — no setState in this hot path
@@ -3072,6 +3076,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return { x0, y0, x1, y1 };
   };
   const onUp = (e) => {
+    if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
     const d = drag.current;
     if (d && d.mode === "marquee") {
       const mx0 = Math.min(d.a.x, marquee?.b.x ?? d.a.x), mx1 = Math.max(d.a.x, marquee?.b.x ?? d.a.x);
@@ -6591,13 +6596,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <svg ref={svgRef} width="100%" height="100%" viewBox={`0 0 ${size.w} ${size.h}`} role="application" aria-label="Site plan canvas"
             style={{ position: "relative", zIndex: 1, background: origin ? "transparent" : PAL.paper, display: "block", touchAction: "none", userSelect: "none", WebkitUserSelect: "none", cursor: spacePan ? (panning ? "grabbing" : "grab") : identifyMode ? ADD_CURSOR : (attachFor || alignFor || traceMode || pobMode || routeMode || xsecMode || ovCalib) ? "crosshair" : (tool === "select" || tool === "pan" || printMode) ? (panning ? "grabbing" : "grab") : "crosshair" }}
             onMouseDown={(e) => e.preventDefault()}
-            // Capture phase runs BOTH the vertex-edit handlers (mouse/single-touch) and the two-finger
-            // pinch (B331) — merged into one prop each so neither silently overwrites the other. The pinch
-            // wins once it engages (touch + 2 fingers set pinchRef); otherwise vertex editing runs as before.
-            onPointerDownCapture={(e) => { onPinchDown(e); if (!pinchRef.current) onCanvasVtxDownCapture(e); }}
+            // Two-finger pinch runs on native touch events (B555) — see onTouchStartPinch. While a
+            // 2-finger gesture is live (touchCountRef ≥ 2) the pointer-driven vertex edit / pan / draw
+            // handlers all bail, so the pinch owns the gesture and nothing fights it.
+            onTouchStart={onTouchStartPinch} onTouchMove={onTouchMovePinch} onTouchEnd={onTouchEndPinch} onTouchCancel={onTouchEndPinch}
+            onPointerDownCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxDownCapture(e); }}
             onContextMenuCapture={onCanvasVtxContextCapture}
-            onPointerMoveCapture={(e) => { onPinchMove(e); if (!pinchRef.current) onCanvasVtxMoveCapture(e); }}
-            onPointerUpCapture={onPinchUp} onPointerCancelCapture={onPinchUp}
+            onPointerMoveCapture={(e) => { if (touchCountRef.current < 2) onCanvasVtxMoveCapture(e); }}
             onPointerDown={onBgDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={(e) => abortGesture(e.pointerId)} onDoubleClick={onBgDouble}
             onContextMenu={(e) => { if (roadStart) { e.preventDefault(); setRoadStart(null); setDraftRoad(null); } }}>
 
