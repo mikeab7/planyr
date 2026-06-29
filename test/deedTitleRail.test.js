@@ -9,14 +9,14 @@ import { fileURLToPath } from "node:url";
  * tool mode (which would corrupt `tool`). No browser / auth / seeded site needed.
  *
  * History: B543 first lifted it out of the File menu into a standalone rail launcher;
- * B567 then folded it INTO the Parcel (was "Boundary") tool group, where it lives now. */
+ * B570 then folded it INTO the Parcel (was "Boundary") tool group, where it lives now. */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
 
 // The Deed/Title entry now lives in the Parcel ▾ menu, keyed by this testid.
 const deedBtn = (src.match(/data-testid="boundary-menu-mb"[\s\S]{0,500}?<\/button>/) || [])[0];
 
-describe("B567 — Deed / Title (metes & bounds) tool lives in the Parcel menu", () => {
+describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel menu", () => {
   it("the Parcel menu has the Deed / Title entry and it opens the existing modal", () => {
     expect(deedBtn).toBeTruthy();
     expect(deedBtn).toMatch(/Deed \/ Title/);
@@ -35,8 +35,7 @@ describe("B567 — Deed / Title (metes & bounds) tool lives in the Parcel menu",
   });
 
   it("the parcel group is labelled 'Parcel' (renamed from 'Boundary') and keeps Draw + Split", () => {
-    // the rail group button reads "Parcel ▾"
-    expect(src).toMatch(/<ToolIcon id="parcel" \/> Parcel /);
+    expect(src).toMatch(/<ToolIcon id="parcel" \/> Parcel /); // the rail group button reads "Parcel ▾"
     expect(src).toMatch(/Draw new parcel/);
     expect(src).toMatch(/Split a parcel/);
   });

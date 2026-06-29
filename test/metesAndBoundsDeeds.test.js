@@ -99,7 +99,7 @@ describe("metes-and-bounds parser — review hardening", () => {
   });
 });
 
-/* True-to-arc curve rendering (B566) — a curve course is tessellated into its real
+/* True-to-arc curve rendering (B569) — a curve course is tessellated into its real
  * circular arc, not drawn as a straight chord. Frame: +x east, +y south. */
 describe("metes-and-bounds — curves render as true arcs", () => {
   // chord due east 100 ft; R = 70.71, Δ = 90° → sagitta = R(1 - cos45°) ≈ 20.71 ft.
