@@ -35,6 +35,11 @@ const btnGhost = {
 
 export default function LinkSchedulePanel({ siteName, schedules = [], suggestedMatch = null, onCreate, onLink }) {
   const [pick, setPick] = useState("");
+  // Defensive: the caller only mounts this once the site name is resolved, but never show or
+  // create a schedule named the raw id — fall back to a neutral label and disable Create if the
+  // name is somehow missing (B560).
+  const label = siteName || "this project";
+  const canCreate = !!siteName;
   // Don't offer the suggested match again inside the manual picker.
   const others = schedules.filter((s) => s && s.id != null && (!suggestedMatch || s.id !== suggestedMatch.id));
 
@@ -50,15 +55,15 @@ export default function LinkSchedulePanel({ siteName, schedules = [], suggestedM
           Connect a schedule
         </div>
         <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>
-          No schedule linked to “{siteName}” yet
+          No schedule linked to “{label}” yet
         </div>
         <p style={{ margin: "0 0 16px", fontSize: 12.5, lineHeight: 1.5, color: "var(--text-secondary)" }}>
           Connect a schedule to this project so it follows you when you switch tabs. You can spin up
           a new one, or link a schedule you’ve already built.
         </p>
 
-        <button style={btnPrimary} onClick={onCreate}>
-          Create a schedule for “{siteName}”
+        <button style={{ ...btnPrimary, opacity: canCreate ? 1 : 0.5, cursor: canCreate ? "pointer" : "not-allowed" }} onClick={canCreate ? onCreate : undefined} disabled={!canCreate}>
+          Create a schedule for “{label}”
         </button>
 
         {suggestedMatch && (
