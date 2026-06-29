@@ -288,9 +288,9 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
     const fd        = readProp(m, "underline") ? "underline" : "none";
     const bgFill    = p.fill !== "none" ? p.fill : "#fff";
     const bgOpacity = p.fillOpacity > 0 ? p.fillOpacity : 1;
-    const pad = 4;
-    const textW = Math.max(60, text.length * fs * 0.58 + pad * 2 + 4);
-    const textH = fs + pad * 2;
+    const padX = 8, padY = 4;   // horizontal a touch more generous than vertical (B561 parity)
+    const textW = Math.max(60, text.length * fs * 0.58 + padX * 2);
+    const textH = fs + padY * 2;
     const leaderX = anchor.x;
     const leaderY = anchor.y + textH / 2;
     return (
@@ -304,7 +304,7 @@ export default function MarkupRenderer({ markup: m, view, selected = false, ftPe
         )}
         <rect x={anchor.x} y={anchor.y} width={textW} height={textH}
           fill={bgFill} fillOpacity={bgOpacity} stroke={p.stroke} strokeWidth={1} rx={3} />
-        <text x={anchor.x + pad + 2} y={anchor.y + fs + pad / 2}
+        <text x={anchor.x + padX} y={anchor.y + fs + padY / 2}
           fontSize={fs} fill={fc} fontWeight={fw} fontStyle={fi} textDecoration={fd}
           pointerEvents="none">{text}</text>
       </g>
