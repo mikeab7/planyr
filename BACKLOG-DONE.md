@@ -1,5 +1,19 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 14 (B558 — lap 2 of 4 owner-requested laps): a 6-lens Workflow (doc-review-pipeline /
+     shared-markup / storage-read / shell-routing / date-handling / coverage-logic). 9 raw → 9 "confirmed"
+     by the panel, but on my own re-read only ONE survived — the rest were over-confirmed false positives /
+     by-design and were REJECTED: crossSections (NO producer — always empty; round-5 already refuted),
+     pdf.js width fallback (modern pdf.js always sets .width; proposed fallback ≈ font height, not run width),
+     measure.js dimension-in-rollup (dimension is category:"shape" — rollup deliberately sums measure-tools;
+     including it would double-count), DocReview docIntent "race" (the `=== undefined` one-shot guard can't be
+     overwritten — misread), coverage hydrate bounds (already validates all four via `.every(Number.isFinite)`),
+     fileIndex epoch fallback (a missing date sorting oldest is a fine default), nearby-radius slider cap
+     (a 10-mi UI cap is a defensible deliberate choice). -->
+
+### B558 — Timestamp comparisons assumed a number → a string `updatedAt` silently picks the OLDER copy (merge + legacy-prune) `[Site Planner / persistence]` (bug — latent data-loss) — MED  *(bug-hunt round 14, 2026-06-27; fixed same lap; minted **B558** = highest real B# (B557) + 1)*
+`[x]` **DONE + verified. lint 0 · 1789 tests · build green.** `mergeSiteContent` (siteModel.js newer-wins) and `pruneMigratedLegacy` (storage.js) compared `updatedAt` with `>=` assuming a ms number — but `createSiteModel` keeps whatever it's given (`p.updatedAt || Date.now()`), so an imported/legacy record can carry an ISO **string**, and `"2025-…" >= 1718…` is a silent **false**. In the merge that would pick the OLDER copy as "newer" (scalar/meta from the stale side; union still keeps drawn work, but the wrong meta + a wrong prune could strand/drop a newer edit). **Fix:** a shared exported `toMs(v)` coercion (string→`Date.parse`, number→itself, else 0) applied at both comparison sites. Unit tests (`test/siteModel.test.js`: toMs + a newer-ISO-vs-older-number merge) + anti-drift guard. Latent (updatedAt is ~always a number in practice) but the consequence is data-loss, so worth the cheap guard. **This lap's hunt was mostly false positives (7 of 9 rejected on re-read) — this is the one genuine find.**
+
 <!-- Bug-hunt ROUND 13 (B557 — lap 1 of 4 owner-requested laps): a 6-lens Workflow (print-export /
      gis-builders / calculators / auth-profile / layer-status / a11y-2). 8 raw → 7 confirmed; all 7
      clean low-risk fixes shipped as one umbrella. print-export, gis-builders, and calculators came
