@@ -1,5 +1,18 @@
 ## ✅ Done
 
+<!-- Bug-hunt ROUND 13 (B556 — lap 1 of 4 owner-requested laps): a 6-lens Workflow (print-export /
+     gis-builders / calculators / auth-profile / layer-status / a11y-2). 8 raw → 7 confirmed; all 7
+     clean low-risk fixes shipped as one umbrella. print-export, gis-builders, and calculators came
+     back CLEAN (no wrong output/requests/numbers — consistent with the round-12 yield audit). -->
+
+### B556 — Round-13 robustness + accessibility batch (auth null-guards · layer-lifecycle cleanup · LayerPanel/menu ARIA) `[Site Planner / robustness + a11y]` (bug umbrella)  *(bug-hunt round 13, 2026-06-27; fixed same lap; minted **B556** = highest real B# (B555) + 1)*
+`[x]` **DONE + verified. lint 0 · 1786 tests · GIS audit OK · build green.** Seven small, confirmed, low-risk fixes from the lap-1 hunt:
+- **Auth email null-guards** — `Shell.jsx` (pill title + dropdown) and `AuthPanel.jsx` (Profile tab) rendered `user.email` unguarded → a missing email would show "undefined". Now `user?.email || "(no email)"`/`""`, matching the codebase's existing defensive pattern.
+- **Layer-lifecycle cleanup (`layers.js`)** — (HIGH) `attachFeatureRetry` scheduled a backoff `setTimeout(refresh)` never cleared when the layer toggled off → a timer fired `refresh()` on a detached layer; now `onRemove` clears it (Leaflet calls onRemove on `map.removeLayer`, chained to the original). `reportCacheAge`'s async cache-age fetch now checks `lyr._map` before `onStatus`, so it can't report age on a since-removed layer.
+- **LayerPanel ARIA** — the group collapse buttons (Map layers / Jurisdictions / Utility evidence) and the "Show N layers with no local data" reveal button gained `aria-expanded` + a descriptive `aria-label`.
+- **ProjectBreadcrumb manage menu** — the portal Rename/Delete menu gained `role="menu"`/`role="menuitem"` + the backdrop `role="presentation"`.
+- Anti-drift guards in `test/bugHuntGuards.test.js`. Pure-additive ARIA + defensive guards — no behavior change for the happy path.
+
 ### B555 — Planner two-finger pinch is "super buggy" on mobile Safari `[Site Planner / mobile]` (bug)  *(owner-found 2026-06-28 once actually planning a parcel on mobile Safari; minted **B555** = highest real B# across both files (B554) + 1; branch `claude/mobile-safari-pinch-menu-3gon8x`)*
 `[x]` **DONE + verified. lint 0 · 1782 tests · build green · headless 3/3.** The Site Planner's pinch-zoom ran on **pointer** events. iOS Safari's multi-touch pointer-event support is unreliable — it routinely fires a spurious `pointercancel` on the first finger the instant a second touches, which tore down the pinch mid-gesture and let a one-finger pan fight it (the "super buggy" feel: jumpy, dropping out, sticking). Rewrote the gesture on **native touch events** (`onTouchStart/Move/End/Cancel` on the canvas `<svg>`):
   - `e.touches` always carries every active finger each frame, so the gesture never "loses" a finger the way pointer events did on iOS.
