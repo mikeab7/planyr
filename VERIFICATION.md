@@ -60,6 +60,11 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V174 — B564: a schedule's task dependencies survive load even if persisted data had a duplicate task id ⏳ signed-in confirm owed
+- **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in** (the scheduler talks to its own Supabase, unreachable headless).
+- **✅ Proven here (no browser):** lint 0 · 1798 tests · build green · scheduler JSX transpiles. Behavioral tests prove a predecessor pointing at a duplicated id now remaps to the FIRST occurrence (original task), and clean unique-id data is unchanged; anti-drift guard ties the fix to source + mirror.
+- **⏳ Why pending:** exercising a *real* persisted schedule (especially any legacy one that may carry a duplicate id) needs the live signed-in scheduler. **Signed-in steps on planyr.io:** open the **Sequence Planyr** tab on a project with task dependencies → confirm the Gantt/dependency arrows and cascade dates match the declared predecessors (nothing pointing at the wrong task), edit a predecessor and confirm the cascade updates correctly, and reload to confirm the dependency graph is stable across loads.
+
 ### V173 — B563: version Restore brings back the parcel's attached drawings (not a mixed-version restore) ⏳ signed-in confirm owed
 - **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in** (cloud version history is unreachable headless).
 - **✅ Proven here (no browser):** lint 0 · tests green · build green; anti-drift guard `test/bugHuntGuards.test.js` (B563) asserts `restoreVersion` re-applies `persistDrawings(v.parcelDrawings || [])`.

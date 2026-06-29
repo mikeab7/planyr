@@ -308,8 +308,41 @@ describe("B550 — a parentId cycle in loaded data can't hang the scheduler", ()
   });
 });
 
+describe("B564: renumberTasks resolves a duplicate id to the FIRST occurrence (original wins)", () => {
+  it("a predecessor pointing at a duplicated id remaps to the first occurrence, not the last", () => {
+    // Corrupt/legacy input: id=100 appears twice (the app once minted dup ids before addTask used
+    // maxId+1). A third task depends on id=100. The original (first in visual order) is the true target.
+    const tasks = [
+      { id: 100, name: "A (original)", parentId: null, predecessors: [] },
+      { id: 200, name: "B", parentId: null, predecessors: [] },
+      { id: 100, name: "A-dup (stray paste)", parentId: null, predecessors: [] },
+      { id: 300, name: "C depends on 100", parentId: null, predecessors: [{ id: 100, type: "FS", lag: 0 }] },
+    ];
+    const out = E.renumberTasks(tasks);
+    // ids compact to 1..n by position
+    expect(out.map((t) => t.id)).toEqual([1, 2, 3, 4]);
+    // C's predecessor must point at the FIRST occurrence of old-id 100 → new id 1, never the dup at 3
+    const c = out.find((t) => t.name === "C depends on 100");
+    expect(c.predecessors).toEqual([{ id: 1, type: "FS", lag: 0 }]);
+  });
+  it("clean unique-id data is unaffected (parent + predecessor remap unchanged)", () => {
+    const tasks = [
+      { id: 10, name: "P", parentId: null, predecessors: [] },
+      { id: 20, name: "child", parentId: 10, predecessors: [{ id: 10, type: "FS", lag: 0 }] },
+    ];
+    const out = E.renumberTasks(tasks);
+    expect(out[1].parentId).toBe(1);
+    expect(out[1].predecessors).toEqual([{ id: 1, type: "FS", lag: 0 }]);
+  });
+});
+
 describe("anti-drift: the guards still exist in the real source (public/sequence/index.html)", () => {
   const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  it("B564: renumberTasks first-occurrence guard exists in BOTH source and the engine mirror", () => {
+    const mirror = readFileSync(fileURLToPath(new URL("../ui-audit/stress/scheduler-engine.mjs", import.meta.url)), "utf8");
+    expect(src).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
+    expect(mirror).toMatch(/tasks\.forEach\(\(t, i\) => \{ if \(!\(t\.id in map\)\) map\[t\.id\] = i \+ 1; \}\)/);
+  });
   it("B550: normalizeIds breaks a parentId cycle on load (protects every downstream tree-walk)", () => {
     expect(src).toMatch(/break any parentId cycle on load/);                          // the comment marking the fix
     expect(src).toMatch(/if \(seen\.has\(p\)\) return \{\.\.\.t, parentId: null\}/);  // the actual break
