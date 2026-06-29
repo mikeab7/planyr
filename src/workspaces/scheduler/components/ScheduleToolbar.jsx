@@ -101,7 +101,7 @@ function ExportMenu({ post }) {
   );
 }
 
-/* B565 — the floppy-disk SaveButton that used to live here was REMOVED. Save status now rides
+/* B566 — the floppy-disk SaveButton that used to live here was REMOVED. Save status now rides
  * in the shared, app-wide cloud badge (CloudSyncBadge) in AppHeader's Row-1 top-right zone, the
  * same place + component the Site Planner uses — so the indicator means the same thing across
  * every workspace. Scheduler.jsx maps the embedded app's reported saveStatus (saved/saving/error,

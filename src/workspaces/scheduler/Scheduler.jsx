@@ -72,7 +72,7 @@ export default function Scheduler({
           zoomPct: Number(m.zoomPct) || 0, zoomable: !!m.zoomable,
           reviewCount: Number(m.reviewCount) || 0, reviewOpen: !!m.reviewOpen,
           saveStatus: m.saveStatus, savePulse: !!m.savePulse, fileLinked: !!m.fileLinked,
-          offlineFallback: !!m.offlineFallback, // B565 — cloud-unreachable → badge shows honest "offline", not a false "synced"
+          offlineFallback: !!m.offlineFallback, // B566 — cloud-unreachable → badge shows honest "offline", not a false "synced"
           activePanel: m.activePanel || null,
         });
         return;
@@ -204,7 +204,7 @@ export default function Scheduler({
   const showLinkPanel = ready && projectId != null && !linkedSchedule && !!routedSiteName;
   const suggestedMatch = showLinkPanel ? suggestNameMatch(routedSiteName, projects) : null;
 
-  // B565 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
+  // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
   // Site Planner (Row-1 right zone of AppHeader), driven by the embedded app's already-reported
   // save status, instead of a separate floppy-disk "Save" button down in the Row-2 toolbar. The
   // embedded Gantt app auto-saves to its own cloud; this only re-skins that live status. Retry on
@@ -220,7 +220,7 @@ export default function Scheduler({
         authControl={authControl}
         accountActive={accountActive}
         homeLabel="Dashboard"
-        // B565 — unified cloud save-status badge (Row-1, top-right), replacing the floppy Save
+        // B566 — unified cloud save-status badge (Row-1, top-right), replacing the floppy Save
         // button. `saveState` is the embedded app's reported status mapped to the shared badge's
         // vocabulary; the loud error state's popover "Retry now" re-posts planar:save to re-attempt
         // the cloud write. The embedded app is the single source of truth — the badge only displays.

@@ -4547,7 +4547,7 @@ function App() {
       reviewCount: reviewRows.length,
       reviewOpen: !!reviewOpen,
       saveStatus, savePulse: !!savePulse, fileLinked: !!fileLinked,
-      // B565 — bridge the offline/cloud-unreachable condition up too, so the unified header
+      // B566 — bridge the offline/cloud-unreachable condition up too, so the unified header
       // cloud badge can show the honest amber "offline" state instead of a false-green "synced":
       // on a failed initial cloud READ, offlineFallback is set while saveStatus still reads its
       // initial "saved" (no write has been attempted yet), which would otherwise map to synced.
@@ -7821,7 +7821,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked}) {
           </div>
         )}
 
-        {/* B565 — "Link a local backup file" moved here from the floppy Save button (the Save
+        {/* B566 — "Link a local backup file" moved here from the floppy Save button (the Save
             control is now the unified cloud sync badge in the shell header). Cloud auto-save is
             always on; this is the optional second copy, written to a local .html file on disk on
             every save (Chrome/Edge File System Access API). */}

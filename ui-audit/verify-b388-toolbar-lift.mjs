@@ -8,7 +8,7 @@
  * asserts:
  *   1. the embedded app's own toolbar (.app-header) is HIDDEN in-iframe — no double toolbar;
  *   2. the lifted controls render in the PARENT shell header (view toggle, review, export,
- *      history, contacts, automation, settings). B565 — the floppy "Save" button was REMOVED
+ *      history, contacts, automation, settings). B566 — the floppy "Save" button was REMOVED
  *      from the lifted toolbar; save status now rides in the shared cloud sync badge in Row-1
  *      (data-testid="cloud-sync-badge"), the same component + slot the Site Planner uses. So we
  *      assert the cloud badge is present in the header AND the old floppy is gone;
@@ -50,7 +50,7 @@ const parentCtl = () => page.evaluate(() => {
     grid: seen(byText("Grid")), split: seen(byText("Split")), gantt: seen(byText("Gantt")),
     review: seen(byTitle("Review suggested updates from forwarded emails")),
     export: seen(byTitlePre("Export")),
-    // B565 — save status is now the shared Row-1 cloud badge, not a floppy in the lifted toolbar.
+    // B566 — save status is now the shared Row-1 cloud badge, not a floppy in the lifted toolbar.
     cloudBadge: seen(header.querySelector('[data-testid="cloud-sync-badge"]')),
     floppyGone: !header.querySelector('button[aria-label="Save status"]'),
     history: seen(byTitlePre("Version history")),
@@ -104,8 +104,8 @@ try {
   ok("lifted view toggle (Grid/Split/Gantt) renders in the shell header", c.grid && c.split && c.gantt);
   ok("lifted review inbox renders", c.review);
   ok("lifted Export renders", c.export);
-  ok("cloud sync badge renders in the shell header (Row-1) — replaces the floppy Save button (B565)", c.cloudBadge);
-  ok("the old floppy 'Save status' button is GONE from the lifted toolbar (B565)", c.floppyGone);
+  ok("cloud sync badge renders in the shell header (Row-1) — replaces the floppy Save button (B566)", c.cloudBadge);
+  ok("the old floppy 'Save status' button is GONE from the lifted toolbar (B566)", c.floppyGone);
   ok("lifted Version History renders", c.history);
   ok("lifted Contacts renders", c.contacts);
   ok("lifted Automation renders", c.automation);
