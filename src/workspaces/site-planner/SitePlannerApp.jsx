@@ -396,7 +396,17 @@ export default function App({
     await reportDeleteResult([res], "that plan");
   };
 
-  const renameSite = (groupId, site) => { renameSiteGroup(groupId, site); loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {})); refreshSites(); };
+  const renameSite = (idOrGroup, site) => {
+    // idOrGroup may be a group id (the header breadcrumb) or a representative plan id (the map's
+    // site list). Resolve to the group so BOTH renameSiteGroup and the cloud-push loop target
+    // every plan in the site — a bare plan id would push nothing, so the rename wouldn't reach
+    // the cloud and could come back as the old name on the next pull. (rename-revert)
+    const rec = loadSite(idOrGroup);
+    const groupId = rec ? groupOf(rec) : idOrGroup;
+    renameSiteGroup(groupId, site);
+    loadPlansOfGroup(groupId).forEach((s) => pushSiteToCloud(s.id).catch(() => {}));
+    refreshSites();
+  };
   const renamePlan = (id, name) => { saveSite({ id, name }); pushSiteToCloud(id).catch(() => {}); refreshSites(); };
 
   // The planner dropped a blank, unedited site (never saved). Forget it.
