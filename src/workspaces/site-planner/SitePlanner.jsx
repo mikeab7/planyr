@@ -29,6 +29,8 @@ import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.j
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 import { centerOn } from "../../shared/geometry/pasteGeom.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
+import { pickInMarquee, selMods, nextSelection } from "../../shared/markup/selection.js";
+import SelectionChrome from "../../shared/markup/SelectionChrome.jsx";
 import { COUNTIES, COUNTIES_MAP, resolveTaxRates } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
@@ -137,6 +139,8 @@ const ICON_PATHS = {
   measure: <><path d="M2.2 10.8 L10.8 2.2 L13.8 5.2 L5.2 13.8 Z" /><path d="M5.6 7.4 l1.4 1.4 M8 5 l1.4 1.4" /></>,
   combine: <><path d="M2.5 2.5 h7 v4 h4 v7 h-7 v-4 h-4 Z" /></>,
   pan: <path d="M5 7 V3.6 a1.1 1.1 0 0 1 2.2 0 V6.6 M7.2 6.4 V2.9 a1.1 1.1 0 0 1 2.2 0 V6.6 M9.4 6.6 V3.5 a1.1 1.1 0 0 1 2.2 0 V8.5 M11.6 6 a1.1 1.1 0 0 1 2.1 0 l-0.2 4 a4 4 0 0 1-4 3.6 H8 a4 4 0 0 1-3.3-1.8 L2.6 9.6 a1.1 1.1 0 0 1 1.7-1.4 L5 9" />,
+  // Marquee/box-select: a dashed selection rectangle with solid corner grips (B570).
+  marquee: <><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="0.6" strokeDasharray="2.4 1.8" /><rect x="1.7" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="1.7" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="1.7" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /><rect x="12.5" y="12.5" width="1.8" height="1.8" fill="currentColor" stroke="none" /></>,
   callout: <><rect x="2.2" y="2.4" width="8.6" height="6" rx="1" /><path d="M5.2 8.4 L4 11.2 L7.2 8.4" /><path d="M11 11.5 L13.8 13.8" /></>,
   text: <><rect x="2.5" y="3" width="11" height="10" rx="1" /><path d="M5.4 6 H10.6 M8 6 V10.6" /></>,
   mline: <path d="M3 13 L13 3" />,
@@ -159,6 +163,7 @@ const ToolIcon = ({ id, size = 15 }) => (
 const TOOLS = [
   { id: "select", label: "Select", hint: "Move/resize/rotate • drag to move (snap only ALIGNS to the grid/edges, never bonds; hold Alt to bypass) • Shift-click or marquee to pick several, then Group (Ctrl+G) so they move/copy/select as one unit; double-click a group member to edit it in place • on a selected parcel: drag a dot to move a corner, click a + to add one, Shift-click a dot to delete • drag empty space to pan • shortcut: V" },
   { id: "pan", label: "Pan", hint: "Hand tool — drag anywhere to move the canvas; clicks don't select. Shortcut: H, or hold Space to pan temporarily (press V for Select)" },
+  { id: "marquee", label: "Marquee", hint: "Box-select (M): drag a box over the drawing — everything it touches is selected together, ready to move (drag any one) or delete. In the Select tool you can also Ctrl/⌘-click to toggle an object, Shift-click to add. Esc / click empty to clear" },
   { id: "parcel", label: "Parcel", hint: "Click to drop boundary points • click the first point (or double-click) to close • Esc cancels" },
   { id: "split", label: "Split", hint: "Cut a parcel: click points to draw a line across it — two points cut straight, or add more for a bent/stepped cut; double-click (or Enter) to finish. It splits into two — then delete the piece you don't want" },
   { id: "callout", label: "Callout", hint: "Annotation (Q): click the point you're calling out, then click where the text box goes, and type. Drag the box to move it, the dot to re-aim the leader; double-click to edit the text" },
@@ -808,6 +813,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     chrome: themePal.chromeBg, chromeLine: themePal.chromeDivider, chromeInk: themePal.chromeText,
     chromeMuted: themePal.chromeMuted, ember: themePal.accent, onAccent: themePal.onAccent,
     accentText: themePal.accentStrong, // AA accent for text on the soft-accent fill
+    selCasing: themePal.selCasing, selLine: themePal.selLine, // neutral multi-select / marquee chrome (B569)
     // Semantic text colors — theme-aware so colored labels stay AA on dark panels too.
     warn: themePal.warnText, danger: themePal.dangerText, success: themePal.successText,
     info: themePal.infoText, purple: themePal.purpleText,
@@ -907,6 +913,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const multiRef = useRef(multi); multiRef.current = multi;
   const [marquee, setMarquee] = useState(null); // {a:{x,y}, b:{x,y}} feet, while rubber-banding
   const inMulti = (kind, id) => multi.some((m) => m.kind === kind && m.id === id);
+  const refEq = (a, b) => a.kind === b.kind && a.id === b.id; // compares {kind,id} refs in the multi set (B569)
+  // Seed an empty multi-set with the current single selection so click-A then Ctrl/Shift-click-B
+  // gives {A,B}, not just {B}. Only the multi-movable kinds (el/markup/measure) seed in. (B569)
+  const seedMulti = (s) => (s.length || !sel || !["el", "markup", "measure"].includes(sel.kind)) ? s : [sel];
   // snap comes from the global pref (a tool mode), never the per-site saved value.
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_SETTINGS, ...(restored?.settings || {}), snap: loadSnapPref() }));
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
@@ -1948,6 +1958,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.metaKey) { e.preventDefault(); selectTool("select"); return; }
       if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("pan"); return; }
+      if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); selectTool("marquee"); return; } // B570 box-select tool
       if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSnap(!settings.snap); return; } // toggle snap (hold Alt while dragging to bypass for one move)
       // Hold Space → temporary hand-pan over whatever tool is active (released = back to it).
       if (e.key === " " || e.code === "Space") {
@@ -1998,10 +2009,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const elIds = new Set();
       multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id)); // B569: measures join the multi-delete
       // B556 — tombstone exactly what the filter removes (selected els, their bonded children, and markups).
       const removedEls = stateRef.current.els.filter((e) => elIds.has(e.id) || elIds.has(e.attachedTo)).map((e) => e.id);
       setEls((a) => a.filter((e) => !elIds.has(e.id) && !elIds.has(e.attachedTo)));
       setMarkups((a) => a.filter((m) => !mkIds.has(m.id)));
+      if (measIds.size) setMeasures((a) => a.filter((m) => !measIds.has(m.id)));
       setMulti([]); setSel(null);
       tombstone([...removedEls, ...mkIds]);
       return;
@@ -2030,8 +2043,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (multi.length > 1) {
       const elIds = new Set(); multi.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
       const mkIds = new Set(multi.filter((m) => m.kind === "markup").map((m) => m.id));
+      const measIds = new Set(multi.filter((m) => m.kind === "measure").map((m) => m.id));
       setEls((a) => a.map((el) => elIds.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
       setMarkups((a) => a.map((m) => mkIds.has(m.id) ? translateMarkup(m, dx, dy) : m));
+      if (measIds.size) setMeasures((a) => a.map((m) => measIds.has(m.id) ? translateMeasure(m, dx, dy) : m)); // B569
     } else if (sel?.kind === "el") {
       const ids = new Set(assemblyOf(sel.id).map((x) => x.id));
       setEls((a) => a.map((el) => ids.has(el.id) ? (el.points ? { ...el, points: el.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: el.cx + dx, cy: el.cy + dy }) : el));
@@ -2228,6 +2243,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool === "pan") { // Shift+V hand tool — drag to move the canvas, never select
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (tool === "marquee") { // dedicated box-select tool (B570): drag a rubber-band, no Shift needed
+      drag.current = { mode: "marquee", a: fp };
+      setMarquee({ a: fp, b: fp });
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
@@ -2519,6 +2540,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (mk) { pushHistory(); setMarkups((arr) => [...arr, mk]); setSel({ kind: "markup", id: mk.id }); setTool("select"); }
     return !!mk;
   };
+  // Move a measurement by (dx,dy) — pts form (line/polyline/area/count) or the legacy {a,b}. (B569)
+  const translateMeasure = (m, dx, dy) => {
+    const out = { ...m };
+    if (Array.isArray(m.pts)) out.pts = m.pts.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+    if (m.a && m.b) { out.a = { x: m.a.x + dx, y: m.a.y + dy }; out.b = { x: m.b.x + dx, y: m.b.y + dy }; }
+    return out;
+  };
   const translateMarkup = (m, dx, dy) => {
     const shift = (arr) => (arr || []).map((p) => ({ x: p.x + dx, y: p.y + dy }));
     if (m.kind === "utilRoute") return { ...m, pts: shift(m.pts), corridor: shift(m.corridor), pad: shift(m.pad) };
@@ -2532,8 +2560,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (tool !== "select" || e.button !== 0) return;
     e.stopPropagation();
     const m = markups.find((x) => x.id === id);
-    if (e.shiftKey) {
-      setMulti((s) => inMulti("markup", id) ? s.filter((mm) => !(mm.kind === "markup" && mm.id === id)) : [...s, { kind: "markup", id }]);
+    const mkMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
+    if (mkMods.toggle || mkMods.add) {
+      setMulti((s) => nextSelection(seedMulti(s), { kind: "markup", id }, mkMods, refEq));
       setSel({ kind: "markup", id });
       setDrillId(null);
       return;
@@ -2566,9 +2595,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const elIds = new Set();
     refs.filter((m) => m.kind === "el").forEach((m) => assemblyOf(m.id).forEach((x) => elIds.add(x.id)));
     const mkIds = new Set(refs.filter((m) => m.kind === "markup").map((m) => m.id));
+    const measIds = new Set(refs.filter((m) => m.kind === "measure").map((m) => m.id));
     const orig = {
       els: els.filter((x) => elIds.has(x.id)).map((x) => x.points ? { id: x.id, points: x.points } : { id: x.id, cx: x.cx, cy: x.cy }),
       markups: markups.filter((m) => mkIds.has(m.id)).map((m) => ({ ...m })),
+      measures: measures.filter((m) => measIds.has(m.id)).map((m) => ({ ...m })), // B569: measurements move with the set
     };
     drag.current = { mode: "groupMove", fx: fp.x, fy: fp.y, orig, canceler: stateRef.current };
     svgRef.current.setPointerCapture(e.pointerId);
@@ -2932,6 +2963,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const eids = new Set(d.orig.els.map((o) => o.id)), mids = new Set(d.orig.markups.map((o) => o.id));
       setEls((a) => a.map((el) => { if (!eids.has(el.id)) return el; const o = d.orig.els.find((x) => x.id === el.id); return o.points ? { ...el, points: o.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : { ...el, cx: o.cx + dx, cy: o.cy + dy }; }));
       setMarkups((a) => a.map((m) => { if (!mids.has(m.id)) return m; const o = d.orig.markups.find((x) => x.id === m.id); return translateMarkup(o, dx, dy); }));
+      if (d.orig.measures?.length) { // B569: measurements travel with the set
+        const sids = new Set(d.orig.measures.map((o) => o.id));
+        setMeasures((a) => a.map((m) => { if (!sids.has(m.id)) return m; const o = d.orig.measures.find((x) => x.id === m.id); return translateMeasure(o, dx, dy); }));
+      }
       return;
     }
     if (d.mode === "mkDraw") {
@@ -3129,16 +3164,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (e.pointerType === "touch" && touchCountRef.current >= 2) return; // pinch owns a 2-finger gesture (B555)
     const d = drag.current;
     if (d && d.mode === "marquee") {
-      const mx0 = Math.min(d.a.x, marquee?.b.x ?? d.a.x), mx1 = Math.max(d.a.x, marquee?.b.x ?? d.a.x);
-      const my0 = Math.min(d.a.y, marquee?.b.y ?? d.a.y), my1 = Math.max(d.a.y, marquee?.b.y ?? d.a.y);
-      const hit = (o) => { const b = featBBox(o); return b && b.x0 <= mx1 && b.x1 >= mx0 && b.y0 <= my1 && b.y1 >= my0; };
+      // Crossing/touch box-select via the shared selection model (B569/B570) — one box-test for
+      // every workspace. Covers drawn elements, markups, and measurements; parcels keep their own
+      // merge interaction (the sanctioned divergence). featBBox returns {x0,y0,x1,y1}, a box form
+      // normBox understands. A degenerate (zero-travel) marquee is treated as "clear" (empty box).
+      const box = { x0: Math.min(d.a.x, marquee?.b.x ?? d.a.x), y0: Math.min(d.a.y, marquee?.b.y ?? d.a.y),
+                    x1: Math.max(d.a.x, marquee?.b.x ?? d.a.x), y1: Math.max(d.a.y, marquee?.b.y ?? d.a.y) };
       const picked = [
-        ...els.filter((el) => !el.attachedTo && !el.dogEar && hit(el)).map((el) => ({ kind: "el", id: el.id })),
-        ...markups.filter((m) => hit(m)).map((m) => ({ kind: "markup", id: m.id })),
+        ...pickInMarquee(els, box, { bboxOf: featBBox, refOf: (el) => ({ kind: "el", id: el.id }), filter: (el) => !el.attachedTo && !el.dogEar }),
+        ...pickInMarquee(markups, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "markup", id: m.id }) }),
+        ...pickInMarquee(measures, box, { bboxOf: featBBox, refOf: (m) => ({ kind: "measure", id: m.id }) }),
       ];
       setMulti(picked);
       setSel(picked.length === 1 ? picked[0] : null);
       setMarquee(null); drag.current = null;
+      if (tool === "marquee") setTool("select"); // hand the live selection to the move tool (don't clear it via selectTool)
       try { svgRef.current.releasePointerCapture(e.pointerId); } catch (_) {}
       return;
     }
@@ -4356,8 +4396,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Explicit attach/align flows (click a host/target) take precedence.
     if (attachFor) { attachTo(attachFor, el.id); setAttachFor(null); return; }
     if (alignFor) { alignToElement(el); return; } // align: this click picks an element to match
-    if (e.shiftKey) { // Shift-click toggles into the temporary multi-selection
-      setMulti((s) => inMulti("el", id) ? s.filter((m) => !(m.kind === "el" && m.id === id)) : [...s, { kind: "el", id }]);
+    const elMods = selMods(e); // Ctrl/⌘-click = toggle in/out, Shift-click = additive add (B569)
+    if (elMods.toggle || elMods.add) {
+      setMulti((s) => nextSelection(seedMulti(s), { kind: "el", id }, elMods, refEq));
       setSel({ kind: "el", id });
       setDrillId(null);
       return;
@@ -7067,14 +7108,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {pp.map((q, i) => <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} fill="#b45309" stroke="#fff" strokeWidth={1} />)}
                 </g>;
               })()}
-              {/* multi-select outlines + marquee */}
+              {/* multi-select outlines + marquee — neutral hue-free chrome (B569): a light casing
+                  under a dark line + solid corner grips, legible on aerial imagery, never colliding
+                  with a status/accent hue. One shared <SelectionChrome> for both workspaces. */}
               {multi.length > 1 && multi.map((m) => {
-                const o = m.kind === "el" ? els.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
+                const o = m.kind === "el" ? els.find((x) => x.id === m.id) : m.kind === "measure" ? measures.find((x) => x.id === m.id) : markups.find((x) => x.id === m.id);
                 const bb = o && featBBox(o); if (!bb) return null;
                 const p0 = f2p({ x: bb.x0, y: bb.y0 }), p1 = f2p({ x: bb.x1, y: bb.y1 });
-                return <rect key={`ms${m.kind}${m.id}`} x={Math.min(p0.x, p1.x) - 2} y={Math.min(p0.y, p1.y) - 2} width={Math.abs(p1.x - p0.x) + 4} height={Math.abs(p1.y - p0.y) + 4} fill="none" stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />;
+                const x = Math.min(p0.x, p1.x) - 2, y = Math.min(p0.y, p1.y) - 2;
+                return <SelectionChrome key={`ms${m.kind}${m.id}`} x={x} y={y} w={Math.abs(p1.x - p0.x) + 4} h={Math.abs(p1.y - p0.y) + 4} casing={PAL.selCasing} line={PAL.selLine} grips />;
               })}
-              {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <rect x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} width={Math.abs(b.x - a.x)} height={Math.abs(b.y - a.y)} fill={PAL.accent} fillOpacity={0.08} stroke={PAL.accent} strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />; })()}
+              {marquee && (() => { const a = f2p(marquee.a), b = f2p(marquee.b); return <SelectionChrome x={Math.min(a.x, b.x)} y={Math.min(a.y, b.y)} w={Math.abs(b.x - a.x)} h={Math.abs(b.y - a.y)} casing={PAL.selCasing} line={PAL.selLine} fill />; })()}
               {/* persistent GROUP outline (B261): a dashed enclosing box that reads "these
                   stay together" — a pure indicator, NO resize handles (a group never scales
                   as a whole — site elements are real feet; resize a member by double-clicking
@@ -7845,6 +7889,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {railHdr("Tools")}
           <button className={`rbtn${tool === "select" ? " on" : ""}`} style={rbtn(tool === "select")} onClick={() => selectTool("select")}><ToolIcon id="select" /> Select <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>V</span></button>
           <button className={`rbtn${tool === "pan" ? " on" : ""}`} style={rbtn(tool === "pan")} onClick={() => selectTool("pan")} title="Hand tool — or hold Space to pan temporarily"><ToolIcon id="pan" /> Pan <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>H</span></button>
+          <button className={`rbtn${tool === "marquee" ? " on" : ""}`} style={rbtn(tool === "marquee")} onClick={() => selectTool("marquee")} aria-pressed={tool === "marquee"} data-testid="tool-marquee" title={TOOLS.find((t) => t.id === "marquee").hint}><ToolIcon id="marquee" /> Marquee <span style={{ marginLeft: "auto", opacity: 0.6, fontSize: 10 }}>M</span></button>
 
           {/* parcel tools grouped in one menu (opens to the left) */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
