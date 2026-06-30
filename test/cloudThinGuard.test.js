@@ -53,6 +53,26 @@ describe("wouldThinClobber — never silently shrink the cloud (B459)", () => {
     const m = { parcels: [{ id: "p1" }, { id: "p2" }], markups: [] };
     expect(wouldThinClobber(m, 5, 0)).toBe(true);
   });
+
+  // B596 — merging parcels collapses N parcels into 1 (a net drop of N-1). For N≥3 that drop is ≥2,
+  // and the merge used to NOT tombstone the removed parcels — so the guard mistook a legitimate
+  // active-tab merge for a stale-tab clobber and blocked the save with a false "changed in another
+  // session" conflict. Adding parcels GROWS the count, so it never tripped (matching the owner's
+  // "only when I merge" report). The fix tombstones the merged-away parcels, exactly like any delete.
+  it("merging 3 parcels into 1 WITHOUT tombstones is wrongly blocked (the pre-fix bug)", () => {
+    // baseline 3 parcels; merge → 1 parcel, no tombstone → 2 unexplained lost → BLOCK (false conflict)
+    const merged = { parcels: [{ id: "pNew" }] };
+    expect(wouldThinClobber(merged, 3, 0)).toBe(true);
+  });
+  it("merging 3 parcels into 1 WITH the removed ids tombstoned is allowed (the fix)", () => {
+    // the merge now tombstones the 3 consumed parcels; the new merged parcel has a fresh id
+    const merged = { parcels: [{ id: "pNew" }], deletedIds: ["p1", "p2", "p3"] };
+    expect(wouldThinClobber(merged, 3, 0)).toBe(false);
+  });
+  it("merging just 2 parcels (a 1-item drop) was always fine, tombstoned or not", () => {
+    expect(wouldThinClobber({ parcels: [{ id: "pNew" }] }, 2, 0)).toBe(false);
+    expect(wouldThinClobber({ parcels: [{ id: "pNew" }], deletedIds: ["p1", "p2"] }, 2, 0)).toBe(false);
+  });
 });
 
 // B556 — the owner's "phantom conflict" class: a DELIBERATE local shrink (deleting a building +

@@ -634,13 +634,13 @@ describe("B590 — round-2 adversarial-debug fixes", () => {
   });
 });
 
-// ── B596 — error propagation through aggregation (match Excel exactly) ──────────
+// ── B597 — error propagation through aggregation (match Excel exactly) ──────────
 // The HOST stores an errored formula-column cell as errVal(code) in the row map; the
 // engine must RE-RAISE that error wherever a cell is consumed — so an aggregation or a
 // reference over a column that has a #DIV/0! row yields #DIV/0!, not a silently-smaller
 // total. Errors only enter via the host (the engine itself always THROWS, never returns
 // an error value), so we simulate the host by seeding errVal cells into the table.
-describe("B596 — error cells propagate through aggregation & references (Excel parity)", () => {
+describe("B597 — error cells propagate through aggregation & references (Excel parity)", () => {
   const E = code => errVal(code);
   const DIV0 = FORMULA_ERRORS.DIV0, REF = FORMULA_ERRORS.REF, VALUE = FORMULA_ERRORS.VALUE;
 

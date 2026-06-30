@@ -2550,7 +2550,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (remaining.length) { alert("Those parcels don't all share a boundary — pick parcels that touch edge-to-edge."); return; }
     pushHistory();
     const np = { id: uid(), points: result, locked: true };
+    // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
+    // invariant every other delete honors (B276/B556). Two reasons, both real bugs without it (B596):
+    //   1. A reload / cross-tab / cross-device union-merge (mergeSiteContent) would otherwise RESURRECT
+    //      them from a copy that still holds their ids, silently undoing the merge.
+    //   2. Collapsing 3+ parcels into one drops contentCount by ≥2 with nothing to explain it, so the
+    //      thin-clobber guard (B459) misreads a legitimate active-tab merge as a stale-tab clobber and
+    //      blocks the save with a false "changed in another session" conflict (the owner's report).
+    // pushHistory() above already snapshotted the pre-merge deletedIds, so undo cleanly drops these
+    // tombstones and restores the parcels; the new parcel's fresh uid() can never collide with them.
+    const goneIds = parcels.filter((p) => combineSel.includes(p.id)).map((p) => p.id);
     setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
+    tombstone(goneIds);
     setCombineSel([]);
     setSel({ kind: "parcel", id: np.id });
     setTool("select");
@@ -4332,12 +4343,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const resized = a.find((x) => x.id === buildingId);
     let next = a.map((x) => {
       if (x.id === buildingId) {
-        const moved = { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
-        // B362: a bump-out resized on its own remembers its new size (span along the dock wall +
-        // projection) on its dogEar tag, so a later host refit re-anchors it AT that size instead
-        // of snapping it back to the 55′×60′ default.
-        if (x.dogEar) moved.dogEar = { ...x.dogEar, ...dogEarSize(x.dogEar, nb.w, nb.h) };
-        return moved;
+        // A bump-out resized on its own stays GLUED to its building corner: update its stored span
+        // along the dock wall + projection (B362), then RE-DERIVE its box from the host via
+        // dogEarGeom so it can never slide away along the wall. Without this re-anchor the free drag
+        // position let the bump float off the corner, opening a gap between it and the dock doors —
+        // even when only the projection (the away-from-the-dock direction) was dragged. Its inner
+        // edge stays pinned to the dock face and its outer end to the building corner; only along /
+        // projection change, so the doors (which start at the bump's along-edge) stay flush.
+        if (x.dogEar) {
+          const de = { ...x.dogEar, ...dogEarSize(x.dogEar, nb.w, nb.h) };
+          const host = a.find((h) => h.id === x.attachedTo && h.type === "building" && !h.points);
+          return host ? { ...x, dogEar: de, ...dogEarGeom(host, de) }
+            : { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, dogEar: de, ...(nb.rot != null ? { rot: nb.rot } : {}) };
+        }
+        return { ...x, cx: nb.cx, cy: nb.cy, w: nb.w, h: nb.h, ...(nb.rot != null ? { rot: nb.rot } : {}) };
       }
       if (x.attachedTo === buildingId && x.dogEar) return { ...x, ...fitDogEar(nb, x.dogEar) };
       const k = kids?.find((kk) => kk.id === x.id);
@@ -6527,7 +6546,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   );
 
   const selEl = sel?.kind === "el" ? els.find((e) => e.id === sel.id) : null;
-  const setSelEl = (patch) => setEls((a) => a.map((e) => e.id === selEl.id ? { ...e, ...patch } : e));
+  // A bump-out (dog-ear) is part of its host building, so colour / opacity edits resolve to the
+  // building — the canvas renders a bump-out with its building's fill/stroke/opacity, and styling
+  // either one keeps the whole unit in one colour (owner request). Returns the host for a bump-out,
+  // else the element itself.
+  const styleHostOf = (el) => (el && el.dogEar ? (els.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el);
+  const setSelEl = (patch) => setEls((a) => {
+    const sel0 = a.find((e) => e.id === selEl.id);
+    const tgt = sel0 && sel0.dogEar ? (a.find((h) => h.id === sel0.attachedTo && h.type === "building" && !h.points) || sel0) : sel0;
+    const tid = tgt ? tgt.id : selEl.id;
+    return a.map((e) => (e.id === tid ? { ...e, ...patch } : e));
+  });
   // B416: change the selected building's dock preset, then prune any dock-zone stack the new
   // preset orphans (cross→single drops a side's apron; →none drops both), so a court/trailer/
   // buffer can never linger on a side that's no longer a dock side.
@@ -6626,7 +6655,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
-  const curStyle = selEl ? elStyle(selEl, settings) : null;
+  const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
   // Merge a default-color patch for one type into settings.typeStyles.
   const setTypeStyle = (type, patch) => { pushHistory(); setSettings((s) => ({ ...s, typeStyles: { ...(s.typeStyles || {}), [type]: { ...((s.typeStyles || {})[type] || {}), ...patch } } })); };
 
@@ -6650,7 +6679,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Make the selected element's current colors the default for its type.
   const setStyleDefault = () => { if (!selEl || !curStyle) return; setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity }); };
   // Drop the selected element's per-element overrides (back to the type default).
-  const clearElStyle = () => { if (!selEl) return; pushHistory(); setEls((a) => a.map((e) => { if (e.id !== selEl.id) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
+  const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
 
   /* ------------ Plans dropdown grouping (this site's plans vs. other sites) ------------ */
   const planGroup = (s) => s.groupId || s.id;
@@ -10137,7 +10166,11 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
   // defined" inside the els.map during render and blanked the whole page on any
   // project with a parking element. Resolve it locally from the settings param.
   const cfgOf = (e) => (e.cfg ? { ...settings, ...e.cfg } : settings);
-  const st = elStyle(el, settings);
+  // A bump-out (dog-ear) is part of its building, so it renders with the HOST building's resolved
+  // fill / stroke / opacity — a recoloured or faded building carries its bump-outs with it (owner
+  // request). Falls back to the bump's own style if the host isn't in the list.
+  const styleEl = el.dogEar && allEls ? (allEls.find((h) => h.id === el.attachedTo && h.type === "building" && !h.points) || el) : el;
+  const st = elStyle(styleEl, settings);
   const fillOp = st.fillOpacity ?? 1;
   const isSel = sel?.kind === "el" && sel.id === el.id;
   const texFill = st.pattern ? `url(#pat-${st.pattern})` : st.hatch ? "url(#pat-landscape)" : null;

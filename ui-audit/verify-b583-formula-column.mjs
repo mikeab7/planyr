@@ -146,7 +146,7 @@ try {
   if (aggOk) ok("SUM([Cost])=400 and COUNTIF([Cost],\">=100\")=2 via the live in-page engine");
   else fail("in-page aggregation (SUM/COUNTIF) returned the wrong result");
 
-  // 5) B596 — error propagation through aggregation (match Excel exactly). The HOST stores
+  // 5) B597 — error propagation through aggregation (match Excel exactly). The HOST stores
   //    an errored formula-column cell as PF.errVal(code); a SUM/COUNT/reference over that
   //    column must PROPAGATE the code, not silently skip the bad row. Exercise the live
   //    in-page engine through the same window.PlanyrFormula the grid uses.
@@ -168,8 +168,8 @@ try {
       detail: JSON.stringify({ sum, cnt, ref, trap, clean }),
     };
   });
-  if (propOk.ok) ok("B596: SUM/COUNT over an errored cell propagate #DIV/0!, IFERROR traps it, a clean column still sums — via the live engine");
-  else fail("B596 error-propagation failed in-page: " + (propOk.why || propOk.detail));
+  if (propOk.ok) ok("B597: SUM/COUNT over an errored cell propagate #DIV/0!, IFERROR traps it, a clean column still sums — via the live engine");
+  else fail("B597 error-propagation failed in-page: " + (propOk.why || propOk.detail));
 
   try { await page.screenshot({ path: "ui-audit/screens/b583-formula-column.png" }); } catch { /* screens/ is gitignored; optional */ }
 
