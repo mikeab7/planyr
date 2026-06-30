@@ -37,7 +37,10 @@ const CROSS = "verify-b568-cross";
 const FLIP = "verify-b568-flip"; // stale dockSide vs the current axis (the resize-flip repro, B569 review)
 const sites = {
   [SINGLE]: mkSite(SINGLE, "Verify B568 single", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 336, h: 260, rot: 0, dock: "single", dockSide: "bottom" }]),
-  [CROSS]: mkSite(CROSS, "Verify B568 cross", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 336, h: 320, rot: 0, dock: "cross" }]),
+  // Deep cross-dock matching the owner's reported 634′-deep buildings: w<h so docks ride the
+  // LEFT/RIGHT long walls, depth = w = 634 (horizontal), length = h = 1100. The middle bays
+  // between the two 60′ speed bays must come out UNIFORM (no skinny/fat centre column).
+  [CROSS]: mkSite(CROSS, "Verify B568 cross", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 634, h: 1100, rot: 0, dock: "cross" }]),
   // w<h so "bottom" is no longer a long side — dockSidesFor must re-validate it to a long
   // side ("right"); the grid + doors must stay coherent (1 speed line), not desync.
   [FLIP]: mkSite(FLIP, "Verify B568 flip", [{ id: "b1", type: "building", cx: 0, cy: 0, w: 260, h: 336, rot: 0, dock: "single", dockSide: "bottom" }]),
@@ -56,7 +59,7 @@ const fillCount = (page, hex) => page.evaluate((h) => [...document.querySelector
 let fail = 0;
 const ok = (label, cond) => { console.log(`  ${cond ? "✓" : "✗"} ${label}`); if (!cond) fail++; };
 
-async function run(cur, label, expectSpeedLines) {
+async function run(cur, label, expectSpeedLines, checkLOD = true) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
   await ctx.addInitScript(seedFor(cur));
   const page = await ctx.newPage();
@@ -86,19 +89,23 @@ async function run(cur, label, expectSpeedLines) {
   ok(`${label}: dock-door leaves render`, doors >= 3);
 
   // Zoom OUT far so the footprint drops below the grid gate — the grid must vanish.
-  for (let i = 0; i < 16; i++) { await page.mouse.move(720, 450); await page.mouse.wheel(0, 300); await page.waitForTimeout(70); }
-  await page.waitForTimeout(400);
-  const interiorOut = await strokeCount(page, GRID_LINE);
-  const speedOut = await strokeCount(page, GRID_SPEED);
-  await page.screenshot({ path: OUT + `b568-${cur}-zoomout.png` });
-  console.log(`  (zoomed OUT: interior ${interiorOut} · speed ${speedOut})`);
-  ok(`${label}: grid hidden when zoomed out below the gate (LOD)`, interiorOut === 0 && speedOut === 0);
+  // (Skipped for the deep cross-dock: a 1100′ building stays larger than the gate even far
+  // out, so its grid correctly STAYS visible — the LOD gate is proven by the smaller cases.)
+  if (checkLOD) {
+    for (let i = 0; i < 16; i++) { await page.mouse.move(720, 450); await page.mouse.wheel(0, 300); await page.waitForTimeout(70); }
+    await page.waitForTimeout(400);
+    const interiorOut = await strokeCount(page, GRID_LINE);
+    const speedOut = await strokeCount(page, GRID_SPEED);
+    await page.screenshot({ path: OUT + `b568-${cur}-zoomout.png` });
+    console.log(`  (zoomed OUT: interior ${interiorOut} · speed ${speedOut})`);
+    ok(`${label}: grid hidden when zoomed out below the gate (LOD)`, interiorOut === 0 && speedOut === 0);
+  }
 
   await ctx.close();
 }
 
 await run(SINGLE, "single-load", 1);
-await run(CROSS, "cross-dock", 2);
+await run(CROSS, "cross-dock (deep)", 2, false); // too large to drop below the LOD gate
 await run(FLIP, "stale-dockside (axis-flip)", 1);
 
 console.log(fail === 0 ? "\n✓ ALL B568/B569 CHECKS PASSED" : `\n✗ ${fail} CHECK(S) FAILED`);
