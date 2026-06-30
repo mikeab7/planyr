@@ -9,7 +9,12 @@ import reactHooks from "eslint-plugin-react-hooks";
  * the recommended *correctness* rules' essentials and leave stylistic rules off.
  */
 export default [
-  { ignores: ["dist/**", "node_modules/**", "ui-audit/.cache-vendor/**"] },  // vendored 3rd-party libs the scheduler boot-check downloads (gitignored; minified, not ours to lint)
+  // Never lint build output, deps, or vendored third-party libraries. The landing
+  // page's GSAP/Three.js are pre-minified UMD bundles — they reference globals
+  // (exports/define/__THREE_DEVTOOLS__) that trip no-undef and are not ours to fix.
+  // ui-audit/.cache-vendor holds React/Babel/Supabase the scheduler boot-check downloads
+  // (gitignored; not all are *.min.js-named, so an explicit dir ignore is needed too).
+  { ignores: ["dist/**", "node_modules/**", "public/landing/vendor/**", "**/*.min.js", "ui-audit/.cache-vendor/**"] },
   {
     files: ["**/*.{js,jsx}"],
     plugins: { "react-hooks": reactHooks },

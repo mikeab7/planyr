@@ -24,3 +24,13 @@
   Cache-Control: no-cache
 /sequence/index.html
   Cache-Control: no-cache
+
+# The standalone marketing landing page (public/landing/) is the same kind of
+# self-contained HTML document — revalidate the HTML on every load so a redeploy
+# propagates immediately. Its vendored libraries live under /landing/vendor/ and are
+# not content-hashed, so they don't get the immutable /assets/* policy; keep them
+# revalidated too (they're tiny and change only on a deliberate version bump).
+/landing/
+  Cache-Control: no-cache
+/landing/index.html
+  Cache-Control: no-cache
