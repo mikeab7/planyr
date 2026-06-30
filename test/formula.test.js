@@ -20,6 +20,17 @@ const run = (src, cols = {}, opts = {}) => evaluateFormula(src, {
   today: opts.today != null ? isoToSerial(opts.today) : isoToSerial("2026-06-29"),
   formatDate: opts.formatDate || serialToISO,
 });
+// Evaluate against a whole table (array of row column-maps) for aggregation/lookups.
+const runTable = (src, rowsArr, rowIndex = 0, opts = {}) => evaluateFormula(src, {
+  columns: lower(rowsArr[rowIndex] || {}),
+  rows: rowsArr.map(lower),
+  rowIndex,
+  calendar: opts.calendar || calendar(opts.holidays || []),
+  today: opts.today != null ? isoToSerial(opts.today) : isoToSerial("2026-06-29"),
+  formatDate: opts.formatDate || serialToISO,
+});
+const valTable = (src, rowsArr, rowIndex, opts) => { const r = runTable(src, rowsArr, rowIndex, opts); if (!r.ok) throw new Error(`unexpected error ${r.error} (${r.detail})`); return r.value; };
+const errTable = (src, rowsArr, rowIndex, opts) => { const r = runTable(src, rowsArr, rowIndex, opts); expect(r.ok, `expected ${src} to error`).toBe(false); return r.error; };
 // Value (fails the test if the formula errored).
 const val = (src, cols, opts) => { const r = run(src, cols, opts); if (!r.ok) throw new Error(`unexpected error ${r.error} (${r.detail})`); return r.value; };
 // Error code (fails if it did NOT error).
@@ -352,6 +363,121 @@ describe("B583 adversarial-review fixes", () => {
     expect(r.ok).toBe(false);          // reported, not thrown
     const deepCall = "ABS(".repeat(600) + "1" + ")".repeat(600);
     expect(run(deepCall).ok).toBe(false);
+  });
+});
+
+describe("B586 — cross-row aggregation over a whole column", () => {
+  const TABLE = [
+    { Cost: 100, Status: "Done", Phase: "DD" },
+    { Cost: 250, Status: "Open", Phase: "DD" },
+    { Cost: 50, Status: "Done", Phase: "Permit" },
+    { Cost: "", Status: "Open", Phase: "Permit" }, // blank cost
+  ];
+  it("SUM/AVERAGE/MIN/MAX/COUNT/COUNTA over a column", () => {
+    expect(valTable("SUM([Cost])", TABLE)).toBe(400);
+    expect(valTable("MAX([Cost])", TABLE)).toBe(250);
+    expect(valTable("MIN([Cost])", TABLE)).toBe(50);
+    expect(valTable("AVERAGE([Cost])", TABLE)).toBeCloseTo(400 / 3, 9); // blank skipped → 3 numbers
+    expect(valTable("COUNT([Cost])", TABLE)).toBe(3);                    // blank not counted
+    expect(valTable("COUNTA([Status])", TABLE)).toBe(4);
+  });
+  it("COUNTIF / SUMIF / AVERAGEIF with criteria", () => {
+    expect(valTable('COUNTIF([Status], "Done")', TABLE)).toBe(2);
+    expect(valTable('SUMIF([Status], "Done", [Cost])', TABLE)).toBe(150);   // 100 + 50
+    expect(valTable('SUMIF([Cost], ">=100")', TABLE)).toBe(350);            // 100 + 250
+    expect(valTable('COUNTIF([Cost], ">100")', TABLE)).toBe(1);
+    expect(valTable('AVERAGEIF([Status], "Open", [Cost])', TABLE)).toBe(250); // only 250 (other Open is blank)
+  });
+  it("COUNTIF honors wildcards", () => {
+    expect(valTable('COUNTIF([Phase], "P*")', TABLE)).toBe(2); // Permit, Permit
+  });
+  it("a bare [Column] still means THIS row in a scalar position (implicit intersection)", () => {
+    expect(valTable("[Cost] * 2", TABLE, 1)).toBe(500);       // row 1 cost 250
+    expect(valTable("[Cost] / SUM([Cost])", TABLE, 0)).toBe(100 / 400);
+  });
+  it("[@Column] forces this-row even inside an aggregator", () => {
+    expect(valTable("SUM([@Cost])", TABLE, 1)).toBe(250);     // just this row
+  });
+});
+
+describe("B586 — lookups", () => {
+  const T = [
+    { Task: "Dig", Owner: "Sam", Cost: 100 },
+    { Task: "Pour", Owner: "Lee", Cost: 250 },
+    { Task: "Frame", Owner: "Mia", Cost: 300 },
+  ];
+  it("MATCH / INDEX", () => {
+    expect(valTable('MATCH("Pour", [Task], 0)', T)).toBe(2);
+    expect(valTable("INDEX([Owner], 3)", T)).toBe("Mia");
+    expect(valTable('INDEX([Owner], MATCH("Dig", [Task], 0))', T)).toBe("Sam");
+    expect(errTable('MATCH("Nope", [Task], 0)', T)).toBe(FORMULA_ERRORS.NA);
+  });
+  it("XLOOKUP returns the paired value, or the fallback", () => {
+    expect(valTable('XLOOKUP("Frame", [Task], [Cost])', T)).toBe(300);
+    expect(valTable('XLOOKUP("X", [Task], [Cost], 0)', T)).toBe(0);
+    expect(errTable('XLOOKUP("X", [Task], [Cost])', T)).toBe(FORMULA_ERRORS.NA);
+  });
+  it("MATCH type 1 = largest value ≤ lookup (ascending)", () => {
+    const N = [{ V: 10 }, { V: 20 }, { V: 30 }];
+    expect(valTable("MATCH(25, [V], 1)", N)).toBe(2);
+  });
+});
+
+describe("B586 — % operator and structured-ref niceties", () => {
+  it("postfix % divides by 100", () => {
+    expect(num("50%")).toBe(0.5);
+    expect(num("[Budget] * 25%", { Budget: 100000 })).toBe(25000);
+    expect(num("-10%")).toBe(-0.1);
+  });
+  it("[@Column] reads the current row like [Column]", () => {
+    expect(num("[@Duration] + 1", { Duration: 4 })).toBe(5);
+  });
+});
+
+describe("B586 — expanded function library", () => {
+  it("math extras", () => {
+    expect(num("SIGN(-3)")).toBe(-1);
+    expect(num("TRUNC(3.99)")).toBe(3);
+    expect(num("TRUNC(-3.99)")).toBe(-3);
+    expect(num("QUOTIENT(17, 5)")).toBe(3);
+    expect(num("MROUND(17, 5)")).toBe(15);
+    expect(num("EVEN(3)")).toBe(4);
+    expect(num("ODD(2)")).toBe(3);
+    expect(num("FACT(5)")).toBe(120);
+    expect(num("LOG(1000)")).toBeCloseTo(3, 9);
+    expect(num("LN(EXP(1))")).toBeCloseTo(1, 9);
+    expect(num("PI()")).toBeCloseTo(Math.PI, 9);
+  });
+  it("text extras", () => {
+    expect(val('SUBSTITUTE("a-b-c", "-", "_")')).toBe("a_b_c");
+    expect(val('SUBSTITUTE("a-b-c", "-", "_", 2)')).toBe("a-b_c");
+    expect(val('REPLACE("2026XX", 5, 2, "07")')).toBe("202607");
+    expect(num('FIND("b", "abc")')).toBe(2);
+    expect(num('SEARCH("B", "aBc")')).toBe(2);
+    expect(val('REPT("ab", 3)')).toBe("ababab");
+    expect(val('PROPER("john o\'brien")')).toBe("John O'Brien");
+    expect(val('TEXTJOIN("-", TRUE(), "a", "", "b")')).toBe("a-b");
+    expect(num('VALUE("1,234.5")')).toBe(1234.5);
+    expect(val('EXACT("abc", "ABC")')).toBe(false);
+  });
+  it("logical + info extras", () => {
+    expect(val("XOR(TRUE(), FALSE())")).toBe(true);
+    expect(val("XOR(TRUE(), TRUE())")).toBe(false);
+    expect(val('IFNA(NA(), "fallback")')).toBe("fallback");
+    expect(val("ISERROR(1/0)")).toBe(true);
+    expect(val("ISERR(1/0)")).toBe(true);
+    expect(val("ISERR(NA())")).toBe(false);   // #N/A excluded from ISERR
+    expect(val("ISNA(NA())")).toBe(true);
+    expect(val("ISNUMBER(5)")).toBe(true);
+    expect(val('ISNUMBER("5")')).toBe(false);
+    expect(val('ISTEXT("x")')).toBe(true);
+    expect(val("ISEVEN(4)")).toBe(true);
+    expect(val("ISODD(4)")).toBe(false);
+  });
+  it("date extras", () => {
+    expect(num("WEEKNUM([d])", { d: D("2026-01-01") })).toBe(1);
+    expect(num("ISOWEEKNUM([d])", { d: D("2026-01-05") })).toBe(2); // Mon 2026-01-05 is ISO week 2
+    expect(num("YEARFRAC([a], [b])", { a: D("2026-01-01"), b: D("2026-07-01") })).toBeCloseTo(0.5, 2);
   });
 });
 

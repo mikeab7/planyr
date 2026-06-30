@@ -546,7 +546,7 @@ const tokenize = src => {
     // Multi-char operators first
     const two = s.slice(i, i + 2);
     if (two === "<=" || two === ">=" || two === "<>") { toks.push({ t: "op", v: two, pos: i }); i += 2; continue; }
-    if ("+-*/^&=<>(),".includes(c)) { toks.push({ t: "op", v: c, pos: i }); i++; continue; }
+    if ("+-*/^&=<>(),%".includes(c)) { toks.push({ t: "op", v: c, pos: i }); i++; continue; }
     throw ferr(FORMULA_ERRORS.ERR, `unexpected character "${c}"`);
   }
   toks.push({ t: "eof", v: null, pos: n });
@@ -610,17 +610,34 @@ const parse = toks => {
     if (peek().t === "op" && (peek().v === "-" || peek().v === "+")) { const op = next().v; return { type: "unary", op, arg: parseUnary() }; }
     return parsePrimary();
   };
+  // A primary, plus any trailing postfix "%" (Excel: 50% → 0.5, binds tightest).
   const parsePrimary = () => {
+    let node = parseAtom();
+    while (peek().t === "op" && peek().v === "%") { next(); node = { type: "percent", arg: node }; }
+    return node;
+  };
+  const parseAtom = () => {
     const t = peek();
     if (t.t === "num") { next(); return { type: "num", value: t.v }; }
     if (t.t === "str") { next(); return { type: "str", value: t.v }; }
-    if (t.t === "col") { next(); return { type: "col", name: t.v }; }
+    if (t.t === "col") {
+      next();
+      // Excel structured reference: [@Column] (or [@[Column]]) is the CURRENT row
+      // explicitly; a bare [Column] is the whole column, implicitly intersected to the
+      // current row in a scalar position (handled at eval time). atRow marks the @ form.
+      let nm = t.v, atRow = false;
+      if (nm[0] === "@") { atRow = true; nm = nm.slice(1).trim(); if (nm[0] === "[" && nm[nm.length - 1] === "]") nm = nm.slice(1, -1).trim(); }
+      return { type: "col", name: nm, atRow };
+    }
     if (t.t === "op" && t.v === "(") { next(); if (++depth > MAX_PARSE_DEPTH) throw ferr(FORMULA_ERRORS.ERR, "formula nesting too deep"); const e = parseCompare(); depth--; expect(")"); return e; }
     if (t.t === "id") {
       next();
       const up = t.v.toUpperCase();
-      if (up === "TRUE") return { type: "bool", value: true };
-      if (up === "FALSE") return { type: "bool", value: false };
+      const callsNext = peek().t === "op" && peek().v === "(";
+      // Bare TRUE / FALSE are boolean literals; TRUE() / FALSE() fall through to the
+      // function call below (both are valid in Excel).
+      if (up === "TRUE" && !callsNext) return { type: "bool", value: true };
+      if (up === "FALSE" && !callsNext) return { type: "bool", value: false };
       // function call: NAME( args )
       if (peek().t === "op" && peek().v === "(") {
         next();
@@ -706,11 +723,25 @@ const need = (args, lo, hi, name) => {
 const num1 = v => toNumber(v);
 
 const FUNCTIONS = {
+  // ── Aggregation (range-aware: a bare [Column] arg sums/counts the WHOLE column;
+  //    scalars and [@Column] this-row refs contribute a single value — Excel semantics) ──
+  SUM:     { rng: (an, ctx, ev) => { need(an, 1, null, "SUM"); return collectNums(an, ctx, ev).reduce((s, v) => s + v, 0); } },
+  PRODUCT: { rng: (an, ctx, ev) => { need(an, 1, null, "PRODUCT"); const n = collectNums(an, ctx, ev); return n.length ? n.reduce((s, v) => s * v, 1) : 0; } },
+  MIN:     { rng: (an, ctx, ev) => { need(an, 1, null, "MIN"); const n = collectNums(an, ctx, ev); return n.length ? Math.min(...n) : 0; } },
+  MAX:     { rng: (an, ctx, ev) => { need(an, 1, null, "MAX"); const n = collectNums(an, ctx, ev); return n.length ? Math.max(...n) : 0; } },
+  AVERAGE: { rng: (an, ctx, ev) => { need(an, 1, null, "AVERAGE"); const n = collectNums(an, ctx, ev); if (!n.length) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGE of no numbers"); return n.reduce((s, v) => s + v, 0) / n.length; } },
+  COUNT:   { rng: (an, ctx, ev) => { need(an, 1, null, "COUNT"); return collectCountable(an, ctx, ev); } },
+  COUNTA:  { rng: (an, ctx, ev) => { need(an, 1, null, "COUNTA"); return collectNonBlank(an, ctx, ev); } },
+  COUNTIF:   { rng: (an, ctx, ev) => { need(an, 2, 2, "COUNTIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); return range.filter(v => matchesCriteria(v, crit)).length; } },
+  SUMIF:     { rng: (an, ctx, ev) => { need(an, 2, 3, "SUMIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const sumRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0; range.forEach((v, i) => { if (matchesCriteria(v, crit)) { const x = sumRange[i]; if (typeof x === "number") s += x; else if (isDate(x)) s += x.s; } }); return s; } },
+  AVERAGEIF: { rng: (an, ctx, ev) => { need(an, 2, 3, "AVERAGEIF"); const range = colArray(an[0], ctx), crit = ev(an[1], ctx); const avgRange = an.length > 2 ? colArray(an[2], ctx) : range; let s = 0, c = 0; range.forEach((v, i) => { if (matchesCriteria(v, crit)) { const x = avgRange[i]; if (typeof x === "number") { s += x; c++; } else if (isDate(x)) { s += x.s; c++; } } }); if (!c) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEIF: no matching numbers"); return s / c; } },
+
+  // ── Lookup (column-based; the modern XLOOKUP / INDEX+MATCH set) ──
+  MATCH:   { rng: (an, ctx, ev) => { need(an, 2, 3, "MATCH"); const target = ev(an[0], ctx); const arr = colArray(an[1], ctx); const type = an.length > 2 ? Math.trunc(toNumber(ev(an[2], ctx))) : 1; return matchIndex(target, arr, type); } },
+  INDEX:   { rng: (an, ctx, ev) => { need(an, 2, 2, "INDEX"); const arr = colArray(an[0], ctx); const n = Math.trunc(toNumber(ev(an[1], ctx))); if (n < 1 || n > arr.length) throw ferr(FORMULA_ERRORS.REF, "INDEX out of range"); return arr[n - 1]; } },
+  XLOOKUP: { rng: (an, ctx, ev) => { need(an, 3, 5, "XLOOKUP"); const target = ev(an[0], ctx); const look = colArray(an[1], ctx); const ret = colArray(an[2], ctx); for (let i = 0; i < look.length; i++) { if (compareValues(target, look[i]) === 0) return ret[i] === undefined ? BLANK : ret[i]; } if (an.length > 3) return ev(an[3], ctx); throw ferr(FORMULA_ERRORS.NA, "XLOOKUP: no match"); } },
+
   // ── Math ──
-  SUM:   { fn: a => a.reduce((s, v) => s + toNumber(v), 0) },
-  PRODUCT: { fn: a => { need(a, 1, null, "PRODUCT"); return a.reduce((s, v) => s * toNumber(v), 1); } },
-  MIN:   { fn: a => { need(a, 1, null, "MIN"); return Math.min(...a.map(num1)); } },
-  MAX:   { fn: a => { need(a, 1, null, "MAX"); return Math.max(...a.map(num1)); } },
   ABS:   { fn: a => { need(a, 1, 1, "ABS"); return Math.abs(num1(a[0])); } },
   ROUND: { fn: a => { need(a, 1, 2, "ROUND"); return roundAwayFromZero(num1(a[0]), a.length > 1 ? num1(a[1]) : 0); } },
   ROUNDUP: { fn: a => { need(a, 1, 2, "ROUNDUP"); const d = a.length > 1 ? Math.trunc(num1(a[1])) : 0, f = Math.pow(10, d), n = num1(a[0]); return (n < 0 ? -Math.ceil(Math.abs(n) * f - 1e-9) : Math.ceil(n * f - 1e-9)) / f; } },
@@ -758,7 +789,205 @@ const FUNCTIONS = {
   UPPER: { fn: a => { need(a, 1, 1, "UPPER"); return toStr(a[0]).toUpperCase(); } },
   LOWER: { fn: a => { need(a, 1, 1, "LOWER"); return toStr(a[0]).toLowerCase(); } },
   TEXT:  { fn: (a, ctx) => { need(a, 2, 2, "TEXT"); return textFormat(a[0], toStr(a[1]), ctx); } },
+  SUBSTITUTE: { fn: a => { need(a, 3, 4, "SUBSTITUTE"); const s = toStr(a[0]), oldT = toStr(a[1]), newT = toStr(a[2]); if (oldT === "") return s; if (a.length > 3) { const inst = Math.trunc(num1(a[3])); if (inst < 1) throw ferr(FORMULA_ERRORS.VALUE, "SUBSTITUTE instance < 1"); let i = 0, from = 0, idx; while ((idx = s.indexOf(oldT, from)) !== -1) { i++; if (i === inst) return s.slice(0, idx) + newT + s.slice(idx + oldT.length); from = idx + oldT.length; } return s; } return s.split(oldT).join(newT); } },
+  REPLACE: { fn: a => { need(a, 4, 4, "REPLACE"); const s = toStr(a[0]); const start = Math.trunc(num1(a[1])); const len = Math.trunc(num1(a[2])); const newT = toStr(a[3]); if (start < 1 || len < 0) throw ferr(FORMULA_ERRORS.VALUE, "REPLACE start/length"); return s.slice(0, start - 1) + newT + s.slice(start - 1 + len); } },
+  FIND:   { fn: a => { need(a, 2, 3, "FIND"); const find = toStr(a[0]), within = toStr(a[1]); const start = a.length > 2 ? Math.trunc(num1(a[2])) : 1; if (start < 1) throw ferr(FORMULA_ERRORS.VALUE, "FIND start < 1"); const idx = within.indexOf(find, start - 1); if (idx === -1) throw ferr(FORMULA_ERRORS.VALUE, "FIND: text not found"); return idx + 1; } },
+  SEARCH: { fn: a => { need(a, 2, 3, "SEARCH"); const find = toStr(a[0]).toLowerCase(), within = toStr(a[1]).toLowerCase(); const start = a.length > 2 ? Math.trunc(num1(a[2])) : 1; if (start < 1) throw ferr(FORMULA_ERRORS.VALUE, "SEARCH start < 1"); const hay = within.slice(start - 1); let idx; if (/[*?]/.test(find)) { const m = wildcardToRegExp(find, false).exec(hay); idx = m ? start - 1 + m.index : -1; } else idx = within.indexOf(find, start - 1); if (idx === -1) throw ferr(FORMULA_ERRORS.VALUE, "SEARCH: text not found"); return idx + 1; } },
+  REPT:   { fn: a => { need(a, 2, 2, "REPT"); const s = toStr(a[0]); const n = Math.trunc(num1(a[1])); if (n < 0) throw ferr(FORMULA_ERRORS.VALUE, "REPT count < 0"); if (s.length * n > 32767) throw ferr(FORMULA_ERRORS.VALUE, "REPT result too long"); return s.repeat(n); } },
+  PROPER: { fn: a => { need(a, 1, 1, "PROPER"); return toStr(a[0]).replace(/[A-Za-z]+/g, w => w[0].toUpperCase() + w.slice(1).toLowerCase()); } },
+  TEXTJOIN: { fn: (a, ctx) => { need(a, 3, null, "TEXTJOIN"); const delim = toStr(a[0], ctx); const ignoreEmpty = toBool(a[1]); const parts = a.slice(2).map(v => toStr(v, ctx)).filter(p => !ignoreEmpty || p !== ""); return parts.join(delim); } },
+  VALUE:  { fn: a => { need(a, 1, 1, "VALUE"); return toNumber(toStr(a[0])); } },
+  EXACT:  { fn: a => { need(a, 2, 2, "EXACT"); return toStr(a[0]) === toStr(a[1]); } },
+  CHAR:   { fn: a => { need(a, 1, 1, "CHAR"); const n = Math.trunc(num1(a[0])); if (n < 1 || n > 0x10FFFF) throw ferr(FORMULA_ERRORS.VALUE, "CHAR out of range"); return String.fromCodePoint(n); } },
+  CODE:   { fn: a => { need(a, 1, 1, "CODE"); const s = toStr(a[0]); if (!s.length) throw ferr(FORMULA_ERRORS.VALUE, "CODE of empty text"); return s.codePointAt(0); } },
+
+  // ── Math (extras) ──
+  AVERAGEA: { rng: (an, ctx, ev) => { need(an, 1, null, "AVERAGEA"); const n = collectNums(an, ctx, ev); if (!n.length) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGEA of no numbers"); return n.reduce((s, v) => s + v, 0) / n.length; } },
+  SIGN:   { fn: a => { need(a, 1, 1, "SIGN"); return Math.sign(num1(a[0])); } },
+  TRUNC:  { fn: a => { need(a, 1, 2, "TRUNC"); const d = a.length > 1 ? Math.trunc(num1(a[1])) : 0, f = Math.pow(10, d), n = num1(a[0]); return Math.trunc(n * f) / f; } },
+  EXP:    { fn: a => { need(a, 1, 1, "EXP"); const r = Math.exp(num1(a[0])); if (!Number.isFinite(r)) throw ferr(FORMULA_ERRORS.NUM, "EXP overflow"); return r; } },
+  LN:     { fn: a => { need(a, 1, 1, "LN"); const n = num1(a[0]); if (n <= 0) throw ferr(FORMULA_ERRORS.NUM, "LN of non-positive"); return Math.log(n); } },
+  LOG:    { fn: a => { need(a, 1, 2, "LOG"); const n = num1(a[0]); const base = a.length > 1 ? num1(a[1]) : 10; if (n <= 0 || base <= 0 || base === 1) throw ferr(FORMULA_ERRORS.NUM, "LOG domain"); return Math.log(n) / Math.log(base); } },
+  LOG10:  { fn: a => { need(a, 1, 1, "LOG10"); const n = num1(a[0]); if (n <= 0) throw ferr(FORMULA_ERRORS.NUM, "LOG10 of non-positive"); return Math.log10(n); } },
+  PI:     { fn: () => Math.PI },
+  QUOTIENT: { fn: a => { need(a, 2, 2, "QUOTIENT"); const d = num1(a[1]); if (d === 0) throw ferr(FORMULA_ERRORS.DIV0, "QUOTIENT by zero"); return Math.trunc(num1(a[0]) / d); } },
+  MROUND: { fn: a => { need(a, 2, 2, "MROUND"); const n = num1(a[0]), m = num1(a[1]); if (m === 0) return 0; if ((n > 0) !== (m > 0)) throw ferr(FORMULA_ERRORS.NUM, "MROUND: number and multiple must share a sign"); return Math.round(n / m) * m; } },
+  EVEN:   { fn: a => { need(a, 1, 1, "EVEN"); const n = num1(a[0]); const r = Math.ceil(Math.abs(n) / 2) * 2; return n < 0 ? -r : r; } },
+  ODD:    { fn: a => { need(a, 1, 1, "ODD"); const n = num1(a[0]); let r = Math.ceil(Math.abs(n)); if (r % 2 === 0) r += 1; if (r === 0) r = 1; return n < 0 ? -r : r; } },
+  FACT:   { fn: a => { need(a, 1, 1, "FACT"); let n = Math.trunc(num1(a[0])); if (n < 0) throw ferr(FORMULA_ERRORS.NUM, "FACT of negative"); if (n > 170) throw ferr(FORMULA_ERRORS.NUM, "FACT overflow"); let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; } },
+
+  // ── Logical (extras) ──
+  XOR:    { fn: a => { need(a, 1, null, "XOR"); return a.reduce((acc, v) => acc !== toBool(v), false); } },
+  TRUE:   { fn: () => true },
+  FALSE:  { fn: () => false },
+  IFNA:   { lazy: (an, ctx, ev) => { need(an, 2, 2, "IFNA"); try { return ev(an[0], ctx); } catch (e) { if (isFormulaError(e) && e.code === FORMULA_ERRORS.NA) return ev(an[1], ctx); throw e; } } },
+  ISERROR: { lazy: (an, ctx, ev) => { need(an, 1, 1, "ISERROR"); try { ev(an[0], ctx); return false; } catch (e) { if (isFormulaError(e)) return true; throw e; } } },
+  ISERR:  { lazy: (an, ctx, ev) => { need(an, 1, 1, "ISERR"); try { ev(an[0], ctx); return false; } catch (e) { if (isFormulaError(e)) return e.code !== FORMULA_ERRORS.NA; throw e; } } },
+  ISNA:   { lazy: (an, ctx, ev) => { need(an, 1, 1, "ISNA"); try { ev(an[0], ctx); return false; } catch (e) { if (isFormulaError(e)) return e.code === FORMULA_ERRORS.NA; throw e; } } },
+  NA:     { fn: () => { throw ferr(FORMULA_ERRORS.NA, "NA()"); } },
+
+  // ── Info ──
+  ISNUMBER:  { fn: a => { need(a, 1, 1, "ISNUMBER"); return typeof a[0] === "number" || isDate(a[0]); } },
+  ISTEXT:    { fn: a => { need(a, 1, 1, "ISTEXT"); return typeof a[0] === "string"; } },
+  ISLOGICAL: { fn: a => { need(a, 1, 1, "ISLOGICAL"); return typeof a[0] === "boolean"; } },
+  ISEVEN:    { fn: a => { need(a, 1, 1, "ISEVEN"); return Math.trunc(num1(a[0])) % 2 === 0; } },
+  ISODD:     { fn: a => { need(a, 1, 1, "ISODD"); return Math.abs(Math.trunc(num1(a[0])) % 2) === 1; } },
+  N:         { fn: a => { need(a, 1, 1, "N"); const v = a[0]; if (typeof v === "number") return v; if (isDate(v)) return v.s; if (typeof v === "boolean") return v ? 1 : 0; return 0; } },
+
+  // ── Date (extras) ──
+  NOW:    { fn: (a, ctx) => makeDate(ctx.today) },
+  DATEVALUE: { fn: a => { need(a, 1, 1, "DATEVALUE"); const s = parseLooseDate(toStr(a[0])); if (s === null) throw ferr(FORMULA_ERRORS.VALUE, "DATEVALUE: not a date"); return makeDate(s); } },
+  WEEKNUM: { fn: a => { need(a, 1, 2, "WEEKNUM"); const s = toDateSerial(a[0]); if (s === null) return BLANK; const type = a.length > 1 ? Math.trunc(num1(a[1])) : 1; return weekNum(s, type); } },
+  ISOWEEKNUM: { fn: a => { need(a, 1, 1, "ISOWEEKNUM"); const s = toDateSerial(a[0]); if (s === null) return BLANK; return isoWeekNum(s); } },
+  YEARFRAC: { fn: a => { need(a, 2, 3, "YEARFRAC"); const s = toDateSerial(a[0]), e = toDateSerial(a[1]); if (s === null || e === null) return BLANK; const basis = a.length > 2 ? Math.trunc(num1(a[2])) : 0; return yearFrac(s, e, basis); } },
 };
+
+// ── Range / criteria / lookup helpers (used by the range-aware functions above) ──
+// A range argument must be a bare [Column] reference; it expands to that column's values
+// across every row in ctx.rows (the whole table, in display order).
+function colArray(node, ctx) {
+  if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] reference");
+  const key = node.name.toLowerCase();
+  const rows = (ctx.rows && ctx.rows.length) ? ctx.rows : [ctx.columns || {}];
+  if (!Object.prototype.hasOwnProperty.call(rows[0], key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
+  return rows.map(r => { const v = r[key]; return v === undefined ? BLANK : v; });
+}
+// Numbers for SUM/AVERAGE/MIN/MAX/PRODUCT: a bare [Column] arg contributes its numeric
+// (and date→serial) cells, skipping blank/text/bool (Excel range behavior); a scalar or
+// [@Column] arg is coerced via toNumber.
+function collectNums(argNodes, ctx, ev) {
+  const nums = [];
+  argNodes.forEach(n => {
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
+    else nums.push(toNumber(ev(n, ctx)));
+  });
+  return nums;
+}
+function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
+  let c = 0;
+  argNodes.forEach(n => {
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (typeof v === "number" || isDate(v)) c++; });
+    else { const v = ev(n, ctx); if (typeof v === "number" || isDate(v)) c++; else if (typeof v === "string") { try { toNumber(v); c++; } catch { /* non-numeric text isn't counted */ } } }
+  });
+  return c;
+}
+function collectNonBlank(argNodes, ctx, ev) { // COUNTA — anything non-blank
+  let c = 0;
+  argNodes.forEach(n => {
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (!isBlank(v) && v !== "") c++; });
+    else { const v = ev(n, ctx); if (!isBlank(v) && v !== "") c++; }
+  });
+  return c;
+}
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+// Excel wildcard text → RegExp. * = any run, ? = one char, ~ escapes the next * / ?.
+function wildcardToRegExp(pat, anchored = true) {
+  let re = "";
+  for (let i = 0; i < pat.length; i++) {
+    const ch = pat[i];
+    if (ch === "~" && i + 1 < pat.length) re += escapeRegExp(pat[++i]);
+    else if (ch === "*") re += ".*";
+    else if (ch === "?") re += ".";
+    else re += escapeRegExp(ch);
+  }
+  return new RegExp(anchored ? "^" + re + "$" : re);
+}
+function parseCriteriaOperand(text) {
+  const t = String(text).trim();
+  if (t === "") return "";
+  if (/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(t)) return parseFloat(t);
+  if (/^(true|false)$/i.test(t)) return t.toLowerCase() === "true";
+  return t;
+}
+function looseEqual(a, b) {
+  if (isBlank(a)) a = "";
+  if (isBlank(b)) b = "";
+  if (typeof a === "string" && typeof b === "string") return a.toLowerCase() === b.toLowerCase();
+  try { return compareValues(a, b) === 0; } catch { return false; }
+}
+// COUNTIF/SUMIF criteria: an optional leading comparison operator (">5", "<=0", "<>x"),
+// else an equality test (text is case-insensitive + honors * / ? wildcards).
+function matchesCriteria(value, criteria) {
+  if (typeof criteria === "string") {
+    const m = /^(<=|>=|<>|=|<|>)\s*([\s\S]*)$/.exec(criteria.trim());
+    let op = "=", operand = criteria;
+    if (m) { op = m[1]; operand = m[2]; }
+    const operandVal = parseCriteriaOperand(operand);
+    if (op === "=" || op === "<>") {
+      if (typeof value === "string" && typeof operandVal === "string") {
+        const matched = wildcardToRegExp(operandVal.toLowerCase()).test(value.toLowerCase());
+        return op === "=" ? matched : !matched;
+      }
+      const eq = looseEqual(value, operandVal);
+      return op === "=" ? eq : !eq;
+    }
+    // Ordered comparison (>, <, …). Excel never matches a blank/empty cell here, and a
+    // text cell never matches a NUMERIC criterion (and vice-versa) — only same-family
+    // values compare. This stops an empty "" cell from reading as "> 100".
+    if (isBlank(value) || value === "") return false;
+    const numericCrit = typeof operandVal === "number";
+    const numericVal = typeof value === "number" || isDate(value);
+    if (numericCrit !== numericVal) return false;
+    const c = compareValuesSafe(value, operandVal);
+    if (c === null) return false;
+    if (op === "<") return c < 0;
+    if (op === "<=") return c <= 0;
+    if (op === ">") return c > 0;
+    return c >= 0;
+  }
+  return looseEqual(value, criteria);
+}
+function compareValuesSafe(a, b) { try { return compareValues(a, b); } catch { return null; } }
+function matchIndex(target, arr, type) {
+  if (type === 0) {
+    for (let i = 0; i < arr.length; i++) {
+      if (typeof target === "string" && typeof arr[i] === "string") { if (wildcardToRegExp(target.toLowerCase()).test(arr[i].toLowerCase())) return i + 1; }
+      else if (compareValuesSafe(target, arr[i]) === 0) return i + 1;
+    }
+    throw ferr(FORMULA_ERRORS.NA, "MATCH: no exact match");
+  }
+  if (type === 1) { // largest value ≤ target (array assumed ascending)
+    let best = -1;
+    for (let i = 0; i < arr.length; i++) { const c = compareValuesSafe(arr[i], target); if (c !== null && c <= 0) best = i; }
+    if (best === -1) throw ferr(FORMULA_ERRORS.NA, "MATCH: no value ≤ lookup");
+    return best + 1;
+  }
+  let best = -1; // type −1: smallest value ≥ target (array assumed descending)
+  for (let i = 0; i < arr.length; i++) { const c = compareValuesSafe(arr[i], target); if (c !== null && c >= 0) best = i; }
+  if (best === -1) throw ferr(FORMULA_ERRORS.NA, "MATCH: no value ≥ lookup");
+  return best + 1;
+}
+function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+function weekNum(serial, type) { // type 1 = weeks start Sunday, 2 = start Monday; week 1 holds Jan 1
+  const { y } = serialToYMD(serial);
+  const jan1 = ymdToSerial(y, 1, 1);
+  const weekStart = (type === 2) ? 1 : 0;
+  const offset = (weekdayOf(jan1) - weekStart + 7) % 7;
+  return Math.floor((serial - jan1 + offset) / 7) + 1;
+}
+function isoWeekNum(serial) { // ISO-8601: weeks start Monday, week 1 holds the year's first Thursday
+  const dow = (weekdayOf(serial) + 6) % 7; // 0=Mon..6=Sun
+  const thursday = serial - dow + 3;
+  const jan1 = ymdToSerial(serialToYMD(thursday).y, 1, 1);
+  return Math.floor((thursday - jan1) / 7) + 1;
+}
+function yearFrac(s, e, basis) {
+  if (s === e) return 0;
+  const sign = e < s ? -1 : 1;
+  const a = Math.min(s, e), b = Math.max(s, e);
+  if (basis === 1) { // actual/actual (approx: actual days over the average year length in the span)
+    const A = serialToYMD(a), B = serialToYMD(b);
+    let days = 0; for (let yy = A.y; yy <= B.y; yy++) days += isLeap(yy) ? 366 : 365;
+    return sign * (b - a) / (days / (B.y - A.y + 1));
+  }
+  if (basis === 2) return sign * (b - a) / 360; // actual/360
+  if (basis === 3) return sign * (b - a) / 365; // actual/365
+  const A = serialToYMD(a), B = serialToYMD(b);  // 30/360 (basis 0 US, 4 European)
+  let d1 = A.d, d2 = B.d;
+  if (d1 === 31) d1 = 30;
+  if (d2 === 31 && (basis === 4 || d1 === 30)) d2 = 30;
+  return sign * ((B.y - A.y) * 360 + (B.m - A.m) * 30 + (d2 - d1)) / 360;
+}
 
 // addMonths with Excel month-end clamping (Jan31 +1 → Feb28/29).
 function addMonths(y, m, d, months) {
@@ -878,6 +1107,7 @@ const evalNode = (node, ctx) => {
       if (node.op === "+") return toNumber(evalNode(node.arg, ctx));
       return -toNumber(evalNode(node.arg, ctx));
     }
+    case "percent": return toNumber(evalNode(node.arg, ctx)) / 100;
     case "binary": return evalBinary(node, ctx);
     case "call": return evalCall(node, ctx);
     default: throw ferr(FORMULA_ERRORS.ERR, "bad node");
@@ -926,7 +1156,8 @@ const evalBinary = (node, ctx) => {
 const evalCall = (node, ctx) => {
   const def = FUNCTIONS[node.name];
   if (!def) throw ferr(FORMULA_ERRORS.NAME, `unknown function ${node.name}`);
-  if (def.lazy) return def.lazy(node.args, ctx, evalNode);
+  if (def.rng) return def.rng(node.args, ctx, evalNode);    // range/lookup: needs the arg NODES (to read whole columns)
+  if (def.lazy) return def.lazy(node.args, ctx, evalNode);  // short-circuit / error-trapping forms
   const args = node.args.map(a => evalNode(a, ctx));
   return def.fn(args, ctx);
 };
@@ -938,8 +1169,14 @@ const evaluateFormula = (src, ctx) => {
   const parsed = parseFormula(src);
   if (parsed.error) return { ok: false, error: parsed.error, detail: parsed.detail };
   if (parsed.ast.type === "blankLiteral") return { ok: true, value: BLANK };
+  const columns = (ctx && ctx.columns) || {};
   const fullCtx = {
-    columns: (ctx && ctx.columns) || {},
+    columns,
+    // rows/rowIndex power whole-column aggregation + lookups (SUM/COUNTIF/XLOOKUP/…).
+    // Default to a single-row view (this row) so those functions still work when a host
+    // evaluates one row in isolation (e.g. the editor preview, or a unit test).
+    rows: (ctx && ctx.rows) || [columns],
+    rowIndex: (ctx && ctx.rowIndex) || 0,
     calendar: (ctx && ctx.calendar) || DEFAULT_CALENDAR,
     today: (ctx && ctx.today != null) ? ctx.today : Math.round(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) / MS_PER_DAY),
     formatDate: (ctx && ctx.formatDate) || serialToISO,
@@ -1010,9 +1247,17 @@ const planFormulaColumns = (columns, nameToKey) => {
 
 // Function names + a short signature/help string, for the editor's autocomplete.
 const FUNCTION_HELP = {
-  SUM: "SUM(n1, n2, …) — add numbers",
+  SUM: "SUM([Column] or n1, n2, …) — add a whole column or numbers",
   PRODUCT: "PRODUCT(n1, n2, …) — multiply numbers",
-  MIN: "MIN(n1, n2, …) — smallest", MAX: "MAX(n1, n2, …) — largest",
+  MIN: "MIN([Column] or n1, …) — smallest", MAX: "MAX([Column] or n1, …) — largest",
+  AVERAGE: "AVERAGE([Column] or n1, …) — mean", COUNT: "COUNT([Column]) — count of numbers",
+  COUNTA: "COUNTA([Column]) — count of non-empty cells",
+  COUNTIF: 'COUNTIF([Column], ">5" | "Done" | …) — count matching',
+  SUMIF: 'SUMIF([Column], criteria, [SumColumn]) — sum matching',
+  AVERAGEIF: 'AVERAGEIF([Column], criteria, [AvgColumn]) — mean of matching',
+  MATCH: "MATCH(value, [Column], [type]) — 1-based position",
+  INDEX: "INDEX([Column], n) — the n-th value",
+  XLOOKUP: "XLOOKUP(value, [LookupColumn], [ReturnColumn], [ifNotFound]) — find across rows",
   ABS: "ABS(n) — absolute value", ROUND: "ROUND(n, digits) — round half away from 0",
   ROUNDUP: "ROUNDUP(n, digits) — round away from 0", ROUNDDOWN: "ROUNDDOWN(n, digits) — round toward 0",
   INT: "INT(n) — round down to integer", MOD: "MOD(n, divisor) — remainder",
@@ -1031,6 +1276,18 @@ const FUNCTION_HELP = {
   CONCAT: "CONCAT(a, b, …) — join text", TEXT: 'TEXT(value, "m/d/yyyy" | "#,##0.00" | …)',
   LEFT: "LEFT(text, n)", RIGHT: "RIGHT(text, n)", MID: "MID(text, start, length)",
   LEN: "LEN(text)", TRIM: "TRIM(text)", UPPER: "UPPER(text)", LOWER: "LOWER(text)",
+  SUBSTITUTE: "SUBSTITUTE(text, old, new, [which])", REPLACE: "REPLACE(text, start, len, new)",
+  FIND: "FIND(find, within, [start]) — case-sensitive", SEARCH: "SEARCH(find, within, [start]) — case-insensitive, wildcards",
+  REPT: "REPT(text, count)", PROPER: "PROPER(text) — Capitalize Each Word", TEXTJOIN: "TEXTJOIN(delim, ignoreEmpty, a, b, …)",
+  VALUE: "VALUE(text) — text to number", EXACT: "EXACT(a, b) — case-sensitive equal", CHAR: "CHAR(code)", CODE: "CODE(text)",
+  SIGN: "SIGN(n)", TRUNC: "TRUNC(n, [digits])", EXP: "EXP(n)", LN: "LN(n)", LOG: "LOG(n, [base])", LOG10: "LOG10(n)", PI: "PI()",
+  QUOTIENT: "QUOTIENT(a, b) — integer divide", MROUND: "MROUND(n, multiple)", EVEN: "EVEN(n)", ODD: "ODD(n)", FACT: "FACT(n) — factorial",
+  XOR: "XOR(a, b, …)", IFNA: "IFNA(value, valueIfNA)", TRUE: "TRUE()", FALSE: "FALSE()", NA: "NA() — the #N/A value",
+  ISERROR: "ISERROR(value)", ISERR: "ISERR(value) — error except #N/A", ISNA: "ISNA(value)",
+  ISNUMBER: "ISNUMBER(value)", ISTEXT: "ISTEXT(value)", ISLOGICAL: "ISLOGICAL(value)",
+  ISEVEN: "ISEVEN(n)", ISODD: "ISODD(n)", N: "N(value) — coerce to number",
+  NOW: "NOW() — today's date", DATEVALUE: "DATEVALUE(text)", WEEKNUM: "WEEKNUM(date, [type])",
+  ISOWEEKNUM: "ISOWEEKNUM(date)", YEARFRAC: "YEARFRAC(start, end, [basis])",
 };
 const FUNCTION_NAMES = Object.keys(FUNCTIONS).sort();
 /* FORMULA-ENGINE:END */
@@ -1934,20 +2191,23 @@ const computeFormulaValues = (tasks, formulaColDefs, proj) => {
   const labelLowerByKey = Object.fromEntries(formulaColDefs.map(d => [d.k, (d.l || "").toLowerCase()]));
   const nameToKey = name => { const l = String(name).toLowerCase(); const fc = formulaColDefs.find(d => (d.l || "").toLowerCase() === l); return fc ? fc.k : null; };
   const plan = PF.planFormulaColumns(formulaColDefs.map(d => ({ key: d.k, formula: d.formula })), nameToKey);
-  tasks.forEach(task => {
-    const columns = buildFormulaRowColumns(task);
-    const cells = {};
-    plan.order.forEach(key => {
-      const def = defByKey[key]; if (!def) return;
+  // Build every row's built-in column map ONCE; pass the whole set as `rows` so a
+  // formula's aggregation/lookup (SUM([Cost]), XLOOKUP, …) can read the entire column.
+  // Compute formula columns COLUMN-BY-COLUMN in dependency order — so a formula that
+  // aggregates ANOTHER formula column sees that column already filled for every row.
+  const rows = tasks.map(buildFormulaRowColumns);
+  tasks.forEach(t => { out[t.id] = {}; });
+  plan.order.forEach(key => {
+    const def = defByKey[key]; if (!def) return;
+    const ll = labelLowerByKey[key];
+    tasks.forEach((task, i) => {
       let res;
       if (plan.cyclic.has(key)) res = { ok: false, error: PF.FORMULA_ERRORS.CIRC, detail: "circular reference between formula columns" };
-      else res = PF.evaluateFormula(def.formula, { columns, calendar: cal, today, formatDate: dateFmt });
+      else res = PF.evaluateFormula(def.formula, { columns: rows[i], rows, rowIndex: i, calendar: cal, today, formatDate: dateFmt });
       const display = res.ok ? PF.formatValue(res.value, { formatDate: dateFmt }) : res.error;
-      cells[key] = { ok: res.ok, error: res.ok ? null : res.error, detail: res.detail, display, value: res.ok ? res.value : undefined };
-      const ll = labelLowerByKey[key];
-      if (ll) columns[ll] = res.ok ? res.value : PF.BLANK; // expose to dependent formula columns
+      out[task.id][key] = { ok: res.ok, error: res.ok ? null : res.error, detail: res.detail, display, value: res.ok ? res.value : undefined };
+      if (ll) rows[i][ll] = res.ok ? res.value : PF.BLANK; // expose to dependent formula columns (this row)
     });
-    out[task.id] = cells;
   });
   return out;
 };
@@ -7343,13 +7603,19 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
   const previewFormula = (formula) => {
     const PF = window.PlanyrFormula;
     if (!PF) return { ok: false, error: "engine unavailable" };
-    const sample = tasks.find(t => t.id === selectedId) || tasks.find(t => !t.hasChildren) || tasks[0];
+    const sampleIdx = Math.max(0, tasks.findIndex(t => t.id === selectedId));
+    const sample = tasks[sampleIdx] || tasks.find(t => !t.hasChildren) || tasks[0];
     if (!sample) return { ok: true, value: PF.BLANK, display: "", sampleName: null };
-    const columns = buildFormulaRowColumns(sample);
-    const cells = formulaValues[sample.id] || {};
-    formulaCols.forEach(fc => { const c = cells[fc.k]; if (c && fc.l) columns[fc.l.toLowerCase()] = c.ok ? c.value : PF.BLANK; });
+    // Build all rows' column maps (incl. already-computed formula columns) so an
+    // aggregation/lookup preview (SUM([Cost]), XLOOKUP, …) evaluates over the whole table.
+    const rows = tasks.map(t => {
+      const cols = buildFormulaRowColumns(t);
+      const fcCells = formulaValues[t.id] || {};
+      formulaCols.forEach(fc => { const c = fcCells[fc.k]; if (c && fc.l) cols[fc.l.toLowerCase()] = c.ok ? c.value : PF.BLANK; });
+      return cols;
+    });
     const dateFmt = serial => toShortDate(PF.serialToISO(serial));
-    const res = PF.evaluateFormula(formula, { columns, calendar: formulaCalendar(), today: formulaToday(), formatDate: dateFmt });
+    const res = PF.evaluateFormula(formula, { columns: rows[sampleIdx] || rows[0], rows, rowIndex: sampleIdx, calendar: formulaCalendar(), today: formulaToday(), formatDate: dateFmt });
     return { ...res, display: res.ok ? PF.formatValue(res.value, { formatDate: dateFmt }) : res.error, sampleName: sample.name || ("Task " + sample.id) };
   };
 
