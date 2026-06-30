@@ -60,6 +60,13 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V177 — B579: Document Review robustness batch (detail-popup capture · failed-delete mirror · silent PDF-store failure) ⏳ signed-in / interaction confirm owed
+- **Added** 2026-06-29 · **Cadence** once (regression acceptance) · **Last checked** 2026-06-29 (unit/anti-drift ✅) · **Next check** — on planyr.io, **signed in**.
+- **✅ Proven here (no browser):** lint 0 · 1874 tests · build green; 3 anti-drift guards in `test/bugHuntGuards.test.js` (pointercancel releases capture; `clearDraft` only on `!error`; the `cloudReady()`-gated store-failure banner).
+- **⏳ Why pending (need a real browser / sign-in):**
+  1. **Detail popup capture:** open a stitched set, click a detail callout to open the "cloud" popup, start panning inside it, then trigger an interrupt (alt-tab / switch tabs) → return and confirm the popup is still responsive (no stuck grab cursor, clicks/drag/wheel work). (Hard to drive headless — `pointercancel` needs a real interrupt.)
+  2. **Failed-delete mirror:** signed in, delete a review while offline (or with a forced network failure) → confirm the review still appears in the Library (cloud row intact) and the app stays consistent; a successful delete still clears it everywhere.
+  3. **Silent store failure:** signed in, drop a PDF while the network/Drive is unreachable → confirm an error banner now appears ("Couldn't save this PDF to the cloud…") instead of silently saving markups that reload with no backdrop. Logged-out: confirm dropping a PDF shows **no** such banner (local-only is expected).
 ### V176 — B94 + B571: Road authority per-road card + the color-coded road-authority map overlay
 - **Added** 2026-06-29 · **Cadence** once (feature acceptance) · **Last checked** 2026-06-29 (headless ✅ card + toggle) · **Next check** — on planyr.io, the live map PAINT.
 - **✅ verified here (logged-out, headless `ui-audit/verify-road-authority.mjs`):** the Site Analysis **Road authority** card renders a true per-road list — a header roll-up ("Maintained by · Mixed — 4 roads") + one row per fronting road (IH 45 = State (TxDOT) · Greens Rd, merged from 3 segments = City · Aldine Mail Rd = County · Private Dr = explicit Unknown) — and the card's **"◍ Map" toggle is present and arms to "◉ On map"** (B190 suppression lifted). Plus lint 0 · 1805 unit tests · build green (+13 new road tests; one asserts the overlay palette never reuses a locked status/module/brand hex).
