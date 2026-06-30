@@ -56,6 +56,7 @@ import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps } from
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible } from "./lib/labelLayout.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones } from "./lib/dockZones.js";
+import { computeBuildingGrid, resolveGridSettings, placeDockDoors } from "./lib/buildingGrid.js";
 import { addedAreaLabelPoint, pondContours, contourLabelPoint, autoContourInterval } from "./lib/pondGeom.js";
 import { offsetInward, ringsArea, maxInwardOffset } from "./lib/pondOffset.js";
 import { splitPolygonByLine, splitPolygonByPath } from "./lib/polygonSplit.js";
@@ -109,6 +110,15 @@ const POND_ADD_FILL_DEFAULT = "#A7D3DD"; // B157: default "added area" fill — 
 // each side means opposite buttons overlap below ~68px; this adds a small legibility
 // margin. Tunable. (The map's Building Pin + Progress Arc live in MapFinder — untouched.)
 const FEAT_BTN_MIN_PX = 72;
+// Structural column-grid drawing (B568/B569). Subtle gray for the column lines (drafting
+// grid, explicitly allowed a subtle gray by the theme rule) — proven legible on both the
+// light paper and the dark canvas, like the existing dock-apron literals. The speed-bay
+// line gets a literal drafting-coral emphasis (a fixed hue, deliberately NOT pulled from
+// the `--status-*` / `--accent-*` palette, so it never reads as a deal-stage or module color).
+const GRID_LINE = "#6b7480";       // interior column line (solid 0.5px)
+const GRID_FLEX = "#6b7480";       // end/rear/centre flex boundary (dashed)
+const GRID_SPEED = "#E0552E";      // speed-bay line (stronger, solid)
+const GRID_WALL = "#4a525e";       // dock wall — the heaviest edge
 const CURB = 0.5;    // 6" curb on each side of a road (added to its true width)
 // B310 — parcel click-vs-drag: a press on a (locked) parcel pans the canvas; only a brief,
 // low-travel pointer-up counts as a real click that selects it. So panning across parcels no
@@ -778,6 +788,12 @@ const DEFAULT_SETTINGS = {
   truckCourtD: 135, trailerParkD: 50, bufferD: 15,
   roadCurb: 0.5, roadWidths: "24, 26, 30, 36, 40",
   showDocks: true,
+  // Structural column grid on drawn buildings (B568): speed bay off each dock face, then
+  // typical bays flexing within an industry band toward the per-direction targets. Dock
+  // doors at doorOC o.c., doorWidth wide. Per-building overrides live on the element.
+  showGrid: true,
+  speedBay: 60, bayLengthTarget: 56, bayDepthTarget: 50, bayMin: 50, bayMax: 58,
+  doorWidth: 9, doorOC: 12,
   typeStyles: {}, // user-set default colors per element type (Bluebeam-style defaults)
 };
 
@@ -8491,6 +8507,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </span>
                         </Field>
 
+                        {/* Column grid (B568) — per-building overrides on the plan defaults. Each field
+                            falls back to the plan-wide Structural-grid setting until pinned here. */}
+                        {grpHdr("Column grid")}
+                        {(() => {
+                          const grd = resolveGridSettings(b, settings);
+                          const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "single", grid: grd });
+                          const ovRow = (label, valueShown, ovKey, floor) => (
+                            <Field label={label} key={ovKey}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <NumInput style={{ ...numInput, width: 52 }} value={Math.round(valueShown)} min={floor} onCommit={(n) => { pushHistory(); setSelEl({ [ovKey]: n }); }} />
+                                {b[ovKey] != null
+                                  ? <button title="Revert to plan default" onClick={() => { pushHistory(); setSelEl({ [ovKey]: null }); }} style={resetBtn}>set ↺</button>
+                                  : <span style={autoTag}>default</span>}
+                              </span>
+                            </Field>
+                          );
+                          return (
+                            <>
+                              {(b.dock || "single") !== "none" && ovRow("Speed bay (ft)", grd.speedBay, "speedBayOverride", 1)}
+                              {ovRow("Typ. bay — length", grd.bayLengthTarget, "bayLengthOverride", 1)}
+                              {ovRow("Typ. bay — depth", grd.bayDepthTarget, "bayDepthOverride", 1)}
+                              {ovRow("Dock door o.c. (ft)", grd.doorOC, "doorOCOverride", 2)}
+                              {gg.summary && <div style={note}>{gg.summary.lengthCount} × {gg.summary.depthCount} bays · {gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′ typ{gg.summary.speedBay ? ` · speed bay ${gg.summary.speedBay}′` : ""}.</div>}
+                            </>
+                          );
+                        })()}
+
                         {grpHdr("Placement")}
                         <Field label="Rotation (°)">
                           <RotationStepper value={b.rot || 0} disabled={!!b.locked} disabledReason="Unlock this element to rotate it"
@@ -8605,10 +8648,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle</>}</>}
                     {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`}</>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
+                      // Door count + column-grid readout track the SAME pure layout the canvas draws
+                      // (B568/B569): doors are placed to fall between columns, so the count reflects
+                      // the column-avoidance gaps and the configured o.c. — not a naive L÷12.
                       const dock = selEl.dock || "single";
-                      const per = Math.floor(footprintLength(selEl) / 12); // doors array along the dock-parallel wall (B548)
+                      const grd = resolveGridSettings(selEl, settings);
+                      const gg = computeBuildingGrid({ length: footprintLength(selEl), depth: footprintDepth(selEl), dock, grid: grd });
+                      const lenOffsets = gg.lengthLines.map((l) => l.at);
+                      const per = placeDockDoors(0, footprintLength(selEl), lenOffsets, { doorOC: grd.doorOC, doorWidth: grd.doorWidth }).length;
                       const total = dock === "cross" ? per * 2 : dock === "none" ? 0 : per;
-                      return <>Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ 12′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}</>;
+                      return (
+                        <>
+                          {settings.showGrid && gg.summary && <>Column grid: <b style={{ color: PAL.ink }}>{gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′</b> typ{gg.summary.speedBay ? <> · speed bay {gg.summary.speedBay}′</> : ""} · {gg.summary.lengthCount} × {gg.summary.depthCount} bays<br /></>}
+                          Dock doors: <b style={{ color: PAL.ink }}>{f0(total)}</b> @ {grd.doorOC}′ o.c.{dock === "cross" ? " · both long sides" : dock === "single" ? " · one long side" : ""}
+                        </>
+                      );
                     })()}
                   </div>
                 );
@@ -9212,6 +9266,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* "Show setback line" lives in the Parcel panel (Boundary › Setbacks per edge › Show),
                 next to the object it acts on — see B164. Not duplicated here. */}
             <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, cursor: "pointer" }}><input type="checkbox" checked={settings.showDocks} onChange={(e) => setSettings((s) => ({ ...s, showDocks: e.target.checked }))} /> Show dock doors</label>
+            <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginTop: 6, cursor: "pointer" }}><input type="checkbox" checked={settings.showGrid} onChange={(e) => setSettings((s) => ({ ...s, showGrid: e.target.checked }))} /> Show column grid</label>
+          </Section>
+
+          {/* Structural column grid (B568): speed bay + flex-to-band typical bays + dock doors.
+              These are the plan-wide defaults; a single building can pin its own in its inspector. */}
+          <Section title="Structural grid" collapsed>
+            <Field label="Speed bay (ft)"><NumInput style={numInput} value={settings.speedBay} min={1} onCommit={(n) => setSettings((s) => ({ ...s, speedBay: n }))} /></Field>
+            <Field label="Typ. bay — length"><NumInput style={numInput} value={settings.bayLengthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayLengthTarget: n }))} /></Field>
+            <Field label="Typ. bay — depth"><NumInput style={numInput} value={settings.bayDepthTarget} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayDepthTarget: n }))} /></Field>
+            <Field label="Bay band (min / max)"><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.bayMin} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMin: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.bayMax} min={1} onCommit={(n) => setSettings((s) => ({ ...s, bayMax: n }))} /></span></Field>
+            <Field label="Dock door — W / o.c."><span style={{ display: "flex", gap: 5 }}><NumInput style={{ ...numInput, width: 42 }} value={settings.doorWidth} min={1} onCommit={(n) => setSettings((s) => ({ ...s, doorWidth: n }))} /> <NumInput style={{ ...numInput, width: 42 }} value={settings.doorOC} min={2} onCommit={(n) => setSettings((s) => ({ ...s, doorOC: n }))} /></span></Field>
+            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45, marginTop: 2 }}>Typical bays flex within the band to close the grid cleanly; the speed bay is pinned and the end / rear bays absorb any leftover.</div>
           </Section>
 
           <Section title="Parking" collapsed>
@@ -9854,35 +9920,86 @@ function renderElPx(el, f2p, sel, tool, settings, startMoveEl, onElDouble, allEl
     const bw = e.axis === "x" ? cpx : w, bh = e.axis === "y" ? cpx : h;
     parts.push(<rect key={`curb${i}`} x={x} y={y} width={bw} height={bh} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
   });
-  if (el.type === "building" && settings.showDocks && (el.dock || "single") !== "none") {
+  if (el.type === "building" && (settings.showDocks || settings.showGrid)) {
+    // Structural column grid + dock doors (B568/B569). The grid is built in building-LOCAL
+    // feet by the pure lib; here we just map its length/depth column-line offsets onto the
+    // element's axis-aligned frame (the outer <g> rotation/ppf transform does the rest).
     const dock = el.dock || "single";
     const side = el.dockSide || (el.w >= el.h ? "bottom" : "right"); // persistent dock side
     const Dpx = Math.min(8, Math.min(el.w, el.h) * 0.25) * ppf; // dock-apron depth
-    const sides = dock === "cross"
-      ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
-      : [side];
-    const dogEars = (allEls || []).filter((x) => x.attachedTo === el.id && x.dogEar);
-    sides.forEach((s) => {
-      const horiz = s === "top" || s === "bottom";
-      const L = horiz ? el.w : el.h; // wall length (ft)
-      // Don't draw doors where a dog-ear takes up the end of the wall — by its ACTUAL span
-      // along this wall (B362: a resized bump consumes more/less of the dock face than 55′).
-      const bumpAlong = (sign) => { const d = dogEars.find((g) => g.dogEar.side === s && g.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
-      const startF = bumpAlong(-1);
-      const endF = L - bumpAlong(1);
-      if (endF - startF < 12) return; // no room for a door
-      if (horiz) {
-        const by = s === "bottom" ? h - Dpx : 0;
-        const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
-        parts.push(<rect key={`db${s}`} x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-        for (let f = startF + 12; f < endF - 0.5; f += 12) { const x = tl.x + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={x} y1={tl.y + by} x2={x} y2={tl.y + by + Dpx} stroke="#5b6470" strokeWidth={0.5} />); }
-      } else {
-        const bx = s === "right" ? w - Dpx : 0;
-        const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
-        parts.push(<rect key={`db${s}`} x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
-        for (let f = startF + 12; f < endF - 0.5; f += 12) { const y = tl.y + f * ppf; parts.push(<line key={`db${s}d${f}`} x1={tl.x + bx} y1={y} x2={tl.x + bx + Dpx} y2={y} stroke="#5b6470" strokeWidth={0.5} />); }
-      }
-    });
+    const g = resolveGridSettings(el, settings);
+    const grid = computeBuildingGrid({ length: footprintLength(el), depth: footprintDepth(el), dock, grid: g });
+    const fax = footprintAxes(el);              // { depth:'w'|'h', length:'w'|'h' }
+    const lengthHoriz = fax.length === "w";     // the length axis runs along x
+    const depthVert = fax.depth === "h";        // the depth axis runs along y
+    const depthMaxFt = depthVert ? el.h : el.w; // = D (ft)
+    // Which depth edge is the dock face (offset 0)? cross/none are symmetric → measure from
+    // the low edge; a single dock measures inward from its own wall.
+    const faceAtZero = dock === "cross" || dock === "none" ? true : (side === "top" || side === "left");
+    const depthFt = (d) => (faceAtZero ? d : depthMaxFt - d);
+
+    // ---- Column grid (B568) — drawn for real buildings only (never a dog-ear bump-out),
+    // zoom-gated on the rendered footprint px (the FEAT_BTN_MIN_PX precedent) so it reveals
+    // when legible and never clutters at site-overview zoom.
+    if (settings.showGrid && !el.dogEar && grid.summary && Math.min(w, h) >= FEAT_BTN_MIN_PX) {
+      const lineStyle = (role) => role === "speed"
+        ? { stroke: GRID_SPEED, strokeWidth: 1.25 }                                  // speed bay — solid emphasis
+        : role === "flex"
+          ? { stroke: GRID_FLEX, strokeWidth: 0.6, strokeDasharray: "5 4", opacity: 0.85 } // end/rear/centre flex boundary
+          : { stroke: GRID_LINE, strokeWidth: 0.5, opacity: 0.8 };                   // interior column line
+      // Dock wall = the heaviest edge (one per dock face).
+      const wallSides = dock === "cross" ? (depthVert ? ["top", "bottom"] : ["left", "right"]) : dock === "none" ? [] : [side];
+      wallSides.forEach((s) => {
+        const edge = s === "bottom" ? [tl.x, tl.y + h, tl.x + w, tl.y + h]
+          : s === "top" ? [tl.x, tl.y, tl.x + w, tl.y]
+          : s === "right" ? [tl.x + w, tl.y, tl.x + w, tl.y + h]
+          : [tl.x, tl.y, tl.x, tl.y + h];
+        parts.push(<line key={`gw${s}`} x1={edge[0]} y1={edge[1]} x2={edge[2]} y2={edge[3]} stroke={GRID_WALL} strokeWidth={1.6} />);
+      });
+      grid.lengthLines.forEach((ln, i) => {
+        if (lengthHoriz) { const x = tl.x + ln.at * ppf; parts.push(<line key={`gl${i}`} x1={x} y1={tl.y} x2={x} y2={tl.y + h} {...lineStyle(ln.role)} />); }
+        else { const y = tl.y + ln.at * ppf; parts.push(<line key={`gl${i}`} x1={tl.x} y1={y} x2={tl.x + w} y2={y} {...lineStyle(ln.role)} />); }
+      });
+      grid.depthLines.forEach((ln, i) => {
+        const d = depthFt(ln.at);
+        if (depthVert) { const y = tl.y + d * ppf; parts.push(<line key={`gd${i}`} x1={tl.x} y1={y} x2={tl.x + w} y2={y} {...lineStyle(ln.role)} />); }
+        else { const x = tl.x + d * ppf; parts.push(<line key={`gd${i}`} x1={x} y1={tl.y} x2={x} y2={tl.y + h} {...lineStyle(ln.role)} />); }
+      });
+    }
+
+    // ---- Dock doors (B569) — apron + door leaves placed to sit BETWEEN columns, never
+    // straddling a column line. Keeps the existing dog-ear skip + dock-side logic; the
+    // hardcoded 12′ spacing is now g.doorOC and the count tracks it.
+    if (settings.showDocks && dock !== "none") {
+      const sides = dock === "cross"
+        ? ((side === "top" || side === "bottom") ? ["bottom", "top"] : ["right", "left"])
+        : [side];
+      const dogEars = (allEls || []).filter((x) => x.attachedTo === el.id && x.dogEar);
+      const lenOffsets = grid.lengthLines.map((l) => l.at);
+      const leaf = g.doorWidth * ppf;
+      sides.forEach((s) => {
+        const horiz = s === "top" || s === "bottom";
+        const L = horiz ? el.w : el.h; // wall length (ft)
+        // Don't draw doors where a dog-ear takes up the end of the wall — by its ACTUAL span
+        // along this wall (B362: a resized bump consumes more/less of the dock face than 55′).
+        const bumpAlong = (sign) => { const d = dogEars.find((g2) => g2.dogEar.side === s && g2.dogEar.sign === sign); return d ? (horiz ? d.w : d.h) : 0; };
+        const startF = bumpAlong(-1);
+        const endF = L - bumpAlong(1);
+        if (endF - startF < g.doorWidth) return; // no room for a door
+        const doors = placeDockDoors(startF, endF, lenOffsets, { doorOC: g.doorOC, doorWidth: g.doorWidth });
+        if (horiz) {
+          const by = s === "bottom" ? h - Dpx : 0;
+          const ax = tl.x + startF * ppf, aw = (endF - startF) * ppf;
+          parts.push(<rect key={`db${s}`} x={ax} y={tl.y + by} width={aw} height={Dpx} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+          doors.forEach((cF, i) => { const x = tl.x + cF * ppf; parts.push(<rect key={`dd${s}${i}`} x={x - leaf / 2} y={tl.y + by} width={leaf} height={Dpx} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />); });
+        } else {
+          const bx = s === "right" ? w - Dpx : 0;
+          const ay = tl.y + startF * ppf, ah = (endF - startF) * ppf;
+          parts.push(<rect key={`db${s}`} x={tl.x + bx} y={ay} width={Dpx} height={ah} fill="#9aa3b0" fillOpacity={0.9} stroke="#5b6470" strokeWidth={1} />);
+          doors.forEach((cF, i) => { const y = tl.y + cF * ppf; parts.push(<rect key={`dd${s}${i}`} x={tl.x + bx} y={y - leaf / 2} width={Dpx} height={leaf} fill="#c2c9d2" fillOpacity={0.95} stroke="#5b6470" strokeWidth={0.6} />); });
+        }
+      });
+    }
   }
   if (el.type === "road") { // curb lines inside each long edge; pavement between
     const cp = (el.curb ?? CURB) * ppf;

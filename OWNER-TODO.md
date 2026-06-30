@@ -44,6 +44,12 @@ _Last updated: 2026-06-27._
       check, again before inviting people. (B491)
 
 ## Things Claude needs FROM Michael to finish/verify
+- [ ] **The real reference drawing sets — Goose Creek / Grand Port / Pinnacle** (and any "training files"), so the
+      new **column-grid + dock-door** auto-layout (B568/B569) can be tuned to how your buildings actually frame.
+      It ships now with sensible defaults (typical bay **56′ along** the docks · **50′ deep** · **60′ speed bay** ·
+      9′ doors @ 12′ o.c., bays flexing in a 50–58′ band). Those names currently exist only as **Scheduler project
+      names** — the actual plan PDFs aren't in the app yet. Drop them into a project (or hand them over) and Claude
+      will measure your real bays and re-set the defaults. **Nothing is broken without them — it's tuning, not a fix.**
 - [ ] **A second test account** — to verify Team Workspaces end-to-end (invite → accept → shared edit → member
       can't delete → make-private revokes). Claude can audit the code + fix bugs without it, but the live
       two-person round-trip needs a 2nd login.
