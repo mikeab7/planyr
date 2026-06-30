@@ -719,3 +719,49 @@ describe("anti-drift: the scheduler bug-batch fixes still exist in the real sour
     expect(hits.length).toBeGreaterThanOrEqual(2); // primary data-change emit + nav-request reply
   });
 });
+
+// ── Round-2 scheduler bug-batch (2026-06-30) — anti-drift guards for the App-level fixes ──
+describe("anti-drift: the round-2 scheduler fixes still exist in the real source", () => {
+  const src = readFileSync(fileURLToPath(new URL("../public/sequence/index.html", import.meta.url)), "utf8");
+  const fjs = readFileSync(fileURLToPath(new URL("../src/shared/formula/formula.js", import.meta.url)), "utf8");
+
+  it("TH1: renameProject guards a stale/non-existent project id (no ghost project)", () => {
+    expect(src).toMatch(/setData\(d => \(d\.projects && d\.projects\[id\]\) \?/);
+  });
+  it("TH2: duplicateProject spreads ...src and deep-copies formulaCols (keeps column layout)", () => {
+    expect(src).toMatch(/\{\.\.\.src, id: newId, name: src\.name \+ " \(Copy\)", tasks: newTasks,/);
+    expect(src).toMatch(/formulaCols: Array\.isArray\(src\.formulaCols\) \? src\.formulaCols\.map\(fc => \(\{\.\.\.fc\}\)\)/);
+  });
+  it("TH3: the nav-delete bridge only routes home when a delete actually happens", () => {
+    expect(src).toMatch(/if \(wasActive && projCount > 1\) setData\(d => \(\{ \.\.\.d, section: "reports" \}\)\);/);
+  });
+  it("S1: previewProject clears the pin on a predecessors patch (preview matches apply)", () => {
+    expect(src).toMatch(/if \('predecessors' in patch\) delete u\.pinnedStart;/);
+  });
+  it("S2: cleanPatchFor structurally compares objects/arrays (predecessor patches aren't dropped)", () => {
+    expect(src).toMatch(/JSON\.stringify\(x\) === JSON\.stringify\(y\)/);
+  });
+  it("S3: the holiday recascade recomputes from the live `d`, not a stale closure", () => {
+    expect(src).toMatch(/Recompute from the LIVE/);
+    expect(src).toMatch(/setData\(d => \{\s*const newProjects = \{\};\s*Object\.entries\(d\.projects\)/);
+  });
+  it("G1: a health-dot click preserves a covering multi-row range (mouse fill works)", () => {
+    expect(src).toMatch(/const inSpan = selRange && ri >= Math\.min\(selRange\.r1, selRange\.r2\)/);
+    expect(src).toMatch(/if \(!inSpan\) setSelRange\(\{r1:ri, r2:ri, c1:ci, c2:ci\}\);/);
+  });
+  it("G2: the parent-lock guards lock the whole cost FAMILY by type (col.t), not just col.k", () => {
+    expect((src.match(/col\.k==="duration"\|\|col\.t==="cost"/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(src).toMatch(/c\.k==="duration"\|\|c\.t==="cost"/);
+    expect(src).not.toMatch(/col\.k==="duration"\|\|col\.k==="cost"/); // the buggy key-only check is gone
+  });
+  it("G3: the range-fill loop skips a parent's rolled cost/budget/actual columns", () => {
+    expect(src).toMatch(/col==="cost"\|\|col==="budget"\|\|col==="actualCost"\)\)\) applyUpdate\(t\.id, col, val\)/);
+  });
+  it("F1+F2: the INLINE formula copy carries the blank-equals-empty + date-overflow guards", () => {
+    expect(src).toMatch(/if \(isBlank\(a\) && typeof b === "string"\) return b === "" \? 0 : -1;/);
+    expect(src).toMatch(/Math\.abs\(s\) > MAX_DATE_SERIAL/);
+    // ...and the source-of-truth engine matches (so the two can't drift)
+    expect(fjs).toMatch(/if \(isBlank\(a\) && typeof b === "string"\) return b === "" \? 0 : -1;/);
+    expect(fjs).toMatch(/Math\.abs\(s\) > MAX_DATE_SERIAL/);
+  });
+});

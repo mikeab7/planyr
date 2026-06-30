@@ -407,7 +407,7 @@ All tools in both workspaces (and the Stitcher) flow through one shared engine i
   DocReview parity tools (Line/Polyline/Polygon/Ellipse/Arc/Dimension/Pen/Highlight/Eraser/
   Snapshot), property-set completion, Count in Site Planner, vtx-drag handles, Shift snap,
   ParcelDrawing inline calibrate. B432 (NEW-9) closes the umbrella.
-- **Shared SELECTION layer (B585/B586; in-code labels read the provisional B569/B570).** On top of the engine sits one shared selection model:
+- **Shared SELECTION layer (B587/B588; in-code labels read the provisional B569/B570).** On top of the engine sits one shared selection model:
   `shared/markup/selection.js` (pure — `pickInMarquee` crossing/window box-test, `nextSelection`
   with Ctrl/⌘=toggle · Shift=add · plain=replace, `cornerGrips`) + `shared/markup/SelectionChrome.jsx`
   (the ONE neutral hue-free chrome — light casing under a dark line + grips, tokens `--sel-casing`/
