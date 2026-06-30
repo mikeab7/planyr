@@ -107,30 +107,32 @@ try {
   const ref = await page.evaluate(() => (document.body.textContent || "").includes("#REF!"));
   if (ref) ok("#REF! surfaced for an unknown column"); else fail("#REF! not shown for a bad column reference");
 
-  // 4) B586 — cross-row aggregation: SUM([Duration]) must equal the column total AND
-  //    show that same total on every row (column-wide, not the per-row value).
+  // 4) B589 — cross-row aggregation must use the project's LEAF tasks (no double-counting
+  //    of parent roll-up rows). Add SUM([Duration]); the column shows ONE constant total on
+  //    every row. Verify that constant equals the seed's LEAF-duration sum, NOT the all-rows
+  //    sum (which includes parent roll-ups and would be the double-counted, wrong value).
   await addFormula("Total dur", "SUM([Duration])");
   const agg = await page.evaluate(() => {
-    const PF = window.PlanyrFormula;
-    // Expected total = sum of leaf durations across the active project's tasks.
-    const data = window.__lastData || null; // not exposed; fall back to DOM check
-    // DOM check: the "Total dur" column should render the SAME number on ≥2 rows.
+    const d = window.__PLANAR_DATA__;
+    const proj = d && d.projects && d.projects[d.aPid];
+    const ts = (proj && proj.tasks) || [];
+    const parentIds = new Set(ts.map(t => t.parentId).filter(x => x !== null && x !== undefined));
+    const leafSum = ts.filter(t => !parentIds.has(t.id)).reduce((s, t) => s + (Number(t.duration) || 0), 0);
+    const allSum = ts.reduce((s, t) => s + (Number(t.duration) || 0), 0); // incl. parent roll-ups → the double-counted value
+    // Tokens (2+ digits) common to EVERY rendered row = the column-wide SUM constant.
     const rows = Array.from(document.querySelectorAll("[data-task-row]"));
-    // Collect the last numeric token per row (the rightmost formula columns), crude but effective.
-    const totals = rows.map(r => { const m = (r.textContent || "").match(/(\d[\d,]*)\s*$/); return m ? m[1] : null; }).filter(Boolean);
-    const uniqueBig = [...new Set(totals)];
-    return { hasEngine: !!PF, sampleCount: totals.length, distinctTrailing: uniqueBig.slice(0, 4) };
+    const tokenSets = rows.map(r => new Set((r.textContent || "").match(/\d{2,}/g) || []));
+    let common = tokenSets.length ? [...tokenSets[0]] : [];
+    tokenSets.forEach(s => { common = common.filter(t => s.has(t)); });
+    return { leafSum, allSum, common, hasGroups: leafSum !== allSum };
   });
-  // A column-wide SUM shows an identical (and larger) value on every row; assert the
-  // engine computed it consistently by checking the same trailing total repeats.
-  const aggConsistent = await page.evaluate(() => {
-    const cells = Array.from(document.querySelectorAll("[data-task-row]"))
-      .map(r => r.querySelectorAll("span"))
-      .map(spans => Array.from(spans).map(s => (s.textContent || "").trim()));
-    return true; // structural presence checked below
-  });
-  if (agg.hasEngine) ok(`aggregation column added (SUM([Duration])); rows scanned=${agg.sampleCount}`);
-  else fail("engine missing for aggregation check");
+  if (agg.hasGroups) ok(`seed has parent groups (leafSum=${agg.leafSum} ≠ allSum=${agg.allSum}) — double-count fix is exercised`);
+  else fail("seed unexpectedly has no parent groups; cannot exercise the double-count fix");
+  if (agg.common.includes(String(agg.leafSum)))
+    ok(`SUM([Duration]) shows the LEAF total ${agg.leafSum} on every row (parents not double-counted)`);
+  else fail(`SUM([Duration]) column constant ${JSON.stringify(agg.common)} != leaf-duration sum ${agg.leafSum} (double-count regression?)`);
+  if (agg.allSum !== agg.leafSum && agg.common.includes(String(agg.allSum)))
+    fail(`SUM([Duration]) shows the ALL-rows sum ${agg.allSum} — parent roll-ups are being double-counted`);
   // Direct engine assertion: SUM over the column equals the arithmetic total of leaf durations.
   const aggOk = await page.evaluate(() => {
     const PF = window.PlanyrFormula;

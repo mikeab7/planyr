@@ -200,10 +200,19 @@ const tokenize = src => {
       if (j >= n) throw ferr(FORMULA_ERRORS.ERR, "unterminated string");
       toks.push({ t: "str", v: out, pos: i }); i = j + 1; continue;
     }
-    // Column reference: [Column Name]
+    // Column reference: [Column Name]. Also the Excel current-row forms [@Column] and
+    // [@[Column]] — the inner-bracketed form needs to scan to "]]" (the lone-"]" scan
+    // would stop early and leave a stray "]").
     if (c === "[") {
       let j = i + 1, out = "";
-      while (j < n && s[j] !== "]") { out += s[j]; j++; }
+      const bracketedInner = s[j] === "@" && s[j + 1] === "[";
+      while (j < n) {
+        if (s[j] === "]") {
+          if (bracketedInner && s[j + 1] === "]") { out += "]"; j++; } // capture the inner "]", advance onto the outer one
+          break;                                                        // j now sits ON the terminating "]"
+        }
+        out += s[j]; j++;
+      }
       if (j >= n) throw ferr(FORMULA_ERRORS.ERR, "unterminated column reference");
       toks.push({ t: "col", v: out.trim(), pos: i }); i = j + 1; continue;
     }
@@ -410,8 +419,8 @@ const FUNCTIONS = {
   //    scalars and [@Column] this-row refs contribute a single value — Excel semantics) ──
   SUM:     { rng: (an, ctx, ev) => { need(an, 1, null, "SUM"); return collectNums(an, ctx, ev).reduce((s, v) => s + v, 0); } },
   PRODUCT: { rng: (an, ctx, ev) => { need(an, 1, null, "PRODUCT"); const n = collectNums(an, ctx, ev); return n.length ? n.reduce((s, v) => s * v, 1) : 0; } },
-  MIN:     { rng: (an, ctx, ev) => { need(an, 1, null, "MIN"); const n = collectNums(an, ctx, ev); return n.length ? Math.min(...n) : 0; } },
-  MAX:     { rng: (an, ctx, ev) => { need(an, 1, null, "MAX"); const n = collectNums(an, ctx, ev); return n.length ? Math.max(...n) : 0; } },
+  MIN:     { rng: (an, ctx, ev) => { need(an, 1, null, "MIN"); const k = collectNumsKind(an, ctx, ev); if (!k.nums.length) return 0; const m = Math.min(...k.nums); return k.allDates ? makeDate(m) : m; } },
+  MAX:     { rng: (an, ctx, ev) => { need(an, 1, null, "MAX"); const k = collectNumsKind(an, ctx, ev); if (!k.nums.length) return 0; const m = Math.max(...k.nums); return k.allDates ? makeDate(m) : m; } },
   AVERAGE: { rng: (an, ctx, ev) => { need(an, 1, null, "AVERAGE"); const n = collectNums(an, ctx, ev); if (!n.length) throw ferr(FORMULA_ERRORS.DIV0, "AVERAGE of no numbers"); return n.reduce((s, v) => s + v, 0) / n.length; } },
   COUNT:   { rng: (an, ctx, ev) => { need(an, 1, null, "COUNT"); return collectCountable(an, ctx, ev); } },
   COUNTA:  { rng: (an, ctx, ev) => { need(an, 1, null, "COUNTA"); return collectNonBlank(an, ctx, ev); } },
@@ -531,8 +540,18 @@ const FUNCTIONS = {
 function colArray(node, ctx) {
   if (!node || node.type !== "col") throw ferr(FORMULA_ERRORS.VALUE, "expected a [Column] reference");
   const key = node.name.toLowerCase();
+  // [@Column] forces THIS row even inside a range function (consistent with how
+  // SUM/AVERAGE treat a [@Column] arg), so it contributes a single cell.
+  if (node.atRow) {
+    const cols = ctx.columns || {};
+    if (!Object.prototype.hasOwnProperty.call(cols, key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
+    const v = cols[key];
+    return [v === undefined ? BLANK : v];
+  }
   const rows = (ctx.rows && ctx.rows.length) ? ctx.rows : [ctx.columns || {}];
-  if (!Object.prototype.hasOwnProperty.call(rows[0], key)) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
+  // Existence check across the union of rows (not just row 0) so a ragged table
+  // doesn't make a genuine column read as #REF!.
+  if (!rows.some(r => Object.prototype.hasOwnProperty.call(r, key))) throw ferr(FORMULA_ERRORS.REF, `unknown column "${node.name}"`);
   return rows.map(r => { const v = r[key]; return v === undefined ? BLANK : v; });
 }
 // Numbers for SUM/AVERAGE/MIN/MAX/PRODUCT: a bare [Column] arg contributes its numeric
@@ -542,9 +561,21 @@ function collectNums(argNodes, ctx, ev) {
   const nums = [];
   argNodes.forEach(n => {
     if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(v => { if (typeof v === "number") nums.push(v); else if (isDate(v)) nums.push(v.s); });
-    else nums.push(toNumber(ev(n, ctx)));
+    else { const v = ev(n, ctx); if (isDate(v)) nums.push(v.s); else nums.push(toNumber(v)); }
   });
   return nums;
+}
+// Like collectNums but also reports whether EVERY contributing value was a date — so
+// MIN/MAX over a date column return a date (e.g. MIN([Start]) = the earliest date), not
+// a raw serial number. A mix of dates and plain numbers yields a number (ambiguous).
+function collectNumsKind(argNodes, ctx, ev) {
+  const nums = []; let any = false, allDates = true;
+  const take = v => { if (isDate(v)) { nums.push(v.s); any = true; } else if (typeof v === "number") { nums.push(v); allDates = false; } };
+  argNodes.forEach(n => {
+    if (n.type === "col" && !n.atRow) colArray(n, ctx).forEach(take);
+    else { const v = ev(n, ctx); if (isDate(v)) { nums.push(v.s); any = true; } else { nums.push(toNumber(v)); allDates = false; } }
+  });
+  return { nums, allDates: any && allDates };
 }
 function collectCountable(argNodes, ctx, ev) { // COUNT — numbers only
   let c = 0;
@@ -580,6 +611,10 @@ function parseCriteriaOperand(text) {
   if (t === "") return "";
   if (/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(t)) return parseFloat(t);
   if (/^(true|false)$/i.test(t)) return t.toLowerCase() === "true";
+  // A date literal (ISO or M/D[/YY]) becomes a date value, so a criterion like
+  // ">=2026-03-01" or "2026-06-01" compares against a date column correctly.
+  const ds = parseLooseDate(t);
+  if (ds !== null) return makeDate(ds);
   return t;
 }
 function looseEqual(a, b) {
@@ -608,7 +643,7 @@ function matchesCriteria(value, criteria) {
     // text cell never matches a NUMERIC criterion (and vice-versa) — only same-family
     // values compare. This stops an empty "" cell from reading as "> 100".
     if (isBlank(value) || value === "") return false;
-    const numericCrit = typeof operandVal === "number";
+    const numericCrit = typeof operandVal === "number" || isDate(operandVal);
     const numericVal = typeof value === "number" || isDate(value);
     if (numericCrit !== numericVal) return false;
     const c = compareValuesSafe(value, operandVal);
@@ -629,22 +664,33 @@ function matchIndex(target, arr, type) {
     }
     throw ferr(FORMULA_ERRORS.NA, "MATCH: no exact match");
   }
+  // Approximate match (type ±1) is only meaningful within the target's type family —
+  // otherwise compareValues' cross-type rank (number < text) would make any numeric cell
+  // count as "≤" a text target. Skip cells of a different family.
   if (type === 1) { // largest value ≤ target (array assumed ascending)
     let best = -1;
-    for (let i = 0; i < arr.length; i++) { const c = compareValuesSafe(arr[i], target); if (c !== null && c <= 0) best = i; }
+    for (let i = 0; i < arr.length; i++) { if (!sameFamily(arr[i], target)) continue; const c = compareValuesSafe(arr[i], target); if (c !== null && c <= 0) best = i; }
     if (best === -1) throw ferr(FORMULA_ERRORS.NA, "MATCH: no value ≤ lookup");
     return best + 1;
   }
   let best = -1; // type −1: smallest value ≥ target (array assumed descending)
-  for (let i = 0; i < arr.length; i++) { const c = compareValuesSafe(arr[i], target); if (c !== null && c >= 0) best = i; }
+  for (let i = 0; i < arr.length; i++) { if (!sameFamily(arr[i], target)) continue; const c = compareValuesSafe(arr[i], target); if (c !== null && c >= 0) best = i; }
   if (best === -1) throw ferr(FORMULA_ERRORS.NA, "MATCH: no value ≥ lookup");
   return best + 1;
 }
+// Type families for ordered comparison: numeric (number|date), text, boolean.
+function valueFamily(v) { if (typeof v === "number" || isDate(v)) return "num"; if (typeof v === "string") return "txt"; if (typeof v === "boolean") return "bool"; return "other"; }
+function sameFamily(a, b) { return valueFamily(a) === valueFamily(b); }
 function isLeap(y) { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
-function weekNum(serial, type) { // type 1 = weeks start Sunday, 2 = start Monday; week 1 holds Jan 1
-  const { y } = serialToYMD(serial);
-  const jan1 = ymdToSerial(y, 1, 1);
-  const weekStart = (type === 2) ? 1 : 0;
+// Excel WEEKNUM return types: 1=Sun, 2=Mon (the originals); 11–17 set the week-start day
+// (Mon..Sun); 21 = ISO-8601. Week 1 is the week containing Jan 1 (except ISO). An
+// unrecognized type is a #NUM! (matching Excel), not a silently-wrong Sunday default.
+const WEEKNUM_START = { 1: 0, 2: 1, 11: 1, 12: 2, 13: 3, 14: 4, 15: 5, 16: 6, 17: 0 };
+function weekNum(serial, type) {
+  if (type === 21) return isoWeekNum(serial);
+  const weekStart = WEEKNUM_START[type];
+  if (weekStart === undefined) throw ferr(FORMULA_ERRORS.NUM, `WEEKNUM type ${type} not supported`);
+  const jan1 = ymdToSerial(serialToYMD(serial).y, 1, 1);
   const offset = (weekdayOf(jan1) - weekStart + 7) % 7;
   return Math.floor((serial - jan1 + offset) / 7) + 1;
 }
@@ -656,20 +702,20 @@ function isoWeekNum(serial) { // ISO-8601: weeks start Monday, week 1 holds the 
 }
 function yearFrac(s, e, basis) {
   if (s === e) return 0;
-  const sign = e < s ? -1 : 1;
+  // Excel's YEARFRAC ignores argument order and always returns a non-negative fraction.
   const a = Math.min(s, e), b = Math.max(s, e);
   if (basis === 1) { // actual/actual (approx: actual days over the average year length in the span)
     const A = serialToYMD(a), B = serialToYMD(b);
     let days = 0; for (let yy = A.y; yy <= B.y; yy++) days += isLeap(yy) ? 366 : 365;
-    return sign * (b - a) / (days / (B.y - A.y + 1));
+    return (b - a) / (days / (B.y - A.y + 1));
   }
-  if (basis === 2) return sign * (b - a) / 360; // actual/360
-  if (basis === 3) return sign * (b - a) / 365; // actual/365
+  if (basis === 2) return (b - a) / 360; // actual/360
+  if (basis === 3) return (b - a) / 365; // actual/365
   const A = serialToYMD(a), B = serialToYMD(b);  // 30/360 (basis 0 US, 4 European)
   let d1 = A.d, d2 = B.d;
   if (d1 === 31) d1 = 30;
   if (d2 === 31 && (basis === 4 || d1 === 30)) d2 = 30;
-  return sign * ((B.y - A.y) * 360 + (B.m - A.m) * 30 + (d2 - d1)) / 360;
+  return ((B.y - A.y) * 360 + (B.m - A.m) * 30 + (d2 - d1)) / 360;
 }
 
 // addMonths with Excel month-end clamping (Jan31 +1 → Feb28/29).
